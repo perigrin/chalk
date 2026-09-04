@@ -9,7 +9,7 @@ use lib 'lib', 't/lib';
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-# G.6 (F7): ~19 sites use `my $repr = $node->representation // 'Int'`.
+# G.6 (F7): ~19 sites use `my $repr = $node->stamp // 'Int'`.
 # An undef-repr node is silently lowered as i64 BEFORE the `repr eq 'Scalar' -> die`
 # check runs; _lower_constant emits `add i64 0, $val` for an undef-repr Constant.
 # This masks upstream type-inference bugs as plausible integer output.
@@ -46,9 +46,9 @@ subtest 'undef-repr Constant dies loudly instead of silently lowering as Int' =>
 subtest 'undef-repr Add node dies loudly instead of silently lowering as i64' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $a = $f->make('Constant', value => 3, const_type => 'integer');
-    $a->set_representation('Int');
+    $a->set_stamp('Int');
     my $b = $f->make('Constant', value => 4, const_type => 'integer');
-    $b->set_representation('Int');
+    $b->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$a, $b]);
     # Intentionally do NOT set representation on Add.
     my $ret = $f->make_cfg('Return', inputs => [$add]);
@@ -72,7 +72,7 @@ subtest 'undef-repr Add node dies loudly instead of silently lowering as i64' =>
 subtest 'well-typed graph with explicit repr still lowers correctly' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $c = $f->make('Constant', value => 7, const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$c]);
 
     my ($ll, $err);
@@ -97,13 +97,13 @@ subtest 'undef-repr VarDecl dies loudly instead of silently lowering as Int' => 
     my $f = Chalk::IR::NodeFactory->new;
     # Build: my $x = 1; return $x
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
-    $nx->set_representation('Str');
+    $nx->set_stamp('Str');
     my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $vx = $f->make('VarDecl', inputs => [$nx, $c1]);
     # Intentionally do NOT set representation on vx — this is the gap.
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
 
     my ($ll, $err);
@@ -124,11 +124,11 @@ subtest 'undef-repr VarDecl dies loudly instead of silently lowering as Int' => 
 subtest 'undef-repr PadAccess dies loudly instead of silently lowering as Int' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
-    $nx->set_representation('Str');
+    $nx->set_stamp('Str');
     my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $vx = $f->make('VarDecl', inputs => [$nx, $c1]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
     # Intentionally do NOT set representation on PadAccess.
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
@@ -151,15 +151,15 @@ subtest 'undef-repr PadAccess dies loudly instead of silently lowering as Int' =
 subtest 'undef-repr Assign dies loudly instead of silently lowering as Int' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
-    $nx->set_representation('Str');
+    $nx->set_stamp('Str');
     my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => 2, const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $vx  = $f->make('VarDecl', inputs => [$nx, $c1]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
     my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rxL->set_representation('Int');
+    $rxL->set_stamp('Int');
     my $asg = $f->make('Assign', inputs => [$rxL, $c2]);
     # Intentionally do NOT set representation on Assign.
     my $ret = $f->make_cfg('Return', inputs => [$asg]);
@@ -186,13 +186,13 @@ subtest 'undef-repr TernaryExpr true-branch dies loudly' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     # Condition: Int is valid (truthiness check via icmp ne i64 %v, 0)
     my $cond = $f->make('Constant', value => 1, const_type => 'integer');
-    $cond->set_representation('Int');
+    $cond->set_stamp('Int');
     my $true_c = $f->make('Constant', value => 10, const_type => 'integer');
     # Intentionally do NOT set representation on true branch — this is the guard site.
     my $fals_c = $f->make('Constant', value => 20, const_type => 'integer');
-    $fals_c->set_representation('Int');
+    $fals_c->set_stamp('Int');
     my $tern = $f->make('TernaryExpr', inputs => [$cond, $true_c, $fals_c]);
-    $tern->set_representation('Int');
+    $tern->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$tern]);
 
     my ($ll, $err);
@@ -226,29 +226,29 @@ subtest 'undef-repr Phi at Region merge (lower_with_elaboration path) dies loudl
 
     # Build minimal if/else: if ($cond) { ... } else { ... }; return Int constant
     my $c_cond = $f->make('Constant', value => 1, const_type => 'integer');
-    $c_cond->set_representation('Int');
+    $c_cond->set_stamp('Int');
     my $cmp = $f->make('Coerce', inputs => [$c_cond], from_repr => 'Int', to_repr => 'Boolean');
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => 2, const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
 
     my $xn = $f->make('Constant', value => '$x', const_type => 'string');
-    $xn->set_representation('Str');
+    $xn->set_stamp('Str');
     my $vx = $f->make('VarDecl', inputs => [$xn, $c1]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Int');
+    $lhs1->set_stamp('Int');
     my $as1 = $f->make('Assign', inputs => [$lhs1, $c1]);
-    $as1->set_representation('Int');
+    $as1->set_stamp('Int');
 
     my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs2->set_representation('Int');
+    $lhs2->set_stamp('Int');
     my $as2 = $f->make('Assign', inputs => [$lhs2, $c2]);
-    $as2->set_representation('Int');
+    $as2->set_stamp('Int');
 
     my $if_node = $f->make('If',   inputs => [$vx, $cmp]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -260,7 +260,7 @@ subtest 'undef-repr Phi at Region merge (lower_with_elaboration path) dies loudl
 
     # Return a simple Int (not the $x variable) so the basic lowering works
     my $c_ret = $f->make('Constant', value => 99, const_type => 'integer');
-    $c_ret->set_representation('Int');
+    $c_ret->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$c_ret]);
     $if_node->set_control_in($vx);
     $ret->set_control_in($region);  # Region-as-control_in path
@@ -269,7 +269,7 @@ subtest 'undef-repr Phi at Region merge (lower_with_elaboration path) dies loudl
     # The Phi has two incoming values but NO representation set.
     # This simulates a TypeInference gap where the Phi's output type is unknown.
     my $phi = $f->make('Phi', region => $region, inputs => [$c1, $c2]);
-    # Intentionally do NOT call $phi->set_representation(...) — this is the gap.
+    # Intentionally do NOT call $phi->set_stamp(...) — this is the gap.
     # Add phi as a consumer of region to trigger _wire_region_phis_with_preblock.
     $region->add_consumer($phi);
 
@@ -297,9 +297,9 @@ subtest 'undef-repr DefinedOr lhs dies loudly' => sub {
     my $lhs = $f->make('Constant', value => 5, const_type => 'integer');
     # Intentionally do NOT set representation on lhs.
     my $rhs = $f->make('Constant', value => 99, const_type => 'integer');
-    $rhs->set_representation('Int');
+    $rhs->set_stamp('Int');
     my $dor = $f->make('DefinedOr', inputs => [$lhs, $rhs]);
-    $dor->set_representation('Int');
+    $dor->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$dor]);
 
     my ($ll, $err);
@@ -333,9 +333,9 @@ use Chalk::Target::LLVM::Context;
 subtest 'undef-repr DefinedOr NODE dies loudly at the phi-repr read' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $lhs = $f->make('Constant', value => 5, const_type => 'integer');
-    $lhs->set_representation('Int');
+    $lhs->set_stamp('Int');
     my $rhs = $f->make('Constant', value => 99, const_type => 'integer');
-    $rhs->set_representation('Int');
+    $rhs->set_stamp('Int');
     my $dor = $f->make('DefinedOr', inputs => [$lhs, $rhs]);
     # Intentionally do NOT set representation on the DefinedOr itself.
     my $ret = $f->make_cfg('Return', inputs => [$dor]);
@@ -359,7 +359,7 @@ subtest 'missing _vd_repr for an elab merge phi dies loudly' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $cond = $f->make('Constant', value => 1, const_type => 'integer');
-    $cond->set_representation('Int');
+    $cond->set_stamp('Int');
     my $if_node = $f->make('If', inputs => [undef, $cond]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
     my $proj1   = $f->make('Proj', inputs => [$if_node], index => 1);
@@ -389,7 +389,7 @@ subtest 'missing _vd_repr for an elab merge phi dies loudly' => sub {
 subtest 'undef-repr shift/pop dies loudly naming the missing repr' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $arr = $f->make('ArrayLiteral', inputs => []);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
     my $shift = $f->make('Call', name => 'shift', dispatch_kind => 'builtin',
                          inputs => [$arr]);
     # Intentionally do NOT set representation on the shift.
@@ -417,10 +417,10 @@ subtest 'undef-repr shift/pop dies loudly naming the missing repr' => sub {
 subtest 'missing vtable return_repr dies loudly naming the method' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $obj = $f->make('Constant', value => 1, const_type => 'integer');
-    $obj->set_representation('Int');
+    $obj->set_stamp('Int');
     my $call = $f->make('Call', name => 'kind', dispatch_kind => 'method',
                         class_name => 'Child', inputs => [$obj]);
-    $call->set_representation('Int');
+    $call->set_stamp('Int');
 
     my $ctx = Chalk::Target::LLVM::Context->new(
         class_registry => {

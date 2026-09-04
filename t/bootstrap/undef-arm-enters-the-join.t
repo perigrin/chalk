@@ -35,7 +35,7 @@ sub dor_repr ( $left_repr, $right_repr ) {
     my $i  = 0;
     my @in = map {
         my $n = $f->make( 'Constant', const_type => 'integer', value => ++$i );
-        $n->set_representation($_);
+        $n->set_stamp($_);
         $n;
     } ( $left_repr, $right_repr );
 
@@ -44,7 +44,7 @@ sub dor_repr ( $left_repr, $right_repr ) {
     my $g = Chalk::IR::Graph->new;
     $g->merge($_) for $d, @in;
     Chalk::IR::Analysis::_propagate_computed_reprs( { g => $g } );
-    return $d->representation;
+    return $d->stamp;
 }
 
 subtest 'an Undef arm widens the merge to Scalar' => sub {

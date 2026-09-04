@@ -92,25 +92,25 @@ sub chain_graph {
     my ($val, $const_type, @path) = @_;
     my $f = Chalk::IR::NodeFactory->new;
     my $n = $f->make('Constant', value => $val, const_type => $const_type);
-    $n->set_representation($path[0]);
+    $n->set_stamp($path[0]);
     for my $i (1 .. $#path) {
         $n = $f->make('Coerce', inputs => [$n],
                       from_repr => $path[$i - 1], to_repr => $path[$i]);
-        $n->set_representation($path[$i]);
+        $n->set_stamp($path[$i]);
     }
 
     my $str = $n;
     if ($path[-1] ne 'Str') {
         $str = $f->make('Coerce', inputs => [$n],
                         from_repr => $path[-1], to_repr => 'Str');
-        $str->set_representation('Str');
+        $str->set_stamp('Str');
     }
 
     my $ctrl = $f->make_cfg('Start');
     for my $part ('[', $str, "]\n") {
         my $val_node = ref $part ? $part : do {
             my $k = $f->make('Constant', value => $part, const_type => 'string');
-            $k->set_representation('Str');
+            $k->set_stamp('Str');
             $k;
         };
         my $pr = $f->make('Print', inputs => [$val_node]);
@@ -119,7 +119,7 @@ sub chain_graph {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;

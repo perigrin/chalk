@@ -31,12 +31,12 @@ subtest 'the transform exists and normalizes at entry' => sub {
 
     my $f = Chalk::IR::NodeFactory->new;
     my $bare = $f->make('PadAccess', targ => 0, varname => '$x', inputs => []);
-    is($bare->representation, undef, 'the node arrives stamp-less');
+    is($bare->stamp, undef, 'the node arrives stamp-less');
 
     my $t1 = $T1->new;
     $t1->run(TestGraph->new([$bare]));
 
-    is($bare->representation, 'Unknown',
+    is($bare->stamp, 'Unknown',
        'a stamp-less Value is Unknown after entry normalization');
 };
 
@@ -60,7 +60,7 @@ subtest 'a node that ARRIVES Unknown is not counted as absent' => sub {
 
     my $f = Chalk::IR::NodeFactory->new;
     my $stamped = $f->make('PadAccess', targ => 0, varname => '$z', inputs => []);
-    $stamped->set_representation('Unknown');
+    $stamped->set_stamp('Unknown');
     my $t1 = $T1->new;
     $t1->run(TestGraph->new([$stamped]));
     my $r = $t1->report;

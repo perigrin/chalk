@@ -31,7 +31,7 @@ sub store_assign ($driver) {
 subtest 'a literal-value store types the Assign Int' => sub {
     my $as = store_assign('my @a = (1,2,3); $a[0] = 42; $a[0]');
     ok(defined $as, 'the store Assign is reachable via control_in') or return;
-    is($as->representation, 'Int', 'Assign(store of 42) is Int');
+    is($as->stamp, 'Int', 'Assign(store of 42) is Int');
 };
 
 subtest 'a computed-value store still types the Assign (repr via control_in closure)' => sub {
@@ -42,8 +42,8 @@ subtest 'a computed-value store still types the Assign (repr via control_in clos
     # (a non-functional GAP for every store of a computed value).
     my $as = store_assign('my @a = (1,2,3); my @b = (5,6,7); $a[0] = $b[0]; $a[0]');
     ok(defined $as, 'the store Assign is reachable') or return;
-    is($as->representation, 'Int', 'Assign(store of $b[0]) is typed Int, not undef');
-    is($as->inputs->[-1]->representation, 'Int', 'the stored Subscript value is Int');
+    is($as->stamp, 'Int', 'Assign(store of $b[0]) is typed Int, not undef');
+    is($as->inputs->[-1]->stamp, 'Int', 'the stored Subscript value is Int');
 };
 
 done_testing();

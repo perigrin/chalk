@@ -40,10 +40,10 @@ sub _print_and_return {
     my ($f, $val) = @_;
 
     my $arg = $val;
-    if ($val->representation ne 'Str') {
+    if ($val->stamp ne 'Str') {
         $arg = $f->make('Coerce', inputs => [$val],
-                        from_repr => $val->representation, to_repr => 'Str');
-        $arg->set_representation('Str');
+                        from_repr => $val->stamp, to_repr => 'Str');
+        $arg->set_stamp('Str');
     }
 
     my $start = $f->make_cfg('Start');
@@ -51,7 +51,7 @@ sub _print_and_return {
     $print->set_control_in($start);
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
     return $ret;
@@ -73,17 +73,17 @@ subtest 'A1: ArrayRef(1,2,3) + Length -> 3' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $len = $f->make('Length', inputs => [$arr]);
-    $len->set_representation('Int');
+    $len->set_stamp('Int');
 
     my $ret = _print_and_return($f, $len);
 
@@ -115,20 +115,20 @@ subtest 'A2: ArrayRef(1,2,3) + Subscript(idx=1) -> 2' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
@@ -158,20 +158,20 @@ subtest 'A3: Subscript OOB (idx=9 on len=3) -> undef' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => '9', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
-    $elem->set_representation('Slot');
+    $elem->set_stamp('Slot');
 
     my $ret = _print_and_return($f, $elem);
 
@@ -188,7 +188,7 @@ subtest 'A3: Subscript OOB (idx=9 on len=3) -> undef' => sub {
         # Printed, an undef and an Int 0 are both "". The repr assertion keeps
         # what the type tag used to carry: this read is a runtime-checked Slot,
         # not a value folded at compile time.
-        is($elem->representation, 'Slot',
+        is($elem->stamp, 'Slot',
             'A3 the OOB read is a Slot (runtime defined-bit)');
         is($out, '', 'A3 lli output is empty (OOB array read prints undef)');
     }
@@ -209,23 +209,23 @@ subtest 'A3d: Defined(Subscript OOB, Slot) -> false' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => '9', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
-    $elem->set_representation('Slot');
+    $elem->set_stamp('Slot');
 
     my $def = $f->make('Defined', inputs => [$elem]);
-    $def->set_representation('Boolean');
+    $def->set_stamp('Boolean');
 
     my $ret = _print_and_return($f, $def);
 
@@ -242,7 +242,7 @@ subtest 'A3d: Defined(Subscript OOB, Slot) -> false' => sub {
         # Defined() entirely and printed the raw undef Slot would still pass.
         # A3e is the other half of the teeth -- defined() of an in-bounds
         # element must print "1", so "always empty" cannot pass both.
-        is($def->representation, 'Boolean',
+        is($def->stamp, 'Boolean',
             'A3d the result is a Boolean (defined()), not the raw Slot');
         is($out, '',
             'A3d lli output is empty (defined(OOB element) is false)');
@@ -262,23 +262,23 @@ subtest 'A3e: Defined(Subscript in-bounds, Int) -> true' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $def = $f->make('Defined', inputs => [$elem]);
-    $def->set_representation('Boolean');
+    $def->set_stamp('Boolean');
 
     my $ret = _print_and_return($f, $def);
 
@@ -288,7 +288,7 @@ subtest 'A3e: Defined(Subscript in-bounds, Int) -> true' => sub {
 
     if (defined $ll) {
         my $out = run_ll($ll);
-        is($def->representation, 'Boolean',
+        is($def->stamp, 'Boolean',
             'A3e the result is a Boolean (defined()), not the element value');
         is($out, '1',
             'A3e lli output is 1 (defined(in-bounds element) is true)');
@@ -311,26 +311,26 @@ subtest 'A3f: DefinedOr(Subscript OOB Slot, 99) -> 99 (rhs)' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => '9', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
-    $elem->set_representation('Slot');
+    $elem->set_stamp('Slot');
 
     my $rhs = $f->make('Constant', value => '99', const_type => 'integer');
-    $rhs->set_representation('Int');
+    $rhs->set_stamp('Int');
 
     my $dor = $f->make('DefinedOr', inputs => [$elem, $rhs]);
-    $dor->set_representation('Int');
+    $dor->set_stamp('Int');
 
     my $ret = _print_and_return($f, $dor);
 
@@ -360,26 +360,26 @@ subtest 'A3g: DefinedOr(Subscript in-bounds Int, 99) -> 2 (element)' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $rhs = $f->make('Constant', value => '99', const_type => 'integer');
-    $rhs->set_representation('Int');
+    $rhs->set_stamp('Int');
 
     my $dor = $f->make('DefinedOr', inputs => [$elem, $rhs]);
-    $dor->set_representation('Int');
+    $dor->set_stamp('Int');
 
     my $ret = _print_and_return($f, $dor);
 
@@ -405,22 +405,22 @@ subtest 'A4: HashRef(a=>1,b=>2) + Subscript("a") -> 1' => sub {
     my $f = _mk();
 
     my $ka = $f->make('Constant', value => 'a', const_type => 'string');
-    $ka->set_representation('Str');
+    $ka->set_stamp('Str');
     my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $v1->set_representation('Int');
+    $v1->set_stamp('Int');
     my $kb = $f->make('Constant', value => 'b', const_type => 'string');
-    $kb->set_representation('Str');
+    $kb->set_stamp('Str');
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $v2->set_representation('Int');
+    $v2->set_stamp('Int');
 
     my $hash = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
-    $hash->set_representation('HashRef');
+    $hash->set_stamp('HashRef');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
-    $lk->set_representation('Str');
+    $lk->set_stamp('Str');
 
     my $val = $f->make('Subscript', inputs => [$hash, $lk]);
-    $val->set_representation('Int');
+    $val->set_stamp('Int');
 
     my $ret = _print_and_return($f, $val);
 
@@ -450,22 +450,22 @@ subtest 'A5: Subscript missing key -> undef' => sub {
     my $f = _mk();
 
     my $ka = $f->make('Constant', value => 'a', const_type => 'string');
-    $ka->set_representation('Str');
+    $ka->set_stamp('Str');
     my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $v1->set_representation('Int');
+    $v1->set_stamp('Int');
     my $kb = $f->make('Constant', value => 'b', const_type => 'string');
-    $kb->set_representation('Str');
+    $kb->set_stamp('Str');
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $v2->set_representation('Int');
+    $v2->set_stamp('Int');
 
     my $hash = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
-    $hash->set_representation('HashRef');
+    $hash->set_stamp('HashRef');
 
     my $lk = $f->make('Constant', value => 'z', const_type => 'string');
-    $lk->set_representation('Str');
+    $lk->set_stamp('Str');
 
     my $val = $f->make('Subscript', inputs => [$hash, $lk]);
-    $val->set_representation('Slot');
+    $val->set_stamp('Slot');
 
     my $ret = _print_and_return($f, $val);
 
@@ -478,7 +478,7 @@ subtest 'A5: Subscript missing key -> undef' => sub {
         unlike($ll, qr/libperl/, 'A5 .ll: no libperl reference');
 
         my $out = run_ll($ll);
-        is($val->representation, 'Slot',
+        is($val->stamp, 'Slot',
             'A5 the missing-key read is a Slot (runtime defined-bit)');
         is($out, '', 'A5 lli output is empty (missing key prints undef)');
     }
@@ -496,23 +496,23 @@ subtest 'A6: ArrayRef[1,2,3] deref [0] -> 1' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $ref = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $ref->set_representation('ArrayRef');
+    $ref->set_stamp('ArrayRef');
 
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
-    $deref->set_representation('Array');
+    $deref->set_stamp('Array');
 
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$deref, $idx]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
@@ -541,25 +541,25 @@ subtest 'A7: HashRef{a=>1,b=>2} deref {a} -> 1' => sub {
     my $f = _mk();
 
     my $ka = $f->make('Constant', value => 'a', const_type => 'string');
-    $ka->set_representation('Str');
+    $ka->set_stamp('Str');
     my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $v1->set_representation('Int');
+    $v1->set_stamp('Int');
     my $kb = $f->make('Constant', value => 'b', const_type => 'string');
-    $kb->set_representation('Str');
+    $kb->set_stamp('Str');
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $v2->set_representation('Int');
+    $v2->set_stamp('Int');
 
     my $ref = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
-    $ref->set_representation('HashRef');
+    $ref->set_stamp('HashRef');
 
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '%');
-    $deref->set_representation('Hash');
+    $deref->set_stamp('Hash');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
-    $lk->set_representation('Str');
+    $lk->set_stamp('Str');
 
     my $val = $f->make('Subscript', inputs => [$deref, $lk]);
-    $val->set_representation('Int');
+    $val->set_stamp('Int');
 
     my $ret = _print_and_return($f, $val);
 
@@ -588,28 +588,28 @@ subtest 'A8: Assign(Subscript-lvalue, 42) -> 42' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     # Subscript lvalue
     my $lval = $f->make('Subscript', inputs => [$arr, $idx]);
-    $lval->set_representation('Int');
+    $lval->set_stamp('Int');
 
     my $newval = $f->make('Constant', value => '42', const_type => 'integer');
-    $newval->set_representation('Int');
+    $newval->set_stamp('Int');
 
     # Assign returns the stored value (42)
     my $elem = $f->make('Assign', inputs => [$lval, $newval]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
@@ -637,26 +637,26 @@ subtest 'A9: Assign(Hash-Subscript-lvalue, 99) -> 99' => sub {
     my $f = _mk();
 
     my $kk = $f->make('Constant', value => 'k', const_type => 'string');
-    $kk->set_representation('Str');
+    $kk->set_stamp('Str');
     my $v0 = $f->make('Constant', value => '0', const_type => 'integer');
-    $v0->set_representation('Int');
+    $v0->set_stamp('Int');
 
     my $hash = $f->make('HashLiteral', inputs => [$kk, $v0]);
-    $hash->set_representation('HashRef');
+    $hash->set_stamp('HashRef');
 
     my $wk = $f->make('Constant', value => 'k', const_type => 'string');
-    $wk->set_representation('Str');
+    $wk->set_stamp('Str');
 
     # Hash Subscript lvalue
     my $lval = $f->make('Subscript', inputs => [$hash, $wk]);
-    $lval->set_representation('Int');
+    $lval->set_stamp('Int');
 
     my $wv = $f->make('Constant', value => '99', const_type => 'integer');
-    $wv->set_representation('Int');
+    $wv->set_stamp('Int');
 
     # Assign returns the stored value (99)
     my $val = $f->make('Assign', inputs => [$lval, $wv]);
-    $val->set_representation('Int');
+    $val->set_stamp('Int');
 
     my $ret = _print_and_return($f, $val);
 
@@ -685,44 +685,44 @@ subtest 'A10: nested ArrayRef [[1,2],[3,4]] ->[1][0] -> 3' => sub {
 
     # Inner arrays
     my $ca1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $ca1->set_representation('Int');
+    $ca1->set_stamp('Int');
     my $ca2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $ca2->set_representation('Int');
+    $ca2->set_stamp('Int');
     my $ca3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $ca3->set_representation('Int');
+    $ca3->set_stamp('Int');
     my $ca4 = $f->make('Constant', value => '4', const_type => 'integer');
-    $ca4->set_representation('Int');
+    $ca4->set_stamp('Int');
 
     # Inner refs (canonical ArrayRef with inline elements)
     my $ref0 = $f->make('ArrayLiteral', inputs => [$ca1, $ca2]);
-    $ref0->set_representation('ArrayRef');
+    $ref0->set_stamp('ArrayRef');
     my $ref1 = $f->make('ArrayLiteral', inputs => [$ca3, $ca4]);
-    $ref1->set_representation('ArrayRef');
+    $ref1->set_stamp('ArrayRef');
 
     # Outer array of refs: [(ref to [1,2]), (ref to [3,4])]
     my $outer_ref = $f->make('ArrayLiteral', inputs => [$ref0, $ref1]);
-    $outer_ref->set_representation('ArrayRef');
+    $outer_ref->set_stamp('ArrayRef');
 
     # Deref outer: $r->[1] = inner array ref (an ArrayRef pointer)
     my $outer_arr = $f->make('PostfixDeref', inputs => [$outer_ref], sigil => '@');
-    $outer_arr->set_representation('Array');
+    $outer_arr->set_stamp('Array');
 
     my $idx1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $idx1->set_representation('Int');
+    $idx1->set_stamp('Int');
 
     # $r->[1] returns a slot containing an ArrayRef pointer
     my $inner_ref_slot = $f->make('Subscript', inputs => [$outer_arr, $idx1]);
-    $inner_ref_slot->set_representation('ArrayRef');
+    $inner_ref_slot->set_stamp('ArrayRef');
 
     # Deref inner: $r->[1][0]
     my $inner_arr = $f->make('PostfixDeref', inputs => [$inner_ref_slot], sigil => '@');
-    $inner_arr->set_representation('Array');
+    $inner_arr->set_stamp('Array');
 
     my $idx0 = $f->make('Constant', value => '0', const_type => 'integer');
-    $idx0->set_representation('Int');
+    $idx0->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$inner_arr, $idx0]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
@@ -760,21 +760,21 @@ subtest 'A11: a Slot read discriminates defined from undefined at runtime' => su
         my $f = _mk();
 
         my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-        $c1->set_representation('Int');
+        $c1->set_stamp('Int');
         my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-        $c2->set_representation('Int');
+        $c2->set_stamp('Int');
         my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-        $c3->set_representation('Int');
+        $c3->set_stamp('Int');
 
         my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-        $arr->set_representation('ArrayRef');
+        $arr->set_stamp('ArrayRef');
 
         my $idx = $f->make('Constant', value => $idx_val, const_type => 'integer');
-        $idx->set_representation('Int');
+        $idx->set_stamp('Int');
 
         my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
-        $elem->set_representation('Slot');
-        is($elem->representation, 'Slot', "A11 idx=$idx_val read is a Slot");
+        $elem->set_stamp('Slot');
+        is($elem->stamp, 'Slot', "A11 idx=$idx_val read is a Slot");
 
         my $ret = _print_and_return($f, $elem);
 
@@ -803,20 +803,20 @@ subtest 'A12: canonical Subscript(ArrayRef, idx=1) -> 2' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$arr, $idx]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
@@ -846,22 +846,22 @@ subtest 'A13: canonical Subscript(HashRef, key="a") -> 1' => sub {
     my $f = _mk();
 
     my $ka = $f->make('Constant', value => 'a', const_type => 'string');
-    $ka->set_representation('Str');
+    $ka->set_stamp('Str');
     my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $v1->set_representation('Int');
+    $v1->set_stamp('Int');
     my $kb = $f->make('Constant', value => 'b', const_type => 'string');
-    $kb->set_representation('Str');
+    $kb->set_stamp('Str');
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $v2->set_representation('Int');
+    $v2->set_stamp('Int');
 
     my $hash = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
-    $hash->set_representation('HashRef');
+    $hash->set_stamp('HashRef');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
-    $lk->set_representation('Str');
+    $lk->set_stamp('Str');
 
     my $elem = $f->make('Subscript', inputs => [$hash, $lk]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
@@ -890,23 +890,23 @@ subtest 'A14: canonical PostfixDeref(sigil=@, ArrayRef) deref -> 1' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $ref = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $ref->set_representation('ArrayRef');
+    $ref->set_stamp('ArrayRef');
 
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
-    $deref->set_representation('Array');
+    $deref->set_stamp('Array');
 
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$deref, $idx]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
@@ -934,25 +934,25 @@ subtest 'A15: canonical PostfixDeref(sigil=%, HashRef) deref -> 1' => sub {
     my $f = _mk();
 
     my $ka = $f->make('Constant', value => 'a', const_type => 'string');
-    $ka->set_representation('Str');
+    $ka->set_stamp('Str');
     my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $v1->set_representation('Int');
+    $v1->set_stamp('Int');
     my $kb = $f->make('Constant', value => 'b', const_type => 'string');
-    $kb->set_representation('Str');
+    $kb->set_stamp('Str');
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $v2->set_representation('Int');
+    $v2->set_stamp('Int');
 
     my $ref = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
-    $ref->set_representation('HashRef');
+    $ref->set_stamp('HashRef');
 
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '%');
-    $deref->set_representation('Hash');
+    $deref->set_stamp('Hash');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
-    $lk->set_representation('Str');
+    $lk->set_stamp('Str');
 
     my $val = $f->make('Subscript', inputs => [$deref, $lk]);
-    $val->set_representation('Int');
+    $val->set_stamp('Int');
 
     my $ret = _print_and_return($f, $val);
 
@@ -981,17 +981,17 @@ subtest 'A16: canonical ArrayRef(1,2,3) + Length -> 3' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $aref = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $aref->set_representation('ArrayRef');
+    $aref->set_stamp('ArrayRef');
 
     my $len = $f->make('Length', inputs => [$aref]);
-    $len->set_representation('Int');
+    $len->set_stamp('Int');
 
     my $ret = _print_and_return($f, $len);
 
@@ -1018,20 +1018,20 @@ subtest 'A17: canonical ArrayRef(1,2,3) + Subscript(1) -> 2' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $aref = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $aref->set_representation('ArrayRef');
+    $aref->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => '1', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $elem = $f->make('Subscript', inputs => [$aref, $idx]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
@@ -1058,22 +1058,22 @@ subtest 'A18: canonical HashRef(a=>1,b=>2) + Subscript("a") -> 1' => sub {
     my $f = _mk();
 
     my $ka = $f->make('Constant', value => 'a', const_type => 'string');
-    $ka->set_representation('Str');
+    $ka->set_stamp('Str');
     my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $v1->set_representation('Int');
+    $v1->set_stamp('Int');
     my $kb = $f->make('Constant', value => 'b', const_type => 'string');
-    $kb->set_representation('Str');
+    $kb->set_stamp('Str');
     my $v2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $v2->set_representation('Int');
+    $v2->set_stamp('Int');
 
     my $href = $f->make('HashLiteral', inputs => [$ka, $v1, $kb, $v2]);
-    $href->set_representation('HashRef');
+    $href->set_stamp('HashRef');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
-    $lk->set_representation('Str');
+    $lk->set_stamp('Str');
 
     my $elem = $f->make('Subscript', inputs => [$href, $lk]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
@@ -1102,27 +1102,27 @@ subtest 'A19: Assign(Subscript-lvalue, 42) emits store and returns 42' => sub {
     my $f = _mk();
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c1, $c2, $c3]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     # Subscript(%arr, idx=0) in lvalue position
     my $idx0 = $f->make('Constant', value => '0', const_type => 'integer');
-    $idx0->set_representation('Int');
+    $idx0->set_stamp('Int');
     my $lval = $f->make('Subscript', inputs => [$arr, $idx0]);
-    $lval->set_representation('Int');
+    $lval->set_stamp('Int');
 
     my $nv = $f->make('Constant', value => '42', const_type => 'integer');
-    $nv->set_representation('Int');
+    $nv->set_stamp('Int');
 
     # Assign is the element store; its return value is nv (42).
     my $store = $f->make('Assign', inputs => [$lval, $nv]);
-    $store->set_representation('Int');
+    $store->set_stamp('Int');
 
     # Return the Assign result (42).
     my $ret = _print_and_return($f, $store);

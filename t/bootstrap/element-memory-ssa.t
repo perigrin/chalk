@@ -55,17 +55,17 @@ sub lower_and_run ($body) {
 sub print_result ($ret) {
     my $f    = Chalk::IR::NodeFactory->new;
     my $val  = $ret->inputs->[-1];
-    my $repr = $val->representation // 'Str';
+    my $repr = $val->stamp // 'Str';
     my $str  = $val;
     if ($repr ne 'Str') {
         $str = $f->make('Coerce', inputs => [$val],
                         from_repr => $repr, to_repr => 'Str');
-        $str->set_representation('Str');
+        $str->set_stamp('Str');
     }
     my $print = $f->make('Print', inputs => [$str]);
     $print->set_control_in($ret->control_in);
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $new_ret = $f->make_cfg('Return', inputs => [$undef]);
     $new_ret->set_control_in($print);
     return $new_ret;

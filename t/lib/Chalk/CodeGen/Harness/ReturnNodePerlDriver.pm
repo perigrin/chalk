@@ -11,6 +11,7 @@ use Scalar::Util qw(blessed);
 
 use Chalk::CodeGen::Harness::BehaviorRecord;
 use Chalk::CodeGen::Harness::TypeTag;
+use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 
 # The path to the perl 5.42.0 binary used as the oracle / P runner.
 my $PERL_BIN = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
@@ -193,7 +194,7 @@ sub _emit_expr {
 
     if ( $op eq 'Constant' ) {
         my $val  = $node->value;
-        my $repr = $node->can('representation') ? ( $node->representation // '' ) : '';
+        my $repr = $node isa Chalk::IR::Value ? ( $node->stamp // '' ) : '';
         # Numeric constants: emit bare.
         return $val if $val =~ /\A-?\d+(?:\.\d+)?\z/;
         # String constants: single-quote them.

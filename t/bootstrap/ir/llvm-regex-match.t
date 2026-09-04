@@ -19,16 +19,16 @@ unless (-x $LLI) {
 sub program_ret {
     my ($f, $value) = @_;
     my $printable = $value;
-    if (($value->representation // q{}) ne q{Str}) {
+    if (($value->stamp // q{}) ne q{Str}) {
         $printable = $f->make(q{Coerce}, inputs => [$value],
-            from_repr => $value->representation, to_repr => q{Str});
-        $printable->set_representation(q{Str});
+            from_repr => $value->stamp, to_repr => q{Str});
+        $printable->set_stamp(q{Str});
     }
     my $start = $f->make_cfg(q{Start});
     my $print = $f->make(q{Print}, inputs => [$printable]);
     $print->set_control_in($start);
     my $undef = $f->make(q{Constant}, value => undef, const_type => q{undef});
-    $undef->set_representation(q{Undef});
+    $undef->set_stamp(q{Undef});
     my $ret = $f->make_cfg(q{Return}, inputs => [$undef]);
     $ret->set_control_in($print);
     return $ret;
@@ -57,9 +57,9 @@ sub _mk { Chalk::IR::NodeFactory->new }
 sub match_node {
     my ($f, $subject, $pattern) = @_;
     my $subj = $f->make('Constant', value => $subject, const_type => 'string');
-    $subj->set_representation('Str');
+    $subj->set_stamp('Str');
     my $m = $f->make('RegexMatch', pattern => $pattern, flags => '', inputs => [$subj]);
-    $m->set_representation('Boolean');
+    $m->set_stamp('Boolean');
     return $m;
 }
 
@@ -455,9 +455,9 @@ subtest 'guards: flags and mid-pattern anchors die GAP' => sub {
     # case-sensitive matcher).
     my $f = _mk();
     my $subj = $f->make('Constant', value => 'FOO', const_type => 'string');
-    $subj->set_representation('Str');
+    $subj->set_stamp('Str');
     my $m = $f->make('RegexMatch', pattern => 'foo', flags => 'i', inputs => [$subj]);
-    $m->set_representation('Boolean');
+    $m->set_stamp('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$m]);
     eval { Chalk::Target::LLVM->lower($ret) };
     like($@, qr/GAP/, 'RegexMatch with /i flags dies GAP (not silently case-sensitive)');
@@ -483,11 +483,11 @@ subtest 'guards: flags and mid-pattern anchors die GAP' => sub {
 subtest 'qr//: Constant(regex) + Match — "foobar" =~ qr/foo/ => prints 1' => sub {
     my $f = _mk();
     my $subj = $f->make('Constant', value => 'foobar', const_type => 'string');
-    $subj->set_representation('Str');
+    $subj->set_stamp('Str');
     my $qr = $f->make('Constant', value => 'foo', const_type => 'regex');
-    $qr->set_representation('Regex');
+    $qr->set_stamp('Regex');
     my $m = $f->make('Match', inputs => [$subj, $qr]);
-    $m->set_representation('Boolean');
+    $m->set_stamp('Boolean');
     my $ret = program_ret($f, $m);
 
     my ($out, $ll);
@@ -502,11 +502,11 @@ subtest 'qr//: Constant(regex) + Match — "foobar" =~ qr/foo/ => prints 1' => s
 subtest 'qr// non-match: "xyz" =~ qr/foo/ => prints empty' => sub {
     my $f = _mk();
     my $subj = $f->make('Constant', value => 'xyz', const_type => 'string');
-    $subj->set_representation('Str');
+    $subj->set_stamp('Str');
     my $qr = $f->make('Constant', value => 'foo', const_type => 'regex');
-    $qr->set_representation('Regex');
+    $qr->set_stamp('Regex');
     my $m = $f->make('Match', inputs => [$subj, $qr]);
-    $m->set_representation('Boolean');
+    $m->set_stamp('Boolean');
     my $ret = program_ret($f, $m);
 
     my ($out, $ll) = eval { lli_run($ret) };

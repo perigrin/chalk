@@ -30,11 +30,11 @@ use Chalk::IR::Serialize::JSON qw(to_json from_json);
 sub typed_graph () {
     my $f = Chalk::IR::NodeFactory->new;
     my $a = $f->make('Constant', value => '1', const_type => 'integer');
-    $a->set_representation('Int');
+    $a->set_stamp('Int');
     my $b = $f->make('Constant', value => '2', const_type => 'integer');
-    $b->set_representation('Int');
+    $b->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$a, $b]);
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$add]);
     return Chalk::IR::Graph->new(start => $a, returns => [$ret]);
 }
@@ -71,7 +71,7 @@ subtest 'the round trip preserves types' => sub {
     my ($add) = grep { $_->operation eq 'Add' }
         $reloaded->{'main::t'}->nodes->@*;
     ok $add, 'the Add survived the round trip';
-    is $add->representation, 'Int', 'with its type intact';
+    is $add->stamp, 'Int', 'with its type intact';
 };
 
 done_testing;

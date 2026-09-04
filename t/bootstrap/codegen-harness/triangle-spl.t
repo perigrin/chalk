@@ -29,11 +29,11 @@ unless ( -x $LLI ) {
 sub _build_arith_add {
     my $f  = Chalk::IR::NodeFactory->new;
     my $c1 = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make( 'Constant', value => '2', const_type => 'integer' );
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $add = $f->make( 'Add', inputs => [ $c1, $c2 ] );
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $ret = $f->make_cfg( 'Return', inputs => [$add] );
     return $ret;
 }
@@ -44,7 +44,7 @@ sub _build_arith_add {
 sub _build_scalar_graph {
     my $f  = Chalk::IR::NodeFactory->new;
     my $c1 = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c1->set_representation('Scalar');    # Scalar = GAP on L corner
+    $c1->set_stamp('Scalar');    # Scalar = GAP on L corner
     my $ret = $f->make_cfg( 'Return', inputs => [$c1] );
     return $ret;
 }

@@ -113,7 +113,7 @@ SRC
         $_->operation eq 'Call' && ( $_->name // '' ) eq 'first'
     } map { ( $_->nodes->@* ) } values %$graphs;
     ok $call, 'the call to Bag::first exists' or return;
-    is $call->representation, 'Int',
+    is $call->stamp, 'Int',
         'the NARROWER of the two wins -- the graph refines the wire';
 
     # AND THE METAOBJECT CARRIES IT TOO. Target::LLVM reads return_type off the

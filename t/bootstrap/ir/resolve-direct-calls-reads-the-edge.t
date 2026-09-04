@@ -96,10 +96,10 @@ subtest 'with the edge present, the name hash is not what is read' => sub {
 
     # Clear the stamp the earlier full run already applied, so the assertion
     # below is about THIS pass's reading and not a leftover.
-    $_->set_representation(undef) for @c;
+    $_->set_stamp(undef) for @c;
     Chalk::IR::Analysis::_resolve_direct_calls( \%perturbed );
 
-    is( $_->representation, 'Int',
+    is( $_->stamp, 'Int',
         'the call result is stamped from the callee reached by EDGE' )
         for @c;
 };

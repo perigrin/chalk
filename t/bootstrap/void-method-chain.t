@@ -27,26 +27,26 @@ require Chalk::IR::NodeFactory;
 # separate "correctly printed the empty string" from "printed nothing at all".
 sub print_program ($ret) {
     my $val  = $ret->inputs->[0];
-    my $repr = $val->representation // 'Int';
+    my $repr = $val->stamp // 'Int';
     my $f    = Chalk::IR::NodeFactory->new;
 
     my $str = $repr eq 'Str' ? $val : do {
         my $c = $f->make( 'Coerce',
             inputs => [$val], from_repr => $repr, to_repr => 'Str' );
-        $c->set_representation('Str');
+        $c->set_stamp('Str');
         $c;
     };
 
     my $lb = $f->make( 'Constant', value => '[', const_type => 'string' );
-    $lb->set_representation('Str');
+    $lb->set_stamp('Str');
     my $rb = $f->make( 'Constant', value => ']', const_type => 'string' );
-    $rb->set_representation('Str');
+    $rb->set_stamp('Str');
 
     my $print = $f->make( 'Print', inputs => [ $lb, $str, $rb ] );
     $print->set_control_in( $ret->control_in );
 
     my $u = $f->make( 'Constant', value => undef, const_type => 'undef' );
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $nret = $f->make_cfg( 'Return', inputs => [$u] );
     $nret->set_control_in($print);
     return $nret;

@@ -31,14 +31,14 @@ sub ternary_with ( $cond_repr, $then_repr, $else_repr ) {
     my $i  = 0;
     my @in = map {
         my $n = $f->make( 'Constant', const_type => 'integer', value => ++$i );
-        $n->set_representation($_);
+        $n->set_stamp($_);
         $n;
     } ( $cond_repr, $then_repr, $else_repr );
 
     my $t = $f->make( 'TernaryExpr', inputs => \@in );
     Chalk::IR::Analysis::_propagate_computed_reprs(
         { g => _graph_of( $t, @in ) } );
-    return $t->representation;
+    return $t->stamp;
 }
 
 # Minimal graph wrapper: the pass walks $g->nodes.

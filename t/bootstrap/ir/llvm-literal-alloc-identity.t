@@ -30,16 +30,16 @@ sub print_returned_value {
 
     my $v = $ret_node->inputs->[0];
     my $s = $v;
-    if (($v->representation // '') ne 'Str') {
+    if (($v->stamp // '') ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
-            from_repr => $v->representation, to_repr => 'Str');
-        $s->set_representation('Str');
+            from_repr => $v->stamp, to_repr => 'Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -49,7 +49,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -71,14 +71,14 @@ sub run_lli {
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     return $c;
 }
 
 sub str_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => $val, const_type => 'string');
-    $c->set_representation('Str');
+    $c->set_stamp('Str');
     return $c;
 }
 
@@ -104,29 +104,29 @@ subtest 'identical array literals do not alias' => sub {
 
     my ($one_a, $two_a) = (int_const($f, 1), int_const($f, 2));
     my $lit_a = $f->make('ArrayLiteral', inputs => [$one_a, $two_a]);
-    $lit_a->set_representation('ArrayRef');
+    $lit_a->set_stamp('ArrayRef');
     my $na = $f->make('Constant', value => '$a', const_type => 'string');
     my $va = $f->make('VarDecl', inputs => [$na, $lit_a]);
-    $va->set_representation('ArrayRef');
+    $va->set_stamp('ArrayRef');
 
     my $lit_b = $f->make('ArrayLiteral', inputs => [$one_a, $two_a]);
-    $lit_b->set_representation('ArrayRef');
+    $lit_b->set_stamp('ArrayRef');
     isnt($lit_b->id, $lit_a->id, 'precondition: the two literals are distinct nodes');
     my $nb = $f->make('Constant', value => '$b', const_type => 'string');
     my $vb = $f->make('VarDecl', inputs => [$nb, $lit_b]);
-    $vb->set_representation('ArrayRef');
+    $vb->set_stamp('ArrayRef');
 
     my $rb = $f->make('PadAccess', targ => 1, varname => '$b', inputs => [$vb]);
-    $rb->set_representation('ArrayRef');
+    $rb->set_stamp('ArrayRef');
     my $store_lv = $f->make('Subscript', inputs => [$rb, int_const($f, 0)]);
-    $store_lv->set_representation('Int');
+    $store_lv->set_stamp('Int');
     my $st = $f->make('Assign', inputs => [$store_lv, int_const($f, 9)]);
-    $st->set_representation('Int');
+    $st->set_stamp('Int');
 
     my $ra = $f->make('PadAccess', targ => 0, varname => '$a', inputs => [$va]);
-    $ra->set_representation('ArrayRef');
+    $ra->set_stamp('ArrayRef');
     my $rd = $f->make('Subscript', inputs => [$ra, int_const($f, 0)]);
-    $rd->set_representation('Int');
+    $rd->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$rd]);
     $ret->set_control_in($st);

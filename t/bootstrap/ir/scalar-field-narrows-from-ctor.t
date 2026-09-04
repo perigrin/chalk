@@ -31,7 +31,7 @@ subtest 'a Scalar :param field narrows to its constructor argument' => sub {
     ok scalar(@calls) >= 2, 'found the :reader calls' or diag 'no reader calls';
 
     for my $c (@calls) {
-        is $c->representation, 'Int',
+        is $c->stamp, 'Int',
             ($c->name // '?') . " returns Int, not Scalar -- ctor passed an Int";
     }
 };

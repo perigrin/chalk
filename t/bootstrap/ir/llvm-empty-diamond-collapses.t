@@ -45,15 +45,15 @@ sub build_pure_diamond () {
     my $start = $f->make('Start');
 
     my $zero = $f->make('Constant', value => 0, const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $one = $f->make('Constant', value => 1, const_type => 'integer');
-    $one->set_representation('Int');
+    $one->set_stamp('Int');
     my $two = $f->make('Constant', value => 2, const_type => 'integer');
-    $two->set_representation('Int');
+    $two->set_stamp('Int');
 
     my $cond = $f->make('NumGt', inputs => [$two, $one],
                         left => $two, right => $one);
-    $cond->set_representation('Boolean');
+    $cond->set_stamp('Boolean');
 
     my $if   = $f->make('If',   inputs => [$start, $cond]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);
@@ -66,19 +66,19 @@ sub build_pure_diamond () {
     # recovery). A hand-built graph that omits it leaves head=undef.
     $if->set_region($region);
     my $phi = $f->make('Phi', region => $region, values => [$one, $zero]);
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
 
     my $nl = $f->make('Constant', value => "\n", const_type => 'string');
-    $nl->set_representation('Str');
+    $nl->set_stamp('Str');
     my $co = $f->make('Coerce', inputs => [$phi],
                       from_repr => 'Int', to_repr => 'Str');
-    $co->set_representation('Str');
+    $co->set_stamp('Str');
 
     my $print = $f->make('Print', inputs => [$co, $nl]);
     $print->set_control_in($region);
 
     my $undef = $f->make('Constant', value => 'undef', const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 
@@ -94,20 +94,20 @@ sub build_effectful_diamond () {
     my $start = $f->make('Start');
 
     my $one = $f->make('Constant', value => 1, const_type => 'integer');
-    $one->set_representation('Int');
+    $one->set_stamp('Int');
     my $two = $f->make('Constant', value => 2, const_type => 'integer');
-    $two->set_representation('Int');
+    $two->set_stamp('Int');
 
     my $cond = $f->make('NumGt', inputs => [$two, $one],
                         left => $two, right => $one);
-    $cond->set_representation('Boolean');
+    $cond->set_stamp('Boolean');
 
     my $if   = $f->make('If',   inputs => [$start, $cond]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);
     my $else = $f->make('Proj', index => 1, inputs => [$if]);
 
     my $msg = $f->make('Constant', value => "in\n", const_type => 'string');
-    $msg->set_representation('Str');
+    $msg->set_stamp('Str');
     my $guarded = $f->make('Print', inputs => [$msg]);
     $guarded->set_control_in($then);          # <-- a FIXED node inside the arm
 
@@ -115,12 +115,12 @@ sub build_effectful_diamond () {
     $if->set_region($region);
 
     my $done = $f->make('Constant', value => "done\n", const_type => 'string');
-    $done->set_representation('Str');
+    $done->set_stamp('Str');
     my $print = $f->make('Print', inputs => [$done]);
     $print->set_control_in($region);
 
     my $undef = $f->make('Constant', value => 'undef', const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 

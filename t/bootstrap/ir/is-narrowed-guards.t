@@ -10,7 +10,7 @@ use Chalk::IR::Analysis;
 
 # THE DISTINCTION. Nine sites in the loader ask "has this node already been
 # assigned a representation?" and skip their work when the answer is yes. They
-# spell that question `defined $node->representation`.
+# spell that question `defined $node->stamp`.
 #
 # That spelling is only correct while `Unknown` CANNOT REACH THE FIELD. Today
 # it cannot: the wire-stamp seed at Serialize/JSON.pm:548 gates on
@@ -56,13 +56,13 @@ subtest '_is_narrowed separates committed from undecided' => sub {
 };
 
 subtest 'the predicate is what the nine guards actually call' => sub {
-    # A guard that still spells the question `defined ...->representation` is
+    # A guard that still spells the question `defined ...->stamp` is
     # one that will misread `Unknown` the moment 3b lands. Sweep for the old
     # spelling so a reintroduced one fails HERE, with this explanation,
     # rather than as a silent miscompile after the gate is removed.
     # BOTH files. The guards moved to Analysis.pm when the inference passes
     # left the loader, but the loader still decodes stamps off the wire and
-    # could regrow one. Either file gaining a bare `defined ->representation`
+    # could regrow one. Either file gaining a bare `defined ->stamp`
     # is the regression this sweeps for.
     for my $path (qw(
         lib/Chalk/IR/Analysis.pm
@@ -72,10 +72,32 @@ subtest 'the predicate is what the nine guards actually call' => sub {
         my @stale;
         while (my $line = <$fh>) {
             next if $line =~ /^\s*#/;                # comments explain, not guard
-            next unless $line =~ /->representation\b/;
+            next unless $line =~ /->stamp\b/;
             next unless $line =~ /\bdefined\b/;
             # _is_narrowed itself is the one place the old spelling is correct.
             next if $line =~ /sub _is_narrowed/;
+
+            # AN ABSENCE CHECK IS NOT A GUARD, and conflating them is the
+            # same mistake this file exists to prevent, one level up.
+            #
+            # The rule here is about GUARDS: code using defined-ness to mean
+            # "already decided", where `Unknown` is wrongly read as committed.
+            # Those must call `_is_narrowed`.
+            #
+            # Two sites legitimately ask about ABSENCE itself, and for them
+            # `defined` is the only correct question -- `_is_narrowed` answers
+            # false for `Unknown` too and would report a legitimately-typed
+            # node as untyped:
+            #
+            #   _assert_value_nodes_are_typed  the invariant: which Value
+            #                                  nodes have NO stamp at all
+            #   _stamp_is_absent               has inference REACHED this node
+            #
+            # Named explicitly rather than matched by shape: a pattern loose
+            # enough to cover both would also swallow a real guard, and this
+            # file's whole value is that it does not.
+            next if index($line, q{next if defined $node->stamp;}) >= 0;
+            next if index($line, q{return !defined $node->stamp;}) >= 0;
             push @stale, "$.: " . ($line =~ s/^\s+|\s+$//gr);
         }
         close $fh;
@@ -83,8 +105,8 @@ subtest 'the predicate is what the nine guards actually call' => sub {
         is \@stale, [],
             "no guard tests defined-ness of a representation in $path"
             or diag(
-                "These sites ask `defined ->representation`, which reads Unknown\n"
-              . "as a committed answer. Use _is_narrowed(\$node->representation)."
+                "These sites ask `defined ->stamp`, which reads Unknown\n"
+              . "as a committed answer. Use _is_narrowed(\$node->stamp)."
             );
     }
 };

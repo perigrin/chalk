@@ -42,18 +42,18 @@ sub print_and_return {
     # Print takes a Str, so a non-Str value is bridged with an explicit
     # Coerce -- the same node a source program's producer inserts.
     my $arg  = $value;
-    my $repr = $value->representation;
+    my $repr = $value->stamp;
     if (!defined $repr || $repr ne 'Str') {
         $arg = $f->make('Coerce', inputs => [$value],
             from_repr => $repr, to_repr => 'Str');
-        $arg->set_representation('Str');
+        $arg->set_stamp('Str');
     }
 
     my $print = $f->make('Print', inputs => [$arg]);
     $print->set_control_in($f->make_cfg('Start'));
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
     return $ret;
@@ -63,11 +63,11 @@ sub print_and_return {
 sub subst_node {
     my ($f, $subject, $pattern, $replacement) = @_;
     my $subj = $f->make('Constant', value => $subject, const_type => 'string');
-    $subj->set_representation('Str');
+    $subj->set_stamp('Str');
     my $s = $f->make('RegexSubst',
         pattern => $pattern, replacement => $replacement, flags => '',
         inputs => [$subj]);
-    $s->set_representation('Str');
+    $s->set_stamp('Str');
     return $s;
 }
 
@@ -140,10 +140,10 @@ subtest 's/// in two method bodies: no duplicate @rxs_lit symbols' => sub {
     my $mk_body = sub {
         my ($text) = @_;
         my $subj = $f->make('Constant', value => $text, const_type => 'string');
-        $subj->set_representation('Str');
+        $subj->set_stamp('Str');
         my $s = $f->make('RegexSubst',
             pattern => 'o', replacement => 'LIT', flags => '', inputs => [$subj]);
-        $s->set_representation('Str');
+        $s->set_stamp('Str');
         return $s;
     };
 
@@ -157,10 +157,10 @@ subtest 's/// in two method bodies: no duplicate @rxs_lit symbols' => sub {
 
     my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Subby', param_names => [], inputs => []);
-    $new_o->set_representation('Object');
+    $new_o->set_stamp('Object');
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'meth_a',
         class_name => 'Subby', inputs => [$new_o]);
-    $call->set_representation('Str');
+    $call->set_stamp('Str');
     my $ret = print_and_return($f, $call);
 
     my ($out, $ll) = eval { lli_run($ret, mop => $mop) };

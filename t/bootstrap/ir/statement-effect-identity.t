@@ -32,11 +32,11 @@ subtest 'Assign(FieldAccess-lvalue) has per-call identity' => sub {
 
     my $mk_store = sub {
         my $fa = $f->make('FieldAccess', field_index => 0, field_stash => 'Counter', inputs => []);
-        $fa->set_representation('Int');
+        $fa->set_stamp('Int');
         my $v = $f->make('Constant', value => '7', const_type => 'integer');
-        $v->set_representation('Int');
+        $v->set_stamp('Int');
         my $a = $f->make('Assign', inputs => [$fa, $v]);
-        $a->set_representation('Int');
+        $a->set_stamp('Int');
         return $a;
     };
 
@@ -52,15 +52,15 @@ subtest 'Assign(Subscript-lvalue) has per-call identity' => sub {
 
     my $mk_store = sub {
         my $arr = $f->make('ArrayLiteral', inputs => []);
-        $arr->set_representation('ArrayRef');
+        $arr->set_stamp('ArrayRef');
         my $idx = $f->make('Constant', value => '0', const_type => 'integer');
-        $idx->set_representation('Int');
+        $idx->set_stamp('Int');
         my $sub = $f->make('Subscript', inputs => [$arr, $idx]);
-        $sub->set_representation('Int');
+        $sub->set_stamp('Int');
         my $v = $f->make('Constant', value => '42', const_type => 'integer');
-        $v->set_representation('Int');
+        $v->set_stamp('Int');
         my $a = $f->make('Assign', inputs => [$sub, $v]);
-        $a->set_representation('Int');
+        $a->set_stamp('Int');
         return $a;
     };
 
@@ -86,9 +86,9 @@ subtest 'Assign with a scalar-rebind lhs ALSO has per-call identity' => sub {
             $f->make('Constant', value => '1', const_type => 'integer'),
         ]);
     my $pa = $f->make('PadAccess', targ => 0, varname => 'x', inputs => [$vd]);
-    $pa->set_representation('Int');
+    $pa->set_stamp('Int');
     my $v = $f->make('Constant', value => '9', const_type => 'integer');
-    $v->set_representation('Int');
+    $v->set_stamp('Int');
 
     my $r1 = $f->make('Assign', inputs => [$pa, $v]);
     my $r2 = $f->make('Assign', inputs => [$pa, $v]);

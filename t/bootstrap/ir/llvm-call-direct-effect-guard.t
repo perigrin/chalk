@@ -26,7 +26,7 @@ subtest 'pure callee (Return.control_in = Start, inputs = [value]) still inlines
     my $f       = Chalk::IR::NodeFactory->new;
     my $start   = $f->make('Start');
     my $value   = $f->make('Constant', value => 2, const_type => 'integer');
-    $value->set_representation('Int');
+    $value->set_stamp('Int');
     my $ret     = $f->make_cfg('Return', inputs => [$value]);
     $ret->set_control_in($start);
     my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
@@ -52,11 +52,11 @@ subtest 'effectful callee via Return.control_in (straight-line Print, not Start)
     my $f       = Chalk::IR::NodeFactory->new;
     my $start   = $f->make('Start');
     my $str     = $f->make('Constant', value => 'x', const_type => 'string');
-    $str->set_representation('Str');
+    $str->set_stamp('Str');
     my $print   = $f->make('Print', inputs => [$str]);
     $print->set_control_in($start);
     my $value   = $f->make('Constant', value => 2, const_type => 'integer');
-    $value->set_representation('Int');
+    $value->set_stamp('Int');
     my $ret     = $f->make_cfg('Return', inputs => [$value]);
     $ret->set_control_in($print);
     my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
@@ -78,14 +78,14 @@ subtest 'effectful callee via Return.control_in (Assign, not Start/Print) still 
     my $start   = $f->make('Start');
     my $name_c  = $f->make('Constant', value => 's', const_type => 'string');
     my $init    = $f->make('Constant', value => 1, const_type => 'integer');
-    $init->set_representation('Int');
+    $init->set_stamp('Int');
     my $vd      = $f->make('VarDecl', inputs => [$name_c, $init]);
     my $rhs     = $f->make('Constant', value => 5, const_type => 'integer');
-    $rhs->set_representation('Int');
+    $rhs->set_stamp('Int');
     my $assign  = $f->make('Assign', inputs => [$vd, $rhs]);
     $assign->set_control_in($start);
     my $value   = $f->make('Constant', value => 2, const_type => 'integer');
-    $value->set_representation('Int');
+    $value->set_stamp('Int');
     my $ret     = $f->make_cfg('Return', inputs => [$value]);
     $ret->set_control_in($assign);
     my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
@@ -143,7 +143,7 @@ subtest 'effectful callee via Return.inputs[1..] (defensive; no live producer) G
     );
     $void_call->set_control_in($start);
     my $value = $f->make('Constant', value => 2, const_type => 'integer');
-    $value->set_representation('Int');
+    $value->set_stamp('Int');
     # Return.control_in is Start (the pure-check alone would pass); the
     # trailing void effect rides as an EXTRA Return input, per the documented
     # convention (JSON.pm:983-988) where inputs[0] is the value and

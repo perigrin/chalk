@@ -19,7 +19,7 @@ use Chalk::Target::LLVM;
 sub str_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => $val, const_type => 'string');
-    $c->set_representation('Str');
+    $c->set_stamp('Str');
     return $c;
 }
 
@@ -27,9 +27,9 @@ subtest 'NotMatch dies with a GAP message, naming the op' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $s = str_const($f, 'abc');
     my $qr = $f->make('Constant', value => 'b', const_type => 'regex');
-    $qr->set_representation('Regex');
+    $qr->set_stamp('Regex');
     my $nm = $f->make('NotMatch', inputs => [$s, $qr]);
-    $nm->set_representation('Boolean');
+    $nm->set_stamp('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$nm]);
     $ret->set_control_in($nm);
 
@@ -43,7 +43,7 @@ subtest 'BacktickExpr dies with a GAP message, naming the op' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $cmd = str_const($f, 'echo hi');
     my $bt = $f->make('BacktickExpr', inputs => [$cmd]);
-    $bt->set_representation('Str');
+    $bt->set_stamp('Str');
     my $ret = $f->make_cfg('Return', inputs => [$bt]);
     $ret->set_control_in($bt);
 
@@ -57,7 +57,7 @@ subtest 'TryCatch dies with a GAP message, naming the op' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $body = str_const($f, 'x');
     my $tc = $f->make('TryCatch', inputs => [$body]);
-    $tc->set_representation('Str');
+    $tc->set_stamp('Str');
     my $ret = $f->make_cfg('Return', inputs => [$tc]);
     $ret->set_control_in($tc);
 

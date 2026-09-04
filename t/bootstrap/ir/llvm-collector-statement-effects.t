@@ -45,18 +45,18 @@ sub print_returned_value {
     my ($f, $ret_node) = @_;
 
     my $v    = $ret_node->inputs->[0];
-    my $repr = $v->representation;
+    my $repr = $v->stamp;
     my $s    = $v;
     if (!defined $repr || $repr ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
             from_repr => $repr, to_repr => 'Str');
-        $s->set_representation('Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -66,7 +66,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -75,7 +75,7 @@ sub print_returned_value {
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     return $c;
 }
 
@@ -90,19 +90,19 @@ subtest 'a method Call in an if-branch is collected and lowered' => sub {
 
     # method bump { $n = $n + 100 }
     my $fa_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'C', inputs => []);
-    $fa_rd->set_representation('Int');
+    $fa_rd->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$fa_rd, int_const($f, 100)]);
-    $sum->set_representation('Int');
+    $sum->set_stamp('Int');
     my $fa_lv = $f->make('FieldAccess', field_index => 0, field_stash => 'C', inputs => []);
-    $fa_lv->set_representation('Int');
+    $fa_lv->set_stamp('Int');
     my $store = $f->make('Assign', inputs => [$fa_lv, $sum]);
-    $store->set_representation('Int');
+    $store->set_stamp('Int');
     my $bump = $cls->declare_method('bump', return_type => 'Int');
     $bump->graph->merge($f->make_cfg('Return', inputs => [$store]));
 
     # method val { $n }
     my $fa_val = $f->make('FieldAccess', field_index => 0, field_stash => 'C', inputs => []);
-    $fa_val->set_representation('Int');
+    $fa_val->set_stamp('Int');
     my $val = $cls->declare_method('val', return_type => 'Int');
     $val->graph->merge($f->make_cfg('Return', inputs => [$fa_val]));
 
@@ -111,15 +111,15 @@ subtest 'a method Call in an if-branch is collected and lowered' => sub {
     # my $c = C->new(n => 5);
     my $new = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'C', param_names => ['n'], inputs => [int_const($f, 5)]);
-    $new->set_representation('Object');
+    $new->set_stamp('Object');
     my $nc = $f->make('Constant', value => '$c', const_type => 'string');
     my $vc = $f->make('VarDecl', inputs => [$nc, $new]);
-    $vc->set_representation('Object');
+    $vc->set_stamp('Object');
 
     # if (1) { $c->bump }
     my $cond = int_const($f, 1);
     my $cond_b = $f->make('NumGt', inputs => [$cond, int_const($f, 0)]);
-    $cond_b->set_representation('Boolean');
+    $cond_b->set_stamp('Boolean');
     my $if_node = $f->make('If', inputs => [$vc, $cond_b]);
     my $proj0 = $f->make('Proj', inputs => [$if_node], index => 0);
     my $proj1 = $f->make('Proj', inputs => [$if_node], index => 1);
@@ -127,18 +127,18 @@ subtest 'a method Call in an if-branch is collected and lowered' => sub {
     $if_node->set_region($region);
 
     my $rc1 = $f->make('PadAccess', targ => 0, varname => '$c', inputs => [$vc]);
-    $rc1->set_representation('Object');
+    $rc1->set_stamp('Object');
     my $bump_call = $f->make('Call', dispatch_kind => 'method', name => 'bump',
         class_name => 'C', inputs => [$rc1]);
-    $bump_call->set_representation('Int');
+    $bump_call->set_stamp('Int');
     $bump_call->set_control_in($proj0);   # the then-branch body
 
     # return $c->val
     my $rc2 = $f->make('PadAccess', targ => 0, varname => '$c', inputs => [$vc]);
-    $rc2->set_representation('Object');
+    $rc2->set_stamp('Object');
     my $val_call = $f->make('Call', dispatch_kind => 'method', name => 'val',
         class_name => 'C', inputs => [$rc2]);
-    $val_call->set_representation('Int');
+    $val_call->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$val_call]);
     $if_node->set_control_in($vc);

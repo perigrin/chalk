@@ -56,16 +56,16 @@ sub make_print_program {
     my ($f, $value_node) = @_;
 
     my $lb = $f->make('Constant', value => '[', const_type => 'string');
-    $lb->set_representation('Str');
+    $lb->set_stamp('Str');
     my $rb = $f->make('Constant', value => ']', const_type => 'string');
-    $rb->set_representation('Str');
+    $rb->set_stamp('Str');
 
     my $start = $f->make_cfg('Start');
     my $print = $f->make('Print', inputs => [$lb, $value_node, $rb]);
     $print->set_control_in($start);
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 
@@ -84,21 +84,21 @@ sub make_str_to_num_graph {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c = $f->make('Constant', value => $str_val, const_type => 'string');
-    $c->set_representation('Str');
+    $c->set_stamp('Str');
 
     my $coerce = $f->make('Coerce',
         from_repr => 'Str',
         to_repr   => 'Num',
         inputs    => [$c],
     );
-    $coerce->set_representation('Num');
+    $coerce->set_stamp('Num');
 
     my $to_str = $f->make('Coerce',
         from_repr => 'Num',
         to_repr   => 'Str',
         inputs    => [$coerce],
     );
-    $to_str->set_representation('Str');
+    $to_str->set_stamp('Str');
 
     return (make_print_program($f, $to_str), $coerce);
 }
@@ -116,21 +116,21 @@ sub make_str_to_bool_graph {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c = $f->make('Constant', value => $str_val, const_type => 'string');
-    $c->set_representation('Str');
+    $c->set_stamp('Str');
 
     my $coerce = $f->make('Coerce',
         from_repr => 'Str',
         to_repr   => 'Boolean',
         inputs    => [$c],
     );
-    $coerce->set_representation('Boolean');
+    $coerce->set_stamp('Boolean');
 
     my $to_str = $f->make('Coerce',
         from_repr => 'Boolean',
         to_repr   => 'Str',
         inputs    => [$coerce],
     );
-    $to_str->set_representation('Str');
+    $to_str->set_stamp('Str');
 
     return (make_print_program($f, $to_str), $coerce);
 }
@@ -208,7 +208,7 @@ subtest 'Coerce(Str->Num) adversarial cases: printed value == perl' => sub {
             next;
         }
 
-        # The type half of the old Num: tag. Asserting $num_node->representation
+        # The type half of the old Num: tag. Asserting $num_node->stamp
         # would be a tautology -- make_str_to_num_graph sets that field itself.
         # The emitted IR is the independent witness: the Num path routes through
         # @chalk_str_to_num (perl's leading-numeric scan) and stringifies the

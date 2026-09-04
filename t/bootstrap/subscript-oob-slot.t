@@ -24,7 +24,7 @@ sub subscript_repr ($body) {
     my $mop = (values %$graphs)[0]->mop;
     my $g = $graphs->{'main::corpus_case'} or return undef;
     my ($sub) = grep { $_->operation eq 'Subscript' } $g->nodes->@*;
-    return $sub ? ($sub->representation // '<undef>') : '<no Subscript>';
+    return $sub ? ($sub->stamp // '<undef>') : '<no Subscript>';
 }
 
 subtest 'an out-of-bounds array read loads as :Slot (R9)' => sub {

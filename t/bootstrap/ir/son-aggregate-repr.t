@@ -46,13 +46,13 @@ push $by_op{ $_->operation }->@*, $_ for $g->nodes->@*;
 subtest 'ArrayRef container gets the aggregate repr' => sub {
     my ($arr) = $by_op{ArrayRef}->@*;
     ok(defined $arr, 'has an ArrayRef');
-    is($arr->representation, 'ArrayRef', 'ArrayRef repr is ArrayRef');
+    is($arr->stamp, 'ArrayRef', 'ArrayRef repr is ArrayRef');
 };
 
 subtest 'Subscript element read gets the element type' => sub {
     my ($sub) = $by_op{Subscript}->@*;
     ok(defined $sub, 'has a Subscript');
-    is($sub->representation, 'Int',
+    is($sub->stamp, 'Int',
         'Subscript(ArrayRef of Int, idx) reads an Int element');
 };
 
@@ -89,7 +89,7 @@ subtest 'a Subscript over an ArrayRef of ArrayRefs reads an ArrayRef element' =>
     my $ng = Chalk::IR::Serialize::JSON::from_json($nested)->{'main::f'};
     my ($sub) = grep { $_->operation eq 'Subscript' } $ng->nodes->@*;
     ok(defined $sub, 'has a Subscript');
-    is($sub->representation, 'ArrayRef',
+    is($sub->stamp, 'ArrayRef',
         'Subscript(ArrayRef of ArrayRefs, idx) reads an ArrayRef element');
 };
 
@@ -134,7 +134,7 @@ subtest 'an OOB inner index in a nested deref reads a Slot (not the element type
         blessed($c) && $c->operation eq 'Subscript';
     } @subs;
     ok(defined $outer, 'has the outer (OOB) Subscript');
-    is($outer->representation, 'Slot',
+    is($outer->stamp, 'Slot',
         'an OOB inner index reads a Slot (undef), not the Int element type');
 };
 

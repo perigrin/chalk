@@ -40,18 +40,18 @@ subtest 'an if-arm die preceded by a Print still emits the abort' => sub {
     my $xn = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx = $f->make('VarDecl', inputs => [$xn, do {
         my $one = $f->make('Constant', value => 1, const_type => 'integer');
-        $one->set_representation('Int');
+        $one->set_stamp('Int');
         $one;
     }]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
     $vx->set_control_in($start);
 
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $zero = $f->make('Constant', value => 0, const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$rx, $zero]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $if_node = $f->make('If', inputs => [$vx, $cmp]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -62,29 +62,29 @@ subtest 'an if-arm die preceded by a Print still emits the abort' => sub {
 
     # then-arm: print "t\n"; die "d\n"   (effect BEFORE die)
     my $tmsg  = $f->make('Constant', value => "t\n", const_type => 'string');
-    $tmsg->set_representation('Str');
+    $tmsg->set_stamp('Str');
     my $print = $f->make('Print', inputs => [$tmsg]);
     $print->set_control_in($proj0);
 
     my $dmsg   = $f->make('Constant', value => "d\n", const_type => 'string');
-    $dmsg->set_representation('Str');
+    $dmsg->set_stamp('Str');
     my $unwind = $f->make_cfg('Unwind', inputs => [$dmsg]);
     $unwind->set_control_in($print);   # <-- the effect-before-die shape
 
     # else-arm: print "e\n"
     my $emsg   = $f->make('Constant', value => "e\n", const_type => 'string');
-    $emsg->set_representation('Str');
+    $emsg->set_stamp('Str');
     my $eprint = $f->make('Print', inputs => [$emsg]);
     $eprint->set_control_in($proj1);
 
     # print "end\n" after the if, on the merge Region's control.
     my $endmsg = $f->make('Constant', value => "end\n", const_type => 'string');
-    $endmsg->set_representation('Str');
+    $endmsg->set_stamp('Str');
     my $endprint = $f->make('Print', inputs => [$endmsg]);
     $endprint->set_control_in($region);
 
     my $val = $f->make('Constant', value => 42, const_type => 'integer');
-    $val->set_representation('Int');
+    $val->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$val]);
     $ret->set_control_in($endprint);
 

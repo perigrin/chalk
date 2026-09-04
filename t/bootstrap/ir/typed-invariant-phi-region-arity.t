@@ -47,14 +47,14 @@ sub build_graph ($phi_value_count) {
     my $start = $f->make('Start');
 
     my $zero = $f->make('Constant', value => 0, const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $one = $f->make('Constant', value => 1, const_type => 'integer');
-    $one->set_representation('Int');
+    $one->set_stamp('Int');
     my $two = $f->make('Constant', value => 2, const_type => 'integer');
-    $two->set_representation('Int');
+    $two->set_stamp('Int');
 
     my $cond = $f->make('NumGt', inputs => [$two, $one]);
-    $cond->set_representation('Boolean');
+    $cond->set_stamp('Boolean');
 
     my $if   = $f->make('If',   inputs => [$start, $cond]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);
@@ -70,7 +70,7 @@ sub build_graph ($phi_value_count) {
     # ARITY defect under test here is independent of whether arms are recorded.
     my $phi = $f->make('Phi', region => $region, values => \@values,
                        predecessors => [$then, $else]);
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
 
     my $ret = $f->make('Return', inputs => [$phi]);
     $ret->set_control_in($region);

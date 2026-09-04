@@ -45,18 +45,18 @@ sub print_returned_value {
     my ($f, $ret_node) = @_;
 
     my $v    = $ret_node->inputs->[0];
-    my $repr = $v->representation;
+    my $repr = $v->stamp;
     my $s    = $v;
     if (!defined $repr || $repr ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
             from_repr => $repr, to_repr => 'Str');
-        $s->set_representation('Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -66,7 +66,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -83,20 +83,20 @@ sub build_pt_mop {
     $cls->declare_field('y', sigil => '$', type => 'Int', attributes => []);
 
     my $fa_x = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
-    $fa_x->set_representation('Int');
+    $fa_x->set_stamp('Int');
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$fa_x, $c1]);
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $fa_y_lv = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
-    $fa_y_lv->set_representation('Int');
+    $fa_y_lv->set_stamp('Int');
     my $asg = $f->make('Assign', inputs => [$fa_y_lv, $add]);
-    $asg->set_representation('Int');
+    $asg->set_stamp('Int');
     my $adj = $cls->declare_adjust();
     $adj->graph->merge($asg);
 
     my $fa_y_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
-    $fa_y_rd->set_representation('Int');
+    $fa_y_rd->set_stamp('Int');
     my $mi = $cls->declare_method('gety', return_type => 'Int');
     $mi->graph->merge($f->make_cfg('Return', inputs => [$fa_y_rd]));
 
@@ -110,13 +110,13 @@ subtest 'single new runs ADJUST (sanity)' => sub {
     my $mop = build_pt_mop($f);
 
     my $v5 = $f->make('Constant', value => '5', const_type => 'integer');
-    $v5->set_representation('Int');
+    $v5->set_stamp('Int');
     my $new_a = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Pt', param_names => ['x'], inputs => [$v5]);
-    $new_a->set_representation('Object');
+    $new_a->set_stamp('Object');
     my $get_a = $f->make('Call', dispatch_kind => 'method', name => 'gety',
         class_name => 'Pt', inputs => [$new_a]);
-    $get_a->set_representation('Int');
+    $get_a->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$get_a]);
 
     my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
@@ -131,25 +131,25 @@ subtest 'second new of the same class runs ADJUST too (I6)' => sub {
     my $mop = build_pt_mop($f);
 
     my $v5 = $f->make('Constant', value => '5', const_type => 'integer');
-    $v5->set_representation('Int');
+    $v5->set_stamp('Int');
     my $v100 = $f->make('Constant', value => '100', const_type => 'integer');
-    $v100->set_representation('Int');
+    $v100->set_stamp('Int');
 
     my $new_a = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Pt', param_names => ['x'], inputs => [$v5]);
-    $new_a->set_representation('Object');
+    $new_a->set_stamp('Object');
     my $new_b = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Pt', param_names => ['x'], inputs => [$v100]);
-    $new_b->set_representation('Object');
+    $new_b->set_stamp('Object');
 
     my $get_a = $f->make('Call', dispatch_kind => 'method', name => 'gety',
         class_name => 'Pt', inputs => [$new_a]);
-    $get_a->set_representation('Int');
+    $get_a->set_stamp('Int');
     my $get_b = $f->make('Call', dispatch_kind => 'method', name => 'gety',
         class_name => 'Pt', inputs => [$new_b]);
-    $get_b->set_representation('Int');
+    $get_b->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$get_a, $get_b]);
-    $sum->set_representation('Int');
+    $sum->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
 
     my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));

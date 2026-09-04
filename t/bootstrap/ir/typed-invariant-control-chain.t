@@ -13,7 +13,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $msg = $f->make('Constant', value => 'hi', const_type => 'string');
-    $msg->set_representation('Str');
+    $msg->set_stamp('Str');
     my $start = $f->make_cfg('Start');
     my $print = $f->make('Print', inputs => [$msg]);
     $print->set_control_in($start);
@@ -32,7 +32,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $msg = $f->make('Constant', value => 'hi', const_type => 'string');
-    $msg->set_representation('Str');
+    $msg->set_stamp('Str');
     my $print = $f->make('Print', inputs => [$msg]);
     # No set_control_in call -- control_in stays undef.
 
@@ -50,9 +50,9 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $target = $f->make('Constant', value => '0', const_type => 'integer');
-    $target->set_representation('Int');
+    $target->set_stamp('Int');
     my $value = $f->make('Constant', value => '1', const_type => 'integer');
-    $value->set_representation('Int');
+    $value->set_stamp('Int');
     my $start = $f->make_cfg('Start');
     my $assign = $f->make('Assign', inputs => [$target, $value]);
     $assign->set_control_in($start);
@@ -66,9 +66,9 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $target = $f->make('Constant', value => '0', const_type => 'integer');
-    $target->set_representation('Int');
+    $target->set_stamp('Int');
     my $value = $f->make('Constant', value => '1', const_type => 'integer');
-    $value->set_representation('Int');
+    $value->set_stamp('Int');
     my $assign = $f->make('Assign', inputs => [$target, $value]);
 
     my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$target, $value, $assign]);
@@ -82,7 +82,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $value = $f->make('Constant', value => '1', const_type => 'integer');
-    $value->set_representation('Int');
+    $value->set_stamp('Int');
     my $start = $f->make_cfg('Start');
     my $ret = $f->make_cfg('Return', inputs => [$value]);
     $ret->set_control_in($start);
@@ -96,7 +96,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $value = $f->make('Constant', value => '1', const_type => 'integer');
-    $value->set_representation('Int');
+    $value->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$value]);
 
     my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$value, $ret]);
@@ -110,7 +110,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $arg = $f->make('Constant', value => '1', const_type => 'integer');
-    $arg->set_representation('Int');
+    $arg->set_stamp('Int');
     my $start = $f->make_cfg('Start');
     my $call = $f->make('Call', inputs => [$arg], dispatch_kind => 'direct', name => 'main::foo');
     $call->set_control_in($start);
@@ -124,7 +124,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $arg = $f->make('Constant', value => '1', const_type => 'integer');
-    $arg->set_representation('Int');
+    $arg->set_stamp('Int');
     my $call = $f->make('Call', inputs => [$arg], dispatch_kind => 'direct', name => 'main::foo');
 
     my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$arg, $call]);
@@ -138,7 +138,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $msg = $f->make('Constant', value => 'died', const_type => 'string');
-    $msg->set_representation('Str');
+    $msg->set_stamp('Str');
     my $start = $f->make_cfg('Start');
     my $unwind = $f->make_cfg('Unwind', inputs => [$msg]);
     $unwind->set_control_in($start);
@@ -152,7 +152,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $msg = $f->make('Constant', value => 'died', const_type => 'string');
-    $msg->set_representation('Str');
+    $msg->set_stamp('Str');
     my $unwind = $f->make_cfg('Unwind', inputs => [$msg]);
 
     my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$msg, $unwind]);
@@ -167,7 +167,7 @@ use Chalk::IR::Graph::TypedInvariant;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $subject = $f->make('Constant', value => 'x', const_type => 'string');
-    $subject->set_representation('Str');
+    $subject->set_stamp('Str');
     my $match = $f->make('RegexMatch', inputs => [$subject], pattern => 'x', flags => '');
 
     my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$subject, $match]);

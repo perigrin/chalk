@@ -31,18 +31,18 @@ sub print_and_return {
     # Print takes a Str, so a non-Str value is bridged with an explicit
     # Coerce -- the same node a source program's producer inserts.
     my $arg  = $value;
-    my $repr = $value->representation;
+    my $repr = $value->stamp;
     if (!defined $repr || $repr ne 'Str') {
         $arg = $f->make('Coerce', inputs => [$value],
             from_repr => $repr, to_repr => 'Str');
-        $arg->set_representation('Str');
+        $arg->set_stamp('Str');
     }
 
     my $print = $f->make('Print', inputs => [$arg]);
     $print->set_control_in($last_effect // $f->make_cfg('Start'));
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
     return $ret;
@@ -58,13 +58,13 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
 
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
 
     my $add = $f->make('Add', inputs => [$c1, $c2]);
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
@@ -81,11 +81,11 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$c1, $c2]);
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
     my $ll = Chalk::Target::LLVM->lower($ret);
@@ -101,11 +101,11 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$c1, $c2]);
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $ret = print_and_return($f, $add);
 
     my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
@@ -139,12 +139,12 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $cn = $f->make('Constant', value => '1.5', const_type => 'number');
-    $cn->set_representation('Num');
+    $cn->set_stamp('Num');
     my $ci = $f->make('Constant', value => '3', const_type => 'integer');
-    $ci->set_representation('Int');
+    $ci->set_stamp('Int');
     # The repr-join (Serialize::JSON) widens Add(Num, Int) -> Num.
     my $add = $f->make('Add', inputs => [$cn, $ci]);
-    $add->set_representation('Num');
+    $add->set_stamp('Num');
     my $ret = print_and_return($f, $add);
 
     my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
@@ -172,11 +172,11 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c1 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '4', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$c1, $c2]);
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $ret = print_and_return($f, $add);
 
     my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
@@ -200,16 +200,16 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$c1, $c2]);
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
     my @data_nodes = ($c1, $c2, $add);
     my @scalar_nodes = grep {
-        defined $_->representation && $_->representation eq 'Scalar'
+        defined $_->stamp && $_->stamp eq 'Scalar'
     } @data_nodes;
 
     is(scalar @scalar_nodes, 0,
@@ -221,11 +221,11 @@ ok(Chalk::Target::LLVM->can('lower'),
 {
     my $f = Chalk::IR::NodeFactory->new;
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$c1, $c2]);
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
     my $generated = Chalk::Target::LLVM->lower($ret);
@@ -247,11 +247,11 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
     my $c7 = $f->make('Constant', value => '7', const_type => 'integer');
-    $c7->set_representation('Int');
+    $c7->set_stamp('Int');
     my $and = $f->make('And', inputs => [$c3, $c7]);
-    $and->set_representation('Int');
+    $and->set_stamp('Int');
     my $ret = print_and_return($f, $and);
 
     my $ll;
@@ -287,11 +287,11 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c3 = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
     my $c7 = $f->make('Constant', value => '7', const_type => 'integer');
-    $c7->set_representation('Int');
+    $c7->set_stamp('Int');
     my $or = $f->make('Or', inputs => [$c3, $c7]);
-    $or->set_representation('Int');
+    $or->set_stamp('Int');
     my $ret = print_and_return($f, $or);
 
     my $ll;
@@ -331,7 +331,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     # blocks so the Phi has only 0 incoming values (empty inputs).
     my $region = $f->make('Region', inputs => []);
     my $phi    = $f->make('Phi', region => $region, values => []);
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$phi]);
 
     eval { Chalk::Target::LLVM->lower($ret) };
@@ -359,33 +359,33 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     # $n = 5; condition: $n > 0
     my $cn   = $f->make('Constant', value => '5',  const_type => 'integer');
-    $cn->set_representation('Int');
+    $cn->set_stamp('Int');
     my $zero = $f->make('Constant', value => '0',  const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     # my $x; (no init)
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     # $x = 1 (then branch)
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Int');
+    $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
-    $as1->set_representation('Int');
+    $as1->set_stamp('Int');
 
     # $x = 2 (else branch)
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     # Note: lhs2 hash-cons == lhs1 (same targ/varname/vd) — that's correct.
     my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs2->set_representation('Int');
+    $lhs2->set_stamp('Int');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
-    $as2->set_representation('Int');
+    $as2->set_stamp('Int');
 
     # If / Proj / Region structure
     my $if_node = $f->make('If',   inputs => [$vx, $cmp]);
@@ -400,7 +400,7 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     # $x (read after if/else)
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
 
     # Return $x; control chain: vx -> if
     # Existing chain: vx -> if_node; the Print goes after the merge.
@@ -453,45 +453,45 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     # Preheader: n=3, s=0
     my $c3   = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
     my $c0s  = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0s->set_representation('Int');
+    $c0s->set_stamp('Int');
     my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $one  = $f->make('Constant', value => '1', const_type => 'integer');
-    $one->set_representation('Int');
+    $one->set_stamp('Int');
 
     my $nn   = $f->make('Constant', value => '$n', const_type => 'string');
     my $sn   = $f->make('Constant', value => '$s', const_type => 'string');
     my $vn   = $f->make('VarDecl', inputs => [$nn, $c3]);
-    $vn->set_representation('Int');
+    $vn->set_stamp('Int');
     my $vs   = $f->make('VarDecl', inputs => [$sn, $c0s]);
-    $vs->set_representation('Int');
+    $vs->set_stamp('Int');
 
     my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
-    $rn0->set_representation('Int');
+    $rn0->set_stamp('Int');
     my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs0->set_representation('Int');
+    $rs0->set_stamp('Int');
 
     # Loop node (entry_ctrl = %vs)
     my $loop = $f->make('Loop', inputs => [$vs, undef]);
 
     # Phi nodes for loop-carried values
     my $n_phi = $f->make('Phi', region => $loop, values => [$rn0]);
-    $n_phi->set_representation('Int');
+    $n_phi->set_stamp('Int');
     my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]);
-    $s_phi->set_representation('Int');
+    $s_phi->set_stamp('Int');
 
     # Condition: n_phi > 0
     my $zero = $c0;  # re-use c0
     my $cmp  = $f->make('NumGt', inputs => [$n_phi, $zero]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     # Body: s_new = s_phi + n_phi; n_new = n_phi - 1
     my $s_new = $f->make('Add', inputs => [$s_phi, $n_phi]);
-    $s_new->set_representation('Int');
+    $s_new->set_stamp('Int');
     my $n_new = $f->make('Subtract', inputs => [$n_phi, $one]);
-    $n_new->set_representation('Int');
+    $n_new->set_stamp('Int');
 
     # Wire backedges
     $n_phi->set_backedge($n_new);
@@ -509,7 +509,7 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     # Return $s (the s_phi value at exit)
     my $rs = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs->set_representation('Int');
+    $rs->set_stamp('Int');
 
     # Existing chain: vn -> vs -> loop; the Print goes after the loop.
     $vs->set_control_in($vn);
@@ -564,26 +564,26 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     # $n = 5; $x = 0; if ($n > 0) { $x = 1 }; $x
     my $cn   = $f->make('Constant', value => '5', const_type => 'integer');
-    $cn->set_representation('Int');
+    $cn->set_stamp('Int');
     my $zero = $f->make('Constant', value => '0', const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     # my $x = 0
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn, $c0]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     # $x = 1 (then branch only; no else branch)
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Int');
+    $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
-    $as1->set_representation('Int');
+    $as1->set_stamp('Int');
 
     # If / Proj / Region — Proj1 (else) has no body
     my $if_node = $f->make('If',   inputs => [$vx, $cmp]);
@@ -597,7 +597,7 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     # $x (read after if)
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
 
     # Return $x; control: vx -> if
     # Existing chain: vx -> if_node; the Print goes after the merge.
@@ -648,34 +648,34 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $cn   = $f->make('Constant', value => '5',   const_type => 'integer');
-    $cn->set_representation('Int');
+    $cn->set_stamp('Int');
     my $zero = $f->make('Constant', value => '0',   const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     # my $x = 0.0 (Num)
     my $xn   = $f->make('Constant', value => '$x',  const_type => 'string');
     my $init = $f->make('Constant', value => '0.0',  const_type => 'integer');
-    $init->set_representation('Num');
+    $init->set_stamp('Num');
     my $vx   = $f->make('VarDecl', inputs => [$xn, $init]);
-    $vx->set_representation('Num');
+    $vx->set_stamp('Num');
 
     # $x = 2.5 (then)
     my $c25 = $f->make('Constant', value => '2.5', const_type => 'integer');
-    $c25->set_representation('Num');
+    $c25->set_stamp('Num');
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Num');
+    $lhs1->set_stamp('Num');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c25]);
-    $as1->set_representation('Num');
+    $as1->set_stamp('Num');
 
     # $x = 1.5 (else)
     my $c15 = $f->make('Constant', value => '1.5', const_type => 'integer');
-    $c15->set_representation('Num');
+    $c15->set_stamp('Num');
     my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs2->set_representation('Num');
+    $lhs2->set_stamp('Num');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c15]);
-    $as2->set_representation('Num');
+    $as2->set_stamp('Num');
 
     my $if_node = $f->make('If',   inputs => [$vx, $cmp]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -687,7 +687,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $as2->set_control_in($proj1);
 
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Num');
+    $rx->set_stamp('Num');
 
     # Existing chain: vx -> if_node; the Print goes after the merge.
     $if_node->set_control_in($vx);
@@ -739,38 +739,38 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $cn   = $f->make('Constant', value => '5', const_type => 'integer');
-    $cn->set_representation('Int');
+    $cn->set_stamp('Int');
     my $zero = $f->make('Constant', value => '0', const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     # my $x = 0 (pre-branch)
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn, $c0]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     # In then-branch: my $t = $n + 1; $x = $t * 2
     my $tn   = $f->make('Constant', value => '$t', const_type => 'string');
     my $add  = $f->make('Add', inputs => [$cn, $c1]);
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $vt   = $f->make('VarDecl', inputs => [$tn, $add]);
-    $vt->set_representation('Int');
+    $vt->set_stamp('Int');
 
     my $rt   = $f->make('PadAccess', targ => 0, varname => '$t', inputs => [$vt]);
-    $rt->set_representation('Int');
+    $rt->set_stamp('Int');
     my $mul  = $f->make('Multiply', inputs => [$rt, $c2]);
-    $mul->set_representation('Int');
+    $mul->set_stamp('Int');
     my $lhsx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhsx->set_representation('Int');
+    $lhsx->set_stamp('Int');
     my $asx  = $f->make('Assign', inputs => [$lhsx, $mul]);
-    $asx->set_representation('Int');
+    $asx->set_stamp('Int');
 
     # Chain: vt -> asx (vt must precede asx in the body)
     $vt->set_control_in(undef);   # no explicit predecessor: first in chain
@@ -788,7 +788,7 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     # Return $x
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
 
     # Existing chain: vx -> if_node; the Print goes after the merge.
     $if_node->set_control_in($vx);
@@ -845,35 +845,35 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c3   = $f->make('Constant', value => '3',  const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
     my $c0a  = $f->make('Constant', value => '0',  const_type => 'integer');
-    $c0a->set_representation('Int');
+    $c0a->set_stamp('Int');
     my $c0b  = $f->make('Constant', value => '0',  const_type => 'integer');
-    $c0b->set_representation('Int');
+    $c0b->set_stamp('Int');
     my $c1   = $f->make('Constant', value => '1',  const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c10  = $f->make('Constant', value => '10', const_type => 'integer');
-    $c10->set_representation('Int');
+    $c10->set_stamp('Int');
 
     my $nn   = $f->make('Constant', value => '$n', const_type => 'string');
     my $sn   = $f->make('Constant', value => '$s', const_type => 'string');
     my $vn   = $f->make('VarDecl', inputs => [$nn, $c3]);
-    $vn->set_representation('Int');
+    $vn->set_stamp('Int');
     my $vs   = $f->make('VarDecl', inputs => [$sn, $c0a]);
-    $vs->set_representation('Int');
+    $vs->set_stamp('Int');
 
     my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
-    $rn0->set_representation('Int');
+    $rn0->set_stamp('Int');
     my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs0->set_representation('Int');
+    $rs0->set_stamp('Int');
 
     my $loop = $f->make('Loop', inputs => [$vs, undef]);
 
     # Loop phis
     my $n_phi = $f->make('Phi', region => $loop, values => [$rn0]);
-    $n_phi->set_representation('Int');
+    $n_phi->set_stamp('Int');
     my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]);
-    $s_phi->set_representation('Int');
+    $s_phi->set_stamp('Int');
 
     # Body: inner comparison n_phi > 1 CREATED FIRST — so it's the first
     # icmp consumer of n_phi. If _lower_loop_condition uses first-icmp heuristic,
@@ -881,19 +881,19 @@ ok(Chalk::Target::LLVM->can('lower'),
     # The fix must use structural selection (the icmp wired via control_in to
     # the Loop node) to avoid this ambiguity.
     my $inner_cmp = $f->make('NumGt', inputs => [$n_phi, $c1]);
-    $inner_cmp->set_representation('Boolean');
+    $inner_cmp->set_stamp('Boolean');
     my $branch_val = $f->make('TernaryExpr', inputs => [$inner_cmp, $c10, $c1]);
-    $branch_val->set_representation('Int');
+    $branch_val->set_stamp('Int');
 
     # Condition: n_phi > 0  (this feeds the header branch — structural, created second)
     my $loop_cmp = $f->make('NumGt', inputs => [$n_phi, $c0b]);
-    $loop_cmp->set_representation('Boolean');
+    $loop_cmp->set_stamp('Boolean');
 
     # s_new = s_phi + branch_val; n_new = n_phi - 1
     my $s_new = $f->make('Add', inputs => [$s_phi, $branch_val]);
-    $s_new->set_representation('Int');
+    $s_new->set_stamp('Int');
     my $n_new = $f->make('Subtract', inputs => [$n_phi, $c1]);
-    $n_new->set_representation('Int');
+    $n_new->set_stamp('Int');
 
     $n_phi->set_backedge($n_new);
     $s_phi->set_backedge($s_new);
@@ -953,12 +953,12 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $region = $f->make('Region', inputs => []);
     # Build a phi with one defined and one undef incoming value
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
 
     # Manufacture a Phi with inputs = [undef, undef] by setting values = []
     # then manually wiring an undef slot — use values => [$c1] then set inputs[0]=undef
     my $phi = $f->make('Phi', region => $region, values => [$c1]);
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
     # Corrupt the first input to undef (simulating a missing predecessor wire)
     $phi->inputs->[0] = undef;
 

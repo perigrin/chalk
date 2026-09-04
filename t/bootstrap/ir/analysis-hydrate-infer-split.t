@@ -74,7 +74,7 @@ subtest 'infer needs NO raw records -- only graphs and the MOP edge' => sub {
     for my $g (values $out->%*) {
         for my $n ($g->nodes->@*) {
             next unless blessed($n) && $n->isa('Chalk::IR::Value');
-            $typed++ if defined $n->representation;
+            $typed++ if defined $n->stamp;
         }
     }
     ok($typed > 0, "infer typed $typed Value nodes with no raw records");
@@ -90,7 +90,7 @@ subtest 'run is exactly hydrate-then-infer' => sub {
 
     my $sig = sub ($set) {
         join '|', map { my $g = $set->{$_};
-            "$_=" . join(',', map { ($_->id // '?') . ':' . ($_->representation // '-') }
+            "$_=" . join(',', map { ($_->id // '?') . ':' . ($_->stamp // '-') }
                 grep { blessed($_) && $_->isa('Chalk::IR::Value') } $g->nodes->@*)
         } sort keys $set->%*;
     };

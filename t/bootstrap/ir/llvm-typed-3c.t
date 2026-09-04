@@ -45,7 +45,7 @@ sub run_lli {
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     return $c;
 }
 
@@ -53,7 +53,7 @@ sub int_const {
 sub num_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'number');
-    $c->set_representation('Num');
+    $c->set_stamp('Num');
     return $c;
 }
 
@@ -70,24 +70,24 @@ sub num_const {
 sub print_program {
     my ($f, $value_node, $control_tail) = @_;
 
-    my $repr = $value_node->representation;
+    my $repr = $value_node->stamp;
     my $printable = $value_node;
     if ($repr ne 'Str') {
         $printable = $f->make('Coerce',
             inputs => [$value_node], from_repr => $repr, to_repr => 'Str');
-        $printable->set_representation('Str');
+        $printable->set_stamp('Str');
     }
 
     my $lb = $f->make('Constant', value => '[', const_type => 'string');
-    $lb->set_representation('Str');
+    $lb->set_stamp('Str');
     my $rb = $f->make('Constant', value => ']', const_type => 'string');
-    $rb->set_representation('Str');
+    $rb->set_stamp('Str');
 
     my $print = $f->make('Print', inputs => [$lb, $printable, $rb]);
     $print->set_control_in($control_tail // $f->make_cfg('Start'));
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 
@@ -110,12 +110,12 @@ sub print_program {
     my $c3   = int_const($f, 3);
     my $c4   = int_const($f, 4);
     my $coe3 = $f->make('Coerce', inputs => [$c3], from_repr => 'Int', to_repr => 'Num');
-    $coe3->set_representation('Num');
+    $coe3->set_stamp('Num');
     my $coe4 = $f->make('Coerce', inputs => [$c4], from_repr => 'Int', to_repr => 'Num');
-    $coe4->set_representation('Num');
+    $coe4->set_stamp('Num');
 
     my $div = $f->make('Divide', inputs => [$coe3, $coe4]);
-    $div->set_representation('Num');
+    $div->set_stamp('Num');
 
     my $ret = print_program($f, $div);
 
@@ -133,7 +133,7 @@ sub print_program {
         is($out, '[0.75]', "arith-div DIV-1: prints 0.75");
         # The type half of the old Num: tag — printing erases it, since a
         # Str "0.75" and a Num 0.75 produce identical stdout.
-        is($div->representation, 'Num', "arith-div DIV-1: the printed value is Num-repr");
+        is($div->stamp, 'Num', "arith-div DIV-1: the printed value is Num-repr");
     }
 }
 
@@ -143,7 +143,7 @@ sub print_program {
     my $c3  = int_const($f, 3);
     my $c4  = int_const($f, 4);
     my $div = $f->make('Divide', inputs => [$c3, $c4]);
-    $div->set_representation('Int');
+    $div->set_stamp('Int');
     my $ret = print_program($f, $div);
 
     my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
@@ -170,7 +170,7 @@ sub print_program {
     my $cm7 = int_const($f, -7);
     my $c3  = int_const($f, 3);
     my $mod = $f->make('Modulo', inputs => [$cm7, $c3]);
-    $mod->set_representation('Int');
+    $mod->set_stamp('Int');
 
     my $ret = print_program($f, $mod);
 
@@ -188,7 +188,7 @@ sub print_program {
         is($out, '[2]', "arith-mod MOD-1 (-7 % 3 == 2): prints 2");
         # The type half of the old Int: tag — printing erases it, since a
         # Str "2" and a Int 2 produce identical stdout.
-        is($mod->representation, 'Int', "arith-mod MOD-1 (-7 % 3 == 2): the printed value is Int-repr");
+        is($mod->stamp, 'Int', "arith-mod MOD-1 (-7 % 3 == 2): the printed value is Int-repr");
     }
 }
 
@@ -198,7 +198,7 @@ sub print_program {
     my $c7  = int_const($f, 7);
     my $c3  = int_const($f, 3);
     my $mod = $f->make('Modulo', inputs => [$c7, $c3]);
-    $mod->set_representation('Int');
+    $mod->set_stamp('Int');
     my $ret = print_program($f, $mod);
 
     my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
@@ -212,7 +212,7 @@ sub print_program {
         is($out, '[1]', "arith-mod MOD-2 (7 % 3 == 1): prints 1");
         # The type half of the old Int: tag — printing erases it, since a
         # Str "1" and a Int 1 produce identical stdout.
-        is($mod->representation, 'Int', "arith-mod MOD-2 (7 % 3 == 1): the printed value is Int-repr");
+        is($mod->stamp, 'Int', "arith-mod MOD-2 (7 % 3 == 1): the printed value is Int-repr");
     }
 }
 
@@ -222,7 +222,7 @@ sub print_program {
     my $c7   = int_const($f, 7);
     my $cm3  = int_const($f, -3);
     my $mod  = $f->make('Modulo', inputs => [$c7, $cm3]);
-    $mod->set_representation('Int');
+    $mod->set_stamp('Int');
     my $ret = print_program($f, $mod);
 
     my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
@@ -236,7 +236,7 @@ sub print_program {
         is($out, '[-2]', "arith-mod MOD-3 (7 % -3 == -2): prints -2");
         # The type half of the old Int: tag — printing erases it, since a
         # Str "-2" and a Int -2 produce identical stdout.
-        is($mod->representation, 'Int', "arith-mod MOD-3 (7 % -3 == -2): the printed value is Int-repr");
+        is($mod->stamp, 'Int', "arith-mod MOD-3 (7 % -3 == -2): the printed value is Int-repr");
     }
 }
 
@@ -270,11 +270,11 @@ sub print_program {
         $f->make('Constant', value => 'x', const_type => 'string'),
         $c1
     ]);
-    $vd->set_representation('Int');
+    $vd->set_stamp('Int');
 
     # PadAccess: inputs[0] = VarDecl (the source slot)
     my $pad  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
-    $pad->set_representation('Int');
+    $pad->set_stamp('Int');
 
     my $ret  = print_program($f, $pad);
 
@@ -291,7 +291,7 @@ sub print_program {
         is($out, '[1]', "VAR-1 (A1): prints 1");
         # The type half of the old Int: tag — printing erases it, since a
         # Str "1" and a Int 1 produce identical stdout.
-        is($pad->representation, 'Int', "VAR-1 (A1): the printed value is Int-repr");
+        is($pad->stamp, 'Int', "VAR-1 (A1): the printed value is Int-repr");
     }
 }
 
@@ -306,21 +306,21 @@ sub print_program {
         $f->make('Constant', value => 'x', const_type => 'string'),
         $c1
     ]);
-    $vd->set_representation('Int');
+    $vd->set_stamp('Int');
 
     # PadAccess for the LHS of Assign (the target slot)
     my $lhs  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
-    $lhs->set_representation('Int');
+    $lhs->set_stamp('Int');
 
     # Assign: inputs[0] = lhs PadAccess (target), inputs[1] = new value
     my $asgn = $f->make('Assign', inputs => [$lhs, $c2]);
-    $asgn->set_representation('Int');
+    $asgn->set_stamp('Int');
     # Wire Assign into the control chain: Assign.control_in = VarDecl
     $asgn->set_control_in($vd);
 
     # The PadAccess that Return reads (after the Assign)
     my $pad  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
-    $pad->set_representation('Int');
+    $pad->set_stamp('Int');
 
     # The Print comes after the Assign in the control chain, so it observes the
     # post-assignment value.
@@ -339,7 +339,7 @@ sub print_program {
         is($out, '[2]', "VAR-2 (C1): prints 2");
         # The type half of the old Int: tag — printing erases it, since a
         # Str "2" and a Int 2 produce identical stdout.
-        is($pad->representation, 'Int', "VAR-2 (C1): the printed value is Int-repr");
+        is($pad->stamp, 'Int', "VAR-2 (C1): the printed value is Int-repr");
     }
 }
 
@@ -354,28 +354,28 @@ sub print_program {
         $f->make('Constant', value => 'x', const_type => 'string'),
         $c1
     ]);
-    $vd->set_representation('Int');
+    $vd->set_stamp('Int');
 
     # PadAccess for reading current $x (the read side of +=)
     my $read_pad = $f->make('PadAccess', targ => 0, varname => '$x_read', inputs => [$vd]);
-    $read_pad->set_representation('Int');
+    $read_pad->set_stamp('Int');
 
     # The Add node for $x + 2
     my $added = $f->make('Add', inputs => [$read_pad, $c2]);
-    $added->set_representation('Int');
+    $added->set_stamp('Int');
 
     # PadAccess for the LHS of the CompoundAssign (the target slot)
     my $lhs_pad = $f->make('PadAccess', targ => 0, varname => '$x_lhs', inputs => [$vd]);
-    $lhs_pad->set_representation('Int');
+    $lhs_pad->set_stamp('Int');
 
     # CompoundAssign: inputs[0] = lhs (target slot), inputs[1] = computed value
     my $ca = $f->make('CompoundAssign', op => '+=', inputs => [$lhs_pad, $added]);
-    $ca->set_representation('Int');
+    $ca->set_stamp('Int');
     $ca->set_control_in($vd);
 
     # PadAccess for return (after compound assign)
     my $ret_pad = $f->make('PadAccess', targ => 0, varname => '$x_ret', inputs => [$vd]);
-    $ret_pad->set_representation('Int');
+    $ret_pad->set_stamp('Int');
 
     my $ret = print_program($f, $ret_pad, $ca);
 
@@ -392,7 +392,7 @@ sub print_program {
         is($out, '[3]', "VAR-3 (C2): prints 3");
         # The type half of the old Int: tag — printing erases it, since a
         # Str "3" and a Int 3 produce identical stdout.
-        is($ret_pad->representation, 'Int', "VAR-3 (C2): the printed value is Int-repr");
+        is($ret_pad->stamp, 'Int', "VAR-3 (C2): the printed value is Int-repr");
     }
 }
 
@@ -416,13 +416,13 @@ sub print_program {
     my $c5   = int_const($f, 5);
     my $c3   = int_const($f, 3);
     my $cmp  = $f->make('NumGt', inputs => [$c5, $c3]);
-    $cmp->set_representation('Boolean');   # comparison result = i1
+    $cmp->set_stamp('Boolean');   # comparison result = i1
 
     # Wrap in a TernaryExpr to make it returnable as an Int
     my $c1   = int_const($f, 1);
     my $c0   = int_const($f, 0);
     my $tern = $f->make('TernaryExpr', inputs => [$cmp, $c1, $c0]);
-    $tern->set_representation('Int');
+    $tern->set_stamp('Int');
 
     my $ret  = print_program($f, $tern);
 
@@ -441,7 +441,7 @@ sub print_program {
         is($out, '[1]', "CMP-1 (5 > 3 ? 1 : 0 == 1): prints 1");
         # The type half of the old Int: tag — printing erases it, since a
         # Str "1" and a Int 1 produce identical stdout.
-        is($tern->representation, 'Int', "CMP-1 (5 > 3 ? 1 : 0 == 1): the printed value is Int-repr");
+        is($tern->stamp, 'Int', "CMP-1 (5 > 3 ? 1 : 0 == 1): the printed value is Int-repr");
     }
 }
 
@@ -451,12 +451,12 @@ sub print_program {
     my $c1c  = int_const($f, 1);
     my $c3   = int_const($f, 3);
     my $cmp  = $f->make('NumGt', inputs => [$c1c, $c3]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $c1   = int_const($f, 1);
     my $c0   = int_const($f, 0);
     my $tern = $f->make('TernaryExpr', inputs => [$cmp, $c1, $c0]);
-    $tern->set_representation('Int');
+    $tern->set_stamp('Int');
 
     my $ret  = print_program($f, $tern);
 
@@ -471,7 +471,7 @@ sub print_program {
         is($out, '[0]', "CMP-2 (1 > 3 ? 1 : 0 == 0): prints 0");
         # The type half of the old Int: tag — printing erases it, since a
         # Str "0" and a Int 0 produce identical stdout.
-        is($tern->representation, 'Int', "CMP-2 (1 > 3 ? 1 : 0 == 0): the printed value is Int-repr");
+        is($tern->stamp, 'Int', "CMP-2 (1 > 3 ? 1 : 0 == 0): the printed value is Int-repr");
     }
 }
 
@@ -482,12 +482,12 @@ sub print_program {
     my $n    = int_const($f, 5);    # $n = 5 (an Int constant representing the parameter)
     my $zero = int_const($f, 0);
     my $cmp  = $f->make('NumGt', inputs => [$n, $zero]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $c1   = int_const($f, 1);
     my $c2   = int_const($f, 2);
     my $tern = $f->make('TernaryExpr', inputs => [$cmp, $c1, $c2]);
-    $tern->set_representation('Int');
+    $tern->set_stamp('Int');
 
     my $ret  = print_program($f, $tern);
 
@@ -504,7 +504,7 @@ sub print_program {
         is($out, '[1]', "CMP-3 (D6) (5>0 ? 1 : 2 == 1): prints 1");
         # The type half of the old Int: tag — printing erases it, since a
         # Str "1" and a Int 1 produce identical stdout.
-        is($tern->representation, 'Int', "CMP-3 (D6) (5>0 ? 1 : 2 == 1): the printed value is Int-repr");
+        is($tern->stamp, 'Int', "CMP-3 (D6) (5>0 ? 1 : 2 == 1): the printed value is Int-repr");
     }
 }
 
@@ -526,27 +526,27 @@ sub print_program {
     my $f  = Chalk::IR::NodeFactory->new;
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
     my $c1 = int_const($f, 1);
-    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_representation('Int');
+    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_stamp('Int');
 
     # my $y = $x;  (pre-assign read of $x — x=1)
     my $rx1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx1->set_representation('Int');
+    $rx1->set_stamp('Int');
     my $ny  = $f->make('Constant', value => '$y', const_type => 'string');
-    my $vy  = $f->make('VarDecl', inputs => [$ny, $rx1]); $vy->set_representation('Int');
+    my $vy  = $f->make('VarDecl', inputs => [$ny, $rx1]); $vy->set_stamp('Int');
 
     # $x = 2;  (reassignment — updates var_table[vx] to new SSA value)
     my $c2  = int_const($f, 2);
     my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rxL->set_representation('Int');
-    my $asg = $f->make('Assign', inputs => [$rxL, $c2]); $asg->set_representation('Int');
+    $rxL->set_stamp('Int');
+    my $asg = $f->make('Assign', inputs => [$rxL, $c2]); $asg->set_stamp('Int');
 
     # return $x + $y;  ($x and $rxL and $rx1 are all the same hash-consed node;
     # the scoped model reads var_table[vx] which now holds x=2)
     my $rx2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx2->set_representation('Int');
+    $rx2->set_stamp('Int');
     my $ryF = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
-    $ryF->set_representation('Int');
-    my $add = $f->make('Add', inputs => [$rx2, $ryF]); $add->set_representation('Int');
+    $ryF->set_stamp('Int');
+    my $add = $f->make('Add', inputs => [$rx2, $ryF]); $add->set_stamp('Int');
     $asg->set_control_in($vy); $vy->set_control_in($vx);
     my $ret = print_program($f, $add, $asg);
 
@@ -564,7 +564,7 @@ sub print_program {
             'B1: prints 3 (x=2 post-assign, y=1 pre-assign, 2+1=3)');
         # The type half of the old Int: tag — printing erases it, since a
         # Str "3" and an Int 3 produce identical stdout.
-        is($add->representation, 'Int', 'B1: the printed value is Int-repr');
+        is($add->stamp, 'Int', 'B1: the printed value is Int-repr');
     }
 }
 

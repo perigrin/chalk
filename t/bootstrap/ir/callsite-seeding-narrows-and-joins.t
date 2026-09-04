@@ -55,7 +55,7 @@ for my $fixture (sort keys %case) {
         } $g->nodes->@*;
         ok $read, 'found the shift read' or return;
 
-        is $read->representation, $c->{expect},
+        is $read->stamp, $c->{expect},
             "the shift read is $c->{expect}";
     };
 }
@@ -77,7 +77,7 @@ subtest 'the narrowed case reaches the Call result' => sub {
 
     # The corpus spec for F5 pins `Call :Int`. Int <: Num and the only call is
     # f(Int), so f : Int -> Int.
-    is $call->representation, 'Int',
+    is $call->stamp, 'Int',
         'Call(main::f) is Int, matching the corpus spec for F5';
 };
 

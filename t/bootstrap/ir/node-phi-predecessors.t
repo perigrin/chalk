@@ -45,9 +45,9 @@ sub build ($with_preds) {
     my $start = $f->make('Start');
 
     my $one = $f->make('Constant', value => 1, const_type => 'integer');
-    $one->set_representation('Int');
+    $one->set_stamp('Int');
     my $zero = $f->make('Constant', value => 0, const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
 
     my $if   = $f->make('If',   inputs => [$start, $one]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);
@@ -56,7 +56,7 @@ sub build ($with_preds) {
     # The arm carries an effect, so the Region's control input for it is the
     # PRINT, not the Proj -- the shape that broke the search.
     my $msg = $f->make('Constant', value => "in\n", const_type => 'string');
-    $msg->set_representation('Str');
+    $msg->set_stamp('Str');
     my $guarded = $f->make('Print', inputs => [$msg]);
     $guarded->set_control_in($then);
 
@@ -70,7 +70,7 @@ sub build ($with_preds) {
         values => [$zero, $one],
         %extra,
     );
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
 
     return ($f, $if, $then, $else, $region, $phi);
 }

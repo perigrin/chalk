@@ -44,18 +44,18 @@ sub print_returned_value {
     my ($f, $ret_node) = @_;
 
     my $v    = $ret_node->inputs->[0];
-    my $repr = $v->representation;
+    my $repr = $v->stamp;
     my $s    = $v;
     if (!defined $repr || $repr ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
             from_repr => $repr, to_repr => 'Str');
-        $s->set_representation('Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -65,7 +65,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -74,7 +74,7 @@ sub print_returned_value {
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     return $c;
 }
 
@@ -83,29 +83,29 @@ subtest 'subscript after ref reassign reads the new array' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $a1 = $f->make('ArrayLiteral', inputs => [int_const($f, 1)]);
-    $a1->set_representation('ArrayRef');
+    $a1->set_stamp('ArrayRef');
     my $nr = $f->make('Constant', value => '$r', const_type => 'string');
     my $vr = $f->make('VarDecl', inputs => [$nr, $a1]);
-    $vr->set_representation('ArrayRef');
+    $vr->set_stamp('ArrayRef');
 
     my $rr0 = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
-    $rr0->set_representation('ArrayRef');
+    $rr0->set_stamp('ArrayRef');
     my $sub0 = $f->make('Subscript', inputs => [$rr0, int_const($f, 0)]);
-    $sub0->set_representation('Int');
+    $sub0->set_stamp('Int');
     my $np = $f->make('Constant', value => '$p', const_type => 'string');
     my $vp = $f->make('VarDecl', inputs => [$np, $sub0]);
-    $vp->set_representation('Int');
+    $vp->set_stamp('Int');
 
     my $a2 = $f->make('ArrayLiteral', inputs => [int_const($f, 9)]);
-    $a2->set_representation('ArrayRef');
+    $a2->set_stamp('ArrayRef');
     my $rrL = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
     my $asg = $f->make('Assign', inputs => [$rrL, $a2]);
-    $asg->set_representation('ArrayRef');
+    $asg->set_stamp('ArrayRef');
 
     my $rr1 = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
-    $rr1->set_representation('ArrayRef');
+    $rr1->set_stamp('ArrayRef');
     my $sub1 = $f->make('Subscript', inputs => [$rr1, int_const($f, 0)]);
-    $sub1->set_representation('Int');
+    $sub1->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$sub1]);
     $ret->set_control_in($asg);
@@ -124,46 +124,46 @@ subtest 'element store after ref reassign hits the new array' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $a1 = $f->make('ArrayLiteral', inputs => [int_const($f, 1)]);
-    $a1->set_representation('ArrayRef');
+    $a1->set_stamp('ArrayRef');
     my $nr = $f->make('Constant', value => '$r', const_type => 'string');
     my $vr = $f->make('VarDecl', inputs => [$nr, $a1]);
-    $vr->set_representation('ArrayRef');
+    $vr->set_stamp('ArrayRef');
 
     my $rr0 = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
-    $rr0->set_representation('ArrayRef');
+    $rr0->set_stamp('ArrayRef');
     my $sub0 = $f->make('Subscript', inputs => [$rr0, int_const($f, 0)]);
-    $sub0->set_representation('Int');
+    $sub0->set_stamp('Int');
     my $np = $f->make('Constant', value => '$p', const_type => 'string');
     my $vp = $f->make('VarDecl', inputs => [$np, $sub0]);
-    $vp->set_representation('Int');
+    $vp->set_stamp('Int');
 
     my $a2 = $f->make('ArrayLiteral', inputs => [int_const($f, 9)]);
-    $a2->set_representation('ArrayRef');
+    $a2->set_stamp('ArrayRef');
     my $rrL = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
     my $asg = $f->make('Assign', inputs => [$rrL, $a2]);
-    $asg->set_representation('ArrayRef');
+    $asg->set_stamp('ArrayRef');
 
     my $rr1 = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
-    $rr1->set_representation('ArrayRef');
+    $rr1->set_stamp('ArrayRef');
     my $store_lv = $f->make('Subscript', inputs => [$rr1, int_const($f, 0)]);
-    $store_lv->set_representation('Int');
+    $store_lv->set_stamp('Int');
     my $st = $f->make('Assign', inputs => [$store_lv, int_const($f, 7)]);
-    $st->set_representation('Int');
+    $st->set_stamp('Int');
 
     my $rr2 = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
-    $rr2->set_representation('ArrayRef');
+    $rr2->set_stamp('ArrayRef');
     my $sub2 = $f->make('Subscript', inputs => [$rr2, int_const($f, 0)]);
-    $sub2->set_representation('Int');
+    $sub2->set_stamp('Int');
     my $nq = $f->make('Constant', value => '$q', const_type => 'string');
     my $vq = $f->make('VarDecl', inputs => [$nq, $sub2]);
-    $vq->set_representation('Int');
+    $vq->set_stamp('Int');
 
     my $rp = $f->make('PadAccess', targ => 0, varname => '$p', inputs => [$vp]);
-    $rp->set_representation('Int');
+    $rp->set_stamp('Int');
     my $rq = $f->make('PadAccess', targ => 1, varname => '$q', inputs => [$vq]);
-    $rq->set_representation('Int');
+    $rq->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$rp, $rq]);
-    $sum->set_representation('Int');
+    $sum->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
     $ret->set_control_in($vq);

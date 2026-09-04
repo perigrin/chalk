@@ -84,7 +84,7 @@ subtest 'a non-static list argument still GAPs' => sub {
     ok(blessed($list_arg), 'join has a list argument');
 
     # ASKED AS AN ENCODING QUESTION, not as an absence. This read
-    # `!defined ->representation` until the loader began carrying every LATTICE
+    # `!defined ->stamp` until the loader began carrying every LATTICE
     # type -- including the ones with no machine encoding -- so that a value
     # node is never stampless. `List` is now PRESENT as a type and still has no
     # encoding, which is exactly the distinction the surrounding comment is

@@ -55,21 +55,21 @@ sub build_rebind_diamond ($guard_value) {
     my $start = $f->make('Start');
 
     my $zero = $f->make('Constant', value => 0, const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $one = $f->make('Constant', value => 1, const_type => 'integer');
-    $one->set_representation('Int');
+    $one->set_stamp('Int');
 
     # The BASE binding: $x = 0, established before the branch.
     my $xn = $f->make('Constant', value => '$x', const_type => 'string');
     my $base = $f->make('VarDecl', inputs => [$xn, $zero]);
-    $base->set_representation('Int');
+    $base->set_stamp('Int');
     $base->set_control_in($start);
 
     # The guard. A runtime value, so nothing can constant-fold the branch away.
     my $g = $f->make('Constant', value => $guard_value, const_type => 'integer');
-    $g->set_representation('Int');
+    $g->set_stamp('Int');
     my $cond = $f->make('NumGt', inputs => [$g, $zero]);
-    $cond->set_representation('Boolean');
+    $cond->set_stamp('Boolean');
 
     my $if   = $f->make('If',   inputs => [$base, $cond]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);
@@ -80,19 +80,19 @@ sub build_rebind_diamond ($guard_value) {
 
     # THE MERGE. Arm 0 (taken) contributes the rebound 1; arm 1 the base 0.
     my $phi = $f->make('Phi', region => $region, values => [$one, $zero]);
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
 
     my $nl = $f->make('Constant', value => "\n", const_type => 'string');
-    $nl->set_representation('Str');
+    $nl->set_stamp('Str');
     my $co = $f->make('Coerce', inputs => [$phi],
                       from_repr => 'Int', to_repr => 'Str');
-    $co->set_representation('Str');
+    $co->set_stamp('Str');
 
     my $print = $f->make('Print', inputs => [$co, $nl]);
     $print->set_control_in($region);
 
     my $undef = $f->make('Constant', value => 'undef', const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 

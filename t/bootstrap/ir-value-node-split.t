@@ -7,6 +7,7 @@ use Test2::V0;
 
 use lib 'lib', 't/lib';
 use Chalk::IR::NodeFactory;
+use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 
 # `field $representation = undef` on the BASE node class made undef mean three
 # things no consumer could tell apart: (1) this node produces no value, (2)

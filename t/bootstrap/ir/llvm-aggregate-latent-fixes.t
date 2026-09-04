@@ -51,18 +51,18 @@ sub print_and_return {
     # Print takes a Str, so a non-Str value is bridged with an explicit
     # Coerce -- the same node a source program's producer inserts.
     my $arg  = $value;
-    my $repr = $value->representation;
+    my $repr = $value->stamp;
     if (!defined $repr || $repr ne 'Str') {
         $arg = $f->make('Coerce', inputs => [$value],
             from_repr => $repr, to_repr => 'Str');
-        $arg->set_representation('Str');
+        $arg->set_stamp('Str');
     }
 
     my $print = $f->make('Print', inputs => [$arg]);
     $print->set_control_in($last_effect // $f->make_cfg('Start'));
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
     return $ret;
@@ -88,31 +88,31 @@ subtest 'I-A: ArrayRef node used as Subscript container AND PostfixDeref input' 
 
     # Build ArrayRef(10, 20, 30)
     my $c10 = $f->make('Constant', value => '10', const_type => 'integer');
-    $c10->set_representation('Int');
+    $c10->set_stamp('Int');
     my $c20 = $f->make('Constant', value => '20', const_type => 'integer');
-    $c20->set_representation('Int');
+    $c20->set_stamp('Int');
     my $c30 = $f->make('Constant', value => '30', const_type => 'integer');
-    $c30->set_representation('Int');
+    $c30->set_stamp('Int');
 
     my $arr = $f->make('ArrayLiteral', inputs => [$c10, $c20, $c30]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     # Consumer 1: Subscript($arr, 1) -> Int:20
     my $idx1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $idx1->set_representation('Int');
+    $idx1->set_stamp('Int');
     my $elem = $f->make('Subscript', inputs => [$arr, $idx1]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     # Consumer 2: PostfixDeref(@, $arr) -> Array; Length -> Int:3
     # (Same $arr node as Consumer 1 — this is the poison trigger)
     my $deref = $f->make('PostfixDeref', inputs => [$arr], sigil => '@');
-    $deref->set_representation('Array');
+    $deref->set_stamp('Array');
     my $len = $f->make('Length', inputs => [$deref]);
-    $len->set_representation('Int');
+    $len->set_stamp('Int');
 
     # Result: elem(=20) + len(=3) = 23
     my $sum = $f->make('Add', inputs => [$elem, $len]);
-    $sum->set_representation('Int');
+    $sum->set_stamp('Int');
 
     my $ret = print_and_return($f, $sum);
 
@@ -147,36 +147,36 @@ subtest 'I-A(Hash): HashRef node used as Subscript container AND PostfixDeref in
     my $f = _mk();
 
     my $ka = $f->make('Constant', value => 'x', const_type => 'string');
-    $ka->set_representation('Str');
+    $ka->set_stamp('Str');
     my $v7 = $f->make('Constant', value => '7', const_type => 'integer');
-    $v7->set_representation('Int');
+    $v7->set_stamp('Int');
     my $kb = $f->make('Constant', value => 'y', const_type => 'string');
-    $kb->set_representation('Str');
+    $kb->set_stamp('Str');
     my $v8 = $f->make('Constant', value => '8', const_type => 'integer');
-    $v8->set_representation('Int');
+    $v8->set_stamp('Int');
 
     # One HashRef node, used twice
     my $hash = $f->make('HashLiteral', inputs => [$ka, $v7, $kb, $v8]);
-    $hash->set_representation('HashRef');
+    $hash->set_stamp('HashRef');
 
     # Consumer 1: Subscript($hash, "x") -> Int:7
     my $lk = $f->make('Constant', value => 'x', const_type => 'string');
-    $lk->set_representation('Str');
+    $lk->set_stamp('Str');
     my $elem = $f->make('Subscript', inputs => [$hash, $lk]);
-    $elem->set_representation('Int');
+    $elem->set_stamp('Int');
 
     # Consumer 2: PostfixDeref(%, $hash) -> Hash; Subscript("y") -> Int:8
     # (Same $hash node — poison trigger)
     my $deref = $f->make('PostfixDeref', inputs => [$hash], sigil => '%');
-    $deref->set_representation('Hash');
+    $deref->set_stamp('Hash');
     my $lk2 = $f->make('Constant', value => 'y', const_type => 'string');
-    $lk2->set_representation('Str');
+    $lk2->set_stamp('Str');
     my $elem2 = $f->make('Subscript', inputs => [$deref, $lk2]);
-    $elem2->set_representation('Int');
+    $elem2->set_stamp('Int');
 
     # Result: 7 + 8 = 15
     my $sum = $f->make('Add', inputs => [$elem, $elem2]);
-    $sum->set_representation('Int');
+    $sum->set_stamp('Int');
 
     my $ret = print_and_return($f, $sum);
 
@@ -211,39 +211,39 @@ subtest 'I-B(Array-lvalue): Assign stores ArrayRef value -> ptrtoint needed' => 
 
     # Outer array: 3 zero-slots initially (we will overwrite slot 0)
     my $z0 = $f->make('Constant', value => '0', const_type => 'integer');
-    $z0->set_representation('Int');
+    $z0->set_stamp('Int');
     my $z1 = $f->make('Constant', value => '0', const_type => 'integer');
-    $z1->set_representation('Int');
+    $z1->set_stamp('Int');
     my $z2 = $f->make('Constant', value => '0', const_type => 'integer');
-    $z2->set_representation('Int');
+    $z2->set_stamp('Int');
     my $outer = $f->make('ArrayLiteral', inputs => [$z0, $z1, $z2]);
-    $outer->set_representation('ArrayRef');
+    $outer->set_stamp('ArrayRef');
 
     # Inner array ref: [5, 6, 7]
     my $c5 = $f->make('Constant', value => '5', const_type => 'integer');
-    $c5->set_representation('Int');
+    $c5->set_stamp('Int');
     my $c6 = $f->make('Constant', value => '6', const_type => 'integer');
-    $c6->set_representation('Int');
+    $c6->set_stamp('Int');
     my $c7 = $f->make('Constant', value => '7', const_type => 'integer');
-    $c7->set_representation('Int');
+    $c7->set_stamp('Int');
     my $inner = $f->make('ArrayLiteral', inputs => [$c5, $c6, $c7]);
-    $inner->set_representation('ArrayRef');
+    $inner->set_stamp('ArrayRef');
 
     # Subscript lvalue: $outer[0]
     my $idx0 = $f->make('Constant', value => '0', const_type => 'integer');
-    $idx0->set_representation('Int');
+    $idx0->set_stamp('Int');
     my $lval = $f->make('Subscript', inputs => [$outer, $idx0]);
-    $lval->set_representation('ArrayRef');  # storing an ArrayRef
+    $lval->set_stamp('ArrayRef');  # storing an ArrayRef
 
     # Assign: $outer[0] = $inner (storing i8* ref -> needs ptrtoint to i64).
     # Assign returns the rhs value (the ArrayRef i8* pointer).
     my $asgn = $f->make('Assign', inputs => [$lval, $inner]);
-    $asgn->set_representation('ArrayRef');
+    $asgn->set_stamp('ArrayRef');
 
     # Length(Assign(...)) — Assign returns rhs (ArrayRef), Length reads its len=3.
     # This forces Assign to be in the return data path so the store is emitted.
     my $asgn_len = $f->make('Length', inputs => [$asgn]);
-    $asgn_len->set_representation('Int');
+    $asgn_len->set_stamp('Int');
 
     my $ret = print_and_return($f, $asgn_len);
 
@@ -288,28 +288,28 @@ subtest 'I-B(HashRef-value): ref stored in hash slot + read back -> ptrtoint/int
 
     # Inner array: [1, 2]
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $inner = $f->make('ArrayLiteral', inputs => [$c1, $c2]);
-    $inner->set_representation('ArrayRef');
+    $inner->set_stamp('ArrayRef');
 
     # Hash: { "k" => $inner }  -- value is ArrayRef (i8*) (V1: store needs ptrtoint)
     my $key = $f->make('Constant', value => 'k', const_type => 'string');
-    $key->set_representation('Str');
+    $key->set_stamp('Str');
 
     my $hash = $f->make('HashLiteral', inputs => [$key, $inner]);
-    $hash->set_representation('HashRef');
+    $hash->set_stamp('HashRef');
 
     # Read the ref back OUT of the hash slot (V2: read needs inttoptr).
     my $key2 = $f->make('Constant', value => 'k', const_type => 'string');
-    $key2->set_representation('Str');
+    $key2->set_stamp('Str');
     my $got = $f->make('Subscript', inputs => [$hash, $key2]);
-    $got->set_representation('ArrayRef');
+    $got->set_stamp('ArrayRef');
 
     # Length of the read-back ref = 2.
     my $got_len = $f->make('Length', inputs => [$got]);
-    $got_len->set_representation('Int');
+    $got_len->set_stamp('Int');
 
     my $ret = print_and_return($f, $got_len);
 
@@ -348,35 +348,35 @@ subtest 'V1: hash element-store of a ref value -> ptrtoint guard' => sub {
 
     # Hash: { "k" => 0 }  (Int placeholder so the key exists for the update scan)
     my $key = $f->make('Constant', value => 'k', const_type => 'string');
-    $key->set_representation('Str');
+    $key->set_stamp('Str');
     my $zero = $f->make('Constant', value => '0', const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $hash = $f->make('HashLiteral', inputs => [$key, $zero]);
-    $hash->set_representation('HashRef');
+    $hash->set_stamp('HashRef');
 
     # Inner array: [1, 2]
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $inner = $f->make('ArrayLiteral', inputs => [$c1, $c2]);
-    $inner->set_representation('ArrayRef');
+    $inner->set_stamp('ArrayRef');
 
     # $h{"k"} = $inner  -- element store of a ref (V1: store needs ptrtoint)
     my $key_w = $f->make('Constant', value => 'k', const_type => 'string');
-    $key_w->set_representation('Str');
+    $key_w->set_stamp('Str');
     my $lval = $f->make('Subscript', inputs => [$hash, $key_w]);
-    $lval->set_representation('ArrayRef');
+    $lval->set_stamp('ArrayRef');
     my $assign = $f->make('Assign', inputs => [$lval, $inner]);
-    $assign->set_representation('ArrayRef');
+    $assign->set_stamp('ArrayRef');
 
     # Read back: Length(Subscript(%h,"k")) = 2
     my $key_r = $f->make('Constant', value => 'k', const_type => 'string');
-    $key_r->set_representation('Str');
+    $key_r->set_stamp('Str');
     my $got = $f->make('Subscript', inputs => [$hash, $key_r]);
-    $got->set_representation('ArrayRef');
+    $got->set_stamp('ArrayRef');
     my $got_len = $f->make('Length', inputs => [$got]);
-    $got_len->set_representation('Int');
+    $got_len->set_stamp('Int');
 
     # Existing chain: the store is the last effect; the Print goes after it,
     # keeping the store emitted before the read this case is testing.
@@ -415,10 +415,10 @@ subtest 'I-C: Length(Str) uses _str_len_table not extractvalue' => sub {
 
     # A string constant "hello" (length=5)
     my $str = $f->make('Constant', value => 'hello', const_type => 'string');
-    $str->set_representation('Str');
+    $str->set_stamp('Str');
 
     my $len = $f->make('Length', inputs => [$str]);
-    $len->set_representation('Int');
+    $len->set_stamp('Int');
 
     my $ret = print_and_return($f, $len);
 
@@ -457,21 +457,21 @@ subtest 'I-D: Length(PostfixDeref(@$ref)) — scalar(@$ref) — valid IR' => sub
 
     # Build ArrayRef(100, 200, 300)
     my $c100 = $f->make('Constant', value => '100', const_type => 'integer');
-    $c100->set_representation('Int');
+    $c100->set_stamp('Int');
     my $c200 = $f->make('Constant', value => '200', const_type => 'integer');
-    $c200->set_representation('Int');
+    $c200->set_stamp('Int');
     my $c300 = $f->make('Constant', value => '300', const_type => 'integer');
-    $c300->set_representation('Int');
+    $c300->set_stamp('Int');
     my $ref = $f->make('ArrayLiteral', inputs => [$c100, $c200, $c300]);
-    $ref->set_representation('ArrayRef');
+    $ref->set_stamp('ArrayRef');
 
     # PostfixDeref(@, ref) -> Array
     my $deref = $f->make('PostfixDeref', inputs => [$ref], sigil => '@');
-    $deref->set_representation('Array');
+    $deref->set_stamp('Array');
 
     # Length(deref) — scalar(@$ref) -> 3
     my $len = $f->make('Length', inputs => [$deref]);
-    $len->set_representation('Int');
+    $len->set_stamp('Int');
 
     my $ret = print_and_return($f, $len);
 
@@ -518,11 +518,11 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
     {
         my $f = _mk();
         my $s = $f->make('Constant', value => 'oops', const_type => 'string');
-        $s->set_representation('Str');
+        $s->set_stamp('Str');
         my $arr = $f->make('ArrayLiteral', inputs => [$s]);
-        $arr->set_representation('ArrayRef');
+        $arr->set_stamp('ArrayRef');
         my $len = $f->make('Length', inputs => [$arr]);
-        $len->set_representation('Int');
+        $len->set_stamp('Int');
         my $ret = $f->make_cfg('Return', inputs => [$len]);
         eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
         unlike($@ // '', qr/GAP/,
@@ -536,13 +536,13 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
     {
         my $f = _mk();
         my $k = $f->make('Constant', value => 'k', const_type => 'string');
-        $k->set_representation('Str');
+        $k->set_stamp('Str');
         my $v = $f->make('Constant', value => 'oops', const_type => 'string');
-        $v->set_representation('Str');
+        $v->set_stamp('Str');
         my $h = $f->make('HashLiteral', inputs => [$k, $v]);
-        $h->set_representation('HashRef');
+        $h->set_stamp('HashRef');
         my $len = $f->make('Length', inputs => [$h]);
-        $len->set_representation('Int');
+        $len->set_stamp('Int');
         my $ret = $f->make_cfg('Return', inputs => [$len]);
         eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
         unlike($@ // '', qr/GAP/,
@@ -568,17 +568,17 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
 
         my $f = _mk();
         my $z = $f->make('Constant', value => '0', const_type => 'integer');
-        $z->set_representation('Int');
+        $z->set_stamp('Int');
         my $arr = $f->make('ArrayLiteral', inputs => [$z]);
-        $arr->set_representation('ArrayRef');
+        $arr->set_stamp('ArrayRef');
         my $idx = $f->make('Constant', value => '0', const_type => 'integer');
-        $idx->set_representation('Int');
+        $idx->set_stamp('Int');
         my $lv = $f->make('Subscript', inputs => [$arr, $idx]);
-        $lv->set_representation('Int');
+        $lv->set_stamp('Int');
         my $s = $f->make('Constant', value => 'oops', const_type => 'string');
-        $s->set_representation('Str');
+        $s->set_stamp('Str');
         my $as = $f->make('Assign', inputs => [$lv, $s]);
-        $as->set_representation('Str');
+        $as->set_stamp('Str');
         my $ret = $f->make_cfg('Return', inputs => [$as]);
         eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
         unlike($@ // '', qr/GAP/,

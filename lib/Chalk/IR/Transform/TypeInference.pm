@@ -104,7 +104,7 @@ class Chalk::IR::Transform::TypeInference {
         my %seen;
         for my $node (($graph->nodes // [])->@*) {
             next unless blessed($node) && $node->isa('Chalk::IR::Value');
-            my $r = $node->representation // next;
+            my $r = $node->stamp // next;
             $seen{ $node->id } = $r;
         }
         return %seen;
@@ -122,7 +122,7 @@ class Chalk::IR::Transform::TypeInference {
         my $n = 0;
         for my $node (($graph->nodes // [])->@*) {
             next unless blessed($node) && $node->isa('Chalk::IR::Value');
-            my $r = $node->representation // next;
+            my $r = $node->stamp // next;
             $n++ if $r eq 'Unknown';
         }
         return $n;
@@ -143,9 +143,9 @@ class Chalk::IR::Transform::TypeInference {
         my $absent = 0;
         for my $node (($graph->nodes // [])->@*) {
             next unless blessed($node) && $node->isa('Chalk::IR::Value');
-            next if defined $node->representation;
+            next if defined $node->stamp;
             $absent++;
-            $node->set_representation('Unknown');
+            $node->set_stamp('Unknown');
         }
         return $absent;
     }

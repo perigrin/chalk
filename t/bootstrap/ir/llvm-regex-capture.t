@@ -39,18 +39,18 @@ sub print_and_return {
     # Print takes a Str, so a non-Str value is bridged with an explicit
     # Coerce -- the same node a source program's producer inserts.
     my $arg  = $value;
-    my $repr = $value->representation;
+    my $repr = $value->stamp;
     if (!defined $repr || $repr ne 'Str') {
         $arg = $f->make('Coerce', inputs => [$value],
             from_repr => $repr, to_repr => 'Str');
-        $arg->set_representation('Str');
+        $arg->set_stamp('Str');
     }
 
     my $print = $f->make('Print', inputs => [$arg]);
     $print->set_control_in($last_effect // $f->make_cfg('Start'));
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
     return $ret;
@@ -60,11 +60,11 @@ sub print_and_return {
 sub capture_graph {
     my ($f, $subject, $pattern, $n) = @_;
     my $subj = $f->make('Constant', value => $subject, const_type => 'string');
-    $subj->set_representation('Str');
+    $subj->set_stamp('Str');
     my $m = $f->make('RegexMatch', pattern => $pattern, flags => '', inputs => [$subj]);
-    $m->set_representation('Boolean');
+    $m->set_stamp('Boolean');
     my $cap = $f->make('RegexCapture', n => $n, inputs => [$m]);
-    $cap->set_representation('Str');
+    $cap->set_stamp('Str');
     return ($m, $cap);
 }
 
@@ -93,11 +93,11 @@ subtest 'guarded idiom: matched ? length($1) : 0 (the realistic lib/ shape)' => 
     my $f = _mk();
     my ($m, $cap) = capture_graph($f, 'foo', '(o+)', 1);
     my $len = $f->make('Length', inputs => [$cap]);
-    $len->set_representation('Int');
+    $len->set_stamp('Int');
     my $zero = $f->make('Constant', value => '0', const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $t = $f->make('TernaryExpr', inputs => [$m, $len, $zero]);
-    $t->set_representation('Int');
+    $t->set_stamp('Int');
     my $ret = print_and_return($f, $t);
     my ($out) = eval { lli_run($ret) };
     ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
@@ -107,13 +107,13 @@ subtest 'guarded idiom: matched ? length($1) : 0 (the realistic lib/ shape)' => 
 subtest 'capture via qr-applied Match also works' => sub {
     my $f = _mk();
     my $subj = $f->make('Constant', value => 'x=42', const_type => 'string');
-    $subj->set_representation('Str');
+    $subj->set_stamp('Str');
     my $qr = $f->make('Constant', value => '(\\d+)', const_type => 'regex');
-    $qr->set_representation('Regex');
+    $qr->set_stamp('Regex');
     my $m = $f->make('Match', inputs => [$subj, $qr]);
-    $m->set_representation('Boolean');
+    $m->set_stamp('Boolean');
     my $cap = $f->make('RegexCapture', n => 1, inputs => [$m]);
-    $cap->set_representation('Str');
+    $cap->set_stamp('Str');
     my $ret = print_and_return($f, $cap);
     my ($out) = eval { lli_run($ret) };
     ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
@@ -137,9 +137,9 @@ subtest 'guards: out-of-range n and a non-match input die loudly' => sub {
 
     my $f2 = _mk();
     my $c = $f2->make('Constant', value => 'x', const_type => 'string');
-    $c->set_representation('Str');
+    $c->set_stamp('Str');
     my $cap2 = $f2->make('RegexCapture', n => 1, inputs => [$c]);
-    $cap2->set_representation('Str');
+    $cap2->set_stamp('Str');
     my $ret2 = $f2->make_cfg('Return', inputs => [$cap2]);
     eval { Chalk::Target::LLVM->lower($ret2, program_mode => 1) };
     like($@, qr/not a regex match node/,
@@ -159,42 +159,42 @@ subtest 'capture crossing a Str phi merge prints exactly the capture' => sub {
 
     # my $s = "xxabyy"; $s =~ /x(ab)y/  ($1 = "ab")
     my $sval = $f->make('Constant', value => 'xxabyy', const_type => 'string');
-    $sval->set_representation('Str');
+    $sval->set_stamp('Str');
     my $sname = $f->make('Constant', value => '$s', const_type => 'string');
     my $vs = $f->make('VarDecl', inputs => [$sname, $sval]);
-    $vs->set_representation('Str');
+    $vs->set_stamp('Str');
     my $rs = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs->set_representation('Str');
+    $rs->set_stamp('Str');
     my $m = $f->make('RegexMatch', pattern => 'x(ab)y', flags => '', inputs => [$rs]);
-    $m->set_representation('Boolean');
+    $m->set_stamp('Boolean');
     my $cap = $f->make('RegexCapture', n => 1, inputs => [$m]);
-    $cap->set_representation('Str');
+    $cap->set_stamp('Str');
 
     # my $x = "zz"; if (1 > 0) { $x = $1 } else { $x = "ww" } return $x
     my $zz = $f->make('Constant', value => 'zz', const_type => 'string');
-    $zz->set_representation('Str');
+    $zz->set_stamp('Str');
     my $xn = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx = $f->make('VarDecl', inputs => [$xn, $zz]);
-    $vx->set_representation('Str');
+    $vx->set_stamp('Str');
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c0 = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$c1, $c0]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $lhs1 = $f->make('PadAccess', targ => 1, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Str');
+    $lhs1->set_stamp('Str');
     my $as1 = $f->make('Assign', inputs => [$lhs1, $cap]);
-    $as1->set_representation('Str');
+    $as1->set_stamp('Str');
 
     my $ww = $f->make('Constant', value => 'ww', const_type => 'string');
-    $ww->set_representation('Str');
+    $ww->set_stamp('Str');
     my $lhs2 = $f->make('PadAccess', targ => 1, varname => '$x', inputs => [$vx]);
-    $lhs2->set_representation('Str');
+    $lhs2->set_stamp('Str');
     my $as2 = $f->make('Assign', inputs => [$lhs2, $ww]);
-    $as2->set_representation('Str');
+    $as2->set_stamp('Str');
 
     my $if_node = $f->make('If', inputs => [$vx, $cmp]);
     my $proj0 = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -205,7 +205,7 @@ subtest 'capture crossing a Str phi merge prints exactly the capture' => sub {
     $as2->set_control_in($proj1);
 
     my $rx = $f->make('PadAccess', targ => 1, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Str');
+    $rx->set_stamp('Str');
 
     # Existing chain: vs -> vx -> if_node; the Print goes after the merge.
     $vx->set_control_in($vs);

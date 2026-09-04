@@ -44,16 +44,16 @@ sub print_returned_value {
 
     my $v = $ret_node->inputs->[0];
     my $s = $v;
-    if (($v->representation // '') ne 'Str') {
+    if (($v->stamp // '') ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
-            from_repr => $v->representation, to_repr => 'Str');
-        $s->set_representation('Str');
+            from_repr => $v->stamp, to_repr => 'Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -63,7 +63,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -84,7 +84,7 @@ sub run_lli {
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     return $c;
 }
 
@@ -139,10 +139,10 @@ subtest 'callee pure node id-collides with caller mutable-read: memo must not le
     # per graph; content-hash ids depend on operand ids that also reset).
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx = $f->make('VarDecl', inputs => [$nx, int_const($f, 1)]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $collision_id = $rx->id;
 
     # Callee graph: sub f { my $a = 1 + 2; $a - $a } -- pure, no args, one
@@ -157,12 +157,12 @@ subtest 'callee pure node id-collides with caller mutable-read: memo must not le
         id     => $collision_id,
         inputs => [$c1, $c2],
     );
-    $callee_add->set_representation('Int');
+    $callee_add->set_stamp('Int');
     my $callee_top = Chalk::IR::Node::Subtract->new(
         id     => 'CalleeTop#collision-test',
         inputs => [$callee_add, $callee_add],
     );
-    $callee_top->set_representation('Int');
+    $callee_top->set_stamp('Int');
     my $callee_start = $f->make('Start');
     my $callee_ret = $f->make_cfg('Return', inputs => [$callee_top]);
     $callee_ret->set_control_in($callee_start);
@@ -176,7 +176,7 @@ subtest 'callee pure node id-collides with caller mutable-read: memo must not le
     $call->set_control_in($vx);
 
     my $asg = $f->make('Assign', inputs => [$rx, int_const($f, 2)]);
-    $asg->set_representation('Int');
+    $asg->set_stamp('Int');
     $asg->set_control_in($call);
 
     my $rxF = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);

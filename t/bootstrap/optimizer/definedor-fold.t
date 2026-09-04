@@ -37,20 +37,20 @@ sub build_case ($index_value, @elements) {
     my $f = Chalk::IR::NodeFactory->new;
     my @elems = map {
         my $n = $f->make('Constant', value => $_, const_type => 'integer');
-        $n->set_representation('Int');
+        $n->set_stamp('Int');
         $n;
     } @elements;
 
     my $arr = $f->make('ArrayLiteral', inputs => [@elems]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => $index_value, const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $sub = $f->make('Subscript', inputs => [$arr, $idx]);
 
     my $rhs = $f->make('Constant', value => '42', const_type => 'integer');
-    $rhs->set_representation('Int');
+    $rhs->set_stamp('Int');
 
     my $dor = $f->make('DefinedOr', inputs => [$sub, $rhs]);
     my $ret = $f->make_cfg('Return', inputs => [$dor]);
@@ -89,18 +89,18 @@ subtest 'a DYNAMIC index is left alone' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my @elems = map {
         my $n = $f->make('Constant', value => $_, const_type => 'integer');
-        $n->set_representation('Int'); $n;
+        $n->set_stamp('Int'); $n;
     } (1, 2, 3);
     my $arr = $f->make('ArrayLiteral', inputs => [@elems]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     # A PadAccess index is not a Constant, so nothing is statically decidable.
     my $idx = $f->make('PadAccess', targ => 1, varname => '$i', inputs => []);
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     my $sub = $f->make('Subscript', inputs => [$arr, $idx]);
     my $rhs = $f->make('Constant', value => '42', const_type => 'integer');
-    $rhs->set_representation('Int');
+    $rhs->set_stamp('Int');
     my $dor = $f->make('DefinedOr', inputs => [$sub, $rhs]);
     my $ret = $f->make_cfg('Return', inputs => [$dor]);
     my $g   = Chalk::IR::Graph->new(start => $arr, returns => [$ret]);

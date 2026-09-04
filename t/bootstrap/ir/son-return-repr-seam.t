@@ -66,7 +66,7 @@ is(defined $ret->control_in ? $ret->control_in->operation : undef,
     'Start', 'Return control_in is the Start node');
 
 # Contract 3: the value node carries a representation mapped from its stamp.
-is($value->representation, 'Int',
+is($value->stamp, 'Int',
     'Constant representation set to Int from the B::SoN stamp');
 
 done_testing();

@@ -6,6 +6,7 @@ use utf8;
 use Test2::V0;
 
 use Chalk::IR::Serialize::JSON;
+use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 
 # A `field $v :param :reader` produces TWO ways to read the same field:
 #

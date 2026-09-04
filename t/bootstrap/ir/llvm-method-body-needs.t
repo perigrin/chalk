@@ -40,21 +40,21 @@ sub make_print_program {
         : do {
             my $c = $f->make('Coerce', inputs => [$value_node],
                 from_repr => $repr, to_repr => 'Str');
-            $c->set_representation('Str');
+            $c->set_stamp('Str');
             $c;
         };
 
     my $lb = $f->make('Constant', value => '[', const_type => 'string');
-    $lb->set_representation('Str');
+    $lb->set_stamp('Str');
     my $rb = $f->make('Constant', value => ']', const_type => 'string');
-    $rb->set_representation('Str');
+    $rb->set_stamp('Str');
 
     my $start = $f->make_cfg('Start');
     my $print = $f->make('Print', inputs => [$lb, $str, $rb]);
     $print->set_control_in($start);
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 
@@ -92,21 +92,21 @@ subtest 'method body Coerce(Boolean->Str) emits no undeclared globals' => sub {
     # Boolean constants are not directly lowerable — Boolean comes from Coerce(Int->Boolean).
     # Body: Constant(5 :Int) -> Coerce(Int->Boolean) :Boolean -> Coerce(Boolean->Str) :Str
     my $int_val = $f->make('Constant', value => 5, const_type => 'integer');
-    $int_val->set_representation('Int');
+    $int_val->set_stamp('Int');
 
     my $coerce_ib = $f->make('Coerce',
         inputs    => [$int_val],
         from_repr => 'Int',
         to_repr   => 'Boolean',
     );
-    $coerce_ib->set_representation('Boolean');
+    $coerce_ib->set_stamp('Boolean');
 
     my $coerce_bs = $f->make('Coerce',
         inputs    => [$coerce_ib],
         from_repr => 'Boolean',
         to_repr   => 'Str',
     );
-    $coerce_bs->set_representation('Str');
+    $coerce_bs->set_stamp('Str');
 
     # Method: coerce_str($self) -> Num { Coerce(Str->Num)("3.14") }
     # The method's return repr is Num, the outer Return is Num.
@@ -120,14 +120,14 @@ subtest 'method body Coerce(Boolean->Str) emits no undeclared globals' => sub {
     # The Num prologue does NOT include @chalk_str_to_num.
     # _need_str_to_num_helper must be propagated from $body_ctx to $ctx.
     my $str_val = $f->make('Constant', value => '3', const_type => 'string');
-    $str_val->set_representation('Str');
+    $str_val->set_stamp('Str');
 
     my $coerce_sn = $f->make('Coerce',
         inputs    => [$str_val],
         from_repr => 'Str',
         to_repr   => 'Num',
     );
-    $coerce_sn->set_representation('Num');
+    $coerce_sn->set_stamp('Num');
 
     # Method: coerce_str($self) -> Num { "3" -> Num = 3.0 }
     my $mop = Chalk::MOP->new;
@@ -141,7 +141,7 @@ subtest 'method body Coerce(Boolean->Str) emits no undeclared globals' => sub {
         param_names => [],
         inputs      => [],
     );
-    $new_obj->set_representation('Object');
+    $new_obj->set_stamp('Object');
 
     my $call = $f->make('Call',
         dispatch_kind => 'method',
@@ -149,7 +149,7 @@ subtest 'method body Coerce(Boolean->Str) emits no undeclared globals' => sub {
         class_name    => 'StrNumClass',
         inputs        => [$new_obj],
     );
-    $call->set_representation('Num');  # Outer return is Num, NOT Str
+    $call->set_stamp('Num');  # Outer return is Num, NOT Str
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
@@ -192,7 +192,7 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
         field_stash => 'StrClass',
         inputs      => [],
     );
-    $field_read->set_representation('Str');
+    $field_read->set_stamp('Str');
 
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('StrClass');
@@ -202,14 +202,14 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
     $mop->seal;
 
     my $str_val = $f->make('Constant', value => 'hello', const_type => 'string');
-    $str_val->set_representation('Str');
+    $str_val->set_stamp('Str');
 
     my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name  => 'StrClass',
         param_names => ['val'],
         inputs      => [$str_val],
     );
-    $new_obj->set_representation('Object');
+    $new_obj->set_stamp('Object');
 
     my $call = $f->make('Call',
         dispatch_kind => 'method',
@@ -217,7 +217,7 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
         class_name    => 'StrClass',
         inputs        => [$new_obj],
     );
-    $call->set_representation('Str');
+    $call->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
@@ -255,18 +255,18 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
     my $f = Chalk::IR::NodeFactory->new;
 
     my $ka = $f->make('Constant', value => 'a', const_type => 'string');
-    $ka->set_representation('Str');
+    $ka->set_stamp('Str');
     my $v1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $v1->set_representation('Int');
+    $v1->set_stamp('Int');
 
     my $hash = $f->make('HashLiteral', inputs => [$ka, $v1]);
-    $hash->set_representation('HashRef');
+    $hash->set_stamp('HashRef');
 
     my $lk = $f->make('Constant', value => 'a', const_type => 'string');
-    $lk->set_representation('Str');
+    $lk->set_stamp('Str');
 
     my $val = $f->make('Subscript', inputs => [$hash, $lk]);
-    $val->set_representation('Int');
+    $val->set_stamp('Int');
 
     # Wrap in a class method body — the outer Return is Int.
     my $mop = Chalk::MOP->new;
@@ -280,7 +280,7 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
         param_names => [],
         inputs      => [],
     );
-    $new_obj->set_representation('Object');
+    $new_obj->set_stamp('Object');
 
     my $call = $f->make('Call',
         dispatch_kind => 'method',
@@ -288,7 +288,7 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
         class_name    => 'HashBodyClass',
         inputs        => [$new_obj],
     );
-    $call->set_representation('Int');
+    $call->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 

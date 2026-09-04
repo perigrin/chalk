@@ -109,13 +109,13 @@ subtest 'the loaded loop graph lowers and runs, printing 6' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $str = $f->make('Coerce', inputs => [$ret->inputs->[0]],
                        from_repr => 'Int', to_repr => 'Str');
-    $str->set_representation('Str');
+    $str->set_stamp('Str');
 
     my $ctrl = $ret->control_in;
     for my $part ('[', $str, "]\n") {
         my $val = ref $part ? $part : do {
             my $k = $f->make('Constant', value => $part, const_type => 'string');
-            $k->set_representation('Str');
+            $k->set_stamp('Str');
             $k;
         };
         my $p = $f->make('Print', inputs => [$val]);
@@ -124,7 +124,7 @@ subtest 'the loaded loop graph lowers and runs, printing 6' => sub {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $prog_ret = $f->make_cfg('Return', inputs => [$u]);
     $prog_ret->set_control_in($ctrl);
 

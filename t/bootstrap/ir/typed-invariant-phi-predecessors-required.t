@@ -45,14 +45,14 @@ sub branch_graph ($with_preds) {
     my $start = $f->make('Start');
 
     my $zero = $f->make('Constant', value => 0, const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $one = $f->make('Constant', value => 1, const_type => 'integer');
-    $one->set_representation('Int');
+    $one->set_stamp('Int');
     my $two = $f->make('Constant', value => 2, const_type => 'integer');
-    $two->set_representation('Int');
+    $two->set_stamp('Int');
 
     my $cond = $f->make('NumGt', inputs => [$two, $one]);
-    $cond->set_representation('Boolean');
+    $cond->set_stamp('Boolean');
 
     my $if   = $f->make('If',   inputs => [$start, $cond]);
     my $then = $f->make('Proj', index => 0, inputs => [$if]);
@@ -66,7 +66,7 @@ sub branch_graph ($with_preds) {
         values => [$one, $zero],
         ($with_preds ? (predecessors => [$then, $else]) : ()),
     );
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
 
     my $ret = $f->make('Return', inputs => [$phi]);
     $ret->set_control_in($region);
@@ -106,10 +106,10 @@ subtest 'a Phi on a branchless Region is exempt' => sub {
     my $region = $f->make('Region', controls => []);
     my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
     my $c2 = $f->make('Constant', value => 2, const_type => 'integer');
-    $_->set_representation('Int') for $c1, $c2;
+    $_->set_stamp('Int') for $c1, $c2;
 
     my $phi = $f->make('Phi', region => $region, values => [$c1, $c2]);
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
 
     my ($result) = Chalk::IR::Graph::TypedInvariant->check_nodes([$phi, $region, $c1, $c2]);
     my @v = grep { ($_->{message} // '') =~ /predecessor/i }
@@ -125,11 +125,11 @@ subtest 'a loop Phi is exempt' => sub {
     my $f     = Chalk::IR::NodeFactory->new;
     my $start = $f->make('Start');
     my $init  = $f->make('Constant', value => 0, const_type => 'integer');
-    $init->set_representation('Int');
+    $init->set_stamp('Int');
 
     my $loop = $f->make_cfg('Loop', inputs => [$start]);
     my $phi  = $f->make('Phi', region => $loop, values => [$init]);
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
 
     my ($result) = Chalk::IR::Graph::TypedInvariant->check_nodes([$phi, $loop, $init, $start]);
     my @v = grep { ($_->{message} // '') =~ /predecessor/i }

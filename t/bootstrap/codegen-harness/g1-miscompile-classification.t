@@ -41,7 +41,7 @@ subtest 'LLVMDriver exposes lli_exit in emission_meta' => sub {
 
     my $fac = Chalk::IR::NodeFactory->new;
     my $c   = $fac->make('Constant', value => 42, const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     my $ret = $fac->make_cfg('Return', inputs => [$c]);
 
     my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($ret);
@@ -174,7 +174,7 @@ subtest 'REAL-FIXTURE: unmocked LLVMDriver+MdtestCorpus classifies malformed .ll
     use Chalk::IR::NodeFactory;
     my $fac = Chalk::IR::NodeFactory->new;
     my $c   = $fac->make('Constant', value => 42, const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     my $ret = $fac->make_cfg('Return', inputs => [$c]);
 
     # Run through UNMOCKED LLVMDriver

@@ -32,13 +32,13 @@ subtest 'a mainline die (Unwind on the control chain) emits the abort' => sub {
     my $start = $f->make('Start');
 
     my $msg = $f->make('Constant', value => "boom\n", const_type => 'string');
-    $msg->set_representation('Str');
+    $msg->set_stamp('Str');
 
     my $unwind = $f->make_cfg('Unwind', inputs => [$msg]);
     $unwind->set_control_in($start);
 
     my $val = $f->make('Constant', value => 1, const_type => 'integer');
-    $val->set_representation('Int');
+    $val->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$val]);
     $ret->set_control_in($unwind);     # <-- the mainline shape
@@ -64,7 +64,7 @@ subtest 'the abort is idempotent per Unwind node' => sub {
     my $f      = Chalk::IR::NodeFactory->new;
     my $start  = $f->make('Start');
     my $msg    = $f->make('Constant', value => "x\n", const_type => 'string');
-    $msg->set_representation('Str');
+    $msg->set_stamp('Str');
     my $unwind = $f->make_cfg('Unwind', inputs => [$msg]);
     $unwind->set_control_in($start);
 

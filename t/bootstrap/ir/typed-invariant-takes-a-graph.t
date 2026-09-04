@@ -32,11 +32,11 @@ use Chalk::IR::NodeFactory;
 sub add_over ($lrepr, $rrepr, $noderepr) {
     my $f   = Chalk::IR::NodeFactory->new;
     my $lhs = $f->make('Constant', value => '1', const_type => 'integer');
-    $lhs->set_representation($lrepr);
+    $lhs->set_stamp($lrepr);
     my $rhs = $f->make('Constant', value => '2', const_type => 'integer');
-    $rhs->set_representation($rrepr);
+    $rhs->set_stamp($rrepr);
     my $add = $f->make('Add', inputs => [$lhs, $rhs]);
-    $add->set_representation($noderepr);
+    $add->set_stamp($noderepr);
     return ($lhs, $rhs, $add);
 }
 

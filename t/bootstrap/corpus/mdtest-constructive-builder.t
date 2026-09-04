@@ -39,14 +39,14 @@ END_IR
     ok(defined $inputs && scalar(@$inputs) > 0, 'Return has inputs');
     my $val = $inputs->[0];
     isa_ok($val, 'Chalk::IR::Node::Add', 'Return input is an Add node');
-    is($val->representation, 'Int', 'Add node has Int representation');
+    is($val->stamp, 'Int', 'Add node has Int representation');
 
     # Add's inputs are Int constants
     my $add_inputs = $val->inputs;
     is($add_inputs->[0]->value, '1', 'first constant is 1');
     is($add_inputs->[1]->value, '2', 'second constant is 2');
-    is($add_inputs->[0]->representation, 'Int', 'constant 1 has Int repr');
-    is($add_inputs->[1]->representation, 'Int', 'constant 2 has Int repr');
+    is($add_inputs->[0]->stamp, 'Int', 'constant 1 has Int repr');
+    is($add_inputs->[1]->stamp, 'Int', 'constant 2 has Int repr');
 }
 
 # Test 2: arith-div block builds a graph with Coerce nodes
@@ -66,14 +66,14 @@ END_IR
 
     my $div = $return_node->inputs->[0];
     isa_ok($div, 'Chalk::IR::Node::Divide', 'Return input is a Divide node');
-    is($div->representation, 'Num', 'Divide node has Num representation');
+    is($div->stamp, 'Num', 'Divide node has Num representation');
 
     my $div_inputs = $div->inputs;
     isa_ok($div_inputs->[0], 'Chalk::IR::Node::Coerce', 'first Divide input is Coerce');
     isa_ok($div_inputs->[1], 'Chalk::IR::Node::Coerce', 'second Divide input is Coerce');
     is($div_inputs->[0]->from_repr, 'Int', 'first Coerce from Int');
     is($div_inputs->[0]->to_repr,   'Num', 'first Coerce to Num');
-    is($div_inputs->[0]->representation, 'Num', 'first Coerce has Num repr');
+    is($div_inputs->[0]->stamp, 'Num', 'first Coerce has Num repr');
 }
 
 # Test 3: pure-GAP block (only L: GAP line) returns undef
@@ -213,13 +213,13 @@ END_IR
         my $tern = $return_node->inputs->[0];
         isa_ok($tern, 'Chalk::IR::Node::TernaryExpr',
             'Return input is a TernaryExpr node');
-        is($tern->representation, 'Int', 'TernaryExpr has Int representation');
+        is($tern->stamp, 'Int', 'TernaryExpr has Int representation');
 
         my $tern_inputs = $tern->inputs;
         is(scalar(@$tern_inputs), 3, 'TernaryExpr has exactly 3 inputs');
         isa_ok($tern_inputs->[0], 'Chalk::IR::Node::NumGt',
             'TernaryExpr cond input is NumGt');
-        is($tern_inputs->[0]->representation, 'Boolean', 'cond (NumGt) has Boolean repr');
+        is($tern_inputs->[0]->stamp, 'Boolean', 'cond (NumGt) has Boolean repr');
         is($tern_inputs->[1]->value, '1', 'then-branch constant is 1');
         is($tern_inputs->[2]->value, '2', 'else-branch constant is 2');
     }
@@ -255,7 +255,7 @@ END_IR
         isa_ok($ctrl, 'Chalk::IR::Node::CompoundAssign',
             'Return control_in is CompoundAssign');
         is($ctrl->op, '+=', 'CompoundAssign op is +=');
-        is($ctrl->representation, 'Int', 'CompoundAssign has Int representation');
+        is($ctrl->stamp, 'Int', 'CompoundAssign has Int representation');
 
         my $ca_inputs = $ctrl->inputs;
         is(scalar(@$ca_inputs), 2, 'CompoundAssign has 2 inputs (lhs, rhs)');

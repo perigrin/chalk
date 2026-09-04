@@ -53,7 +53,7 @@ subtest 'unknown_at_exit counts what T1 could not determine' => sub {
 
     # A node that arrives typed is not.
     my $typed = $f->make('PadAccess', targ => 1, varname => '$z', inputs => []);
-    $typed->set_representation('Int');
+    $typed->set_stamp('Int');
     my $t2 = $T1->new;
     $t2->run(graph_of($typed));
     is($t2->report->{unknown_at_exit}, 0, 'a typed node is not counted');
@@ -73,7 +73,7 @@ subtest 'narrowed_count counts what T1 improved' => sub {
 subtest 'widened_without_merge is a soundness counter, and reads zero' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $n = $f->make('PadAccess', targ => 0, varname => '$v', inputs => []);
-    $n->set_representation('Int');
+    $n->set_stamp('Int');
     my $t1 = $T1->new;
     $t1->run(graph_of($n));
     is($t1->report->{widened_without_merge}, 0,
@@ -96,14 +96,14 @@ subtest 'the counters MOVE -- narrowing and widening are distinguished' => sub {
     {
         my ($from, $to, $want_narrow, $want_widen) = $case->@*;
         my $n = $f->make('PadAccess', targ => 0, varname => "\$v_$from", inputs => []);
-        $n->set_representation($from);
+        $n->set_stamp($from);
 
         {
             no warnings 'redefine';
             no strict 'refs';
             local *{'Chalk::IR::Transform::TypeInference::_infer'} = sub {
                 my ($self, $g) = @_;
-                $_->set_representation($to) for $g->nodes->@*;
+                $_->set_stamp($to) for $g->nodes->@*;
                 return;
             };
             my $t1 = $T1->new;

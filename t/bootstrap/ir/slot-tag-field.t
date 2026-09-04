@@ -88,13 +88,13 @@ subtest 'the backend stamps a stored element with its own reading' => sub {
     my @c;
     for my $v (1, 2, 3) {
         my $n = $f->make('Constant', value => "$v", const_type => 'integer');
-        $n->set_representation('Int');
+        $n->set_stamp('Int');
         push @c, $n;
     }
     my $arr = $f->make('ArrayLiteral', inputs => \@c);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
     my $len = $f->make('Length', inputs => [$arr]);
-    $len->set_representation('Int');
+    $len->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$len]);
 
     my $ll = Chalk::Target::LLVM->lower($ret);

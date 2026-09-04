@@ -45,18 +45,18 @@ sub print_returned_value {
     my ($f, $ret_node) = @_;
 
     my $v    = $ret_node->inputs->[0];
-    my $repr = $v->representation;
+    my $repr = $v->stamp;
     my $s    = $v;
     if (!defined $repr || $repr ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
             from_repr => $repr, to_repr => 'Str');
-        $s->set_representation('Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -66,7 +66,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -75,7 +75,7 @@ sub print_returned_value {
 sub str_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => $val, const_type => 'string');
-    $c->set_representation('Str');
+    $c->set_stamp('Str');
     return $c;
 }
 
@@ -88,7 +88,7 @@ subtest 'match ops have per-call identity at the factory' => sub {
     isnt($m1->id, $m2->id, 'identical RegexMatch nodes are distinct');
 
     my $qr = $f->make('Constant', value => 'b', const_type => 'regex');
-    $qr->set_representation('Regex');
+    $qr->set_stamp('Regex');
     my $a1 = $f->make('Match', inputs => [$s, $qr]);
     my $a2 = $f->make('Match', inputs => [$s, $qr]);
     isnt($a1->id, $a2->id, 'identical Match (qr-apply) nodes are distinct');
@@ -109,30 +109,30 @@ subtest 'match re-tested after subject reassign sees the new value' => sub {
 
     my $ns = $f->make('Constant', value => '$s', const_type => 'string');
     my $vs = $f->make('VarDecl', inputs => [$ns, str_const($f, 'b')]);
-    $vs->set_representation('Str');
+    $vs->set_stamp('Str');
 
     my $rs1 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs1->set_representation('Str');
+    $rs1->set_stamp('Str');
     my $m1 = $f->make('RegexMatch', pattern => 'b', flags => '', inputs => [$rs1]);
-    $m1->set_representation('Boolean');
+    $m1->set_stamp('Boolean');
     my $ny = $f->make('Constant', value => '$y', const_type => 'string');
     my $vy = $f->make('VarDecl', inputs => [$ny, $m1]);
-    $vy->set_representation('Boolean');
+    $vy->set_stamp('Boolean');
 
     my $rsL = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $asg = $f->make('Assign', inputs => [$rsL, str_const($f, 'x')]);
-    $asg->set_representation('Str');
+    $asg->set_stamp('Str');
 
     my $rs2 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $m2 = $f->make('RegexMatch', pattern => 'b', flags => '', inputs => [$rs2]);
-    $m2->set_representation('Boolean');
+    $m2->set_stamp('Boolean');
     isnt($m2->id, $m1->id, 'precondition: the two matches are distinct nodes');
     my $nz = $f->make('Constant', value => '$z', const_type => 'string');
     my $vz = $f->make('VarDecl', inputs => [$nz, $m2]);
-    $vz->set_representation('Boolean');
+    $vz->set_stamp('Boolean');
 
     my $rzF = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
-    $rzF->set_representation('Boolean');
+    $rzF->set_stamp('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$rzF]);
     $ret->set_control_in($vz);
     $vz->set_control_in($asg);
@@ -152,40 +152,40 @@ subtest 'capture records are per program point' => sub {
 
     my $ns = $f->make('Constant', value => '$s', const_type => 'string');
     my $vs = $f->make('VarDecl', inputs => [$ns, str_const($f, 'aa x')]);
-    $vs->set_representation('Str');
+    $vs->set_stamp('Str');
 
     my $rs1 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs1->set_representation('Str');
+    $rs1->set_stamp('Str');
     my $m1 = $f->make('RegexMatch', pattern => '(a+)', flags => '', inputs => [$rs1]);
-    $m1->set_representation('Boolean');
+    $m1->set_stamp('Boolean');
     my $cap1 = $f->make('RegexCapture', n => 1, inputs => [$m1]);
-    $cap1->set_representation('Str');
+    $cap1->set_stamp('Str');
     my $np = $f->make('Constant', value => '$p', const_type => 'string');
     my $vp = $f->make('VarDecl', inputs => [$np, $cap1]);
-    $vp->set_representation('Str');
+    $vp->set_stamp('Str');
 
     my $rsL = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $asg = $f->make('Assign', inputs => [$rsL, str_const($f, 'aaa x')]);
-    $asg->set_representation('Str');
+    $asg->set_stamp('Str');
 
     my $rs2 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $m2 = $f->make('RegexMatch', pattern => '(a+)', flags => '', inputs => [$rs2]);
-    $m2->set_representation('Boolean');
+    $m2->set_stamp('Boolean');
     my $cap2 = $f->make('RegexCapture', n => 1, inputs => [$m2]);
-    $cap2->set_representation('Str');
+    $cap2->set_stamp('Str');
     my $nq = $f->make('Constant', value => '$q', const_type => 'string');
     my $vq = $f->make('VarDecl', inputs => [$nq, $cap2]);
-    $vq->set_representation('Str');
+    $vq->set_stamp('Str');
 
     my $rp = $f->make('PadAccess', targ => 0, varname => '$p', inputs => [$vp]);
-    $rp->set_representation('Str');
+    $rp->set_stamp('Str');
     my $rq = $f->make('PadAccess', targ => 1, varname => '$q', inputs => [$vq]);
-    $rq->set_representation('Str');
+    $rq->set_stamp('Str');
     my $dash = str_const($f, '-');
     my $c1 = $f->make('Concat', inputs => [$rp, $dash]);
-    $c1->set_representation('Str');
+    $c1->set_stamp('Str');
     my $c2 = $f->make('Concat', inputs => [$c1, $rq]);
-    $c2->set_representation('Str');
+    $c2->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$c2]);
     $ret->set_control_in($vq);
@@ -205,34 +205,34 @@ subtest 'qr-apply (Match) re-applied after subject reassign sees the new value' 
     my $f = Chalk::IR::NodeFactory->new;
 
     my $qr = $f->make('Constant', value => 'b', const_type => 'regex');
-    $qr->set_representation('Regex');
+    $qr->set_stamp('Regex');
 
     my $ns = $f->make('Constant', value => '$s', const_type => 'string');
     my $vs = $f->make('VarDecl', inputs => [$ns, str_const($f, 'b')]);
-    $vs->set_representation('Str');
+    $vs->set_stamp('Str');
 
     my $rs1 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs1->set_representation('Str');
+    $rs1->set_stamp('Str');
     my $m1 = $f->make('Match', inputs => [$rs1, $qr]);
-    $m1->set_representation('Boolean');
+    $m1->set_stamp('Boolean');
     my $ny = $f->make('Constant', value => '$y', const_type => 'string');
     my $vy = $f->make('VarDecl', inputs => [$ny, $m1]);
-    $vy->set_representation('Boolean');
+    $vy->set_stamp('Boolean');
 
     my $rsL = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $asg = $f->make('Assign', inputs => [$rsL, str_const($f, 'x')]);
-    $asg->set_representation('Str');
+    $asg->set_stamp('Str');
 
     my $rs2 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
     my $m2 = $f->make('Match', inputs => [$rs2, $qr]);
-    $m2->set_representation('Boolean');
+    $m2->set_stamp('Boolean');
     isnt($m2->id, $m1->id, 'precondition: the two qr-applies are distinct nodes');
     my $nz = $f->make('Constant', value => '$z', const_type => 'string');
     my $vz = $f->make('VarDecl', inputs => [$nz, $m2]);
-    $vz->set_representation('Boolean');
+    $vz->set_stamp('Boolean');
 
     my $rzF = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
-    $rzF->set_representation('Boolean');
+    $rzF->set_stamp('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$rzF]);
     $ret->set_control_in($vz);
     $vz->set_control_in($asg);

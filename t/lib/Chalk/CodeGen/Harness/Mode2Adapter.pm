@@ -209,16 +209,16 @@ class Chalk::CodeGen::Harness::Mode2Adapter {
 
         my $v = $ret->inputs->[0];
         my $s = $v;
-        if (($v->representation // '') ne 'Str') {
+        if (($v->stamp // '') ne 'Str') {
             $s = $f->make('Coerce', inputs => [$v],
-                from_repr => $v->representation, to_repr => 'Str');
-            $s->set_representation('Str');
+                from_repr => $v->stamp, to_repr => 'Str');
+            $s->set_stamp('Str');
         }
 
         my $open = $f->make('Constant', value => '[', const_type => 'string');
-        $open->set_representation('Str');
+        $open->set_stamp('Str');
         my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-        $close->set_representation('Str');
+        $close->set_stamp('Str');
 
         # Hang the Prints off the Return's EXISTING control_in, so they run
         # after every effect the case already had. Nothing is reordered.
@@ -230,7 +230,7 @@ class Chalk::CodeGen::Harness::Mode2Adapter {
         }
 
         my $u = $f->make('Constant', value => undef, const_type => 'undef');
-        $u->set_representation('Undef');
+        $u->set_stamp('Undef');
         my $new_ret = $f->make_cfg('Return', inputs => [$u]);
         $new_ret->set_control_in($ctrl);
         return $new_ret;

@@ -28,17 +28,17 @@ sub print_returned_value {
 
     my $v = $ret_node->inputs->[0];
     my $str = $v;
-    if (($v->representation // '') ne 'Str') {
+    if (($v->stamp // '') ne 'Str') {
         $str = $f->make('Coerce', inputs => [$v],
-            from_repr => $v->representation, to_repr => 'Str');
-        $str->set_representation('Str');
+            from_repr => $v->stamp, to_repr => 'Str');
+        $str->set_stamp('Str');
     }
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ('[', $str, "]\n") {
         my $val = ref $part ? $part : do {
             my $k = $f->make('Constant', value => $part, const_type => 'string');
-            $k->set_representation('Str');
+            $k->set_stamp('Str');
             $k;
         };
         my $pr = $f->make('Print', inputs => [$val]);
@@ -47,7 +47,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $prog_ret = $f->make_cfg('Return', inputs => [$u]);
     $prog_ret->set_control_in($ctrl);
     return $prog_ret;
@@ -75,12 +75,12 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c5 = $f->make('Constant', value => '5', const_type => 'integer');
-    $c5->set_representation('Int');
+    $c5->set_stamp('Int');
     my $xn = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx = $f->make('VarDecl', inputs => [$xn, $c5]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $ret->set_control_in($vx);
 
@@ -104,29 +104,29 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $cn   = $f->make('Constant', value => '5', const_type => 'integer');
-    $cn->set_representation('Int');
+    $cn->set_stamp('Int');
     my $zero = $f->make('Constant', value => '0', const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Int');
+    $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
-    $as1->set_representation('Int');
+    $as1->set_stamp('Int');
 
     my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs2->set_representation('Int');
+    $lhs2->set_stamp('Int');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
-    $as2->set_representation('Int');
+    $as2->set_stamp('Int');
 
     my $if_node = $f->make('If',   inputs => [$vx, $cmp]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -138,7 +138,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $as2->set_control_in($proj1);
 
     my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
     $ret->set_control_in($if_node);
@@ -188,25 +188,25 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $cn   = $f->make('Constant', value => '5', const_type => 'integer');
-    $cn->set_representation('Int');
+    $cn->set_stamp('Int');
     my $zero = $f->make('Constant', value => '0', const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $cmp  = $f->make('NumGt', inputs => [$cn, $zero]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn, $c0]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     # then-branch only: $x = 1
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Int');
+    $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
-    $as1->set_representation('Int');
+    $as1->set_stamp('Int');
 
     # If with only a then-branch (no else body)
     my $if_node = $f->make('If',   inputs => [$vx, $cmp]);
@@ -219,7 +219,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     # No else body — proj1 has no control_in consumers
 
     my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
     $ret->set_control_in($if_node);
@@ -274,15 +274,15 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c5  = $f->make('Constant', value => '5', const_type => 'integer');
-    $c5->set_representation('Int');
+    $c5->set_stamp('Int');
     my $c0  = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$c5, $c0]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $xn  = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx  = $f->make('VarDecl', inputs => [$xn]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $if_node = $f->make('If', inputs => [$vx, $cmp]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -291,7 +291,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $if_node->set_region($region);
 
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
     $ret->set_control_in($if_node);
@@ -334,49 +334,49 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
 
     # Constants
     my $c0    = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $c1    = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c3    = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
 
     # Variable $n = 2 (runtime value — chosen to make outer-cond TRUE, inner-cond FALSE)
     my $nn   = $f->make('Constant', value => '$n', const_type => 'string');
     my $vn   = $f->make('VarDecl', inputs => [$nn, $f->make('Constant', value => '2', const_type => 'integer')]);
-    $vn->set_representation('Int');
-    $vn->inputs->[1]->set_representation('Int');
+    $vn->set_stamp('Int');
+    $vn->inputs->[1]->set_stamp('Int');
 
     my $rn   = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
-    $rn->set_representation('Int');
+    $rn->set_stamp('Int');
 
     # Variable $x = 0
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn, $c0]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     # Outer condition: $n > 0  (true for n=2)
     my $cmp_out = $f->make('NumGt', inputs => [$rn, $c0]);
-    $cmp_out->set_representation('Boolean');
+    $cmp_out->set_stamp('Boolean');
 
     # Inner condition: $n > 3  (false for n=2)
     my $cmp_in = $f->make('NumGt', inputs => [$rn, $c3]);
-    $cmp_in->set_representation('Boolean');
+    $cmp_in->set_stamp('Boolean');
 
     # Assignments
     my $lhs3 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs3->set_representation('Int');
+    $lhs3->set_stamp('Int');
     my $as3  = $f->make('Assign', inputs => [$lhs3, $c3]);
-    $as3->set_representation('Int');
+    $as3->set_stamp('Int');
 
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Int');
+    $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
-    $as1->set_representation('Int');
+    $as1->set_stamp('Int');
 
     my $lhs0 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs0->set_representation('Int');
+    $lhs0->set_stamp('Int');
     my $as0  = $f->make('Assign', inputs => [$lhs0, $c0]);
-    $as0->set_representation('Int');
+    $as0->set_stamp('Int');
 
     # Inner if: if ($n>3) { $x=3 } else { $x=1 }
     my $inner_if  = $f->make('If', inputs => [$vx, $cmp_in]);
@@ -402,7 +402,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
 
     # Return $x
     my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $ret->set_control_in($outer_if);
 
@@ -469,52 +469,52 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
 
     # Constants
     my $c3    = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
     my $c0a   = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0a->set_representation('Int');
+    $c0a->set_stamp('Int');
     my $c0b   = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0b->set_representation('Int');
+    $c0b->set_stamp('Int');
     my $c0c   = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0c->set_representation('Int');
+    $c0c->set_stamp('Int');
     my $c1    = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
 
     # Variables
     my $nn    = $f->make('Constant', value => '$n', const_type => 'string');
     my $sn    = $f->make('Constant', value => '$s', const_type => 'string');
     my $vn    = $f->make('VarDecl', inputs => [$nn, $c3]);
-    $vn->set_representation('Int');
+    $vn->set_stamp('Int');
     my $vs    = $f->make('VarDecl', inputs => [$sn, $c0a]);
-    $vs->set_representation('Int');
+    $vs->set_stamp('Int');
 
     my $rn0   = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
-    $rn0->set_representation('Int');
+    $rn0->set_stamp('Int');
     my $rs0   = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs0->set_representation('Int');
+    $rs0->set_stamp('Int');
 
     # Outer condition: $n > 0 (static: 3>0 = true)
     my $cmp_out = $f->make('NumGt', inputs => [$rn0, $c0b]);
-    $cmp_out->set_representation('Boolean');
+    $cmp_out->set_stamp('Boolean');
 
     # Loop (lives inside the outer-if then-branch)
     my $loop  = $f->make('Loop', inputs => [$vs, undef]);
 
     # Loop phis
     my $n_phi = $f->make('Phi', region => $loop, values => [$rn0]);
-    $n_phi->set_representation('Int');
+    $n_phi->set_stamp('Int');
     my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]);
-    $s_phi->set_representation('Int');
+    $s_phi->set_stamp('Int');
 
     # Loop condition: n_phi > 0
     my $loop_cmp = $f->make('NumGt', inputs => [$n_phi, $c0c]);
-    $loop_cmp->set_representation('Boolean');
+    $loop_cmp->set_stamp('Boolean');
     $loop_cmp->set_control_in($loop);
 
     # Loop body: s_new = s_phi + n_phi; n_new = n_phi - 1
     my $s_new = $f->make('Add', inputs => [$s_phi, $n_phi]);
-    $s_new->set_representation('Int');
+    $s_new->set_stamp('Int');
     my $n_new = $f->make('Subtract', inputs => [$n_phi, $c1]);
-    $n_new->set_representation('Int');
+    $n_new->set_stamp('Int');
 
     $n_phi->set_backedge($n_new);
     $s_phi->set_backedge($s_new);
@@ -542,7 +542,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
 
     # Return $s
     my $rx    = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret   = $f->make_cfg('Return', inputs => [$rx]);
     $ret->set_control_in($outer_if);
 
@@ -587,29 +587,29 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
 
     # Graph: if (5>0) { $x = 1 } else { $x = 2 }; $x
     my $c5   = $f->make('Constant', value => '5', const_type => 'integer');
-    $c5->set_representation('Int');
+    $c5->set_stamp('Int');
     my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $cmp  = $f->make('NumGt', inputs => [$c5, $c0]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Int');
+    $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
-    $as1->set_representation('Int');
+    $as1->set_stamp('Int');
 
     my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs2->set_representation('Int');
+    $lhs2->set_stamp('Int');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
-    $as2->set_representation('Int');
+    $as2->set_stamp('Int');
 
     my $if_node = $f->make('If', inputs => [$vx, $cmp]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -620,7 +620,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $as2->set_control_in($proj1);
 
     my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
     $ret->set_control_in($if_node);
@@ -656,29 +656,29 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c5   = $f->make('Constant', value => '5', const_type => 'integer');
-    $c5->set_representation('Int');
+    $c5->set_stamp('Int');
     my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $cmp  = $f->make('NumGt', inputs => [$c5, $c0]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Int');
+    $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
-    $as1->set_representation('Int');
+    $as1->set_stamp('Int');
 
     my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs2->set_representation('Int');
+    $lhs2->set_stamp('Int');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
-    $as2->set_representation('Int');
+    $as2->set_stamp('Int');
 
     my $if_node = $f->make('If', inputs => [$vx, $cmp]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -689,7 +689,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $as2->set_control_in($proj1);
 
     my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
 
     # KEY: Return's control_in is the REGION, not the If.
@@ -753,33 +753,33 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     # Constants
-    my $c3    = $f->make('Constant', value => '3',  const_type => 'integer'); $c3->set_representation('Int');
-    my $c0a   = $f->make('Constant', value => '0',  const_type => 'integer'); $c0a->set_representation('Int');
-    my $c0b   = $f->make('Constant', value => '0',  const_type => 'integer'); $c0b->set_representation('Int');
-    my $c0c   = $f->make('Constant', value => '0',  const_type => 'integer'); $c0c->set_representation('Int');
-    my $c1    = $f->make('Constant', value => '1',  const_type => 'integer'); $c1->set_representation('Int');
-    my $c1b   = $f->make('Constant', value => '1',  const_type => 'integer'); $c1b->set_representation('Int');
-    my $c10   = $f->make('Constant', value => '10', const_type => 'integer'); $c10->set_representation('Int');
+    my $c3    = $f->make('Constant', value => '3',  const_type => 'integer'); $c3->set_stamp('Int');
+    my $c0a   = $f->make('Constant', value => '0',  const_type => 'integer'); $c0a->set_stamp('Int');
+    my $c0b   = $f->make('Constant', value => '0',  const_type => 'integer'); $c0b->set_stamp('Int');
+    my $c0c   = $f->make('Constant', value => '0',  const_type => 'integer'); $c0c->set_stamp('Int');
+    my $c1    = $f->make('Constant', value => '1',  const_type => 'integer'); $c1->set_stamp('Int');
+    my $c1b   = $f->make('Constant', value => '1',  const_type => 'integer'); $c1b->set_stamp('Int');
+    my $c10   = $f->make('Constant', value => '10', const_type => 'integer'); $c10->set_stamp('Int');
 
     my $nn   = $f->make('Constant', value => '$n', const_type => 'string');
     my $sn   = $f->make('Constant', value => '$s', const_type => 'string');
-    my $vn   = $f->make('VarDecl', inputs => [$nn, $c3]);  $vn->set_representation('Int');
-    my $vs   = $f->make('VarDecl', inputs => [$sn, $c0a]); $vs->set_representation('Int');
+    my $vn   = $f->make('VarDecl', inputs => [$nn, $c3]);  $vn->set_stamp('Int');
+    my $vs   = $f->make('VarDecl', inputs => [$sn, $c0a]); $vs->set_stamp('Int');
 
-    my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]); $rn0->set_representation('Int');
-    my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rs0->set_representation('Int');
+    my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]); $rn0->set_stamp('Int');
+    my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rs0->set_stamp('Int');
 
     # Loop
     my $loop  = $f->make('Loop', inputs => [$vs, undef]);
-    my $n_phi = $f->make('Phi', region => $loop, values => [$rn0]); $n_phi->set_representation('Int');
-    my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]); $s_phi->set_representation('Int');
+    my $n_phi = $f->make('Phi', region => $loop, values => [$rn0]); $n_phi->set_stamp('Int');
+    my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]); $s_phi->set_stamp('Int');
 
     # Loop condition: n_phi > 0
-    my $loop_cmp = $f->make('NumGt', inputs => [$n_phi, $c0c]); $loop_cmp->set_representation('Boolean');
+    my $loop_cmp = $f->make('NumGt', inputs => [$n_phi, $c0c]); $loop_cmp->set_stamp('Boolean');
     $loop_cmp->set_control_in($loop);
 
     # Inner condition: n_phi > 1
-    my $inner_cmp = $f->make('NumGt', inputs => [$n_phi, $c1]); $inner_cmp->set_representation('Boolean');
+    my $inner_cmp = $f->make('NumGt', inputs => [$n_phi, $c1]); $inner_cmp->set_stamp('Boolean');
 
     # Inner if branches
     my $body_proj = $f->make('Proj', inputs => [$loop], index => 0);
@@ -795,15 +795,15 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $inner_if->set_control_in($body_proj);
 
     # Then: s_phi + 10; Else: s_phi + 1
-    my $s_then = $f->make('Add', inputs => [$s_phi, $c10]); $s_then->set_representation('Int');
-    my $s_else = $f->make('Add', inputs => [$s_phi, $c1b]); $s_else->set_representation('Int');
+    my $s_then = $f->make('Add', inputs => [$s_phi, $c10]); $s_then->set_stamp('Int');
+    my $s_else = $f->make('Add', inputs => [$s_phi, $c1b]); $s_else->set_stamp('Int');
 
     # Inner Phi at Region merge: represents "s after the if"
     my $s_new = $f->make('Phi', region => $inner_reg, values => [$s_then, $s_else]);
-    $s_new->set_representation('Int');
+    $s_new->set_stamp('Int');
 
     # n_new = n_phi - 1
-    my $n_new = $f->make('Subtract', inputs => [$n_phi, $c1]); $n_new->set_representation('Int');
+    my $n_new = $f->make('Subtract', inputs => [$n_phi, $c1]); $n_new->set_stamp('Int');
     $n_new->set_control_in($body_proj);
 
     # Loop backedges
@@ -815,7 +815,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $loop->set_control_in($vs);
 
     # Return $s
-    my $rx  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rx->set_representation('Int');
+    my $rx  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $ret->set_control_in($loop);
 

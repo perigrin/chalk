@@ -52,23 +52,23 @@ sub make_stringify_int_graph {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c = $f->make('Constant', value => $int_val, const_type => 'number');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
 
     my $s = $f->make('Coerce', inputs => [$c],
                      from_repr => 'Int', to_repr => 'Str');
-    $s->set_representation('Str');
+    $s->set_stamp('Str');
 
     my $lb = $f->make('Constant', value => '[', const_type => 'string');
-    $lb->set_representation('Str');
+    $lb->set_stamp('Str');
     my $rb = $f->make('Constant', value => ']', const_type => 'string');
-    $rb->set_representation('Str');
+    $rb->set_stamp('Str');
 
     my $start = $f->make_cfg('Start');
     my $print = $f->make('Print', inputs => [$lb, $s, $rb]);
     $print->set_control_in($start);
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 
@@ -97,7 +97,7 @@ subtest q{Coerce(Int -> Str): printed decimal face == perl} => sub {
 
         # The type half of the old Str: tag — unrecoverable from stdout, since
         # a Str "3" and an Int 3 both print as "3".
-        is($str_node->representation, 'Str',
+        is($str_node->stamp, 'Str',
             "$desc: the coerced node is Str-repr (the type half of the old tag)");
 
         my $ll = eval { Chalk::Target::LLVM->lower($ret_node, program_mode => 1) };

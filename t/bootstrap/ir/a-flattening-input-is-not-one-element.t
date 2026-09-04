@@ -80,8 +80,8 @@ PROG
     # perl prints "3,4" -- BOTH reads land on a real element. Neither may be
     # stamped Undef, which is what a slot-count bounds check concludes for the
     # second one.
-    my @undef_stamped = grep { ($_->representation // '') eq 'Undef' } @subs;
-    is_deeply([ map { $_->representation } @undef_stamped ], [],
+    my @undef_stamped = grep { ($_->stamp // '') eq 'Undef' } @subs;
+    is_deeply([ map { $_->stamp } @undef_stamped ], [],
         'no read of a flattened container is stamped Undef')
         or diag("  a read perl answers with a VALUE was typed as undef;\n"
               . "  the container's inputs were counted as its elements.");
@@ -99,9 +99,9 @@ PROG
 
     my ($read) = subscripts_of($g);
     ok($read, 'found the element read') or return;
-    isnt($read->representation, 'Undef',
+    isnt($read->stamp, 'Undef',
         'an in-bounds read of a plain literal is not undef');
-    isnt($read->representation, undef,
+    isnt($read->stamp, undef,
         'and it still gets a type -- the guard did not blind the narrowing');
 };
 

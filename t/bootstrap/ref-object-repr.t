@@ -35,7 +35,7 @@ subtest 'ref($obj) is a RefType stamped Str (the class name)' => sub {
     );
     my ($rt) = grep { $_->operation eq 'RefType' } @nodes;
     ok(defined $rt, 'has a RefType node') or return;
-    is($rt->representation, 'Str', 'RefType carries a Str repr');
+    is($rt->stamp, 'Str', 'RefType carries a Str repr');
     ok(!grep({ $_->operation eq 'Ref' } @nodes), 'no Ref node (that is the \\ operator)');
 };
 
@@ -43,7 +43,7 @@ subtest 'ref() over a non-object is also a RefType :Str (not object-specific)' =
     my @nodes = load_nodes('my $r = [1,2,3]; ref($r)');
     my ($rt) = grep { $_->operation eq 'RefType' } @nodes;
     ok(defined $rt, 'ref([...]) is a RefType') or return;
-    is($rt->representation, 'Str', 'ref() is always Str regardless of operand');
+    is($rt->stamp, 'Str', 'ref() is always Str regardless of operand');
 };
 
 subtest 'the \\ operator loads as a Ref, not a RefType (collision teeth)' => sub {

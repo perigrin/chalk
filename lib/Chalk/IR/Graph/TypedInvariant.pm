@@ -165,7 +165,7 @@ sub _check_repr_for_position {
     my ($op, $i, $allowed_ref, $input, $violations_ref) = @_;
     my @allowed = $allowed_ref->@*;
 
-    my $input_repr = $input->representation();
+    my $input_repr = $input->stamp();
     return unless defined $input_repr;  # undef = not yet assigned; skip
 
     if ($input->isa('Chalk::IR::Node::Coerce')) {
@@ -418,14 +418,14 @@ sub check_nodes {
             # Skip nested arrayrefs (e.g. Call arg lists)
             next if ref($input) eq 'ARRAY';
 
-            my $input_repr = $input->representation();
+            my $input_repr = $input->stamp();
             # undef = not yet assigned; skip (not a violation)
             next unless defined $input_repr;
 
             # If the input IS a Coerce node, check its to_repr against allowed set
             if ($input->isa('Chalk::IR::Node::Coerce')) {
                 my $to = $input->to_repr();
-                unless (_conforms($to, $op, \@allowed, $node->representation())) {
+                unless (_conforms($to, $op, \@allowed, $node->stamp())) {
                     my $allowed_str = join(' or ', @allowed);
                     push @violations, {
                         node_id => $node->id(),
@@ -440,7 +440,7 @@ sub check_nodes {
 
             # Plain node: representation must conform to the allowed set —
             # exactly, or by subtyping for the ops that permit it.
-            unless (_conforms($input_repr, $op, \@allowed, $node->representation())) {
+            unless (_conforms($input_repr, $op, \@allowed, $node->stamp())) {
                 my $allowed_str = join(' or ', @allowed);
                 push @violations, {
                     node_id => $node->id(),

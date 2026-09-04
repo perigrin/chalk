@@ -33,7 +33,7 @@ sub make_not_bool_str_graph {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $cval = $f->make('Constant', value => $int_val, const_type => 'integer');
-    $cval->set_representation('Int');
+    $cval->set_stamp('Int');
 
     # Coerce Int->Boolean (truthiness)
     my $coerce_ib = $f->make('Coerce',
@@ -41,11 +41,11 @@ sub make_not_bool_str_graph {
         to_repr   => 'Boolean',
         inputs    => [$cval],
     );
-    $coerce_ib->set_representation('Boolean');
+    $coerce_ib->set_stamp('Boolean');
 
     # Not: logical negation
     my $not_node = $f->make('Not', inputs => [$coerce_ib]);
-    $not_node->set_representation('Boolean');
+    $not_node->set_stamp('Boolean');
 
     # Coerce Boolean->Str: string-face "" or "1"
     my $coerce_bs = $f->make('Coerce',
@@ -53,7 +53,7 @@ sub make_not_bool_str_graph {
         to_repr   => 'Str',
         inputs    => [$not_node],
     );
-    $coerce_bs->set_representation('Str');
+    $coerce_bs->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$coerce_bs]);
     return ($ret, $coerce_bs);
@@ -74,36 +74,36 @@ sub make_not_bool_str_program {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $cval = $f->make('Constant', value => $int_val, const_type => 'integer');
-    $cval->set_representation('Int');
+    $cval->set_stamp('Int');
 
     my $coerce_ib = $f->make('Coerce',
         from_repr => 'Int',
         to_repr   => 'Boolean',
         inputs    => [$cval],
     );
-    $coerce_ib->set_representation('Boolean');
+    $coerce_ib->set_stamp('Boolean');
 
     my $not_node = $f->make('Not', inputs => [$coerce_ib]);
-    $not_node->set_representation('Boolean');
+    $not_node->set_stamp('Boolean');
 
     my $coerce_bs = $f->make('Coerce',
         from_repr => 'Boolean',
         to_repr   => 'Str',
         inputs    => [$not_node],
     );
-    $coerce_bs->set_representation('Str');
+    $coerce_bs->set_stamp('Str');
 
     my $lb = $f->make('Constant', value => '[', const_type => 'string');
-    $lb->set_representation('Str');
+    $lb->set_stamp('Str');
     my $rb = $f->make('Constant', value => ']', const_type => 'string');
-    $rb->set_representation('Str');
+    $rb->set_stamp('Str');
 
     my $start = $f->make_cfg('Start');
     my $print = $f->make('Print', inputs => [$lb, $coerce_bs, $rb]);
     $print->set_control_in($start);
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 
@@ -197,7 +197,7 @@ sub run_ll {
 
     is($exit, 0, 'CBS5: lli exit 0 for truthy->false->empty Str face');
     is($out, '[]', 'CBS5: truthy input: Not(5)->false->"" (empty string face)');
-    is($val->representation, 'Str',
+    is($val->stamp, 'Str',
         'CBS5: the printed value is Str-repr, not Boolean (the type half of the old tag)');
 }
 
@@ -216,7 +216,7 @@ sub run_ll {
 
     is($exit, 0, 'CBS6: lli exit 0 for falsy->true->"1" Str face');
     is($out, '[1]', 'CBS6: falsy input: Not(0)->true->"1" ("1" string face)');
-    is($val->representation, 'Str',
+    is($val->stamp, 'Str',
         'CBS6: the printed value is Str-repr, not Boolean (the type half of the old tag)');
 }
 
@@ -285,14 +285,14 @@ sub run_ll {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c5 = $f->make('Constant', value => 5, const_type => 'integer');
-    $c5->set_representation('Int');
+    $c5->set_stamp('Int');
 
     my $coerce = $f->make('Coerce', from_repr => 'Int', to_repr => 'Boolean', inputs => [$c5]);
-    $coerce->set_representation('Boolean');
+    $coerce->set_stamp('Boolean');
 
     # Not over an explicit :Boolean operand — _ensure_i1 must pass through as i1.
     my $not_node = $f->make('Not', inputs => [$coerce]);
-    $not_node->set_representation('Boolean');
+    $not_node->set_stamp('Boolean');
 
     # The Not result is Boolean. A program cannot observe a Boolean directly:
     # the backend refuses Print of a Boolean arg ("Print takes Str, so this
@@ -300,24 +300,24 @@ sub run_ll {
     # stringification. So the Boolean-ness is asserted on the node and the
     # value is observed through the Coerce, bracketed to separate "printed
     # empty" from "printed nothing".
-    is($not_node->representation, 'Boolean',
+    is($not_node->stamp, 'Boolean',
         'F3A: Not(Boolean) result is Boolean-repr (the type half of the old Bool: tag)');
 
     my $to_str = $f->make('Coerce',
         from_repr => 'Boolean', to_repr => 'Str', inputs => [$not_node]);
-    $to_str->set_representation('Str');
+    $to_str->set_stamp('Str');
 
     my $lb = $f->make('Constant', value => '[', const_type => 'string');
-    $lb->set_representation('Str');
+    $lb->set_stamp('Str');
     my $rb = $f->make('Constant', value => ']', const_type => 'string');
-    $rb->set_representation('Str');
+    $rb->set_stamp('Str');
 
     my $start = $f->make_cfg('Start');
     my $print = $f->make('Print', inputs => [$lb, $to_str, $rb]);
     $print->set_control_in($start);
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 
@@ -349,7 +349,7 @@ sub run_ll {
     # where a Boolean-typed value has lost its repr annotation.
 
     my $not_node = $f->make('Not', inputs => [$c5]);
-    $not_node->set_representation('Boolean');
+    $not_node->set_stamp('Boolean');
 
     my $ret = $f->make_cfg('Return', inputs => [$not_node]);
 

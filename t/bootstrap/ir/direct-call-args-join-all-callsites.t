@@ -101,9 +101,9 @@ for my $order ( sort keys %ORDER ) {
 
         # THE CALLEE-SIDE JOIN. One node, two incoming types, so it must carry
         # the least upper bound of both.
-        is( $reads[0]->representation, $JOIN,
+        is( $reads[0]->stamp, $JOIN,
             "the shared argument read is stamped the JOIN ($JOIN)" );
-        $stamp{$order} = $reads[0]->representation;
+        $stamp{$order} = $reads[0]->stamp;
 
         # THE CALLSITE SIDE. A Call's own result must not be stamped from the
         # OTHER site's argument. Each Call here returns its own argument
@@ -113,9 +113,9 @@ for my $order ( sort keys %ORDER ) {
         is( scalar @calls, 2, 'both callsites are present' );
         for my $c (@calls) {
             my ($arg) = grep { blessed($_) } $c->inputs->@*;
-            next unless $arg && defined $arg->representation;
-            my $own = $arg->representation;
-            my $got = $c->representation // 'Unknown';
+            next unless $arg && defined $arg->stamp;
+            my $own = $arg->stamp;
+            my $got = $c->stamp // 'Unknown';
             is( Chalk::Grammar::Perl::TypeLibrary::join_types( $own, $got ),
                 $got,
                 "the $own-argument call is stamped $got, a supertype of its OWN argument"

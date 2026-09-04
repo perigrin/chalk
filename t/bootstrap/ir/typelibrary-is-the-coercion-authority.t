@@ -50,9 +50,9 @@ subtest 'a non-Str operand of StrLt gets a coercion' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $lhs = $f->make('Constant', const_type => 'integer', value => 7);
-    $lhs->set_representation('Int');
+    $lhs->set_stamp('Int');
     my $rhs = $f->make('Constant', const_type => 'string', value => 'x');
-    $rhs->set_representation('Str');
+    $rhs->set_stamp('Str');
 
     # Producer shape: operands at 0 and 1, control on its own edge.
     my $cmp = $f->make('StrLt',
@@ -83,9 +83,9 @@ subtest 'an undef input slot is skipped, not coerced' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $lhs = $f->make('Constant', const_type => 'integer', value => 7);
-    $lhs->set_representation('Int');
+    $lhs->set_stamp('Int');
     my $rhs = $f->make('Constant', const_type => 'string', value => 'x');
-    $rhs->set_representation('Str');
+    $rhs->set_stamp('Str');
 
     my $cmp = $f->make('StrLt',
         inputs => [undef, $lhs, $rhs],

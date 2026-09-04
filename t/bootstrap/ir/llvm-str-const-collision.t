@@ -39,13 +39,13 @@ sub build_dual_str_graph {
 
     # Method A: Constant("first" :Str)
     my $str_a = $f->make('Constant', value => 'first', const_type => 'string');
-    $str_a->set_representation('Str');
+    $str_a->set_stamp('Str');
     my $m_a = $cls->declare_method('get_first', return_type => 'Str');
     $m_a->graph->merge($f->make_cfg('Return', inputs => [$str_a]));
 
     # Method B: Constant("second" :Str) — same index (0) in a fresh body_ctx
     my $str_b = $f->make('Constant', value => 'second', const_type => 'string');
-    $str_b->set_representation('Str');
+    $str_b->set_stamp('Str');
     my $m_b = $cls->declare_method('get_second', return_type => 'Str');
     $m_b->graph->merge($f->make_cfg('Return', inputs => [$str_b]));
 
@@ -56,7 +56,7 @@ sub build_dual_str_graph {
         param_names => [],
         inputs      => [],
     );
-    $new_obj->set_representation('Object');
+    $new_obj->set_stamp('Object');
 
     my $call = $f->make('Call',
         dispatch_kind => 'method',
@@ -64,7 +64,7 @@ sub build_dual_str_graph {
         class_name    => 'MultiStr',
         inputs        => [$new_obj],
     );
-    $call->set_representation('Str');
+    $call->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
     return ($ret, $f, $mop);
@@ -79,17 +79,17 @@ sub build_triple_str_graph {
     my $cls = $mop->declare_class('TripleStr');
 
     my $str_a = $f->make('Constant', value => 'alpha', const_type => 'string');
-    $str_a->set_representation('Str');
+    $str_a->set_stamp('Str');
     my $m_a = $cls->declare_method('get_alpha', return_type => 'Str');
     $m_a->graph->merge($f->make_cfg('Return', inputs => [$str_a]));
 
     my $str_b = $f->make('Constant', value => 'beta', const_type => 'string');
-    $str_b->set_representation('Str');
+    $str_b->set_stamp('Str');
     my $m_b = $cls->declare_method('get_beta', return_type => 'Str');
     $m_b->graph->merge($f->make_cfg('Return', inputs => [$str_b]));
 
     my $str_c = $f->make('Constant', value => 'gamma', const_type => 'string');
-    $str_c->set_representation('Str');
+    $str_c->set_stamp('Str');
     my $m_c = $cls->declare_method('get_gamma', return_type => 'Str');
     $m_c->graph->merge($f->make_cfg('Return', inputs => [$str_c]));
 
@@ -97,14 +97,14 @@ sub build_triple_str_graph {
 
     my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'TripleStr', param_names => [], inputs => []);
-    $new_obj->set_representation('Object');
+    $new_obj->set_stamp('Object');
     my $call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'get_alpha',
         class_name    => 'TripleStr',
         inputs        => [$new_obj],
     );
-    $call->set_representation('Str');
+    $call->set_stamp('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
     return ($ret, $f, $mop);
 }

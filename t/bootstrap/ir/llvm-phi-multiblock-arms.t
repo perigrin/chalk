@@ -34,16 +34,16 @@ sub print_returned_value {
 
     my $v = $ret_node->inputs->[0];
     my $s = $v;
-    if (($v->representation // '') ne 'Str') {
+    if (($v->stamp // '') ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
-            from_repr => $v->representation, to_repr => 'Str');
-        $s->set_representation('Str');
+            from_repr => $v->stamp, to_repr => 'Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     # A Return hung directly off a Loop is ambiguous between the loop BODY and
@@ -63,7 +63,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -85,7 +85,7 @@ sub run_lli {
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     return $c;
 }
 
@@ -97,17 +97,17 @@ subtest 'if-merge explicit Phi with a multi-block then-arm (I5)' => sub {
 
     my $nn = $f->make('Constant', value => '$n', const_type => 'string');
     my $vn = $f->make('VarDecl', inputs => [$nn, int_const($f, 1)]);
-    $vn->set_representation('Int');
+    $vn->set_stamp('Int');
 
     my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
-    $rn->set_representation('Int');
+    $rn->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $aref = $f->make('ArrayLiteral', inputs => [int_const($f, 42)]);
-    $aref->set_representation('ArrayRef');
+    $aref->set_stamp('ArrayRef');
     my $sub = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
-    $sub->set_representation('Int');
+    $sub->set_stamp('Int');
 
     my $c7 = int_const($f, 7);
 
@@ -118,7 +118,7 @@ subtest 'if-merge explicit Phi with a multi-block then-arm (I5)' => sub {
     $if_node->set_region($region);
 
     my $phi = $f->make('Phi', region => $region, values => [$sub, $c7]);
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$phi]);
     $if_node->set_control_in($vn);
@@ -141,12 +141,12 @@ subtest 'two explicit Phis on one Region, later arm multi-block (review C1)' => 
 
     my $nn = $f->make('Constant', value => '$n', const_type => 'string');
     my $vn = $f->make('VarDecl', inputs => [$nn, int_const($f, 1)]);
-    $vn->set_representation('Int');
+    $vn->set_stamp('Int');
 
     my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
-    $rn->set_representation('Int');
+    $rn->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $if_node = $f->make('If', inputs => [$vn, $cmp]);
     my $proj0 = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -157,19 +157,19 @@ subtest 'two explicit Phis on one Region, later arm multi-block (review C1)' => 
     # Phi A: simple constant arms — wired first.
     my $phi_a = $f->make('Phi', region => $region,
         values => [int_const($f, 5), int_const($f, 7)]);
-    $phi_a->set_representation('Int');
+    $phi_a->set_stamp('Int');
 
     # Phi B: multi-block then-arm (bounds-checked Subscript).
     my $aref = $f->make('ArrayLiteral', inputs => [int_const($f, 42)]);
-    $aref->set_representation('ArrayRef');
+    $aref->set_stamp('ArrayRef');
     my $sub = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
-    $sub->set_representation('Int');
+    $sub->set_stamp('Int');
     my $phi_b = $f->make('Phi', region => $region,
         values => [$sub, int_const($f, 9)]);
-    $phi_b->set_representation('Int');
+    $phi_b->set_stamp('Int');
 
     my $sum = $f->make('Add', inputs => [$phi_a, $phi_b]);
-    $sum->set_representation('Int');
+    $sum->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
     $if_node->set_control_in($vn);
     $ret->set_control_in($if_node);
@@ -197,32 +197,32 @@ subtest 'loop phi with a multi-block init value (I5)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $aref = $f->make('ArrayLiteral', inputs => [int_const($f, 3)]);
-    $aref->set_representation('ArrayRef');
+    $aref->set_stamp('ArrayRef');
     my $n_init = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
-    $n_init->set_representation('Int');
+    $n_init->set_stamp('Int');
 
     my $one = int_const($f, 1);
 
     my $sn = $f->make('Constant', value => '$s', const_type => 'string');
     my $vs = $f->make('VarDecl', inputs => [$sn, int_const($f, 0)]);
-    $vs->set_representation('Int');
+    $vs->set_stamp('Int');
     my $rs0 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs0->set_representation('Int');
+    $rs0->set_stamp('Int');
 
     my $loop = $f->make('Loop', inputs => [$vs, undef]);
 
     my $n_phi = $f->make('Phi', region => $loop, values => [$n_init]);
-    $n_phi->set_representation('Int');
+    $n_phi->set_stamp('Int');
     my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]);
-    $s_phi->set_representation('Int');
+    $s_phi->set_stamp('Int');
 
     my $cmp = $f->make('NumGt', inputs => [$n_phi, int_const($f, 0)]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $s_new = $f->make('Add', inputs => [$s_phi, $n_phi]);
-    $s_new->set_representation('Int');
+    $s_new->set_stamp('Int');
     my $n_new = $f->make('Subtract', inputs => [$n_phi, $one]);
-    $n_new->set_representation('Int');
+    $n_new->set_stamp('Int');
 
     $n_phi->set_backedge($n_new);
     $s_phi->set_backedge($s_new);
@@ -262,30 +262,30 @@ subtest 'loop phi with a multi-block backedge value (I5)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $aref = $f->make('ArrayLiteral', inputs => [int_const($f, 0), int_const($f, 5)]);
-    $aref->set_representation('ArrayRef');
+    $aref->set_stamp('ArrayRef');
 
     my $one = int_const($f, 1);
 
     my $sn = $f->make('Constant', value => '$s', const_type => 'string');
     my $vs = $f->make('VarDecl', inputs => [$sn, int_const($f, 0)]);
-    $vs->set_representation('Int');
+    $vs->set_stamp('Int');
     my $rs0 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs0->set_representation('Int');
+    $rs0->set_stamp('Int');
 
     my $loop = $f->make('Loop', inputs => [$vs, undef]);
 
     my $n_phi = $f->make('Phi', region => $loop, values => [$one]);
-    $n_phi->set_representation('Int');
+    $n_phi->set_stamp('Int');
     my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]);
-    $s_phi->set_representation('Int');
+    $s_phi->set_stamp('Int');
 
     my $cmp = $f->make('NumGt', inputs => [$n_phi, int_const($f, 0)]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $s_new = $f->make('Subscript', inputs => [$aref, $n_phi]);
-    $s_new->set_representation('Int');
+    $s_new->set_stamp('Int');
     my $n_new = $f->make('Subtract', inputs => [$n_phi, $one]);
-    $n_new->set_representation('Int');
+    $n_new->set_stamp('Int');
 
     $n_phi->set_backedge($n_new);
     $s_phi->set_backedge($s_new);
@@ -319,17 +319,17 @@ subtest 'elab phi labels + branch-snapshot arm reads (review gaps 2+3)' => sub {
 
     my $nn = $f->make('Constant', value => '$n', const_type => 'string');
     my $vn = $f->make('VarDecl', inputs => [$nn, int_const($f, 1)]);
-    $vn->set_representation('Int');
+    $vn->set_stamp('Int');
 
     # my $t = 0;
     my $nt = $f->make('Constant', value => '$t', const_type => 'string');
     my $vt = $f->make('VarDecl', inputs => [$nt, int_const($f, 0)]);
-    $vt->set_representation('Int');
+    $vt->set_stamp('Int');
 
     my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
-    $rn->set_representation('Int');
+    $rn->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $if_node = $f->make('If', inputs => [$vt, $cmp]);
     my $proj0 = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -339,31 +339,31 @@ subtest 'elab phi labels + branch-snapshot arm reads (review gaps 2+3)' => sub {
 
     # then: $t = 1; else: $t = 2  (divergence -> elab phi for $t)
     my $rt_lhs = $f->make('PadAccess', targ => 1, varname => '$t', inputs => [$vt]);
-    $rt_lhs->set_representation('Int');
+    $rt_lhs->set_stamp('Int');
     my $asg_then = $f->make('Assign', inputs => [$rt_lhs, int_const($f, 1)]);
-    $asg_then->set_representation('Int');
+    $asg_then->set_stamp('Int');
     $asg_then->set_control_in($proj0);
     my $asg_else = $f->make('Assign', inputs => [$rt_lhs, int_const($f, 2)]);
-    $asg_else->set_representation('Int');
+    $asg_else->set_stamp('Int');
     $asg_else->set_control_in($proj1);
 
     # Explicit Phi: then-arm = [40]->[0] + $t (multi-block AND reads $t).
     my $aref = $f->make('ArrayLiteral', inputs => [int_const($f, 40)]);
-    $aref->set_representation('ArrayRef');
+    $aref->set_stamp('ArrayRef');
     my $sub = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
-    $sub->set_representation('Int');
+    $sub->set_stamp('Int');
     my $rt_arm = $f->make('PadAccess', targ => 1, varname => '$t', inputs => [$vt]);
-    $rt_arm->set_representation('Int');
+    $rt_arm->set_stamp('Int');
     my $arm = $f->make('Add', inputs => [$sub, $rt_arm]);
-    $arm->set_representation('Int');
+    $arm->set_stamp('Int');
     my $phi = $f->make('Phi', region => $region, values => [$arm, int_const($f, 9)]);
-    $phi->set_representation('Int');
+    $phi->set_stamp('Int');
 
     # return V + $t  ($t post-merge = the elab phi)
     my $rt_post = $f->make('PadAccess', targ => 1, varname => '$t', inputs => [$vt]);
-    $rt_post->set_representation('Int');
+    $rt_post->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$phi, $rt_post]);
-    $sum->set_representation('Int');
+    $sum->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
     $if_node->set_control_in($vt);
     $vt->set_control_in($vn);

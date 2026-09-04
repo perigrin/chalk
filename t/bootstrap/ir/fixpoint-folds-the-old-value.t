@@ -42,7 +42,7 @@ subtest 'the main loop folds the old value into its join' => sub {
     my ($body) = $src =~ /\nsub _propagate_computed_reprs \(\$graphs\) \{(.*?)\n\}\n/s
         or die 'could not find _propagate_computed_reprs';
 
-    like($body, qr/_join_repr\(\s*\$node->representation\s*,/,
+    like($body, qr/_join_repr\(\s*\$node->stamp\s*,/,
          'the join folds the node\'s existing stamp in as an operand');
 };
 

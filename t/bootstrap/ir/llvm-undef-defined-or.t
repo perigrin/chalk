@@ -29,16 +29,16 @@ sub print_program {
     my ($f, $value_node, $control_tail) = @_;
 
     my $lb = $f->make('Constant', value => '[', const_type => 'string');
-    $lb->set_representation('Str');
+    $lb->set_stamp('Str');
     my $rb = $f->make('Constant', value => ']', const_type => 'string');
-    $rb->set_representation('Str');
+    $rb->set_stamp('Str');
 
     my $head = $control_tail // $f->make_cfg('Start');
     my $print = $f->make('Print', inputs => [$lb, $value_node, $rb]);
     $print->set_control_in($head);
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 
@@ -68,7 +68,7 @@ subtest 'U1: Constant(undef) :Undef lowers without dying' => sub {
 
     # Constant(undef) :Undef — the undef literal
     my $cundef = $f->make('Constant', value => undef, const_type => 'undef');
-    $cundef->set_representation('Undef');
+    $cundef->set_stamp('Undef');
 
     # A program observes the undef the way perl does: by printing it. Print
     # takes a Str, so the undef goes through Coerce(Undef->Str) — the same
@@ -77,9 +77,9 @@ subtest 'U1: Constant(undef) :Undef lowers without dying' => sub {
     # Coerce"), which is the correct shape, not a limitation.
     my $to_str = $f->make('Coerce',
         from_repr => 'Undef', to_repr => 'Str', inputs => [$cundef]);
-    $to_str->set_representation('Str');
+    $to_str->set_stamp('Str');
 
-    is($cundef->representation, 'Undef',
+    is($cundef->stamp, 'Undef',
         'U1: the constant is Undef-repr (unobservable from stdout: undef and "" both print as nothing)');
 
     my $ret = print_program($f, $to_str);
@@ -117,36 +117,36 @@ subtest 'U2: DefinedOr(Int :defined, Int) => left operand via lli' => sub {
 
     # $a = 3
     my $cn_a  = $f->make('Constant', value => '$a', const_type => 'string');
-    $cn_a->set_representation('Str');
+    $cn_a->set_stamp('Str');
     my $ca    = $f->make('Constant', value => '3',  const_type => 'integer');
-    $ca->set_representation('Int');
+    $ca->set_stamp('Int');
     my $vda   = $f->make('VarDecl', inputs => [$cn_a, $ca]);
-    $vda->set_representation('Int');
+    $vda->set_stamp('Int');
     my $pa    = $f->make('PadAccess', targ => 0, varname => '$a', inputs => [$vda]);
-    $pa->set_representation('Int');
+    $pa->set_stamp('Int');
 
     # $b = 7
     my $cn_b  = $f->make('Constant', value => '$b', const_type => 'string');
-    $cn_b->set_representation('Str');
+    $cn_b->set_stamp('Str');
     my $cb    = $f->make('Constant', value => '7',  const_type => 'integer');
-    $cb->set_representation('Int');
+    $cb->set_stamp('Int');
     my $vdb   = $f->make('VarDecl', inputs => [$cn_b, $cb]);
-    $vdb->set_representation('Int');
+    $vdb->set_stamp('Int');
     my $pb    = $f->make('PadAccess', targ => 0, varname => '$b', inputs => [$vdb]);
-    $pb->set_representation('Int');
+    $pb->set_stamp('Int');
 
     # $a // $b :Int
     my $dor   = $f->make('DefinedOr', inputs => [$pa, $pb]);
-    $dor->set_representation('Int');
+    $dor->set_stamp('Int');
 
     # Print takes a Str, so the Int result is stringified — the same coercion
     # the producer inserts for a print argument.
-    is($dor->representation, 'Int',
+    is($dor->stamp, 'Int',
         'U2: the // result is Int-repr (the type half of the old Int: tag; a Str "3" prints identically)');
 
     my $to_str = $f->make('Coerce',
         from_repr => 'Int', to_repr => 'Str', inputs => [$dor]);
-    $to_str->set_representation('Str');
+    $to_str->set_stamp('Str');
 
     $vdb->set_control_in($vda);
     my $ret = print_program($f, $to_str, $vdb);
@@ -187,36 +187,36 @@ subtest 'U3: DefinedOr(Undef :undef, Int) => right operand via lli' => sub {
 
     # $a = undef
     my $cn_a   = $f->make('Constant', value => '$a', const_type => 'string');
-    $cn_a->set_representation('Str');
+    $cn_a->set_stamp('Str');
     my $cundef = $f->make('Constant', value => undef, const_type => 'undef');
-    $cundef->set_representation('Undef');
+    $cundef->set_stamp('Undef');
     my $vda    = $f->make('VarDecl', inputs => [$cn_a, $cundef]);
-    $vda->set_representation('Undef');
+    $vda->set_stamp('Undef');
     my $pa     = $f->make('PadAccess', targ => 0, varname => '$a', inputs => [$vda]);
-    $pa->set_representation('Undef');
+    $pa->set_stamp('Undef');
 
     # $b = 7
     my $cn_b  = $f->make('Constant', value => '$b', const_type => 'string');
-    $cn_b->set_representation('Str');
+    $cn_b->set_stamp('Str');
     my $cb    = $f->make('Constant', value => '7',  const_type => 'integer');
-    $cb->set_representation('Int');
+    $cb->set_stamp('Int');
     my $vdb   = $f->make('VarDecl', inputs => [$cn_b, $cb]);
-    $vdb->set_representation('Int');
+    $vdb->set_stamp('Int');
     my $pb    = $f->make('PadAccess', targ => 0, varname => '$b', inputs => [$vdb]);
-    $pb->set_representation('Int');
+    $pb->set_stamp('Int');
 
     # $a // $b :Int
     my $dor   = $f->make('DefinedOr', inputs => [$pa, $pb]);
-    $dor->set_representation('Int');
+    $dor->set_stamp('Int');
 
     # Print takes a Str, so the Int result is stringified — the same coercion
     # the producer inserts for a print argument.
-    is($dor->representation, 'Int',
+    is($dor->stamp, 'Int',
         'U3: the // result is Int-repr (the type half of the old Int: tag; a Str "7" prints identically)');
 
     my $to_str = $f->make('Coerce',
         from_repr => 'Int', to_repr => 'Str', inputs => [$dor]);
-    $to_str->set_representation('Str');
+    $to_str->set_stamp('Str');
 
     $vdb->set_control_in($vda);
     my $ret = print_program($f, $to_str, $vdb);
@@ -271,7 +271,7 @@ subtest 'U5: a program whose result is undef prints nothing and exits 0' => sub 
     # No Print at all: the whole program is `return undef`. Its entire
     # observable contract is empty stdout plus exit 0.
     my $cundef = $f->make('Constant', value => undef, const_type => 'undef');
-    $cundef->set_representation('Undef');
+    $cundef->set_stamp('Undef');
     my $start = $f->make_cfg('Start');
     my $ret = $f->make_cfg('Return', inputs => [$cundef]);
     $ret->set_control_in($start);
@@ -293,7 +293,7 @@ subtest 'U5: a program whose result is undef prints nothing and exits 0' => sub 
         # the empty result above is a real empty and not a dead lowering.
         my $g = Chalk::IR::NodeFactory->new;
         my $lit = $g->make('Constant', value => 'x', const_type => 'string');
-        $lit->set_representation('Str');
+        $lit->set_stamp('Str');
         my $ll2 = Chalk::Target::LLVM->lower(print_program($g, $lit), program_mode => 1);
         my ($out2, $exit2) = run_lli($ll2);
         is($exit2, 0,    'U5 control: the printing twin exits 0');

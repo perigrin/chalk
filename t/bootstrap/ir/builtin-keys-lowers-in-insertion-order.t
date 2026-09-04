@@ -99,7 +99,7 @@ subtest 'the two contexts are stamped differently' => sub {
                 && $_->can('name') && ($_->name // '') eq 'keys'
         } $prog->nodes->@*;
         ok($keys, "$ctx has a keys call") or next;
-        $stamp{$ctx} = $keys->representation // '<undef>';
+        $stamp{$ctx} = $keys->stamp // '<undef>';
     }
 
     is($stamp{'scalar context'}, 'Int',

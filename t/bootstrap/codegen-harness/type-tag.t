@@ -222,11 +222,11 @@ subtest 'round-trip: Int repr (1+2=3) lli tag == TypeTag prefix' => sub {
     }
     my $f   = _make_factory();
     my $c1  = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2  = $f->make( 'Constant', value => '2', const_type => 'integer' );
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $add = $f->make( 'Add', inputs => [ $c1, $c2 ] );
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $ret = $f->make_cfg( 'Return', inputs => [$add] );
 
     my $ll           = Chalk::Target::LLVM->lower($ret);
@@ -252,7 +252,7 @@ subtest 'round-trip: Num repr (1.5) lli tag == TypeTag prefix' => sub {
     }
     my $f   = _make_factory();
     my $c   = $f->make( 'Constant', value => '1.5', const_type => 'float' );
-    $c->set_representation('Num');
+    $c->set_stamp('Num');
     my $ret = $f->make_cfg( 'Return', inputs => [$c] );
 
     my $ll           = Chalk::Target::LLVM->lower($ret);
@@ -275,11 +275,11 @@ subtest 'round-trip: Boolean repr true (1 == 1) lli tag == TypeTag prefix' => su
     }
     my $f  = _make_factory();
     my $c1 = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $eq = $f->make( 'NumEq', inputs => [ $c1, $c2 ] );
-    $eq->set_representation('Boolean');
+    $eq->set_stamp('Boolean');
     my $ret = $f->make_cfg( 'Return', inputs => [$eq] );
 
     my $ll           = Chalk::Target::LLVM->lower($ret);
@@ -301,11 +301,11 @@ subtest 'round-trip: Boolean repr false (1 == 2) lli tag == TypeTag prefix' => s
     }
     my $f  = _make_factory();
     my $c1 = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2 = $f->make( 'Constant', value => '2', const_type => 'integer' );
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $eq = $f->make( 'NumEq', inputs => [ $c1, $c2 ] );
-    $eq->set_representation('Boolean');
+    $eq->set_stamp('Boolean');
     my $ret = $f->make_cfg( 'Return', inputs => [$eq] );
 
     my $ll           = Chalk::Target::LLVM->lower($ret);

@@ -43,10 +43,10 @@ use Chalk::Target::LLVM;
 # A Boolean-valued node: Constant(N :Int) -> Coerce(Int->Boolean) :Boolean
 sub make_bool_node ($f, $val) {
     my $c = $f->make('Constant', value => $val, const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     my $coerce = $f->make('Coerce', inputs => [$c],
         from_repr => 'Int', to_repr => 'Boolean');
-    $coerce->set_representation('Boolean');
+    $coerce->set_stamp('Boolean');
     return $coerce;
 }
 
@@ -54,14 +54,14 @@ sub make_const ($f, $repr, $val) {
     my $c = $f->make('Constant', value => $val,
         const_type => ($repr eq 'Num' ? 'number'
                      : $repr eq 'Str' ? 'string' : 'integer'));
-    $c->set_representation($repr);
+    $c->set_stamp($repr);
     return $c;
 }
 
 # Lower `$op($lhs, $rhs)` in $f and return (ir, error).
 sub lower_binop ($f, $op, $lhs, $rhs, $node_repr) {
     my $node = $f->make($op, inputs => [$lhs, $rhs]);
-    $node->set_representation($node_repr) if defined $node_repr;
+    $node->set_stamp($node_repr) if defined $node_repr;
     my $ret = $f->make_cfg('Return', inputs => [$node]);
     my $ll  = eval { Chalk::Target::LLVM->lower($ret) };
     return ($ll, $@);

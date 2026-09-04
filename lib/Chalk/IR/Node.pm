@@ -4,7 +4,6 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-# The deprecation category for `representation` / `set_representation`.
 #
 # TWO GATES, AND BOTH ARE LOAD-BEARING.
 #
@@ -324,52 +323,24 @@ class Chalk::IR::Node {
     # which fails if a non-lattice name is written again.
     # hazard RETURNING rather than documenting a live one.
     #
-    # ---------------------------------------------------------------------
-    # DEPRECATED. NEW CODE MUST USE `stamp` / `set_stamp`.
+    # THE `representation` ALIAS IS GONE. It was a read/write alias for this
+    # same `stamp` field, kept while ~1700 call sites used the old spelling.
+    # The name was wrong about which axis it named: a stamp is a TYPE
+    # (`Unknown` and `None` are legitimate values), a representation is a
+    # MACHINE ENCODING (neither has one). Calling the type axis by the encoding
+    # axis's name is what let a value correct on one axis be read as poison on
+    # the other -- see the paragraphs above for the concrete case.
     #
-    # These two are a transitional read/write alias for the SAME storage, kept
-    # only so the ~111 existing `->representation` call sites in lib/ keep
-    # working while they are migrated. Measured at the time of writing:
+    # Removed in four recorded steps, deliberately not together:
+    #   1. a notice saying new code must use `stamp`
+    #   2. a `warnings::register` deprecation warning, gated on
+    #      CHALK_WARN_DEPRECATED_REPR so no existing run became noisy
+    #   3. the call sites: 136 in lib/, 1560 in t/ across 101 files
+    #   4. this deletion
     #
-    #     ->representation   111 reads      ->stamp        12
-    #     set_representation  32 writes     set_stamp       6
-    #
-    # so the deprecated spelling is still the majority and cannot simply be
-    # deleted. It is not merely a style preference: the name is WRONG about
-    # which axis it names. A stamp is a TYPE (`Unknown` is a legitimate value);
-    # a representation is a MACHINE ENCODING (`Unknown` has none, and
-    # _repr_to_llvm_type dies on it). Calling the type axis by the encoding
-    # axis's name is what lets a value that is correct on one axis be read as
-    # poison on the other -- see the paragraphs above for the concrete case.
-    #
-    # PLANNED, in this order, and deliberately NOT done together:
-    #   1. this notice                       <- you are here
-    #   2. a `warnings::register` deprecation warning on both methods, silent
-    #      by default so no existing run becomes noisy
-    #   3. migrate the call sites, then restore pristine test output
-    #   4. delete these two methods
-    #
-    # Step 2 is separated from step 1 because turning on a warning across 143
-    # call sites at once floods every test run, and this project treats
-    # non-pristine test output as a failure rather than as noise to skim. The
-    # warning lands only when the migration is ready to absorb it.
-    # ---------------------------------------------------------------------
-    method representation() {
-        warnings::warnif('Chalk::IR::Node',
-            'representation() is deprecated; use stamp() -- it names the TYPE '
-          . 'axis, which is what this returns')
-            if $_WARN_DEPRECATED_REPR;
-        return $stamp;
-    }
-    method set_representation($repr) {
-        # The write is the more dangerous direction: it OVERWRITES the type
-        # rather than naming it, so a non-lattice name here destroys a real
-        # type. See the paragraphs above.
-        warnings::warnif('Chalk::IR::Node',
-            'set_representation() is deprecated; use set_stamp() -- it writes '
-          . 'the TYPE axis, and a machine-encoding name here destroys the type')
-            if $_WARN_DEPRECATED_REPR;
-        $stamp = $repr;
-        return;
-    }
+    # Step 2 was separated from 1 because turning the warning on across every
+    # site at once floods every run, and this project treats non-pristine test
+    # output as a failure rather than as noise to skim. With the sites migrated
+    # the warning went 1438 -> 0 on an ordinary test file, which is what made
+    # this deletion safe to do rather than hope for.
 }

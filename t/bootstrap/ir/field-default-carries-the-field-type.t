@@ -80,7 +80,7 @@ PROG
     # THE REGRESSION THIS FILE EXISTS FOR. Unstamped here means the LLVM
     # backend's _require_repr rejects it as "Call(new).default.field ... NO
     # representation".
-    is $dv->representation, 'ArrayRef',
+    is $dv->stamp, 'ArrayRef',
         'the default node carries the field type, not Unknown';
 };
 
@@ -99,7 +99,7 @@ PROG
     my ($f, $dv) = default_value_of($mop, 'Counter', '$n');
     ok $dv, 'the field has a default value node';
     is $dv->operation, 'Constant', 'the default is a scalar constant';
-    is $dv->representation, 'Int',
+    is $dv->stamp, 'Int',
         'the producer answer survives -- it is narrower than the field record';
 };
 

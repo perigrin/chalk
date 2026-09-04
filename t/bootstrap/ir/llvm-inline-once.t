@@ -42,11 +42,11 @@ subtest 'an inlined effectful callee used as both a statement and a value lowers
     # Callee: sub f { print "x\n"; 2 }
     my $callee_start = $f->make('Start');
     my $msg = $f->make('Constant', value => "x\n", const_type => 'string');
-    $msg->set_representation('Str');
+    $msg->set_stamp('Str');
     my $print = $f->make('Print', inputs => [$msg]);
     $print->set_control_in($callee_start);
     my $two = $f->make('Constant', value => 2, const_type => 'integer');
-    $two->set_representation('Int');
+    $two->set_stamp('Int');
     my $callee_ret = $f->make_cfg('Return', inputs => [$two]);
     $callee_ret->set_control_in($print);
     my $callee_graph = Chalk::IR::Graph->new(
@@ -61,16 +61,16 @@ subtest 'an inlined effectful callee used as both a statement and a value lowers
         name           => 'main::f',
         target         => mk_target($callee_graph),
     );
-    $call->set_representation('Int');
+    $call->set_stamp('Int');
     $call->set_control_in($start);
 
     my $rname = $f->make('Constant', value => '$r', const_type => 'string');
     my $vdecl = $f->make('VarDecl', inputs => [$rname, $call]);
-    $vdecl->set_representation('Int');
+    $vdecl->set_stamp('Int');
     $vdecl->set_control_in($call);
 
     my $rread = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vdecl]);
-    $rread->set_representation('Int');
+    $rread->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$rread]);
     $ret->set_control_in($vdecl);

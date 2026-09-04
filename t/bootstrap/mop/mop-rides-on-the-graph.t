@@ -102,8 +102,8 @@ SRC
 
     # And the edge is LOAD-BEARING, not decoration: the repr stamped on each
     # Call is the one resolved through it.
-    is $call{own}->representation, 'Int', 'own is stamped through the edge';
-    is $call{m}->representation, 'Int',   'inherited is stamped through the edge';
+    is $call{own}->stamp, 'Int', 'own is stamped through the edge';
+    is $call{m}->stamp, 'Int',   'inherited is stamped through the edge';
 };
 
 # A `:reader` accessor is synthesized by the backend, so no MOP::Method exists
@@ -131,7 +131,7 @@ SRC
     ok $call{v}, 'found the inherited reader call' or return;
     is $call{v}->target, undef,
         'a synthesized reader has no metaobject to target';
-    is $call{v}->representation, 'Int',
+    is $call{v}->stamp, 'Int',
         'and is stamped anyway, from the field type on the DECLARING class';
 };
 

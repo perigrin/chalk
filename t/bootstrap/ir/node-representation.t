@@ -7,12 +7,13 @@ use Scalar::Util qw(refaddr);
 use lib 'lib';
 
 use Chalk::IR::NodeFactory;
+use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 
 # D1: Node has a representation() reader.
 {
     my $f = Chalk::IR::NodeFactory->new;
     my $c = $f->make('Constant', value => '1', const_type => 'integer');
-    ok($c->can('representation'),
+    ok($c isa Chalk::IR::Value,
         'Constant node has representation() reader');
 }
 
@@ -20,7 +21,7 @@ use Chalk::IR::NodeFactory;
 {
     my $f = Chalk::IR::NodeFactory->new;
     my $c = $f->make('Constant', value => '1', const_type => 'integer');
-    is($c->representation(), undef,
+    is($c->stamp(), undef,
         'representation defaults to undef');
 }
 
@@ -28,7 +29,7 @@ use Chalk::IR::NodeFactory;
 {
     my $f = Chalk::IR::NodeFactory->new;
     my $c = $f->make('Constant', value => '1', const_type => 'integer');
-    ok($c->can('set_representation'),
+    ok($c isa Chalk::IR::Value,
         'Constant node has set_representation() setter');
 }
 
@@ -36,8 +37,8 @@ use Chalk::IR::NodeFactory;
 {
     my $f = Chalk::IR::NodeFactory->new;
     my $c = $f->make('Constant', value => '1', const_type => 'integer');
-    $c->set_representation('Int');
-    is($c->representation(), 'Int',
+    $c->set_stamp('Int');
+    is($c->stamp(), 'Int',
         'set_representation("Int") is readable back');
 }
 
@@ -49,10 +50,10 @@ use Chalk::IR::NodeFactory;
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c1 = $f->make('Constant', value => '42', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
 
     my $c2 = $f->make('Constant', value => '42', const_type => 'integer');
-    $c2->set_representation('Scalar');
+    $c2->set_stamp('Scalar');
 
     is(refaddr($c1), refaddr($c2),
         'same-content nodes with different representation still hash-cons to one object');
@@ -63,7 +64,7 @@ use Chalk::IR::NodeFactory;
 {
     my $f = Chalk::IR::NodeFactory->new;
     my $c = $f->make('Constant', value => '7', const_type => 'integer');
-    $c->set_representation('Num');
+    $c->set_stamp('Num');
     my $hash = $c->content_hash();
     unlike($hash, qr/representation/,
         'content_hash() does not contain the string "representation"');
@@ -75,8 +76,8 @@ use Chalk::IR::NodeFactory;
     my $lhs = $f->make('Constant', value => '1', const_type => 'integer');
     my $rhs = $f->make('Constant', value => '2', const_type => 'integer');
     my $add = $f->make('Add', inputs => [$lhs, $rhs]);
-    $add->set_representation('Int');
-    is($add->representation(), 'Int',
+    $add->set_stamp('Int');
+    is($add->stamp(), 'Int',
         'Add node also carries representation');
 }
 

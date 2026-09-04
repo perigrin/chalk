@@ -44,14 +44,14 @@ sub build_str_param_int_return_graph {
 
     # Method returns Int (not Str) — line 372 scan gets $need_strpair=0
     my $int_body = $f->make('Constant', value => 42, const_type => 'integer');
-    $int_body->set_representation('Int');
+    $int_body->set_stamp('Int');
     my $m = $cls->declare_method('get_int', return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$int_body]));
 
     $mop->seal;
 
     my $str_val = $f->make('Constant', value => 'hello', const_type => 'string');
-    $str_val->set_representation('Str');
+    $str_val->set_stamp('Str');
 
     # New with Str :param — _lower_new at line ~3521 emits %StrPair instructions
     my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
@@ -59,7 +59,7 @@ sub build_str_param_int_return_graph {
         param_names => ['name'],
         inputs      => [$str_val],
     );
-    $new_obj->set_representation('Object');
+    $new_obj->set_stamp('Object');
 
     # Call the Int method (so the outer Return is Int, not Str)
     my $call = $f->make('Call',
@@ -68,7 +68,7 @@ sub build_str_param_int_return_graph {
         class_name    => 'StrParamIntReturn',
         inputs        => [$new_obj],
     );
-    $call->set_representation('Int');
+    $call->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
     return ($ret, $f, $mop);
@@ -126,7 +126,7 @@ subtest 'Str-returning method: exactly one %StrPair (I3 no double-declare)' => s
     my $cls = $mop->declare_class('StrReturn');
 
     my $str_val = $f->make('Constant', value => 'world', const_type => 'string');
-    $str_val->set_representation('Str');
+    $str_val->set_stamp('Str');
 
     my $m = $cls->declare_method('get_str', return_type => 'Str');
     $m->graph->merge($f->make_cfg('Return', inputs => [$str_val]));
@@ -135,7 +135,7 @@ subtest 'Str-returning method: exactly one %StrPair (I3 no double-declare)' => s
 
     my $new_obj = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'StrReturn', param_names => [], inputs => []);
-    $new_obj->set_representation('Object');
+    $new_obj->set_stamp('Object');
 
     my $call = $f->make('Call',
         dispatch_kind => 'method',
@@ -143,7 +143,7 @@ subtest 'Str-returning method: exactly one %StrPair (I3 no double-declare)' => s
         class_name    => 'StrReturn',
         inputs        => [$new_obj],
     );
-    $call->set_representation('Str');
+    $call->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 

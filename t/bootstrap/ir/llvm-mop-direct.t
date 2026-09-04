@@ -31,16 +31,16 @@ sub print_returned_value {
 
     my $v = $ret_node->inputs->[0];
     my $s = $v;
-    if (($v->representation // '') ne 'Str') {
+    if (($v->stamp // '') ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
-            from_repr => $v->representation, to_repr => 'Str');
-        $s->set_representation('Str');
+            from_repr => $v->stamp, to_repr => 'Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -50,7 +50,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -72,7 +72,7 @@ sub run_lli {
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     return $c;
 }
 
@@ -91,19 +91,19 @@ subtest 'field + reader + ADJUST + method via the sealed MOP' => sub {
 
     # method val { $y }
     my $fa_y = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
-    $fa_y->set_representation('Int');
+    $fa_y->set_stamp('Int');
     my $m = $cls->declare_method('val', return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$fa_y]));
 
     # ADJUST { $y = $x + 1 }
     my $fa_x = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
-    $fa_x->set_representation('Int');
+    $fa_x->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$fa_x, int_const($f, 1)]);
-    $add->set_representation('Int');
+    $add->set_stamp('Int');
     my $fa_y_lv = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
-    $fa_y_lv->set_representation('Int');
+    $fa_y_lv->set_stamp('Int');
     my $st = $f->make('Assign', inputs => [$fa_y_lv, $add]);
-    $st->set_representation('Int');
+    $st->set_stamp('Int');
     my $adj = $cls->declare_adjust();
     $adj->graph->merge($st);
 
@@ -111,15 +111,15 @@ subtest 'field + reader + ADJUST + method via the sealed MOP' => sub {
 
     my $new = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Pt', param_names => ['x'], inputs => [int_const($f, 5)]);
-    $new->set_representation('Object');
+    $new->set_stamp('Object');
     my $val = $f->make('Call', dispatch_kind => 'method', name => 'val',
         class_name => 'Pt', inputs => [$new]);
-    $val->set_representation('Int');
+    $val->set_stamp('Int');
     my $x = $f->make('Call', dispatch_kind => 'method', name => 'x',
         class_name => 'Pt', inputs => [$new]);
-    $x->set_representation('Int');
+    $x->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$val, $x]);
-    $sum->set_representation('Int');
+    $sum->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
 
     my $ll = Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1);
@@ -145,10 +145,10 @@ subtest ':isa inheritance through the MOP registry' => sub {
 
     my $new = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Kid', inputs => []);
-    $new->set_representation('Object');
+    $new->set_stamp('Object');
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'seven',
         class_name => 'Kid', inputs => [$new]);
-    $call->set_representation('Int');
+    $call->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
@@ -168,19 +168,19 @@ subtest 'multi-statement ADJUST body in control-chain order' => sub {
     $cls->declare_field('q', sigil => '$', type => 'Int', attributes => []);
 
     my $fa_x = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
-    $fa_x->set_representation('Int');
+    $fa_x->set_stamp('Int');
     my $fa_p_lv = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
-    $fa_p_lv->set_representation('Int');
+    $fa_p_lv->set_stamp('Int');
     my $fa_q_lv = $f->make('FieldAccess', field_index => 2, field_stash => 'Pt', inputs => []);
-    $fa_q_lv->set_representation('Int');
+    $fa_q_lv->set_stamp('Int');
 
     my $st_p = $f->make('Assign', inputs => [$fa_p_lv, $fa_x]);
-    $st_p->set_representation('Int');
+    $st_p->set_stamp('Int');
     my $st_x = $f->make('Assign',
         inputs => [$f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []), int_const($f, 9)]);
-    $st_x->set_representation('Int');
+    $st_x->set_stamp('Int');
     my $st_q = $f->make('Assign', inputs => [$fa_q_lv, $fa_x]);
-    $st_q->set_representation('Int');
+    $st_q->set_stamp('Int');
 
     # Thread the body order: st_p -> st_x -> st_q.
     $st_x->set_control_in($st_p);
@@ -190,11 +190,11 @@ subtest 'multi-statement ADJUST body in control-chain order' => sub {
     $adj->graph->merge($_) for ($st_p, $st_x, $st_q);
 
     my $fa_p = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
-    $fa_p->set_representation('Int');
+    $fa_p->set_stamp('Int');
     my $fa_q = $f->make('FieldAccess', field_index => 2, field_stash => 'Pt', inputs => []);
-    $fa_q->set_representation('Int');
+    $fa_q->set_stamp('Int');
     my $body = $f->make('Add', inputs => [$fa_p, $fa_q]);
-    $body->set_representation('Int');
+    $body->set_stamp('Int');
     my $m = $cls->declare_method('val', return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body]));
 
@@ -202,10 +202,10 @@ subtest 'multi-statement ADJUST body in control-chain order' => sub {
 
     my $new = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Pt', param_names => ['x'], inputs => [int_const($f, 5)]);
-    $new->set_representation('Object');
+    $new->set_stamp('Object');
     my $val = $f->make('Call', dispatch_kind => 'method', name => 'val',
         class_name => 'Pt', inputs => [$new]);
-    $val->set_representation('Int');
+    $val->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$val]);
 
     my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
@@ -232,10 +232,10 @@ subtest 'grandparent inheritance, child sorts before parent (review)' => sub {
 
     my $new = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Kid', inputs => []);
-    $new->set_representation('Object');
+    $new->set_stamp('Object');
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'seven',
         class_name => 'Kid', inputs => [$new]);
-    $call->set_representation('Int');
+    $call->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
@@ -255,7 +255,7 @@ subtest 'field default value lowers through the MOP registry (review)' => sub {
         has_default => true, default_value => $c41);
 
     my $fa_y = $f->make('FieldAccess', field_index => 0, field_stash => 'Dft', inputs => []);
-    $fa_y->set_representation('Int');
+    $fa_y->set_stamp('Int');
     my $m = $cls->declare_method('val', return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$fa_y]));
 
@@ -263,10 +263,10 @@ subtest 'field default value lowers through the MOP registry (review)' => sub {
 
     my $new = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Dft', inputs => []);
-    $new->set_representation('Object');
+    $new->set_stamp('Object');
     my $val = $f->make('Call', dispatch_kind => 'method', name => 'val',
         class_name => 'Dft', inputs => [$new]);
-    $val->set_representation('Int');
+    $val->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$val]);
 
     my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
@@ -286,9 +286,9 @@ subtest 'phaser body collection ignores statement-effect sub-expressions' => sub
     my $rhs_call = $f->make('Call', dispatch_kind => 'builtin', name => 'length',
         inputs => [$f->make('Constant', value => 'abc', const_type => 'string')]);
     my $fa_lv = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
-    $fa_lv->set_representation('Int');
+    $fa_lv->set_stamp('Int');
     my $st = $f->make('Assign', inputs => [$fa_lv, $rhs_call]);
-    $st->set_representation('Int');
+    $st->set_stamp('Int');
 
     my $adj = $cls->declare_adjust();
     $adj->graph->merge($st);   # ONE statement; the Call rides as its input
@@ -336,7 +336,7 @@ subtest 'guards: unsealed MOP and Return-less method die loudly' => sub {
     my $f4 = Chalk::IR::NodeFactory->new;
     my $ghost = $f4->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Ghost', inputs => []);
-    $ghost->set_representation('Object');
+    $ghost->set_stamp('Object');
     my $ret4 = $f4->make_cfg('Return', inputs => [$ghost]);
     my $err4;
     eval { Chalk::Target::LLVM->lower($ret4); 1 } or $err4 = $@;

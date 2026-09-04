@@ -46,21 +46,21 @@ sub make_print_program {
         : do {
             my $c = $f->make('Coerce', inputs => [$value_node],
                 from_repr => $repr, to_repr => 'Str');
-            $c->set_representation('Str');
+            $c->set_stamp('Str');
             $c;
         };
 
     my $lb = $f->make('Constant', value => '[', const_type => 'string');
-    $lb->set_representation('Str');
+    $lb->set_stamp('Str');
     my $rb = $f->make('Constant', value => ']', const_type => 'string');
-    $rb->set_representation('Str');
+    $rb->set_stamp('Str');
 
     my $start = $f->make_cfg('Start');
     my $print = $f->make('Print', inputs => [$lb, $str, $rb]);
     $print->set_control_in($start);
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
 
@@ -90,7 +90,7 @@ subtest 'Call(dispatch_kind=method, name=greet): $g->greet => 42 (Int)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
-    $body42->set_representation('Int');
+    $body42->set_stamp('Int');
 
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Greeter');
@@ -103,7 +103,7 @@ subtest 'Call(dispatch_kind=method, name=greet): $g->greet => 42 (Int)' => sub {
         param_names => [],
         inputs      => [],
     );
-    $new_g->set_representation('Object');
+    $new_g->set_stamp('Object');
 
     # Use Call(dispatch_kind='method') instead of MethodCall
     my $result = $f->make('Call',
@@ -112,7 +112,7 @@ subtest 'Call(dispatch_kind=method, name=greet): $g->greet => 42 (Int)' => sub {
         class_name    => 'Greeter',
         inputs        => [$new_g],
     );
-    $result->set_representation('Int');
+    $result->set_stamp('Int');
 
     my $ret = make_print_program($f, $result, 'Int');
 
@@ -140,7 +140,7 @@ subtest 'Call(dispatch_kind=method) on absent method dies loudly' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $body = $f->make('Constant', value => 1, const_type => 'integer');
-    $body->set_representation('Int');
+    $body->set_stamp('Int');
 
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Greeter');
@@ -150,7 +150,7 @@ subtest 'Call(dispatch_kind=method) on absent method dies loudly' => sub {
 
     my $new_g = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Greeter', param_names => [], inputs => []);
-    $new_g->set_representation('Object');
+    $new_g->set_stamp('Object');
 
     # Call 'wave' which does not exist
     my $bad = $f->make('Call',
@@ -159,7 +159,7 @@ subtest 'Call(dispatch_kind=method) on absent method dies loudly' => sub {
         class_name    => 'Greeter',
         inputs        => [$new_g],
     );
-    $bad->set_representation('Int');
+    $bad->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$bad]);
 
@@ -182,13 +182,13 @@ subtest 'guard: a field with NO declared type dies GAP (no silent Int default)' 
     $mop->seal;
 
     my $val = $f->make('Constant', value => 'cat', const_type => 'string');
-    $val->set_representation('Str');
+    $val->set_stamp('Str');
     my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Untyped', param_names => ['name'], inputs => [$val]);
-    $new_o->set_representation('Object');
+    $new_o->set_stamp('Object');
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'name',
         class_name => 'Untyped', inputs => [$new_o]);
-    $call->set_representation('Str');
+    $call->set_stamp('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
@@ -199,7 +199,7 @@ subtest 'guard: Call(method) node repr disagreeing with the vtable ABI dies' => 
     my $f = Chalk::IR::NodeFactory->new;
 
     my $body = $f->make('Constant', value => '42', const_type => 'integer');
-    $body->set_representation('Int');
+    $body->set_stamp('Int');
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Mismatch');
     my $m   = $cls->declare_method('answer', return_type => 'Int');
@@ -208,12 +208,12 @@ subtest 'guard: Call(method) node repr disagreeing with the vtable ABI dies' => 
 
     my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Mismatch', param_names => [], inputs => []);
-    $new_o->set_representation('Object');
+    $new_o->set_stamp('Object');
     # The node CLAIMS Str but the vtable define returns i64 — through the i8*
     # fn-ptr bitcast lli ACCEPTS the wrong-ABI call (the silent channel).
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'answer',
         class_name => 'Mismatch', inputs => [$new_o]);
-    $call->set_representation('Str');
+    $call->set_stamp('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };

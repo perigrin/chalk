@@ -45,28 +45,28 @@ sub roundtrip_graph ($from, $value, $to) {
 
     my $c = $f->make('Constant', value => $value,
                      const_type => ($from eq 'Str' ? 'string' : 'number'));
-    $c->set_representation($from);
+    $c->set_stamp($from);
 
     my $box = $f->make('Coerce', inputs => [$c],
                        from_repr => $from, to_repr => 'Scalar');
-    $box->set_representation('Scalar');
+    $box->set_stamp('Scalar');
 
     my $read = $f->make('Coerce', inputs => [$box],
                         from_repr => 'Scalar', to_repr => $to);
-    $read->set_representation($to);
+    $read->set_stamp($to);
 
     my $str = $read;
     if ($to ne 'Str') {
         $str = $f->make('Coerce', inputs => [$read],
                         from_repr => $to, to_repr => 'Str');
-        $str->set_representation('Str');
+        $str->set_stamp('Str');
     }
 
     my $ctrl = $f->make_cfg('Start');
     for my $part ('[', $str, "]\n") {
         my $val = ref $part ? $part : do {
             my $k = $f->make('Constant', value => $part, const_type => 'string');
-            $k->set_representation('Str');
+            $k->set_stamp('Str');
             $k;
         };
         my $pr = $f->make('Print', inputs => [$val]);
@@ -75,7 +75,7 @@ sub roundtrip_graph ($from, $value, $to) {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;

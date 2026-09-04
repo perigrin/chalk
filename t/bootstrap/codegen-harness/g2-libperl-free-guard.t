@@ -28,7 +28,7 @@ use Chalk::IR::Node::Return;
 subtest 'clean .ll passes libperl-free guard' => sub {
     my $fac = Chalk::IR::NodeFactory->new;
     my $c   = $fac->make('Constant', value => 7, const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     my $ret = $fac->make_cfg('Return', inputs => [$c]);
 
     my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($ret);

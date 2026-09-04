@@ -566,7 +566,7 @@ sub run ($class, $graphs, $classes = undef) {
 # before any pass had a chance to type it. The producer can use ADJUST because
 # it builds a node only once it knows the value; chalk cannot.
 #
-# WHY IT MATTERS. Once this holds, `defined $node->representation` STOPS
+# WHY IT MATTERS. Once this holds, `defined $node->stamp` STOPS
 # DISCRIMINATING for value nodes -- it is always true. The nine guards in the
 # loader that use it as "already decided" are then asking a question with a
 # fixed answer, and must be re-expressed as `_is_narrowed` (committed to
@@ -970,10 +970,10 @@ sub _resolve_direct_calls ($graphs) {
             # list-returning sub's callsites from its SCALAR face --
             # the same bug bson hit in _graph_return_type (7b26a89).
             my $val = $ret ? $ret->value() : undef;
-            if ($val && _is_narrowed($val->representation)) {
-                my $have = $node->representation;
-                my $want = $val->representation;
-                $node->set_representation($want)
+            if ($val && _is_narrowed($val->stamp)) {
+                my $have = $node->stamp;
+                my $want = $val->stamp;
+                $node->set_stamp($want)
                     if !_is_narrowed($have)
                     || ($have ne $want
                         && Chalk::Grammar::Perl::TypeLibrary::is_subtype($want, $have));
@@ -1024,7 +1024,7 @@ sub _resolve_direct_calls ($graphs) {
                 # one-typed-arm-plus-one-recursive-arm shape. Mutual recursion
                 # where no arm types on the first pass still needs real
                 # iteration to a fixpoint.
-                $node->set_representation('None');
+                $node->set_stamp('None');
             }
         }
     }
@@ -1178,21 +1178,21 @@ sub _seed_direct_call_arg_reprs ($graphs) {
                     defined $pname && length $pname or next;
                     next if exists $params{$i};   # a real Parameter node wins
                     my $arg  = $args[$i]                    or next;
-                    my $repr = $arg->representation         or next;
+                    my $repr = $arg->stamp         or next;
                     for my $n ($callee->nodes->@*) {
                         next unless blessed($n)
                                  && $n->operation eq 'PadAccess'
                                  && $n->can('varname')
                                  && ($n->varname // '') eq $pname;
                         # A HOLE IS `Unknown` OR ABSENT, not merely undef.
-                        # `defined ->representation` reads Unknown as a
+                        # `defined ->stamp` reads Unknown as a
                         # committed answer and would skip the very case
                         # this fill exists for -- a forwarded parameter
                         # arrives stamped Unknown, not undef. _is_narrowed
                         # is the predicate the other guards use for
                         # exactly this question (pinned by
                         # ir/is-narrowed-guards.t, which caught this).
-                        next if _is_narrowed($n->representation);
+                        next if _is_narrowed($n->stamp);
                         $collect->( $n, $repr, _arg_is_self_call($arg, $callee) );
                     }
                 }
@@ -1205,7 +1205,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
                     # against the operation that needed a type, rather than
                     # guessing here.
                     my $arg = $args[$i] or next;
-                    my $repr = $arg->representation // next;
+                    my $repr = $arg->stamp // next;
                     $collect->( $params{$i}, $repr,
                         _arg_is_self_call( $arg, $callee ) );
                 }
@@ -1241,7 +1241,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
             }
             next unless @reads == 1 && @args == 1;
 
-            my $arg_repr = $args[0]->representation // next;
+            my $arg_repr = $args[0]->stamp // next;
             $collect->( $reads[0], $arg_repr,
                 _arg_is_self_call( $args[0], $callee ) );
         }
@@ -1260,7 +1260,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
         sort { $a->{node}->id cmp $b->{node}->id } values %pending )
     {
         my $read = $slot->{node};
-        my $existing = $read->representation;
+        my $existing = $read->stamp;
 
         # A SELF-REFERENTIAL ARM IS NOT A SECOND CALLER'S MEASUREMENT. In
         # `f(f(1))` both callsites bind the SAME read: the inner passes
@@ -1344,7 +1344,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
         # Only a real move counts. `$stamped` drives the caller's `while`, so
         # returning a nonzero for a no-op re-stamp is what would spin it.
         next if defined $existing && $existing eq $joined;
-        $read->set_representation($joined);
+        $read->set_stamp($joined);
         $stamped++;
     }
 
@@ -1388,8 +1388,8 @@ sub _insert_str_coercions ($graphs) {
 
                 my $in = $inputs->[$i];
                 next unless defined $in && ref $in && ref($in) ne 'ARRAY';
-                next unless $in->can('representation');
-                my $repr = $in->representation;
+                next unless $in isa Chalk::IR::Value;
+                my $repr = $in->stamp;
                 # undef repr: nothing established a type, so a coercion here
                 # would be the guess the producer already declined to make.
                 # The backend reports it against the operator, which names the
@@ -1428,7 +1428,7 @@ sub _insert_str_coercions ($graphs) {
                     from_repr => $repr,
                     to_repr   => $want,
                 );
-                $c->set_representation($want);
+                $c->set_stamp($want);
                 $inputs->[$i] = $c;
                 $inserted++;
             }
@@ -1482,8 +1482,8 @@ sub _narrow_unknown_coercions ($graphs) {
                 next unless blessed($c) && $c->isa('Chalk::IR::Node::Coerce');
 
                 my $operand = ($c->inputs // [])->[0];
-                next unless blessed($operand) && $operand->can('representation');
-                my $repr = $operand->representation;
+                next unless $operand isa Chalk::IR::Value;
+                my $repr = $operand->stamp;
 
                 # A STALE `from_repr` IS ALSO UN-NARROWED, even when it names a
                 # real type. The gate here used to be `!_is_narrowed(from_repr)`
@@ -1580,7 +1580,7 @@ sub _narrow_unknown_coercions ($graphs) {
                     # re-propagation below derives the new answer. Restricted to
                     # the vacuous case -- an identity edge ($repr eq to_repr)
                     # changes no type, so its consumer's stamp is still true.
-                    if ($vacuous && $node->can('set_representation')) {
+                    if ($vacuous && $node isa Chalk::IR::Value) {
                         push @stale, $node;
                     }
 
@@ -1593,7 +1593,7 @@ sub _narrow_unknown_coercions ($graphs) {
                     from_repr => $repr,
                     to_repr   => $c->to_repr,
                 );
-                $new->set_representation($c->to_repr);
+                $new->set_stamp($c->to_repr);
 
                 $inputs->[$i] = $new;
                 # The old Coerce no longer reads the operand.
@@ -1609,7 +1609,7 @@ sub _narrow_unknown_coercions ($graphs) {
     # than before, so this runs the same propagation the loader already
     # trusts rather than inventing an answer here.
     if (@stale) {
-        $_->set_representation(undef) for @stale;
+        $_->set_stamp(undef) for @stale;
         _propagate_computed_reprs($graphs);
     }
 
@@ -1629,7 +1629,7 @@ sub _ctor_arg_reprs ($graphs) {
             my @args  = $node->inputs->@*;
             for my $i (0 .. $#$pn) {
                 my $arg  = $args[$i] or next;
-                my $repr = blessed($arg) ? $arg->representation : undef;
+                my $repr = blessed($arg) ? $arg->stamp : undef;
                 next unless defined $repr && $_INFERABLE_FIELD_REPR{$repr};
 
                 # JOIN over every construction site, never the first one.
@@ -1730,9 +1730,9 @@ sub _replay_classes ($classes, $graphs) {
             # "Call(new).default.field" (zhi 019f61ad).
             if (defined $field_type
                     && defined $default_node
-                    && $default_node->can('set_representation')
-                    && !_is_narrowed($default_node->representation)) {
-                $default_node->set_representation($field_type);
+                    && $default_node isa Chalk::IR::Value
+                    && !_is_narrowed($default_node->stamp)) {
+                $default_node->set_stamp($field_type);
             }
 
             $cls->declare_field($vname,
@@ -1930,7 +1930,7 @@ sub _seed_and_propagate_reprs ($graphs) {
             push @seed_nodes, $n unless $seen{ $n->id }++;
         }
         for my $node (@seed_nodes) {
-            next if _is_narrowed($node->representation);
+            next if _is_narrowed($node->stamp);
             # A qr// compiled-regex literal is a Constant of const_type 'regex';
             # its repr is Regex (the matcher value the backend resolves
             # statically). Keyed on const_type, not node kind, so it can't live
@@ -1938,11 +1938,11 @@ sub _seed_and_propagate_reprs ($graphs) {
             if ($node->operation eq 'Constant'
                 && $node->can('const_type')
                 && ($node->const_type // '') eq 'regex') {
-                $node->set_representation('Regex');
+                $node->set_stamp('Regex');
                 next;
             }
             my $seed = $_SEED_REPR{ $node->operation } // next;
-            $node->set_representation($seed);
+            $node->set_stamp($seed);
         }
     }
     _propagate_computed_reprs($graphs);
@@ -2043,27 +2043,27 @@ sub _propagate_computed_reprs ($graphs) {
                 # descends a finite lattice finitely often) and keeps this
                 # forward inference -- the node is retyped from its own inputs,
                 # never from a consumer's requirement.
-                if (_is_narrowed($node->representation)
+                if (_is_narrowed($node->stamp)
                     && ($_COMPUTED_REPR{ $node->operation } // '') eq 'join') {
                     my $inputs = $node->can('inputs') ? $node->inputs : undef;
                     my @operand_reprs =
-                        map  { $_->representation }
-                        grep { blessed($_) && $_->can('representation')
-                                 && _is_narrowed($_->representation) }
+                        map  { $_->stamp }
+                        grep { $_ isa Chalk::IR::Value
+                                 && _is_narrowed($_->stamp) }
                         ($inputs ? $inputs->@* : ());
-                    my $have = $node->representation;
+                    my $have = $node->stamp;
                     if ($inputs && @operand_reprs == scalar(grep { blessed($_) } $inputs->@*)
                         && @operand_reprs) {
                         my $want = _join_repr(@operand_reprs);
                         if (defined $want && $want ne $have
                             && Chalk::Grammar::Perl::TypeLibrary::is_subtype($want, $have)) {
-                            $node->set_representation($want);
+                            $node->set_stamp($want);
                             $changed = 1;
                         }
                     }
                 }
 
-                next if _is_narrowed($node->representation);
+                next if _is_narrowed($node->stamp);
                 my $op = $node->operation;
 
                 # A Subscript reads an element out of an aggregate container:
@@ -2100,9 +2100,9 @@ sub _propagate_computed_reprs ($graphs) {
                     }
                     my $repr = _element_repr( $node->inputs->[0] );
                     next unless defined $repr;
-                    my $prev = $node->representation;
+                    my $prev = $node->stamp;
                     next if defined $prev && $prev eq $repr;
-                    $node->set_representation($repr);
+                    $node->set_stamp($repr);
                     $changed = 1;
                     next;
                 }
@@ -2115,19 +2115,19 @@ sub _propagate_computed_reprs ($graphs) {
                 if ($op eq 'Assign') {
                     my $value = $node->inputs->[-1];
                     next unless defined $value && blessed($value);
-                    my $repr = $value->representation // next;
-                    my $prev = $node->representation;
+                    my $repr = $value->stamp // next;
+                    my $prev = $node->stamp;
                     next if defined $prev && $prev eq $repr;
-                    $node->set_representation($repr);
+                    $node->set_stamp($repr);
                     $changed = 1;
                     next;
                 }
 
                 my $rule = $_COMPUTED_REPR{$op} // next;
                 if ($rule ne 'join') {
-                    my $prev = $node->representation;
+                    my $prev = $node->stamp;
                     next if defined $prev && $prev eq $rule;
-                    $node->set_representation($rule);
+                    $node->set_stamp($rule);
                     $changed = 1;
                     next;
                 }
@@ -2150,7 +2150,7 @@ sub _propagate_computed_reprs ($graphs) {
                 # condition among its inputs to drop.
                 @in = @in[ 1 .. $#in ] if $op eq 'TernaryExpr' && @in > 1;
 
-                my @reprs = map { $_->representation } @in;
+                my @reprs = map { $_->stamp } @in;
                 next if grep { !defined } @reprs;          # an input still untyped
 
                 # A `Slot` arm is NOT dropped here, and the reason is worth
@@ -2183,11 +2183,11 @@ sub _propagate_computed_reprs ($graphs) {
                 # SIDEWAYS between incomparable elements, which the change guard
                 # below cannot stop -- termination would then be luck of which
                 # moves happen to be reachable rather than a proof.
-                my $widest = _join_repr($node->representation, @reprs);
+                my $widest = _join_repr($node->stamp, @reprs);
                 next unless defined $widest;
-                my $prev = $node->representation;
+                my $prev = $node->stamp;
                     next if defined $prev && $prev eq $widest;
-                    $node->set_representation($widest);
+                    $node->set_stamp($widest);
                 $changed = 1;
             }
         }
@@ -2255,13 +2255,13 @@ sub _element_repr ($container) {
     else {
         return undef;   # container repr not a literal aggregate we can read
     }
-    my @reprs = map { blessed($_) ? $_->representation : undef } @elems;
+    my @reprs = map { blessed($_) ? $_->stamp : undef } @elems;
     # An UNTYPED store contributes undef, which fails the all-defined check
     # below — correct, because the caller runs inside the repr fixpoint and
     # will ask again once that store's rhs is typed. Answering from the
     # literals alone while a store is still untyped would commit to a type the
     # store may be about to widen.
-    push @reprs, map { blessed($_) ? $_->representation : undef }
+    push @reprs, map { blessed($_) ? $_->stamp : undef }
                  _element_store_values($container);
     return undef unless @reprs;
     return undef if grep { !defined } @reprs;
@@ -2369,7 +2369,7 @@ sub _static_miss ($container, $index) {
     my $flattens = grep {
         blessed($_) && do {
             my $op = $_->operation;
-            my $r  = $_->can('representation') ? ($_->representation // '') : '';
+            my $r  = $_ isa Chalk::IR::Value ? ($_->stamp // '') : '';
             $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
                 || $r eq 'List' || $r eq 'Array' || $r eq 'Hash'
                 || ($op eq 'Slice' || $op eq 'ExpressionList'
@@ -2458,7 +2458,7 @@ sub _infer_field_types_from_stores ($classes, $graphs) {
             my ($lv, $val) = ($node->inputs->[0], $node->inputs->[1]);
             next unless blessed($lv) && $lv->operation eq 'FieldAccess';
             next unless blessed($val);
-            my $repr = $val->representation // next;
+            my $repr = $val->stamp // next;
             my $key  = ($lv->field_stash // '') . "\0" . ($lv->field_index // -1);
             # A field written with conflicting reprs across stores is ambiguous;
             # leave it untyped (a GAP) rather than pick one (a possible miscompile).
@@ -2538,17 +2538,17 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
         for my $node ($g->nodes->@*) {
             # The :reader accessor's field read (see %reader_graph_type above).
             if ($reader && $node->operation eq 'PadAccess'
-                    && !_is_narrowed($node->representation)
+                    && !_is_narrowed($node->stamp)
                     && $node->can('varname')
                     && ($node->varname // '') eq $reader->{varname}) {
-                $node->set_representation($reader->{type});
+                $node->set_stamp($reader->{type});
                 next;
             }
-            if ($node->operation eq 'FieldAccess' && !_is_narrowed($node->representation)) {
+            if ($node->operation eq 'FieldAccess' && !_is_narrowed($node->stamp)) {
                 my $stash = $node->field_stash // next;
                 my $fidx  = $node->field_index;
                 my $type  = $field_type{"$stash\::" . ($fidx // -1)} // next;
-                $node->set_representation($type);
+                $node->set_stamp($type);
                 next;
             }
             # A Subscript reading an element out of an aggregate FIELD: its repr
@@ -2556,13 +2556,13 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
             # literal aggregate _element_repr can read). A LITERAL constant index
             # is left for the OOB->Slot path (references R9); only a non-literal
             # index needs this (its own _element_repr sees a FieldAccess).
-            if ($node->operation eq 'Subscript' && !_is_narrowed($node->representation)) {
+            if ($node->operation eq 'Subscript' && !_is_narrowed($node->stamp)) {
                 my $cont = $node->inputs->[0];
                 next unless blessed($cont) && $cont->operation eq 'FieldAccess';
                 my $er = $field_elem_type{
                     ($cont->field_stash // '') . '::' . ($cont->field_index // -1) };
                 next unless defined $er;
-                $node->set_representation($er);
+                $node->set_stamp($er);
             }
         }
     }
@@ -2619,7 +2619,7 @@ sub _stamp_method_call_reprs ($graphs, $mop) {
             next unless $ret;
             my $val = $ret->inputs->[0];
             next unless defined $val && blessed($val);
-            my $repr = $val->representation;
+            my $repr = $val->stamp;
             # Not merely `defined`: an unnarrowed graph-derived repr is not a
             # second opinion, so it must not be compared against the wire's.
             # `Unknown ne Str` is true and would fire the disagreement die
@@ -2763,7 +2763,7 @@ sub _stamp_method_call_reprs ($graphs, $mop) {
             # a real method (perl5-son 4df7576): before that a :reader had no
             # entry in the class's methods record, so this loop never saw one
             # and could not re-stamp it.
-            my $prev = $node->representation;
+            my $prev = $node->stamp;
             next if defined $prev && $prev eq $repr;
 
             # DOWNWARD ONLY once a stamp exists. An unnarrowed Call takes the
@@ -2775,7 +2775,7 @@ sub _stamp_method_call_reprs ($graphs, $mop) {
             next if _is_narrowed($prev)
                 && !Chalk::Grammar::Perl::TypeLibrary::is_subtype($repr, $prev);
 
-            $node->set_representation($repr);
+            $node->set_stamp($repr);
             $stamped++;
         }
     }

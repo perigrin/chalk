@@ -42,16 +42,16 @@ sub print_returned_value {
 
     my $v = $ret_node->inputs->[0];
     my $s = $v;
-    if (($v->representation // '') ne 'Str') {
+    if (($v->stamp // '') ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
-            from_repr => $v->representation, to_repr => 'Str');
-        $s->set_representation('Str');
+            from_repr => $v->stamp, to_repr => 'Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -61,7 +61,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -102,10 +102,10 @@ subtest 'Call(name=new): class-simple ref($e) => "Empty" (Str)' => sub {
         inputs        => [],
         param_names   => [],
     );
-    $new_e->set_representation('Object');
+    $new_e->set_stamp('Object');
 
     my $ref_result = $f->make(q{RefType}, inputs => [$new_e]);
-    $ref_result->set_representation('Str');
+    $ref_result->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$ref_result]);
 
@@ -141,9 +141,9 @@ subtest 'Call(name=new): field-attrs Pair->new(left=>10, right=>20), left+right 
     $mop->seal;
 
     my $lval = $f->make('Constant', value => 10, const_type => 'integer');
-    $lval->set_representation('Int');
+    $lval->set_stamp('Int');
     my $rval = $f->make('Constant', value => 20, const_type => 'integer');
-    $rval->set_representation('Int');
+    $rval->set_stamp('Int');
 
     # Call(name='new') with :param values
     my $new_p = $f->make('Call',
@@ -153,7 +153,7 @@ subtest 'Call(name=new): field-attrs Pair->new(left=>10, right=>20), left+right 
         inputs        => [$lval, $rval],
         param_names   => ['left', 'right'],
     );
-    $new_p->set_representation('Object');
+    $new_p->set_stamp('Object');
 
     my $lr = $f->make('Call',
         dispatch_kind => 'method',
@@ -161,7 +161,7 @@ subtest 'Call(name=new): field-attrs Pair->new(left=>10, right=>20), left+right 
         class_name    => 'Pair',
         inputs        => [$new_p],
     );
-    $lr->set_representation('Int');
+    $lr->set_stamp('Int');
 
     my $rr = $f->make('Call',
         dispatch_kind => 'method',
@@ -169,10 +169,10 @@ subtest 'Call(name=new): field-attrs Pair->new(left=>10, right=>20), left+right 
         class_name    => 'Pair',
         inputs        => [$new_p],
     );
-    $rr->set_representation('Int');
+    $rr->set_stamp('Int');
 
     my $result = $f->make('Add', inputs => [$lr, $rr]);
-    $result->set_representation('Int');
+    $result->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$result]);
 

@@ -43,16 +43,16 @@ sub print_returned_value {
 
     my $v = $ret_node->inputs->[0];
     my $s = $v;
-    if (($v->representation // '') ne 'Str') {
+    if (($v->stamp // '') ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
-            from_repr => $v->representation, to_repr => 'Str');
-        $s->set_representation('Str');
+            from_repr => $v->stamp, to_repr => 'Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -62,7 +62,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -97,7 +97,7 @@ subtest 'method-simple via MOP registry: $g->greet => 42 (Int)' => sub {
 
     # Method body
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
-    $body42->set_representation('Int');
+    $body42->set_stamp('Int');
 
     # MOP: class Greeter { method greet { return 42 } }
     my $mop = Chalk::MOP->new;
@@ -112,7 +112,7 @@ subtest 'method-simple via MOP registry: $g->greet => 42 (Int)' => sub {
         param_names => [],
         inputs      => [],
     );
-    $new_g->set_representation('Object');
+    $new_g->set_stamp('Object');
 
     # Call(dispatch_kind='method'): resolved by class_name
     my $result = $f->make('Call',
@@ -121,7 +121,7 @@ subtest 'method-simple via MOP registry: $g->greet => 42 (Int)' => sub {
         class_name    => 'Greeter',
         inputs        => [$new_g],
     );
-    $result->set_representation('Int');
+    $result->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$result]);
 
@@ -158,12 +158,12 @@ subtest 'class-simple via MOP registry: ref($e) => "Empty" (Str)' => sub {
         param_names => [],
         inputs      => [],
     );
-    $new_e->set_representation('Object');
+    $new_e->set_stamp('Object');
 
     my $ref_result = $f->make(q{RefType},
         inputs => [$new_e],
     );
-    $ref_result->set_representation('Str');
+    $ref_result->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$ref_result]);
 
@@ -196,7 +196,7 @@ subtest 'field-basic via MOP registry: $a->name => "cat" (Str)' => sub {
         field_stash => 'Animal',
         inputs      => [],
     );
-    $field_read->set_representation('Str');
+    $field_read->set_stamp('Str');
 
     # MOP: class Animal { field $name :param; method name { return $name } }
     my $mop = Chalk::MOP->new;
@@ -208,14 +208,14 @@ subtest 'field-basic via MOP registry: $a->name => "cat" (Str)' => sub {
     $mop->seal;
 
     my $name_val = $f->make('Constant', value => 'cat', const_type => 'string');
-    $name_val->set_representation('Str');
+    $name_val->set_stamp('Str');
 
     my $new_a = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name  => 'Animal',
         param_names => ['name'],
         inputs      => [$name_val],
     );
-    $new_a->set_representation('Object');
+    $new_a->set_stamp('Object');
 
     my $result = $f->make('Call',
         dispatch_kind => 'method',
@@ -223,7 +223,7 @@ subtest 'field-basic via MOP registry: $a->name => "cat" (Str)' => sub {
         class_name    => 'Animal',
         inputs        => [$new_a],
     );
-    $result->set_representation('Str');
+    $result->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$result]);
 

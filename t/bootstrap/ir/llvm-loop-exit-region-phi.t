@@ -21,7 +21,7 @@ use Chalk::Target::LLVM;
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     return $c;
 }
 
@@ -31,17 +31,17 @@ subtest 'an exit-Region phi consumer dies with a diagnostic' => sub {
     # my $i = 0; while ($i < 3) { $i = $i + 1 } return $i;
     my $ni = $f->make('Constant', value => '$i', const_type => 'string');
     my $vi = $f->make('VarDecl', inputs => [$ni, int_const($f, 0)]);
-    $vi->set_representation('Int');
+    $vi->set_stamp('Int');
     my $ri0 = $f->make('PadAccess', targ => 0, varname => '$i', inputs => [$vi]);
-    $ri0->set_representation('Int');
+    $ri0->set_stamp('Int');
 
     my $loop = $f->make('Loop', inputs => [$vi, undef]);
     my $i_phi = $f->make('Phi', region => $loop, values => [$ri0]);
-    $i_phi->set_representation('Int');
+    $i_phi->set_stamp('Int');
     my $cmp = $f->make('NumLt', inputs => [$i_phi, int_const($f, 3)]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
     my $i_new = $f->make('Add', inputs => [$i_phi, int_const($f, 1)]);
-    $i_new->set_representation('Int');
+    $i_new->set_stamp('Int');
     $i_phi->set_backedge($i_new);
 
     my $body_proj = $f->make('Proj', inputs => [$loop], index => 0);
@@ -53,7 +53,7 @@ subtest 'an exit-Region phi consumer dies with a diagnostic' => sub {
     # Adversarially attach a Phi to the EXIT region (the shape no real
     # producer makes — the thing the guard must reject).
     my $exit_phi = $f->make('Phi', region => $exit_region, values => [$i_phi, $ri0]);
-    $exit_phi->set_representation('Int');
+    $exit_phi->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$exit_phi]);
     $loop->set_control_in($vi);

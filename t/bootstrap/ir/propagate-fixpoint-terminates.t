@@ -54,7 +54,7 @@ subtest 'the latch and the write discipline stay in step' => sub {
         or die 'could not find _is_narrowed';
     my $latches = $pred !~ /return\s+false\b/;
 
-    like $body, qr/next if _is_narrowed\(\$node->representation\)/,
+    like $body, qr/next if _is_narrowed\(\$node->stamp\)/,
         'the loop skips already-narrowed nodes';
 
     # THE PAIRING. If someone loosens _is_narrowed so a repr can be revisited,
@@ -81,7 +81,7 @@ subtest 'a Scalar-joined merge settles instead of re-joining forever' => sub {
     my $i = 0;
     my @in = map {
         my $n = $f->make( 'Constant', const_type => 'integer', value => ++$i );
-        $n->set_representation($_);
+        $n->set_stamp($_);
         $n;
     } ( 'Undef', 'Int' );
 
@@ -104,7 +104,7 @@ subtest 'a Scalar-joined merge settles instead of re-joining forever' => sub {
     ok $done, 'the fixpoint terminated'
         or diag("error: " . ($err // $@ // 'timed out'));
 
-    is $d->representation, 'Scalar',
+    is $d->stamp, 'Scalar',
         'and it settled on Scalar -- written once, then latched';
 };
 

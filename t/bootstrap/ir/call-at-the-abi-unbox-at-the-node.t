@@ -52,7 +52,7 @@ subtest 'the disagreement this exercises is real' => sub {
             && ($_->can('dispatch_kind') ? ($_->dispatch_kind // '') : '') eq 'method'
             && ($_->name // '') eq 'val'
     } $driver->nodes->@*;
-    is +($call ? $call->representation : undef), 'Int',
+    is +($call ? $call->stamp : undef), 'Int',
         'the call site node was narrowed to Int';
 };
 

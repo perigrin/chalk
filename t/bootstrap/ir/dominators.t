@@ -35,12 +35,12 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c1 = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $xn = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx = $f->make('VarDecl', inputs => [$xn, $c1]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $ret->set_control_in($vx);
 
@@ -80,29 +80,29 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c5   = $f->make('Constant', value => '5', const_type => 'integer');
-    $c5->set_representation('Int');
+    $c5->set_stamp('Int');
     my $c0   = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1->set_representation('Int');
+    $c1->set_stamp('Int');
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
-    $c2->set_representation('Int');
+    $c2->set_stamp('Int');
     my $cmp  = $f->make('NumGt', inputs => [$c5, $c0]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Int');
+    $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
-    $as1->set_representation('Int');
+    $as1->set_stamp('Int');
 
     my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs2->set_representation('Int');
+    $lhs2->set_stamp('Int');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
-    $as2->set_representation('Int');
+    $as2->set_stamp('Int');
 
     my $if_node = $f->make('If',   inputs => [$vx, $cmp]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -114,7 +114,7 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     $as2->set_control_in($proj1);
 
     my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
     $ret->set_control_in($if_node);
@@ -186,41 +186,41 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c3   = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3->set_representation('Int');
+    $c3->set_stamp('Int');
     my $c0a  = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0a->set_representation('Int');
+    $c0a->set_stamp('Int');
     my $c0b  = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0b->set_representation('Int');
+    $c0b->set_stamp('Int');
     my $one  = $f->make('Constant', value => '1', const_type => 'integer');
-    $one->set_representation('Int');
+    $one->set_stamp('Int');
 
     my $nn   = $f->make('Constant', value => '$n', const_type => 'string');
     my $sn   = $f->make('Constant', value => '$s', const_type => 'string');
     my $vn   = $f->make('VarDecl', inputs => [$nn, $c3]);
-    $vn->set_representation('Int');
+    $vn->set_stamp('Int');
     my $vs   = $f->make('VarDecl', inputs => [$sn, $c0a]);
-    $vs->set_representation('Int');
+    $vs->set_stamp('Int');
 
     my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
-    $rn0->set_representation('Int');
+    $rn0->set_stamp('Int');
     my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
-    $rs0->set_representation('Int');
+    $rs0->set_stamp('Int');
 
     my $loop = $f->make('Loop', inputs => [$vs, undef]);
 
     my $n_phi = $f->make('Phi', region => $loop, values => [$rn0]);
-    $n_phi->set_representation('Int');
+    $n_phi->set_stamp('Int');
     my $s_phi = $f->make('Phi', region => $loop, values => [$rs0]);
-    $s_phi->set_representation('Int');
+    $s_phi->set_stamp('Int');
 
     my $cmp  = $f->make('NumGt', inputs => [$n_phi, $c0b]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
     $cmp->set_control_in($loop);   # structural: header condition
 
     my $s_new = $f->make('Add', inputs => [$s_phi, $n_phi]);
-    $s_new->set_representation('Int');
+    $s_new->set_stamp('Int');
     my $n_new = $f->make('Subtract', inputs => [$n_phi, $one]);
-    $n_new->set_representation('Int');
+    $n_new->set_stamp('Int');
 
     $n_phi->set_backedge($n_new);
     $s_phi->set_backedge($s_new);
@@ -290,41 +290,41 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $n    = $f->make('Constant', value => '5', const_type => 'integer');
-    $n->set_representation('Int');
+    $n->set_stamp('Int');
     my $zero = $f->make('Constant', value => '0', const_type => 'integer');
-    $zero->set_representation('Int');
+    $zero->set_stamp('Int');
     my $three= $f->make('Constant', value => '3', const_type => 'integer');
-    $three->set_representation('Int');
+    $three->set_stamp('Int');
     my $c3v  = $f->make('Constant', value => '3', const_type => 'integer');
-    $c3v->set_representation('Int');
+    $c3v->set_stamp('Int');
     my $c1v  = $f->make('Constant', value => '1', const_type => 'integer');
-    $c1v->set_representation('Int');
+    $c1v->set_stamp('Int');
     my $c0v  = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0v->set_representation('Int');
+    $c0v->set_stamp('Int');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $cmp_out = $f->make('NumGt', inputs => [$n, $zero]);
-    $cmp_out->set_representation('Boolean');
+    $cmp_out->set_stamp('Boolean');
     my $cmp_in  = $f->make('NumGt', inputs => [$n, $three]);
-    $cmp_in->set_representation('Boolean');
+    $cmp_in->set_stamp('Boolean');
 
     my $lhs3 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs3->set_representation('Int');
+    $lhs3->set_stamp('Int');
     my $as3  = $f->make('Assign', inputs => [$lhs3, $c3v]);
-    $as3->set_representation('Int');
+    $as3->set_stamp('Int');
 
     my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs1->set_representation('Int');
+    $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1v]);
-    $as1->set_representation('Int');
+    $as1->set_stamp('Int');
 
     my $lhs0 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs0->set_representation('Int');
+    $lhs0->set_stamp('Int');
     my $as0  = $f->make('Assign', inputs => [$lhs0, $c0v]);
-    $as0->set_representation('Int');
+    $as0->set_stamp('Int');
 
     my $inner_if = $f->make('If', inputs => [$vx, $cmp_in]);
     my $inner_p0 = $f->make('Proj', inputs => [$inner_if], index => 0);
@@ -344,7 +344,7 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     $inner_if->set_control_in($outer_p0);
 
     my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $outer_if->set_control_in($vx);
     $ret->set_control_in($outer_if);
@@ -406,15 +406,15 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c5  = $f->make('Constant', value => '5', const_type => 'integer');
-    $c5->set_representation('Int');
+    $c5->set_stamp('Int');
     my $c0  = $f->make('Constant', value => '0', const_type => 'integer');
-    $c0->set_representation('Int');
+    $c0->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$c5, $c0]);
-    $cmp->set_representation('Boolean');
+    $cmp->set_stamp('Boolean');
 
     my $xn   = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $if_node = $f->make('If', inputs => [$vx, $cmp]);
     my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
@@ -423,7 +423,7 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     $if_node->set_region($region);
 
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
     $ret->set_control_in($if_node);

@@ -47,21 +47,21 @@ sub print_num ($bits, $label) {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $c = $f->make('Constant', value => $bits, const_type => 'number');
-    $c->set_representation('Num');
+    $c->set_stamp('Num');
     my $s = $f->make('Coerce', inputs => [$c], from_repr => 'Num', to_repr => 'Str');
-    $s->set_representation('Str');
+    $s->set_stamp('Str');
 
     my $lb = $f->make('Constant', value => '[', const_type => 'string');
-    $lb->set_representation('Str');
+    $lb->set_stamp('Str');
     my $rb = $f->make('Constant', value => ']', const_type => 'string');
-    $rb->set_representation('Str');
+    $rb->set_stamp('Str');
 
     my $start = $f->make_cfg('Start');
     my $print = $f->make('Print', inputs => [$lb, $s, $rb]);
     $print->set_control_in($start);
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($print);
 

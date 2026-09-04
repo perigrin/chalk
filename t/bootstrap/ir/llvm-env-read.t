@@ -23,16 +23,16 @@ sub print_returned_value {
 
     my $v = $ret_node->inputs->[0];
     my $s = $v;
-    if (($v->representation // '') ne 'Str') {
+    if (($v->stamp // '') ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
-            from_repr => $v->representation, to_repr => 'Str');
-        $s->set_representation('Str');
+            from_repr => $v->stamp, to_repr => 'Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -42,7 +42,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -70,7 +70,7 @@ subtest 'EnvRead of a set variable returns its value' => sub {
     local $ENV{CHALK_G7_TEST} = 'hostval';
     my $f = _mk();
     my $e = $f->make('EnvRead', key => 'CHALK_G7_TEST');
-    $e->set_representation('Str');
+    $e->set_stamp('Str');
     my $ret = $f->make_cfg('Return', inputs => [$e]);
     my ($out, $ll) = eval { lli_run($ret, factory => $f) };
     ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
@@ -84,7 +84,7 @@ subtest 'EnvRead of an UNSET variable yields the empty string (documented diverg
     delete local $ENV{CHALK_G7_UNSET};
     my $f = _mk();
     my $e = $f->make('EnvRead', key => 'CHALK_G7_UNSET');
-    $e->set_representation('Str');
+    $e->set_stamp('Str');
     my $ret = $f->make_cfg('Return', inputs => [$e]);
     my ($out) = eval { lli_run($ret, factory => $f) };
     ok(!$@, 'lowering + lli succeeded (no NULL-deref)') or do { diag("error: $@"); return };
@@ -95,9 +95,9 @@ subtest 'EnvRead composes: length($ENV{...})' => sub {
     local $ENV{CHALK_G7_TEST} = 'sevench';
     my $f = _mk();
     my $e = $f->make('EnvRead', key => 'CHALK_G7_TEST');
-    $e->set_representation('Str');
+    $e->set_stamp('Str');
     my $len = $f->make('Length', inputs => [$e]);
-    $len->set_representation('Int');
+    $len->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$len]);
     my ($out) = eval { lli_run($ret, factory => $f) };
     ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
@@ -117,7 +117,7 @@ subtest 'EnvRead in two method bodies: declared getenv, no duplicate globals' =>
     my $mk_body = sub {
         my ($key) = @_;
         my $e = $f->make('EnvRead', key => $key);
-        $e->set_representation('Str');
+        $e->set_stamp('Str');
         return $e;
     };
 
@@ -131,10 +131,10 @@ subtest 'EnvRead in two method bodies: declared getenv, no duplicate globals' =>
 
     my $new_o = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Envy', param_names => [], inputs => []);
-    $new_o->set_representation('Object');
+    $new_o->set_stamp('Object');
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'env_a',
         class_name => 'Envy', inputs => [$new_o]);
-    $call->set_representation('Str');
+    $call->set_stamp('Str');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     my ($out, $ll) = eval { lli_run($ret, mop => $mop, factory => $f) };

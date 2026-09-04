@@ -38,7 +38,7 @@ sub run_lli {
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     return $c;
 }
 
@@ -54,18 +54,18 @@ sub print_and_return {
     # Print takes a Str, so a non-Str value is bridged with an explicit
     # Coerce -- the same node a source program's producer inserts.
     my $arg  = $value;
-    my $repr = $value->representation;
+    my $repr = $value->stamp;
     if (!defined $repr || $repr ne 'Str') {
         $arg = $f->make('Coerce', inputs => [$value],
             from_repr => $repr, to_repr => 'Str');
-        $arg->set_representation('Str');
+        $arg->set_stamp('Str');
     }
 
     my $print = $f->make('Print', inputs => [$arg]);
     $print->set_control_in($last_effect // $f->make_cfg('Start'));
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
     return $ret;
@@ -79,35 +79,35 @@ subtest 'pure Add over reassigned PadAccess re-lowers per consumption (C1)' => s
 
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx = $f->make('VarDecl', inputs => [$nx, int_const($f, 1)]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $rx1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx1->set_representation('Int');
+    $rx1->set_stamp('Int');
     my $c10 = int_const($f, 10);
     my $add1 = $f->make('Add', inputs => [$rx1, $c10]);
-    $add1->set_representation('Int');
+    $add1->set_stamp('Int');
     my $ny = $f->make('Constant', value => '$y', const_type => 'string');
     my $vy = $f->make('VarDecl', inputs => [$ny, $add1]);
-    $vy->set_representation('Int');
+    $vy->set_stamp('Int');
 
     my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
     my $asg = $f->make('Assign', inputs => [$rxL, int_const($f, 2)]);
-    $asg->set_representation('Int');
+    $asg->set_stamp('Int');
 
     my $rx2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
     my $add2 = $f->make('Add', inputs => [$rx2, $c10]);
-    $add2->set_representation('Int');
+    $add2->set_stamp('Int');
     is($add2->id, $add1->id, 'precondition: the two pure Adds hash-cons to one node');
     my $nz = $f->make('Constant', value => '$z', const_type => 'string');
     my $vz = $f->make('VarDecl', inputs => [$nz, $add2]);
-    $vz->set_representation('Int');
+    $vz->set_stamp('Int');
 
     my $ryF = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
-    $ryF->set_representation('Int');
+    $ryF->set_stamp('Int');
     my $rzF = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
-    $rzF->set_representation('Int');
+    $rzF->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$ryF, $rzF]);
-    $sum->set_representation('Int');
+    $sum->set_stamp('Int');
     # Existing chain: vx -> vy -> asg -> vz; the Print goes after vz.
     $vz->set_control_in($asg);
     $asg->set_control_in($vy);
@@ -127,26 +127,26 @@ subtest 'repeat scalar rebind increments twice (C1+C3 interaction)' => sub {
 
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx = $f->make('VarDecl', inputs => [$nx, int_const($f, 1)]);
-    $vx->set_representation('Int');
+    $vx->set_stamp('Int');
 
     my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx->set_representation('Int');
+    $rx->set_stamp('Int');
     my $c1 = int_const($f, 1);
 
     my $add1 = $f->make('Add', inputs => [$rx, $c1]);
-    $add1->set_representation('Int');
+    $add1->set_stamp('Int');
     my $asg1 = $f->make('Assign', inputs => [$rx, $add1]);
-    $asg1->set_representation('Int');
+    $asg1->set_stamp('Int');
 
     my $add2 = $f->make('Add', inputs => [$rx, $c1]);
-    $add2->set_representation('Int');
+    $add2->set_stamp('Int');
     my $asg2 = $f->make('Assign', inputs => [$rx, $add2]);
-    $asg2->set_representation('Int');
+    $asg2->set_stamp('Int');
 
     isnt($asg1->id, $asg2->id, 'precondition: the two Assigns are distinct (Family-A)');
 
     my $rxF = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rxF->set_representation('Int');
+    $rxF->set_stamp('Int');
     # Existing chain: vx -> asg1 -> asg2; the Print goes after asg2.
     $asg2->set_control_in($asg1);
     $asg1->set_control_in($vx);
@@ -164,21 +164,21 @@ subtest 'Subscript read-store-read re-reads the element (C2)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $arr = $f->make('ArrayLiteral', inputs => [int_const($f, 1), int_const($f, 2)]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
     my $i0 = int_const($f, 0);
 
     my $rd1 = $f->make('Subscript', inputs => [$arr, $i0]);
-    $rd1->set_representation('Slot');
+    $rd1->set_stamp('Slot');
     my $np = $f->make('Constant', value => '$p', const_type => 'string');
     my $vp = $f->make('VarDecl', inputs => [$np, $rd1]);
-    $vp->set_representation('Slot');
+    $vp->set_stamp('Slot');
 
     my $st = $f->make('Assign',
         inputs => [$f->make('Subscript', inputs => [$arr, $i0]), int_const($f, 9)]);
-    $st->set_representation('Int');
+    $st->set_stamp('Int');
 
     my $rd2 = $f->make('Subscript', inputs => [$arr, $i0]);
-    $rd2->set_representation('Slot');
+    $rd2->set_stamp('Slot');
     is($rd2->id, $rd1->id, 'precondition: the two element reads hash-cons to one node');
 
     # Existing chain: vp -> st; the Print goes after st.
@@ -199,21 +199,21 @@ subtest 'pre-store binding keeps its old value (no over-correction)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $arr = $f->make('ArrayLiteral', inputs => [int_const($f, 1), int_const($f, 2)]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
     my $i0 = int_const($f, 0);
 
     my $rd1 = $f->make('Subscript', inputs => [$arr, $i0]);
-    $rd1->set_representation('Slot');
+    $rd1->set_stamp('Slot');
     my $np = $f->make('Constant', value => '$p', const_type => 'string');
     my $vp = $f->make('VarDecl', inputs => [$np, $rd1]);
-    $vp->set_representation('Slot');
+    $vp->set_stamp('Slot');
 
     my $st = $f->make('Assign',
         inputs => [$f->make('Subscript', inputs => [$arr, $i0]), int_const($f, 9)]);
-    $st->set_representation('Int');
+    $st->set_stamp('Int');
 
     my $rp = $f->make('PadAccess', targ => 0, varname => '$p', inputs => [$vp]);
-    $rp->set_representation('Slot');
+    $rp->set_stamp('Slot');
 
     # Existing chain: vp -> st; the Print goes after st.
     $st->set_control_in($vp);
@@ -234,26 +234,26 @@ subtest 'repeat compound assign fires twice (C3 behavioral)' => sub {
         $f->make('Constant', value => 'x', const_type => 'string'),
         int_const($f, 1),
     ]);
-    $vd->set_representation('Int');
+    $vd->set_stamp('Int');
 
     my $pa = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
-    $pa->set_representation('Int');
+    $pa->set_stamp('Int');
     my $c2 = int_const($f, 2);
 
     my $add1 = $f->make('Add', inputs => [$pa, $c2]);
-    $add1->set_representation('Int');
+    $add1->set_stamp('Int');
     my $ca1 = $f->make('CompoundAssign', op => '+=', inputs => [$pa, $add1]);
-    $ca1->set_representation('Int');
+    $ca1->set_stamp('Int');
 
     my $add2 = $f->make('Add', inputs => [$pa, $c2]);
-    $add2->set_representation('Int');
+    $add2->set_stamp('Int');
     my $ca2 = $f->make('CompoundAssign', op => '+=', inputs => [$pa, $add2]);
-    $ca2->set_representation('Int');
+    $ca2->set_stamp('Int');
 
     isnt($ca1->id, $ca2->id, 'precondition: the two CompoundAssigns are distinct (Family-A)');
 
     my $ret_pad = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
-    $ret_pad->set_representation('Int');
+    $ret_pad->set_stamp('Int');
     # Existing chain: vd -> ca1 -> ca2; the Print goes after ca2.
     $ca2->set_control_in($ca1);
     $ca1->set_control_in($vd);
@@ -281,25 +281,25 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     $cls->declare_field('q', sigil => '$', type => 'Int', attributes => []);
 
     my $fa_x_rd1 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
-    $fa_x_rd1->set_representation('Int');
+    $fa_x_rd1->set_stamp('Int');
     my $fa_p_lv = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
-    $fa_p_lv->set_representation('Int');
+    $fa_p_lv->set_stamp('Int');
     my $st_p = $f->make('Assign', inputs => [$fa_p_lv, $fa_x_rd1]);
-    $st_p->set_representation('Int');
+    $st_p->set_stamp('Int');
 
     my $fa_x_lv = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
-    $fa_x_lv->set_representation('Int');
+    $fa_x_lv->set_stamp('Int');
     my $st_x = $f->make('Assign', inputs => [$fa_x_lv, int_const($f, 9)]);
-    $st_x->set_representation('Int');
+    $st_x->set_stamp('Int');
 
     my $fa_x_rd2 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
-    $fa_x_rd2->set_representation('Int');
+    $fa_x_rd2->set_stamp('Int');
     is($fa_x_rd2->id, $fa_x_rd1->id,
         'precondition: the two field reads hash-cons to one node');
     my $fa_q_lv = $f->make('FieldAccess', field_index => 2, field_stash => 'Pt', inputs => []);
-    $fa_q_lv->set_representation('Int');
+    $fa_q_lv->set_stamp('Int');
     my $st_q = $f->make('Assign', inputs => [$fa_q_lv, $fa_x_rd2]);
-    $st_q->set_representation('Int');
+    $st_q->set_stamp('Int');
 
     # Thread the ADJUST body order: st_p -> st_x -> st_q.
     $st_x->set_control_in($st_p);
@@ -308,11 +308,11 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     $adj->graph->merge($_) for ($st_p, $st_x, $st_q);
 
     my $fa_p_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
-    $fa_p_rd->set_representation('Int');
+    $fa_p_rd->set_stamp('Int');
     my $getp = $cls->declare_method('getp', return_type => 'Int');
     $getp->graph->merge($f->make_cfg('Return', inputs => [$fa_p_rd]));
     my $fa_q_rd = $f->make('FieldAccess', field_index => 2, field_stash => 'Pt', inputs => []);
-    $fa_q_rd->set_representation('Int');
+    $fa_q_rd->set_stamp('Int');
     my $getq = $cls->declare_method('getq', return_type => 'Int');
     $getq->graph->merge($f->make_cfg('Return', inputs => [$fa_q_rd]));
 
@@ -321,15 +321,15 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     my $v5 = int_const($f, 5);
     my $new = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Pt', param_names => ['x'], inputs => [$v5]);
-    $new->set_representation('Object');
+    $new->set_stamp('Object');
     my $get_p = $f->make('Call', dispatch_kind => 'method', name => 'getp',
         class_name => 'Pt', inputs => [$new]);
-    $get_p->set_representation('Int');
+    $get_p->set_stamp('Int');
     my $get_q = $f->make('Call', dispatch_kind => 'method', name => 'getq',
         class_name => 'Pt', inputs => [$new]);
-    $get_q->set_representation('Int');
+    $get_q->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$get_p, $get_q]);
-    $sum->set_representation('Int');
+    $sum->set_stamp('Int');
     # No pre-existing top-level effect chain here (the ordering under test is
     # inside the ADJUST body), so the Print hangs off a fresh Start.
     my $ret = print_and_return($f, $sum);

@@ -46,7 +46,7 @@ sub run_lli {
 sub int_const {
     my ($f, $val) = @_;
     my $c = $f->make('Constant', value => "$val", const_type => 'integer');
-    $c->set_representation('Int');
+    $c->set_stamp('Int');
     return $c;
 }
 
@@ -62,18 +62,18 @@ sub print_and_return {
     # Print takes a Str, so a non-Str value is bridged with an explicit
     # Coerce -- the same node a source program's producer inserts.
     my $arg  = $value;
-    my $repr = $value->representation;
+    my $repr = $value->stamp;
     if (!defined $repr || $repr ne 'Str') {
         $arg = $f->make('Coerce', inputs => [$value],
             from_repr => $repr, to_repr => 'Str');
-        $arg->set_representation('Str');
+        $arg->set_stamp('Str');
     }
 
     my $print = $f->make('Print', inputs => [$arg]);
     $print->set_control_in($last_effect);
 
     my $undef = $f->make('Constant', value => undef, const_type => 'undef');
-    $undef->set_representation('Undef');
+    $undef->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$undef]);
     $ret->set_control_in($print);
     return $ret;
@@ -113,26 +113,26 @@ sub print_and_return {
     my $f  = Chalk::IR::NodeFactory->new;
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
     my $c1 = int_const($f, 1);
-    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_representation('Int');
+    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_stamp('Int');
 
     # my $y = $x (pre-assign read)
     my $rx1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx1->set_representation('Int');
+    $rx1->set_stamp('Int');
     my $ny  = $f->make('Constant', value => '$y', const_type => 'string');
-    my $vy  = $f->make('VarDecl', inputs => [$ny, $rx1]); $vy->set_representation('Int');
+    my $vy  = $f->make('VarDecl', inputs => [$ny, $rx1]); $vy->set_stamp('Int');
 
     # $x = 2
     my $c2  = int_const($f, 2);
     my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rxL->set_representation('Int');
-    my $asg = $f->make('Assign', inputs => [$rxL, $c2]); $asg->set_representation('Int');
+    $rxL->set_stamp('Int');
+    my $asg = $f->make('Assign', inputs => [$rxL, $c2]); $asg->set_stamp('Int');
 
     # return $x + $y  (post-assign read)
     my $rx2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx2->set_representation('Int');
+    $rx2->set_stamp('Int');
     my $ryF = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
-    $ryF->set_representation('Int');
-    my $add = $f->make('Add', inputs => [$rx2, $ryF]); $add->set_representation('Int');
+    $ryF->set_stamp('Int');
+    my $add = $f->make('Add', inputs => [$rx2, $ryF]); $add->set_stamp('Int');
     # Existing chain: vx -> vy -> asg; the Print goes after asg.
     $asg->set_control_in($vy); $vy->set_control_in($vx);
     my $ret = print_and_return($f, $add, $asg);
@@ -169,42 +169,42 @@ sub print_and_return {
     my $f  = Chalk::IR::NodeFactory->new;
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
     my $c1 = int_const($f, 1);
-    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_representation('Int');
+    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_stamp('Int');
 
     # my $y = $x  (x=1)
     my $rx_for_y = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx_for_y->set_representation('Int');
+    $rx_for_y->set_stamp('Int');
     my $ny = $f->make('Constant', value => '$y', const_type => 'string');
-    my $vy = $f->make('VarDecl', inputs => [$ny, $rx_for_y]); $vy->set_representation('Int');
+    my $vy = $f->make('VarDecl', inputs => [$ny, $rx_for_y]); $vy->set_stamp('Int');
 
     # $x = 2
     my $c2   = int_const($f, 2);
     my $rxL1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rxL1->set_representation('Int');
-    my $asg1 = $f->make('Assign', inputs => [$rxL1, $c2]); $asg1->set_representation('Int');
+    $rxL1->set_stamp('Int');
+    my $asg1 = $f->make('Assign', inputs => [$rxL1, $c2]); $asg1->set_stamp('Int');
 
     # my $z = $x  (x=2 after first assign)
     my $rx_for_z = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx_for_z->set_representation('Int');
+    $rx_for_z->set_stamp('Int');
     my $nz = $f->make('Constant', value => '$z', const_type => 'string');
-    my $vz = $f->make('VarDecl', inputs => [$nz, $rx_for_z]); $vz->set_representation('Int');
+    my $vz = $f->make('VarDecl', inputs => [$nz, $rx_for_z]); $vz->set_stamp('Int');
 
     # $x = 3
     my $c3   = int_const($f, 3);
     my $rxL2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rxL2->set_representation('Int');
-    my $asg2 = $f->make('Assign', inputs => [$rxL2, $c3]); $asg2->set_representation('Int');
+    $rxL2->set_stamp('Int');
+    my $asg2 = $f->make('Assign', inputs => [$rxL2, $c3]); $asg2->set_stamp('Int');
 
     # return $x + $y + $z  (x=3 after second assign)
     my $rx_final = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx_final->set_representation('Int');
+    $rx_final->set_stamp('Int');
     my $ry_final = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
-    $ry_final->set_representation('Int');
+    $ry_final->set_stamp('Int');
     my $rz_final = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
-    $rz_final->set_representation('Int');
+    $rz_final->set_stamp('Int');
 
-    my $sum1 = $f->make('Add', inputs => [$rx_final, $ry_final]); $sum1->set_representation('Int');
-    my $sum2 = $f->make('Add', inputs => [$sum1, $rz_final]); $sum2->set_representation('Int');
+    my $sum1 = $f->make('Add', inputs => [$rx_final, $ry_final]); $sum1->set_stamp('Int');
+    my $sum2 = $f->make('Add', inputs => [$sum1, $rz_final]); $sum2->set_stamp('Int');
     # Existing chain: vx -> vy -> asg1 -> vz -> asg2; the Print goes after asg2.
     $asg2->set_control_in($vz);
     $vz->set_control_in($asg1);   $asg1->set_control_in($vy);
@@ -251,24 +251,24 @@ for my $pair ([5, 6], [-1, 2]) {
     # $n = $n_val  (the runtime input)
     my $cn = int_const($f, $n_val);
     my $nn = $f->make('Constant', value => '$n', const_type => 'string');
-    my $vn = $f->make('VarDecl', inputs => [$nn, $cn]); $vn->set_representation('Int');
+    my $vn = $f->make('VarDecl', inputs => [$nn, $cn]); $vn->set_stamp('Int');
 
     # my $x = 1
     my $c1 = int_const($f, 1);
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
-    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_representation('Int');
+    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_stamp('Int');
 
     # my $y = $x  (pre-branch read; x=1)
     my $rx_for_y = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx_for_y->set_representation('Int');
+    $rx_for_y->set_stamp('Int');
     my $ny = $f->make('Constant', value => '$y', const_type => 'string');
-    my $vy = $f->make('VarDecl', inputs => [$ny, $rx_for_y]); $vy->set_representation('Int');
+    my $vy = $f->make('VarDecl', inputs => [$ny, $rx_for_y]); $vy->set_stamp('Int');
 
     # condition: $n > 0
     my $c0  = int_const($f, 0);
     my $rn  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
-    $rn->set_representation('Int');
-    my $cmp = $f->make('NumGt', inputs => [$rn, $c0]); $cmp->set_representation('Boolean');
+    $rn->set_stamp('Int');
+    my $cmp = $f->make('NumGt', inputs => [$rn, $c0]); $cmp->set_stamp('Boolean');
 
     # If / Proj / Region
     my $if_node = $f->make('If',     inputs => [$vy, $cmp]);
@@ -280,17 +280,17 @@ for my $pair ([5, 6], [-1, 2]) {
     # then-branch: $x = 5
     my $c5  = int_const($f, 5);
     my $lhs = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $lhs->set_representation('Int');
-    my $asg = $f->make('Assign', inputs => [$lhs, $c5]); $asg->set_representation('Int');
+    $lhs->set_stamp('Int');
+    my $asg = $f->make('Assign', inputs => [$lhs, $c5]); $asg->set_stamp('Int');
     $asg->set_control_in($proj0);
 
     # post-merge reads
     my $rx_post = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rx_post->set_representation('Int');
+    $rx_post->set_stamp('Int');
     my $ry_post = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
-    $ry_post->set_representation('Int');
+    $ry_post->set_stamp('Int');
 
-    my $add = $f->make('Add', inputs => [$rx_post, $ry_post]); $add->set_representation('Int');
+    my $add = $f->make('Add', inputs => [$rx_post, $ry_post]); $add->set_stamp('Int');
     # Existing chain: vn -> vx -> vy -> if_node; the Print goes after the merge.
     $if_node->set_control_in($vy);
     $vy->set_control_in($vx);
@@ -341,23 +341,23 @@ for my $pair ([5, 6], [-1, 2]) {
     my $ni  = $f->make('Constant', value => '$i', const_type => 'string');
     my $nxl = $f->make('Constant', value => '$x', const_type => 'string');
     my $ns  = $f->make('Constant', value => '$s', const_type => 'string');
-    my $vi  = $f->make('VarDecl', inputs => [$ni, $c0i]); $vi->set_representation('Int');
-    my $vx  = $f->make('VarDecl', inputs => [$nxl, $c0x]); $vx->set_representation('Int');
-    my $vs  = $f->make('VarDecl', inputs => [$ns, $c0s]); $vs->set_representation('Int');
+    my $vi  = $f->make('VarDecl', inputs => [$ni, $c0i]); $vi->set_stamp('Int');
+    my $vx  = $f->make('VarDecl', inputs => [$nxl, $c0x]); $vx->set_stamp('Int');
+    my $vs  = $f->make('VarDecl', inputs => [$ns, $c0s]); $vs->set_stamp('Int');
 
-    my $ri0 = $f->make('PadAccess', targ => 0, varname => '$i', inputs => [$vi]); $ri0->set_representation('Int');
-    my $rx0 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]); $rx0->set_representation('Int');
-    my $rs0 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rs0->set_representation('Int');
+    my $ri0 = $f->make('PadAccess', targ => 0, varname => '$i', inputs => [$vi]); $ri0->set_stamp('Int');
+    my $rx0 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]); $rx0->set_stamp('Int');
+    my $rs0 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rs0->set_stamp('Int');
 
     my $loop   = $f->make('Loop', inputs => [$vs, undef]);
-    my $i_phi  = $f->make('Phi', region => $loop, values => [$ri0]); $i_phi->set_representation('Int');
-    my $x_phi  = $f->make('Phi', region => $loop, values => [$rx0]); $x_phi->set_representation('Int');
-    my $s_phi  = $f->make('Phi', region => $loop, values => [$rs0]); $s_phi->set_representation('Int');
+    my $i_phi  = $f->make('Phi', region => $loop, values => [$ri0]); $i_phi->set_stamp('Int');
+    my $x_phi  = $f->make('Phi', region => $loop, values => [$rx0]); $x_phi->set_stamp('Int');
+    my $s_phi  = $f->make('Phi', region => $loop, values => [$rs0]); $s_phi->set_stamp('Int');
 
-    my $cmp   = $f->make('NumLt', inputs => [$i_phi, $c3]); $cmp->set_representation('Boolean');
-    my $x_new = $f->make('Add', inputs => [$x_phi, $c1]); $x_new->set_representation('Int');
-    my $s_new = $f->make('Add', inputs => [$s_phi, $x_new]); $s_new->set_representation('Int');
-    my $i_new = $f->make('Add', inputs => [$i_phi, $c1]); $i_new->set_representation('Int');
+    my $cmp   = $f->make('NumLt', inputs => [$i_phi, $c3]); $cmp->set_stamp('Boolean');
+    my $x_new = $f->make('Add', inputs => [$x_phi, $c1]); $x_new->set_stamp('Int');
+    my $s_new = $f->make('Add', inputs => [$s_phi, $x_new]); $s_new->set_stamp('Int');
+    my $i_new = $f->make('Add', inputs => [$i_phi, $c1]); $i_new->set_stamp('Int');
 
     $i_phi->set_backedge($i_new);
     $x_phi->set_backedge($x_new);
@@ -405,48 +405,48 @@ for my $pair ([5, 6], [-1, 2]) {
     my $f  = Chalk::IR::NodeFactory->new;
     my $nx = $f->make('Constant', value => '$x', const_type => 'string');
     my $c1 = int_const($f, 1);
-    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_representation('Int');
+    my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_stamp('Int');
 
     # acc1 = $x  (x=1)
     my $r1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $r1->set_representation('Int');
+    $r1->set_stamp('Int');
     my $n1 = $f->make('Constant', value => '$acc1', const_type => 'string');
-    my $v1 = $f->make('VarDecl', inputs => [$n1, $r1]); $v1->set_representation('Int');
+    my $v1 = $f->make('VarDecl', inputs => [$n1, $r1]); $v1->set_stamp('Int');
 
     # $x = 2
     my $c2   = int_const($f, 2);
     my $rxL1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rxL1->set_representation('Int');
-    my $asg1 = $f->make('Assign', inputs => [$rxL1, $c2]); $asg1->set_representation('Int');
+    $rxL1->set_stamp('Int');
+    my $asg1 = $f->make('Assign', inputs => [$rxL1, $c2]); $asg1->set_stamp('Int');
 
     # acc2 = $x  (x=2)
     my $r2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $r2->set_representation('Int');
+    $r2->set_stamp('Int');
     my $n2 = $f->make('Constant', value => '$acc2', const_type => 'string');
-    my $v2 = $f->make('VarDecl', inputs => [$n2, $r2]); $v2->set_representation('Int');
+    my $v2 = $f->make('VarDecl', inputs => [$n2, $r2]); $v2->set_stamp('Int');
 
     # $x = 3
     my $c3   = int_const($f, 3);
     my $rxL2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $rxL2->set_representation('Int');
-    my $asg2 = $f->make('Assign', inputs => [$rxL2, $c3]); $asg2->set_representation('Int');
+    $rxL2->set_stamp('Int');
+    my $asg2 = $f->make('Assign', inputs => [$rxL2, $c3]); $asg2->set_stamp('Int');
 
     # acc3 = $x  (x=3)
     my $r3 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
-    $r3->set_representation('Int');
+    $r3->set_stamp('Int');
     my $n3 = $f->make('Constant', value => '$acc3', const_type => 'string');
-    my $v3 = $f->make('VarDecl', inputs => [$n3, $r3]); $v3->set_representation('Int');
+    my $v3 = $f->make('VarDecl', inputs => [$n3, $r3]); $v3->set_stamp('Int');
 
     # return acc1+acc2+acc3
     my $ra1 = $f->make('PadAccess', targ => 0, varname => '$acc1', inputs => [$v1]);
-    $ra1->set_representation('Int');
+    $ra1->set_stamp('Int');
     my $ra2 = $f->make('PadAccess', targ => 0, varname => '$acc2', inputs => [$v2]);
-    $ra2->set_representation('Int');
+    $ra2->set_stamp('Int');
     my $ra3 = $f->make('PadAccess', targ => 0, varname => '$acc3', inputs => [$v3]);
-    $ra3->set_representation('Int');
+    $ra3->set_stamp('Int');
 
-    my $sum1 = $f->make('Add', inputs => [$ra1, $ra2]); $sum1->set_representation('Int');
-    my $sum2 = $f->make('Add', inputs => [$sum1, $ra3]); $sum2->set_representation('Int');
+    my $sum1 = $f->make('Add', inputs => [$ra1, $ra2]); $sum1->set_stamp('Int');
+    my $sum2 = $f->make('Add', inputs => [$sum1, $ra3]); $sum2->set_stamp('Int');
     # Existing chain: vx -> v1 -> asg1 -> v2 -> asg2 -> v3; the Print goes after v3.
     $v3->set_control_in($asg2);
     $asg2->set_control_in($v2);  $v2->set_control_in($asg1);

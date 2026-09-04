@@ -77,7 +77,7 @@ subtest 'the folded comparator reaches the node' => sub {
 
     is($sort->sort_cmp,   'string',    'sort keys %h is a STRING compare');
     is($sort->sort_order, 'ascending', 'ascending');
-    is($sort->representation // '<undef>', 'Array',
+    is($sort->stamp // '<undef>', 'Array',
         'and it yields an Array -- the ordered keys');
 };
 

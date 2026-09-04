@@ -26,29 +26,29 @@ sub build ($store_it) {
     my $f = Chalk::IR::NodeFactory->new;
     my @elems = map {
         my $n = $f->make('Constant', value => $_, const_type => 'integer');
-        $n->set_representation('Int');
+        $n->set_stamp('Int');
         $n;
     } (1, 2);
     my $arr = $f->make('ArrayLiteral', inputs => [@elems]);
-    $arr->set_representation('ArrayRef');
+    $arr->set_stamp('ArrayRef');
 
     my $idx = $f->make('Constant', value => '0', const_type => 'integer');
-    $idx->set_representation('Int');
+    $idx->set_stamp('Int');
 
     if ($store_it) {
         # $arr[0] = 99 -- the lvalue Subscript hash-conses with the read below,
         # which is exactly why the read cannot be folded to the initializer.
         my $lv = $f->make('Subscript', inputs => [$arr, $idx]);
-        $lv->set_representation('Int');
+        $lv->set_stamp('Int');
         my $v = $f->make('Constant', value => '99', const_type => 'integer');
-        $v->set_representation('Int');
+        $v->set_stamp('Int');
         my $as = $f->make('Assign', inputs => [$lv, $v]);
-        $as->set_representation('Int');
+        $as->set_stamp('Int');
     }
 
     my $read = $f->make('Subscript', inputs => [$arr, $idx]);
     my $rhs  = $f->make('Constant', value => '5', const_type => 'integer');
-    $rhs->set_representation('Int');
+    $rhs->set_stamp('Int');
     my $dor = $f->make('DefinedOr', inputs => [$read, $rhs]);
     my $ret = $f->make_cfg('Return', inputs => [$dor]);
     my $g   = Chalk::IR::Graph->new(start => $arr, returns => [$ret]);

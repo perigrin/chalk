@@ -11,6 +11,7 @@ use Scalar::Util qw(blessed);
 
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::BehaviorRecord;
+use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 
 # The lli interpreter path.
 my $LLI = '/usr/lib/llvm-15/bin/lli';
@@ -191,9 +192,9 @@ sub _visit_for_coverage {
 
     # Count this node if it is a value-producing node (has a representation field).
     # We check for the set_representation/representation API.
-    if ( $node->can('representation') ) {
+    if ( $node isa Chalk::IR::Value ) {
         $$total_ref++;
-        my $repr = $node->representation;
+        my $repr = $node->stamp;
         if ( defined $repr && $repr ne 'Scalar' ) {
             $$non_scalar_ref++;
         }

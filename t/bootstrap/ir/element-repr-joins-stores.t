@@ -41,7 +41,7 @@ sub subscript_reprs ($graphs) {
     for my $gn (sort keys %$graphs) {
         for my $n (Chalk::IR::Analysis::_all_graph_nodes($graphs->{$gn})) {
             next unless blessed($n) && $n->can('operation');
-            push @r, $n->representation // 'undef'
+            push @r, $n->stamp // 'undef'
                 if $n->operation eq 'Subscript';
         }
     }

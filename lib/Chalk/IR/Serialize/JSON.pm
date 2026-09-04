@@ -15,6 +15,7 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Analysis;   # from_json still runs it; see the note at its call
 use Chalk::IR::Node::Coerce;   # _insert_str_coercions builds these directly
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: the join lattice
+use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 
 # CFG node operations — these carry control tokens and are never hash-consed.
 my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
@@ -430,7 +431,7 @@ sub _serialize_graph ($graph) {
         # The read and the membership check are ONE expression deliberately:
         # reading this field is only safe when the check accompanies it, and
         # the sweep in stamp-alias-preconditions.t recognises that shape.
-        if ($node->can('stamp')
+        if ($node isa Chalk::IR::Value
                 && Chalk::Grammar::Perl::TypeLibrary::is_lattice_type($node->stamp)) {
             $entry{stamp} = $node->stamp;
         }
@@ -721,7 +722,7 @@ sub _deserialize_graph ($method_data) {
         # the node runtime-free. Chalk's own serializer emits no stamp, so this
         # only fires for B::SoN-produced JSON.
         if (is_lowerable_stamp($nd->{stamp})) {
-            $node->set_representation($nd->{stamp});
+            $node->set_stamp($nd->{stamp});
         }
         # `Unknown` IS A TYPE AND MUST BE CARRIED, even though it is not
         # lowerable. The gate above answers "does this stamp have a machine
@@ -765,7 +766,7 @@ sub _deserialize_graph ($method_data) {
         # `ArrayLiteral`(List) and `FieldAccess`. Same defect, four values.
         elsif (defined $nd->{stamp}
                && Chalk::Grammar::Perl::TypeLibrary::is_lattice_type($nd->{stamp})) {
-            $node->set_representation($nd->{stamp});
+            $node->set_stamp($nd->{stamp});
         }
 
         # A BUILTIN CALL STAMPED `List` YIELDS AN AGGREGATE, and its consumers
@@ -805,7 +806,7 @@ sub _deserialize_graph ($method_data) {
                 && ( $op eq 'ArrayLiteral'
                   || ($op eq 'Call'
                       && ($fields->{dispatch_kind} // '') eq 'builtin') )) {
-            $node->set_representation('Array');
+            $node->set_stamp('Array');
         }
 
         # A Print carries no stamp (the producer leaves it unstamped), but perl's
@@ -813,7 +814,7 @@ sub _deserialize_graph ($method_data) {
         # value-context `my $ok = print ...` reads Bool:1. Seed the repr as Boolean
         # so the return epilogue tags it correctly.
         if ($op eq 'Print') {
-            $node->set_representation('Boolean');
+            $node->set_stamp('Boolean');
         }
 
         push @nodes, $node;

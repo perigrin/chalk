@@ -48,7 +48,7 @@ sub loads_as ($stamp) {
         JSON::PP->new->canonical->encode($wire));
     my ($const) = grep { $_->operation eq 'Constant' }
         $graphs->{'main::probe'}->nodes->@*;
-    return $const->representation;
+    return $const->stamp;
 }
 
 subtest 'the lowerable names reach the field' => sub {

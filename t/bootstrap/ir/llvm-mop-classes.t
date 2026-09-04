@@ -45,16 +45,16 @@ sub print_returned_value {
 
     my $v = $ret_node->inputs->[0];
     my $s = $v;
-    if (($v->representation // '') ne 'Str') {
+    if (($v->stamp // '') ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
-            from_repr => $v->representation, to_repr => 'Str');
-        $s->set_representation('Str');
+            from_repr => $v->stamp, to_repr => 'Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -64,7 +64,7 @@ sub print_returned_value {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
@@ -95,7 +95,7 @@ subtest 'method-simple: $g->greet => 42 (Int)' => sub {
 
     # Method body: greet($self) { return 42 }
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
-    $body42->set_representation('Int');
+    $body42->set_stamp('Int');
 
     # MOP: class Greeter { method greet { return 42 } }
     my $mop = Chalk::MOP->new;
@@ -110,7 +110,7 @@ subtest 'method-simple: $g->greet => 42 (Int)' => sub {
         param_names => [],
         inputs      => [],
     );
-    $new_g->set_representation('Object');
+    $new_g->set_stamp('Object');
 
     # Call: $g->greet
     my $result = $f->make('Call',
@@ -119,7 +119,7 @@ subtest 'method-simple: $g->greet => 42 (Int)' => sub {
         class_name    => 'Greeter',
         inputs        => [$new_g],
     );
-    $result->set_representation('Int');
+    $result->set_stamp('Int');
 
     # Return node
     my $ret = $f->make_cfg('Return', inputs => [$result]);
@@ -161,13 +161,13 @@ subtest 'class-simple: ref($e) => "Empty" (Str)' => sub {
         param_names => [],
         inputs      => [],
     );
-    $new_e->set_representation('Object');
+    $new_e->set_stamp('Object');
 
     # ref($obj) = load class-name from vtable slot 0
     my $ref_result = $f->make(q{RefType},
         inputs => [$new_e],
     );
-    $ref_result->set_representation('Str');
+    $ref_result->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$ref_result]);
 
@@ -200,7 +200,7 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
         field_stash  => 'Animal',
         inputs       => [],
     );
-    $field_read->set_representation('Str');
+    $field_read->set_stamp('Str');
 
     # MOP: class Animal { field $name :param; method name { return $name } }
     my $mop = Chalk::MOP->new;
@@ -213,14 +213,14 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
 
     # New: Animal->new(name => 'cat')
     my $name_val = $f->make('Constant', value => 'cat', const_type => 'string');
-    $name_val->set_representation('Str');
+    $name_val->set_stamp('Str');
 
     my $new_a = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name  => 'Animal',
         param_names => ['name'],
         inputs      => [$name_val],
     );
-    $new_a->set_representation('Object');
+    $new_a->set_stamp('Object');
 
     # Call: $a->name
     my $result = $f->make('Call',
@@ -229,7 +229,7 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
         class_name    => 'Animal',
         inputs        => [$new_a],
     );
-    $result->set_representation('Str');
+    $result->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$result]);
 
@@ -269,15 +269,15 @@ subtest 'Str field store in method body: $t->set; $t->get => "hi" (Str)' => sub 
 
     # method set { $s = "hi" } — body: Assign(FieldAccess-lvalue(0,"Tag"), "hi")
     my $hi = $f->make('Constant', value => 'hi', const_type => 'string');
-    $hi->set_representation('Str');
+    $hi->set_stamp('Str');
     my $fa_lv = $f->make('FieldAccess', field_index => 0, field_stash => 'Tag', inputs => []);
-    $fa_lv->set_representation('Str');
+    $fa_lv->set_stamp('Str');
     my $store = $f->make('Assign', inputs => [$fa_lv, $hi]);
-    $store->set_representation('Str');
+    $store->set_stamp('Str');
 
     # method get { return $s } — body: FieldAccess(0,"Tag") read
     my $fa_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'Tag', inputs => []);
-    $fa_rd->set_representation('Str');
+    $fa_rd->set_stamp('Str');
 
     # MOP: class Tag { field $s; method set; method get }
     my $mop = Chalk::MOP->new;
@@ -292,17 +292,17 @@ subtest 'Str field store in method body: $t->set; $t->get => "hi" (Str)' => sub 
     # my $t = Tag->new;
     my $new_t = $f->make('Call', dispatch_kind => 'method', name => 'new',
         class_name => 'Tag', param_names => [], inputs => []);
-    $new_t->set_representation('Object');
+    $new_t->set_stamp('Object');
 
     # $t->set;  (control-position side effect, before get)
     my $set_call = $f->make('Call', dispatch_kind => 'method', name => 'set',
         class_name => 'Tag', inputs => [$new_t]);
-    $set_call->set_representation('Str');
+    $set_call->set_stamp('Str');
 
     # $t->get
     my $get_call = $f->make('Call', dispatch_kind => 'method', name => 'get',
         class_name => 'Tag', inputs => [$new_t]);
-    $get_call->set_representation('Str');
+    $get_call->set_stamp('Str');
 
     my $ret = $f->make_cfg('Return', inputs => [$get_call]);
     $ret->set_control_in($set_call);
@@ -331,7 +331,7 @@ subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => 
 
     # class Greeter has 'greet' (no 'wave' method defined)
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
-    $body42->set_representation('Int');
+    $body42->set_stamp('Int');
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Greeter');
     my $m   = $cls->declare_method('greet', return_type => 'Int');
@@ -343,7 +343,7 @@ subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => 
         param_names => [],
         inputs      => [],
     );
-    $new_g->set_representation('Object');
+    $new_g->set_stamp('Object');
 
     # Call 'wave' which is NOT defined — must die at lowering
     my $bad_call = $f->make('Call',
@@ -352,7 +352,7 @@ subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => 
         class_name    => 'Greeter',
         inputs        => [$new_g],
     );
-    $bad_call->set_representation('Int');
+    $bad_call->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$bad_call]);
 
@@ -381,7 +381,7 @@ subtest 'adversarial: Call(method) on undeclared class dies loudly at lowering' 
 
     # KnownClass has 'foo' but UndeclaredClass is never declared in the MOP
     my $body = $f->make('Constant', value => 1, const_type => 'integer');
-    $body->set_representation('Int');
+    $body->set_stamp('Int');
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('KnownClass');
     my $m   = $cls->declare_method('foo', return_type => 'Int');
@@ -393,7 +393,7 @@ subtest 'adversarial: Call(method) on undeclared class dies loudly at lowering' 
         param_names => [],
         inputs      => [],
     );
-    $new_k->set_representation('Object');
+    $new_k->set_stamp('Object');
 
     # Call on an object of KnownClass but using UndeclaredClass as the class
     # (no such class in the sealed MOP -> must die)
@@ -403,7 +403,7 @@ subtest 'adversarial: Call(method) on undeclared class dies loudly at lowering' 
         class_name    => 'UndeclaredClass',
         inputs        => [$new_k],
     );
-    $bad_call->set_representation('Int');
+    $bad_call->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$bad_call]);
 

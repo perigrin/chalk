@@ -73,7 +73,7 @@ subtest 'a List-stamped ArrayLiteral loads with a representation' => sub {
     my @lits = nodes_of($g, 'ArrayLiteral');
     cmp_ok scalar @lits, '>=', 1, 'the graph has an ArrayLiteral' or return;
 
-    my @untyped = grep { !defined $_->representation } @lits;
+    my @untyped = grep { !defined $_->stamp } @lits;
     is_deeply [ map { $_->operation } @untyped ], [],
         'no ArrayLiteral arrives with NO representation'
         or diag("  an untyped source list makes the backend refuse at\n"
@@ -85,7 +85,7 @@ subtest 'map is the same shape and must not be fixed separately' => sub {
     my $g = load("my \@m = map { \$_ * 2 } (1,2,3); say(scalar(\@m));\n")
         or plan skip_all => 'no graph';
 
-    my @untyped = grep { !defined $_->representation } nodes_of($g, 'ArrayLiteral');
+    my @untyped = grep { !defined $_->stamp } nodes_of($g, 'ArrayLiteral');
     is_deeply [ map { $_->operation } @untyped ], [],
         'map, reached through the other block-taking builtin, is covered too';
 };
@@ -99,7 +99,7 @@ subtest 'an already-typed literal keeps the type it had' => sub {
 
     my ($lit) = nodes_of($g, 'ArrayLiteral');
     ok $lit, 'found the array literal' or return;
-    is $lit->representation, 'Array',
+    is $lit->stamp, 'Array',
         'a producer-stamped Array is still Array, not overwritten';
 };
 

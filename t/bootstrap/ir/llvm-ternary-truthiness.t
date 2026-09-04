@@ -26,18 +26,18 @@ require Chalk::Target::LLVM;
 # the graph's last existing effect, so the select under test still runs first.
 sub print_returned_value ($f, $ret_node) {
     my $v    = $ret_node->inputs->[0];
-    my $repr = $v->representation;
+    my $repr = $v->stamp;
     my $s    = $v;
     if (!defined $repr || $repr ne 'Str') {
         $s = $f->make('Coerce', inputs => [$v],
             from_repr => $repr, to_repr => 'Str');
-        $s->set_representation('Str');
+        $s->set_stamp('Str');
     }
 
     my $open = $f->make('Constant', value => '[', const_type => 'string');
-    $open->set_representation('Str');
+    $open->set_stamp('Str');
     my $close = $f->make('Constant', value => "]\n", const_type => 'string');
-    $close->set_representation('Str');
+    $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
     for my $part ($open, $s, $close) {
@@ -47,7 +47,7 @@ sub print_returned_value ($f, $ret_node) {
     }
 
     my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_representation('Undef');
+    $u->set_stamp('Undef');
     my $ret = $f->make_cfg('Return', inputs => [$u]);
     $ret->set_control_in($ctrl);
     return $ret;
