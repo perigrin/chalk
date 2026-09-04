@@ -169,7 +169,23 @@ my %PROBE_VALUES = (
 # print one (LLVM.pm:1259). Both are limits of THIS HARNESS, not missing
 # arrows -- _emit_coercion has live Scalar/Slot arms reached from field and
 # element access. Composition through Slot needs a different probe shape.
-my @REPRS = qw(Int Num Str Boolean Undef);
+# SCALAR IS IN THIS LIST, and its absence was hiding the finding. Every
+# all-upcast triple except Int->Num->Str routes through Scalar (Int->Str->Scalar,
+# Num->Str->Scalar, Int->Num->Scalar), so with Scalar omitted the composition
+# law had exactly ONE all-upcast instance to check -- and that instance is the
+# kind-(2) precision bug, which made the upcast law look uniformly broken.
+#
+# With Scalar enumerated: Int->Str->Scalar 7/7 AGREE, Num->Str->Scalar 3/3
+# AGREE, Int->Num->Scalar 5 AGREE + 2 DIFFER (the 2^53 pair). ZERO upcast
+# compositions that avoid Num differ, on any probe. That isolates kind (2) to
+# the OBJECT map choice Num |-> double rather than to the arrow map, which is
+# what `2026-09-04-the-arrow-map-is-not-a-functor-on-the-subtype-poset.md`
+# needed in order to decide where the fix belongs.
+#
+# Scalar needs no %PROBE_VALUES entry: it appears only as an intermediate ($b)
+# or a target ($c), never as a source ($a), because a Scalar source has no
+# unboxed literal to start from.
+my @REPRS = qw(Int Num Str Boolean Undef Scalar);
 
 # ---------------------------------------------------------------------------
 # THE RECORDED TABLE. Key: "A->B->C|value" => verdict.
@@ -374,6 +390,140 @@ my %RECORDED = (
     'Undef->Boolean->Int|undef'  => 'AGREE' ,
     'Undef->Boolean->Num|undef'  => 'AGREE' ,
     'Undef->Boolean->Str|undef'  => 'AGREE' ,
+    # ---------------------------------------------------------------------
+    # SCALAR-ROUTED ROWS. Measured 2026-09-04 when Scalar entered @REPRS.
+    #
+    # 110 rows, 27 of them DIFFER, and every DIFFER is one of the three kinds
+    # already named at the top of this file -- no new kind appeared:
+    #
+    #   (1) lossy-by-design, the bulk: a route through Boolean, or through Int
+    #       from a fractional/non-numeric source, narrows BEFORE boxing. The
+    #       direct arm boxes the original value, the composed arm boxes what
+    #       survived the intermediate. Verified against perl 5.42: `my $u; my
+    #       $s = $u` boxes as undef and prints ''; `!!0` boxes and prints '';
+    #       `my $s = q{}` prints ''. The DIRECT arm matches perl in each case,
+    #       so the composed arm is the one that lost information, correctly.
+    #
+    #   (2) the Num precision miscompile: Int->Num->Scalar at 2^53 and 2^53+1,
+    #       [9007199254740992] vs [9.00719925474099e+15]. Same sitofp defect as
+    #       Int->Num->Str, now visible on a second route -- which is the
+    #       evidence that it belongs to Num's REPRESENTATION, not to either
+    #       arrow.
+    #
+    #   (3) no new inversions. The Undef->{Int,Num}->Scalar rows LOOK like the
+    #       Undef->Boolean inversion ([] vs [0]) but are not: perl agrees with
+    #       the direct [] here, so the composed [0] is ordinary narrowing.
+    # ---------------------------------------------------------------------
+    'Boolean->Int->Scalar|0'                       => 'DIFFER',
+    'Boolean->Int->Scalar|1'                       => 'AGREE',
+    'Boolean->Num->Scalar|0'                       => 'DIFFER',
+    'Boolean->Num->Scalar|1'                       => 'AGREE',
+    'Boolean->Scalar->Int|0'                       => 'AGREE',
+    'Boolean->Scalar->Int|1'                       => 'AGREE',
+    'Boolean->Scalar->Num|0'                       => 'AGREE',
+    'Boolean->Scalar->Num|1'                       => 'AGREE',
+    'Boolean->Scalar->Str|0'                       => 'AGREE',
+    'Boolean->Scalar->Str|1'                       => 'AGREE',
+    'Boolean->Str->Scalar|0'                       => 'AGREE',
+    'Boolean->Str->Scalar|1'                       => 'AGREE',
+    'Int->Boolean->Scalar|-1'                      => 'DIFFER',
+    'Int->Boolean->Scalar|0'                       => 'DIFFER',
+    'Int->Boolean->Scalar|1'                       => 'AGREE',
+    'Int->Boolean->Scalar|2^31'                    => 'DIFFER',
+    'Int->Boolean->Scalar|2^53'                    => 'DIFFER',
+    'Int->Boolean->Scalar|2^53+1'                  => 'DIFFER',
+    'Int->Boolean->Scalar|big15'                   => 'DIFFER',
+    'Int->Num->Scalar|-1'                          => 'AGREE',
+    'Int->Num->Scalar|0'                           => 'AGREE',
+    'Int->Num->Scalar|1'                           => 'AGREE',
+    'Int->Num->Scalar|2^31'                        => 'AGREE',
+    'Int->Num->Scalar|2^53'                        => 'DIFFER',
+    'Int->Num->Scalar|2^53+1'                      => 'DIFFER',
+    'Int->Num->Scalar|big15'                       => 'AGREE',
+    'Int->Scalar->Boolean|-1'                      => 'AGREE',
+    'Int->Scalar->Boolean|0'                       => 'AGREE',
+    'Int->Scalar->Boolean|1'                       => 'AGREE',
+    'Int->Scalar->Boolean|2^31'                    => 'AGREE',
+    'Int->Scalar->Boolean|2^53'                    => 'AGREE',
+    'Int->Scalar->Boolean|2^53+1'                  => 'AGREE',
+    'Int->Scalar->Boolean|big15'                   => 'AGREE',
+    'Int->Scalar->Num|-1'                          => 'AGREE',
+    'Int->Scalar->Num|0'                           => 'AGREE',
+    'Int->Scalar->Num|1'                           => 'AGREE',
+    'Int->Scalar->Num|2^31'                        => 'AGREE',
+    'Int->Scalar->Num|2^53'                        => 'AGREE',
+    'Int->Scalar->Num|2^53+1'                      => 'AGREE',
+    'Int->Scalar->Num|big15'                       => 'AGREE',
+    'Int->Scalar->Str|-1'                          => 'AGREE',
+    'Int->Scalar->Str|0'                           => 'AGREE',
+    'Int->Scalar->Str|1'                           => 'AGREE',
+    'Int->Scalar->Str|2^31'                        => 'AGREE',
+    'Int->Scalar->Str|2^53'                        => 'AGREE',
+    'Int->Scalar->Str|2^53+1'                      => 'AGREE',
+    'Int->Scalar->Str|big15'                       => 'AGREE',
+    'Int->Str->Scalar|-1'                          => 'AGREE',
+    'Int->Str->Scalar|0'                           => 'AGREE',
+    'Int->Str->Scalar|1'                           => 'AGREE',
+    'Int->Str->Scalar|2^31'                        => 'AGREE',
+    'Int->Str->Scalar|2^53'                        => 'AGREE',
+    'Int->Str->Scalar|2^53+1'                      => 'AGREE',
+    'Int->Str->Scalar|big15'                       => 'AGREE',
+    'Num->Boolean->Scalar|-1.5'                    => 'DIFFER',
+    'Num->Boolean->Scalar|0.0'                     => 'DIFFER',
+    'Num->Boolean->Scalar|1.5'                     => 'DIFFER',
+    'Num->Int->Scalar|-1.5'                        => 'DIFFER',
+    'Num->Int->Scalar|0.0'                         => 'AGREE',
+    'Num->Int->Scalar|1.5'                         => 'DIFFER',
+    'Num->Scalar->Boolean|-1.5'                    => 'AGREE',
+    'Num->Scalar->Boolean|0.0'                     => 'AGREE',
+    'Num->Scalar->Boolean|1.5'                     => 'AGREE',
+    'Num->Scalar->Int|-1.5'                        => 'AGREE',
+    'Num->Scalar->Int|0.0'                         => 'AGREE',
+    'Num->Scalar->Int|1.5'                         => 'AGREE',
+    'Num->Scalar->Str|-1.5'                        => 'AGREE',
+    'Num->Scalar->Str|0.0'                         => 'AGREE',
+    'Num->Scalar->Str|1.5'                         => 'AGREE',
+    'Num->Str->Scalar|-1.5'                        => 'AGREE',
+    'Num->Str->Scalar|0.0'                         => 'AGREE',
+    'Num->Str->Scalar|1.5'                         => 'AGREE',
+    'Str->Boolean->Scalar|""'                      => 'AGREE',
+    'Str->Boolean->Scalar|"0"'                     => 'DIFFER',
+    'Str->Boolean->Scalar|"3.9x"'                  => 'DIFFER',
+    'Str->Boolean->Scalar|"42"'                    => 'DIFFER',
+    'Str->Boolean->Scalar|"abc"'                   => 'DIFFER',
+    'Str->Int->Scalar|""'                          => 'DIFFER',
+    'Str->Int->Scalar|"0"'                         => 'AGREE',
+    'Str->Int->Scalar|"3.9x"'                      => 'DIFFER',
+    'Str->Int->Scalar|"42"'                        => 'AGREE',
+    'Str->Int->Scalar|"abc"'                       => 'DIFFER',
+    'Str->Num->Scalar|""'                          => 'DIFFER',
+    'Str->Num->Scalar|"0"'                         => 'AGREE',
+    'Str->Num->Scalar|"3.9x"'                      => 'DIFFER',
+    'Str->Num->Scalar|"42"'                        => 'AGREE',
+    'Str->Num->Scalar|"abc"'                       => 'DIFFER',
+    'Str->Scalar->Boolean|""'                      => 'AGREE',
+    'Str->Scalar->Boolean|"0"'                     => 'AGREE',
+    'Str->Scalar->Boolean|"3.9x"'                  => 'AGREE',
+    'Str->Scalar->Boolean|"42"'                    => 'AGREE',
+    'Str->Scalar->Boolean|"abc"'                   => 'AGREE',
+    'Str->Scalar->Int|""'                          => 'AGREE',
+    'Str->Scalar->Int|"0"'                         => 'AGREE',
+    'Str->Scalar->Int|"3.9x"'                      => 'AGREE',
+    'Str->Scalar->Int|"42"'                        => 'AGREE',
+    'Str->Scalar->Int|"abc"'                       => 'AGREE',
+    'Str->Scalar->Num|""'                          => 'AGREE',
+    'Str->Scalar->Num|"0"'                         => 'AGREE',
+    'Str->Scalar->Num|"3.9x"'                      => 'AGREE',
+    'Str->Scalar->Num|"42"'                        => 'AGREE',
+    'Str->Scalar->Num|"abc"'                       => 'AGREE',
+    'Undef->Boolean->Scalar|undef'                 => 'AGREE',
+    'Undef->Int->Scalar|undef'                     => 'DIFFER',
+    'Undef->Num->Scalar|undef'                     => 'DIFFER',
+    'Undef->Scalar->Boolean|undef'                 => 'AGREE',
+    'Undef->Scalar->Int|undef'                     => 'AGREE',
+    'Undef->Scalar->Num|undef'                     => 'AGREE',
+    'Undef->Scalar->Str|undef'                     => 'AGREE',
+    'Undef->Str->Scalar|undef'                     => 'AGREE',
 );
 
 # ---------------------------------------------------------------------------
