@@ -629,6 +629,24 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # OBSERVATION a narrowing pass can consume, rather than a rule only the
         # emitter enforces.
         Divide => '/',
+    );
+
+    # OBSERVATION-ONLY OPS: their operand requirements are real and readable,
+    # but publishing them through %IR_OP_SOURCE_NAME would mint coercions and
+    # break the gate (measured, 224 -> 184). They live here instead, reachable
+    # only via `observed_operand_repr`.
+    #
+    # `+ - * **` numify both operands unconditionally -- measured, `"3" + "4"`
+    # is 7 and `1 + "abc"` is 1 -- so `Num` is the honest observation even
+    # though the RESULT representation varies (B::IV for 1+2, B::NV for
+    # 1.5+2). `%` is the exception: 7.9 % 3 is 1, not 1.9, so perl truncates
+    # both operands and its observation is `Int`.
+    my %IR_OP_OBSERVED_NAME = (
+        Add      => '+',
+        Subtract => '-',
+        Multiply => '*',
+        Power    => '**',
+        Modulo   => '%',
 
         # DELIBERATELY ABSENT -- BitAnd/BitOr/BitXor. Numeric `&` is
         # (Int, Int) -> Int while string-bitwise `&.` is a Str operator, and
@@ -755,6 +773,60 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # every entry names a node type that actually exists: an entry for a
     # nonexistent node is dead weight that reads as coverage, because no such
     # node is ever built and the entry can never be consulted.
+    # observed_operand_repr($ir_op, $position) -> the repr this position is
+    # OBSERVED to require, or undef for "nothing observes it".
+    #
+    # THE READ-ONLY TWIN OF `operand_repr_for_ir_op`, AND THE REASON THE TWO
+    # ARE SEPARATE. That accessor looks passive and is not: its only consumer
+    # is `Analysis::_required_operand_repr`, whose two callers both MUTATE THE
+    # GRAPH -- `_insert_str_coercions` mints Coerce nodes, and the retire pass
+    # removes them. Publishing a requirement there does not record a fact, it
+    # changes the emitted IR.
+    #
+    # Measured: admitting the arithmetic family to %IR_OP_SOURCE_NAME took the
+    # corpus gate 224 -> 184 and the worklist 3 -> 43, because most of the
+    # newly-stamped nodes were coercions the change itself created. See
+    # docs/plans/2026-09-04-publishing-the-arithmetic-family-fails.md.
+    #
+    # A narrowing pass needs those same facts with NO side effect: "what does
+    # this position require?" is the input to choosing a machine
+    # representation, and asking it must not rewrite the graph being analysed.
+    # This is that channel. Nothing it answers causes a node to be minted, so
+    # it is free to answer for ops the coercion authority declines.
+    #
+    # It reads the SAME signature tables, so the two cannot drift on the facts
+    # -- only on which ops each is willing to speak for.
+    sub observed_operand_repr($ir_op, $position) {
+        # Ops the coercion authority already publishes: defer to it, so a
+        # single source stays single.
+        if (defined(my $shared = operand_repr_for_ir_op($ir_op, $position))) {
+            return $shared;
+        }
+
+        my $name = $IR_OP_OBSERVED_NAME{$ir_op} // return undef;
+
+        # MODULO TRUNCATES, so its observation is Int even though `%` shares
+        # the (Num, Num) -> Num entry with the rest of the family. Measured:
+        # 7.9 % 3 is 1, not 1.9 -- perl truncates BOTH operands before
+        # dividing.
+        #
+        # Overridden HERE rather than by giving `%` its own
+        # %BINARY_OP_SIGNATURES entry, because that hash is also read by the
+        # parser and by the coercion authority; editing it is the same class of
+        # change that took the corpus gate 224 -> 184. The observation channel
+        # has no such reach, so the narrower fix is the safe one.
+        return 'Int' if $name eq '%';
+
+        my $sig  = $BINARY_OP_SIGNATURES{$name} // return undef;
+        my $want = $position == 0 ? $sig->{left} : $sig->{right};
+
+        # 'List' is not a coercion target and not an observation either -- it
+        # says "this position accepts a sequence", which constrains no
+        # representation.
+        return undef if !defined $want || $want eq 'List';
+        return $want;
+    }
+
     sub ir_ops_with_signatures() {
         return sort keys %IR_OP_SOURCE_NAME;
     }

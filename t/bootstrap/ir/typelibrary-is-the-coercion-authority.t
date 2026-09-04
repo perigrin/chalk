@@ -19,6 +19,12 @@ sub want ($op, $pos) {
     return Chalk::Grammar::Perl::TypeLibrary::operand_repr_for_ir_op($op, $pos);
 }
 
+# The OBSERVATION channel -- same question, no graph side effect. See the
+# subtests at the end of this file for why the two are separate.
+sub observed ($op, $pos) {
+    return Chalk::Grammar::Perl::TypeLibrary::observed_operand_repr($op, $pos);
+}
+
 # ---------------------------------------------------------------------------
 # The signature answers, per LOGICAL operand position
 # ---------------------------------------------------------------------------
@@ -224,6 +230,57 @@ subtest 'a source name resolving to conflicting signatures DIES' => sub {
     ok Chalk::Grammar::Perl::TypeLibrary::_signatures_conflict(
         { operand => 'Str' }, { operand => 'Int' },
     ), 'differing operand types are reported as a conflict';
+};
+
+# ---------------------------------------------------------------------------
+# The OBSERVATION channel: read a requirement without minting a coercion
+# ---------------------------------------------------------------------------
+
+subtest 'observed_operand_repr answers for the whole numifying family' => sub {
+    # WHY A SECOND ACCESSOR EXISTS. `operand_repr_for_ir_op` is not a passive
+    # lookup: it feeds `_required_operand_repr`, whose only two callers MUTATE
+    # THE GRAPH -- `_insert_str_coercions` mints Coerce nodes and the retire
+    # pass removes them. So publishing a requirement there does not record an
+    # observation, it changes the emitted IR. Measured: admitting the whole
+    # arithmetic family took the corpus gate 224 -> 184 with worklist 3 -> 43,
+    # because most of the newly-stamped nodes were coercions the change itself
+    # created (docs/plans/2026-09-04-publishing-the-arithmetic-family-fails.md).
+    #
+    # A narrowing pass needs the SAME FACTS with NO side effect. This accessor
+    # is that channel: it answers what an operand position is OBSERVED to
+    # require, and nothing it says causes a node to be minted.
+    #
+    # `+` is not polymorphic, which is why the family belongs here. Measured on
+    # perl 5.42: `"3" + "4"` is 7 (not "34") and `1 + "abc"` is 1 -- both
+    # operands are numified unconditionally. What varies between `1+2` and
+    # `1.5+2` is the RESULT representation (B::IV vs B::NV), not the operand
+    # requirement.
+    for my $op (qw(Add Subtract Multiply Divide Power)) {
+        is observed($op, 0), 'Num', "$op observes Num at position 0";
+        is observed($op, 1), 'Num', "$op observes Num at position 1";
+    }
+};
+
+subtest 'observed_operand_repr says Int for Modulo, which truncates' => sub {
+    # `%` shares the arithmetic signature entry but does not share its
+    # semantics: measured, 7.9 % 3 is 1 and NOT 1.9, so perl truncates both
+    # operands to integers. Answering Num here would be a WRONG observation,
+    # not a loose one -- it would tell a narrowing pass that a fractional value
+    # is acceptable at a position that must be integral.
+    is observed('Modulo', 0), 'Int', 'Modulo observes Int at position 0';
+    is observed('Modulo', 1), 'Int', 'Modulo observes Int at position 1';
+};
+
+subtest 'the observation channel does not disturb the coercion channel' => sub {
+    # THE WHOLE POINT: the two accessors must be able to disagree. The
+    # coercion authority still declines for the family -- admitting it there is
+    # what broke the gate -- while the observation channel answers.
+    for my $op (qw(Add Subtract Multiply Power Modulo)) {
+        is want($op, 0), undef, "$op still has no COERCION opinion";
+    }
+    # Divide is the one op published to both, because its requirement is also
+    # semantic (perl's / is float division) and the backend already enforces it.
+    is want('Divide', 0), 'Num', 'Divide remains a coercion target';
 };
 
 done_testing;
