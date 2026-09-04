@@ -12,6 +12,7 @@ use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Coerce;             # _insert_str_coercions builds these
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype / join_types: the lattice
+use Chalk::IR::Node;   # stamp reads gate on isa Chalk::IR::Node
 
 # NOTE: no `use Chalk::IR::Serialize::JSON` here, and none is needed. The passes
 # below used to live in that module and were called back into it from here,
@@ -2369,7 +2370,7 @@ sub _static_miss ($container, $index) {
     my $flattens = grep {
         blessed($_) && do {
             my $op = $_->operation;
-            my $r  = $_ isa Chalk::IR::Value ? ($_->stamp // '') : '';
+            my $r  = $_ isa Chalk::IR::Node ? ($_->stamp // '') : '';
             $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
                 || $r eq 'List' || $r eq 'Array' || $r eq 'Hash'
                 || ($op eq 'Slice' || $op eq 'ExpressionList'

@@ -351,6 +351,20 @@ boolean `1`, and the type-tagged oracle reads `Bool:1`; the STAMP is the wider
 `Scalar` because the stamp must cover the failing case too. The stdout is
 `x\n`; the block value is the Print's `1`.
 
+WORKLIST 2026-09-04: the shape leg fails here, and it is a NEWLY VISIBLE
+disagreement rather than a new defect. The spec says `Print :Scalar` (above,
+and it is right); the loaded graph carries `Boolean`. The wire itself says
+`Scalar` -- checked -- so something between load and lowering narrows it.
+
+It was invisible because the shape checker gated its repr comparison on
+`isa Chalk::IR::Value`, and `Print` is `:isa(Chalk::IR::Node)` DIRECTLY, a
+sibling of Value rather than a subclass. So the comparison read undef against
+undef and PASSED WITHOUT LOOKING. Fixing that guard (the same class-vs-stamp
+bug as 0cc04737) un-vacuoused the check and the disagreement surfaced.
+
+The gate went 224 -> 223 as a result. That is a FALSE POSITIVE BEING RETIRED,
+not a regression: the case was counted green by a leg that never examined it.
+
 ```perl
 # source
 use 5.42.0;

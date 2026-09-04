@@ -27,6 +27,7 @@ use Chalk::MOP;
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::BehaviorRecord;
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
+use Chalk::IR::Node;   # stamp reads gate on isa Chalk::IR::Node
 
 # The Perl 5.42.0 binary used as the oracle.
 my $PERL_BIN = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
@@ -1683,7 +1684,7 @@ sub _operand_specificity {
     my ($node) = @_;
     return 0 unless blessed($node);
     my $s = 0;
-    $s++ if $node isa Chalk::IR::Value && defined $node->stamp;
+    $s++ if $node isa Chalk::IR::Node && defined $node->stamp;
     $s++ if _node_kind($node) eq 'Constant' && $node->can('value') && defined $node->value;
     return $s;
 }
@@ -1774,8 +1775,14 @@ sub _pair_match {
     # so re-failing on a stamp the loader will fill would false-FAIL a valid
     # lax/strict operand split (shape-subset-check test 7). A real repr that is
     # DEFINED but DIFFERENT still fails (an :Int spec vs a :Num real Divide).
-    my $srepr = $spec isa Chalk::IR::Value ? $spec->stamp : undef;
-    my $rrepr = $real isa Chalk::IR::Value ? $real->stamp : undef;
+    # `isa Chalk::IR::Node`, NOT Value. `stamp` is on Node, and Value is a
+    # SIBLING of Print/Proj/VarDecl/ListAssign rather than their parent -- so a
+    # Value test reads undef for four node kinds that carry a stamp. HERE that
+    # made the comparison VACUOUS: an undef spec repr against an undef real
+    # repr agrees, so a declared `:Repr` on any of those four was never checked
+    # at all. The shape leg passed without looking.
+    my $srepr = $spec isa Chalk::IR::Node ? $spec->stamp : undef;
+    my $rrepr = $real isa Chalk::IR::Node ? $real->stamp : undef;
     if (defined $srepr && defined $rrepr) {
         return false unless $rrepr eq $srepr;
     }
@@ -1892,7 +1899,7 @@ sub _literal_operand {
         $kind = _node_kind($node);
     }
     return () unless $kind eq 'Constant' && $node->can('value');
-    my $repr = $node isa Chalk::IR::Value ? $node->stamp : undef;
+    my $repr = $node isa Chalk::IR::Node ? $node->stamp : undef;
     return ($node->value, $repr, $node);
 }
 
@@ -1997,7 +2004,7 @@ sub _fold_satisfied_ids {
         # Only fold over numeric literals — never coerce a string (warning +
         # spurious value that could coincidentally match a real Constant).
         next unless $_NUMERIC_REPR{ $lrepr // '' } && $_NUMERIC_REPR{ $rrepr // '' };
-        my $repr = $node isa Chalk::IR::Value ? $node->stamp : undef;
+        my $repr = $node isa Chalk::IR::Node ? $node->stamp : undef;
         my $value = eval { $fold->($lv, $rv) };
         next unless defined $value;   # e.g. modulo/divide by zero — no fold
         # ponytail: the value-key is string-eq. Both sides are perl-default NV
@@ -2017,7 +2024,7 @@ sub _fold_satisfied_ids {
         next unless _node_kind($node) eq 'TernaryExpr';
         my ($value) = _fold_value($node);
         next unless defined $value;
-        my $repr = $node isa Chalk::IR::Value ? $node->stamp : undef;
+        my $repr = $node isa Chalk::IR::Node ? $node->stamp : undef;
         next unless $real_const{ $value . "\0" . ($repr // '') };
         $satisfied{ $node->id } = 1;
     }
@@ -2369,7 +2376,7 @@ sub _visit_node {
 
     # Build the signature for this node
     my $kind = _node_kind($node);
-    my $repr = ($node isa Chalk::IR::Value) ? $node->stamp : undef;
+    my $repr = ($node isa Chalk::IR::Node) ? $node->stamp : undef;
 
     my %sig = (kind => $kind, repr => $repr);
 

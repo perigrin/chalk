@@ -33,6 +33,7 @@ use utf8;
 use Chalk::IR::NodeFactory;   # is_statement_node() classifier used by the value/effect collectors
 use Chalk::IR::Analysis;      # return_reading_for_want: which of a callee reading a callsite takes
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
+use Chalk::IR::Node;   # stamp reads gate on isa Chalk::IR::Node
 
 # Re-export helpers from the main package so unqualified calls in this
 # package resolve correctly (both packages share the same implementation).
@@ -4368,7 +4369,22 @@ sub _lower_defined_or {
     # land above the phi (LLVM requires phis at the top of their block) and can
     # open continuation blocks of its own, so the incoming label is re-read
     # after it. Same reasoning the And/Or arms give for their own bridges.
-    my $rhs_repr_now = $rhs_node isa Chalk::IR::Value ? $rhs_node->stamp : undef;
+    # `isa Chalk::IR::Node`, NOT `isa Chalk::IR::Value`. `stamp` is declared on
+    # Node -- the BASE -- while Value is a SIBLING of the value-producing
+    # control nodes: Print, Proj, VarDecl and ListAssign are each
+    # `:isa(Chalk::IR::Node)` directly. A Value test therefore answers "no
+    # stamp" for four node kinds that have one.
+    #
+    # Measured: none of those four reaches this site (or the sort/keys/Call
+    # sites below) in today's corpus, so this is LATENT rather than a live
+    # defect -- which is the moment to close it. The same pattern has shipped
+    # twice already: 0cc04737 in the coercion guard, a404a718 in the corpus
+    # harness, where it silently dropped a spec-declared `:Repr` and blamed
+    # TypeInference for the result.
+    #
+    # Pinned class-wide by t/bootstrap/ir/a-stamp-question-is-not-a-class-question.t
+    # so a third occurrence fails a test rather than a program.
+    my $rhs_repr_now = $rhs_node isa Chalk::IR::Node ? $rhs_node->stamp : undef;
     my $node_repr_early = $node->stamp;
     if (defined $rhs_repr_now && defined $node_repr_early
             && $rhs_repr_now ne $node_repr_early
@@ -7433,7 +7449,7 @@ sub _lower_builtin_sort {
       . "FOLDED numeric/string comparators are); got sort_cmp='$cmp'."
         unless $cmp eq 'numeric' || $cmp eq 'string';
 
-    my $op_repr = $operand isa Chalk::IR::Value ? ($operand->stamp // '') : '';
+    my $op_repr = $operand isa Chalk::IR::Node ? ($operand->stamp // '') : '';
 
     # TWO OPERAND SHAPES REACH HERE, and the difference is perl's, not ours.
     # `sort keys %h` passes ONE aggregate (the keys Call, stamped List and
@@ -7678,7 +7694,7 @@ sub _lower_builtin_keys {
     my ($operand) = grep { blessed($_) } $node->inputs->@*;
     die "GAP: keys expects a hash operand." unless defined $operand;
 
-    my $op_repr = $operand isa Chalk::IR::Value ? ($operand->stamp // '') : '';
+    my $op_repr = $operand isa Chalk::IR::Node ? ($operand->stamp // '') : '';
     die "GAP: keys over an operand with repr=" . ($op_repr || 'NONE')
       . " — only a Hash or HashRef has a key list to read."
         unless $op_repr eq 'Hash' || $op_repr eq 'HashRef';
@@ -7699,7 +7715,7 @@ sub _lower_builtin_keys {
     # consumer of an Int-stamped Call expects an i64 and got an %Array*
     # ("'%tmp_42' defined with type '%Array*' but expected 'i64'"). Materialising
     # a list nobody asked for is also the work perl skips here.
-    my $repr = $node isa Chalk::IR::Value ? ($node->stamp // '') : '';
+    my $repr = $node isa Chalk::IR::Node ? ($node->stamp // '') : '';
     if ($repr eq 'Int') {
         $self->{cache}{$node->id} = $cnt;
         return $cnt;
