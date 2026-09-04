@@ -598,11 +598,28 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # the (Num, Num) -> Num signature below; this line is the missing link
         # that lets `operand_repr_for_ir_op` reach it.
         #
-        # Its siblings stay out, and that is not an oversight: `+`, `-`, `*`
-        # are genuinely polymorphic in perl (Int+Int and Num+Num are both
-        # valid), so a table answering "what must this operand BE?" has no
-        # authority to pick one. `/` is the exception because it has no Int
-        # form at all.
+        # ITS SIBLINGS STAY OUT FOR A MEASURED REASON, AND NOT THE ONE THIS
+        # COMMENT FIRST GAVE. The original claim was that `+`, `-`, `*` are
+        # "genuinely polymorphic in perl (Int+Int and Num+Num are both valid)".
+        # That is FALSE: `"3" + "4"` is 7, `1 + "abc"` is 1 -- `+` numifies
+        # both operands unconditionally, and %BINARY_OP_SIGNATURES has always
+        # given `+ - * / % **` one shared (Num, Num) -> Num entry. What varies
+        # between `1+2` and `1.5+2` is the RESULT representation (B::IV vs
+        # B::NV), not the operand requirement, and this table answers the
+        # operand question.
+        #
+        # They stay out because ADMITTING THEM WAS MEASURED AND BREAKS THE
+        # GATE: 224 -> 184, worklist 3 -> 43. This table is not a passive
+        # lookup -- it feeds `_required_operand_repr`, which drives
+        # `_insert_str_coercions`, which MINTS Coerce nodes. Publishing a
+        # requirement therefore changes the emitted graph rather than merely
+        # recording an observation. See
+        # docs/plans/2026-09-04-publishing-the-arithmetic-family-fails.md.
+        #
+        # `/` is admitted anyway because its requirement is additionally a
+        # SEMANTIC one -- perl's division is float division, 3/4 is 0.75 -- and
+        # the backend already enforces it, so publishing it aligns the table
+        # with a rule the emitter was keeping to itself.
         #
         # The backend has always known this -- its Divide arm dies unless the
         # result repr is float, "If Num were ever mapped to an integral type,
