@@ -183,6 +183,74 @@ is the difference between a pass that can be shown correct and one that cannot.
 4. Phases 2-4 behind a flag, off by default. Compare against 223.
 5. Only then retire `%_REPR_LLVM_TYPE`'s premature substitution.
 
+## What the session that wrote this got wrong, and how it was caught
+
+Recorded because each error is REACHABLE FROM THE ARTIFACTS a fresh session
+will read. These are not confessions; they are traps still sitting in the tree.
+
+### 1. Proposed adding a Coerce at the mixed `Add`
+
+Having measured `Add(%4:i64, %5:double)`, this session concluded "blocker (1)
+is a missing coercion, not a propagation gap" and was about to insert a
+conversion node at the merge point.
+
+That is a 20th hand-written arrow site, in a codebase where the existing ones
+are already recorded as debt for being N independent decisions. **The reasoning
+error was reasoning in the SOURCE category**: "narrow the wider operand and
+convert at the point of use" is a subtype-lattice argument, and `i64`/`double`
+have no order for it to run on. There is no "narrower operand" to promote.
+
+Caught by perigrin naming the frame -- T2 is a functor guided by a constraint
+solver, not by the subtype lattice.
+
+### 2. Treated a stale doc as authoritative
+
+`2026-09-04-t2-is-a-functor-objects-and-arrows.md` lists the 2^53 attribution
+as unresolved. This session read that, concluded the question was open, and
+stopped -- when `6a174bad` had ALREADY ANSWERED IT by adding `Scalar` to the
+composition enumeration.
+
+**The doc is older than the measurement that settles its own open question.**
+A fresh session reading it will hit the same trap. That is why THE ATTRIBUTION
+IS SETTLED is placed near the top of this document.
+
+Caught by grepping the composition test instead of trusting the prose.
+
+### 3. Invented an invariant and read a healthy gate as damage
+
+This session twice called the leg spread 205/207/208/210 evidence of a
+problem, citing "last session all four agreed at 223". They did not.
+`gate-green` is the conjunction of the other three, so it is always <= each of
+them, and a spread is the NORMAL shape.
+
+The `gate-green=N +behavior=N +shape=N +invariant=N` AC pattern in the
+milestone history is a point-in-time coincidence that this session promoted
+into a law. Cost: a regression hunt for a regression that did not exist.
+
+Caught by running the gate against the restored pin and seeing 223/225/224/226
+-- a spread, on a run that is unambiguously healthy.
+
+### 4. Accepted an exit code instead of reading output
+
+The first gate run of the session reported `exit code 0` and was very nearly
+taken as a pass. It had printed `1..0 # SKIP perl5-son not found`. A skipped
+file exits 0.
+
+Same family as the recorded `grep -c "^not ok"` reading 0 for a file that
+DIES. Caught only by reading the tail of the output.
+
+### The pattern across all four
+
+Three of the four are the same error in different clothes: **an artifact was
+read as authority when it was only evidence** -- a stale doc, a historical AC,
+an exit code. The one that is not (the Coerce proposal) is the mirror image:
+reasoning confidently in a category whose structure the target does not have.
+
+The defence in both directions is the same and it is cheap: MEASURE THE CASE
+THAT LOOKS DIFFERENT IF YOU ARE WRONG. The composition test's `Scalar` control
+is exactly that, and it is why the attribution above is settled rather than
+argued.
+
 ## Do not repeat these
 
 - **Do not add a coercion at the mixed `Add`.** 20th arrow site; the
@@ -217,6 +285,13 @@ all `T2.pm` line numbers cited.
 ASSESSED (argument from the above, not independently measured): that phase 4
 ordering fixes defect (1); that edge-level generation fixes (2) and (3); the
 recommendation to build `ir-t2` first.
+
+Also VERIFIED, for the four errors recorded above: the `1..0 # SKIP` run and
+its exit code 0; the 205/207/208/210 and 223/225/224/226 leg splits; that
+`6a174bad` postdates the functor doc and adds the `Scalar` enumeration that
+settles its open question. The characterisation of WHY each error happened is
+ASSESSED -- it is this session's reading of its own reasoning, not a
+measurement.
 
 UNVERIFIED: the 224 -> 53 composition collapse and the 224 -> 0 gate figure
 are quoted from prior docs, not re-run here.
