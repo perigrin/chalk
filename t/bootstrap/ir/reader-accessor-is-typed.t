@@ -71,14 +71,32 @@ subtest 'the explicit method body is typed (it always was)' => sub {
 };
 
 subtest 'the :reader accessor body is typed too' => sub {
-    # THE REGRESSION THIS FILE EXISTS FOR.
+    # THE REGRESSION THIS FILE EXISTS FOR, and it is now closed AT THE SOURCE.
+    #
+    # The defect was that `field $v :param :reader` produced TWO ways to read
+    # one field -- a FieldAccess in an explicit `method get`, and a PadAccess
+    # in the synthesized accessor -- while the loader's typing rule
+    # (_stamp_field_access_reprs) was written only for FieldAccess. Same field,
+    # same known type, one of them untyped.
+    #
+    # The producer no longer synthesizes a PadAccess. Measured on the pinned
+    # producer, BOTH graphs are now Start -> FieldAccess -> Return:
+    #
+    #     Box::get -> ['Start', 'FieldAccess', 'Return']
+    #     Box::v   -> ['Start', 'FieldAccess', 'Return']
+    #
+    # So the two reads take the SAME path and the divergence that caused the
+    # regression is gone. This asserts the PROPERTY the file exists for -- the
+    # accessor body carries the field's type -- rather than the MECHANISM that
+    # used to deliver it, which is what left it asserting a node kind the
+    # producer had stopped emitting.
     my $g = $graphs->{'Box::v'};
     ok $g, 'the synthesized accessor graph exists';
 
-    my ($pa) = grep { $_->operation eq 'PadAccess' } $g->nodes->@*;
-    ok $pa, 'Box::v reads the field through a PadAccess';
-    is $pa->stamp, 'Int',
-        'and it carries the SAME field type the FieldAccess does';
+    my ($read) = grep { $_->operation eq 'FieldAccess' } $g->nodes->@*;
+    ok $read, 'Box::v reads the field (through a FieldAccess, as Box::get does)';
+    is $read->stamp, 'Int',
+        'and it carries the SAME field type the explicit method does';
 };
 
 subtest 'no Value node in the accessor graph is left untyped' => sub {
