@@ -261,14 +261,40 @@ what decides it.
     findings and only the second is corruption: `->utf8` turning `ff` into
     `c3 bf` is the correct encoding of U+00FF, not a mangling of it, and a
     round trip returns the original string. Reading the hex without the
-    round trip is how the remedy first came out inverted here. The utf8
-    flag settles nothing either -- a high-byte literal and an ordinary
-    accented one can both report it off -- so only what the producer hands
-    the serializer answers the question.
+    round trip is how the remedy first came out inverted here.
+    THE UTF8 FLAG IS NOT EVIDENCE, and not merely unreliable evidence: it
+    does not partition the cases at all. Measured over four strings,
+    `"café"` and `"q\xff\x80"` both report it OFF while `"café ☺ naïve"`
+    reports it ON, and all four round-trip identically under `->utf8` --
+    so the flag separates strings that behave the same and groups strings
+    that look different. Only what the producer hands the serializer
+    answers the question.
+    THE CLAUSE IS BOUNDED BY UNICODE, and the bound is real rather than
+    defensive. It holds for every program whose string values are Unicode
+    characters. A program holding a value OUTSIDE Unicode is outside the
+    guarantee, and no encoder setting brings it back in: the value has no
+    UTF-8 representation to choose. A consumer meeting one either expects
+    perl-extended UTF-8 or refuses the file, and refusing is the honest
+    answer for a target that must lower to a machine type.
+    One corpus program is in that position by construction --
+    `comp/parser.t:651`, `eval "q" . chr(100000000064)`, a deliberate
+    buffer-overflow test whose codepoint is ~89,000x Unicode's 0x10FFFF
+    maximum. Perl encodes it in its own extended UTF-8 (`71 ff 80 80 80 80
+    80 81 9d 88 9d ae a1 80`), which perl's own `utf8::decode` ACCEPTS and
+    a JSON decoder does not. Measured, every mode fails and they do not
+    fail alike: plain and `->utf8` die `malformed UTF-8 character in JSON
+    string`, while `->ascii` dies `missing high surrogate character in
+    surrogate pair` -- the codepoint cannot be written as a `\uXXXX`
+    surrogate pair either, so escaping moves the break into the escape
+    syntax rather than avoiding it. Each death is LOUD; none substitutes a
+    replacement character silently, which is the property that makes the
+    carve-out safe to state.
     `docs/plans/2026-09-13-the-wire-is-not-valid-utf8.md` (perl5-son)
-    carries the measurement; 4 of 34 files in that corpus are affected.
+    carries the measurement; of 4 affected files in that corpus, 3 decode
+    once the producer sets `->utf8` and this one cannot.
     *Check:* round-trip each string value through a non-perl decoder and
-    compare the VALUE; a divergence is the producer's, not T2's.
+    compare the VALUE; a divergence is the producer's, not T2's. A value
+    outside Unicode is outside the clause, not a violation of it.
 
 12. **Named by sigil and symbol.** A node that names a variable carries the
     sigil and the bare symbol SEPARATELY, and the symbol is bare: `x`, not
@@ -422,15 +448,18 @@ and over live B::SoN output through `from_json` -- at the pin `b96087c`
   }`) delivers two `PadAccess` nodes with `inputs[0]` undef -- a load with
   no `VarDecl` (Q6). (f) Met within a graph, not across: per-call ops
   (`Phi#N`, `If#N`, `Call#N`) have counter-based ids.
-- Clause 11. NOT met. The producer's serializer sets neither `->utf8` nor
-  `->ascii`, so string `Constant`s carrying raw high bytes make a document
-  that perl's decoder accepts and a stricter one refuses -- 4 of the 34
-  files in the producer's own corpus
-  (`docs/plans/2026-09-13-the-wire-is-not-valid-utf8.md`, perl5-son). The
-  clause is stated ahead of the fix because the finding does not depend on
-  it: what T2 can decode is a property of the input, and a producer-side
-  `->utf8` at its single encode site closes it without changing anything
-  here.
+- Clause 11. Met at producer `180c89f`, within the clause's Unicode bound.
+  Before it the serializer set neither `->utf8` nor `->ascii`, so string
+  `Constant`s carrying raw high bytes made a document perl's decoder
+  accepts and a stricter one refuses -- 4 of the 34 files in the
+  producer's own corpus
+  (`docs/plans/2026-09-13-the-wire-is-not-valid-utf8.md`, perl5-son).
+  `->utf8` at the single encode site closed 3 of those 4 and changed
+  nothing here. The fourth, `comp/parser.t`, is the out-of-Unicode case
+  the clause carves out: it does not decode, no encoder setting makes it
+  decode, and it fails loudly rather than silently. A consumer that must
+  pick a machine representation refuses that file, which is the same
+  answer T2 gives any input it cannot represent.
 - Clause 12. Met at producer `2aa5fd7` and NOT before it. The pre-split
   wire carried one `varname` blob with the sigil inside; `2aa5fd7` sends
   `sigil` + `symbol` (and `package` for a stash variable), with the symbol
