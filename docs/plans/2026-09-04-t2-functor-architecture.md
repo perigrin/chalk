@@ -248,14 +248,27 @@ what decides it.
     other decoders refuse the same document. A producer that emits its
     strings with neither `->utf8` nor `->ascii` therefore has no single
     answer to "what does this document say".
-    The fix is `->ascii`, not `->utf8`: `->utf8` RE-ENCODES, so a byte
-    `0xff` becomes `c3 bf` and the string the producer meant is gone --
-    measured, and for a program whose whole subject is a malformed UTF-8
-    string that changes the program under test.
+    The fix is `->utf8`, at the producer's single encode site. What the
+    serializer receives is a CHARACTER string -- perl has already decoded
+    the literal -- so `->utf8` encodes those characters to bytes exactly
+    once, which is what a byte-oriented wire needs. `->ascii` is equally
+    correct and is the wrong trade: it escapes every non-ASCII character,
+    so ordinary Unicode text pays for the pathological case (measured on
+    `"café ☺ naïve"`: 20 bytes plain, 24 under `->utf8`, 35 under
+    `->ascii`).
+    THE TEST IS VALUE EQUALITY AFTER DECODE, NEVER BYTE EQUALITY ON THE
+    WIRE. "These bytes changed" and "this value changed" are different
+    findings and only the second is corruption: `->utf8` turning `ff` into
+    `c3 bf` is the correct encoding of U+00FF, not a mangling of it, and a
+    round trip returns the original string. Reading the hex without the
+    round trip is how the remedy first came out inverted here. The utf8
+    flag settles nothing either -- a high-byte literal and an ordinary
+    accented one can both report it off -- so only what the producer hands
+    the serializer answers the question.
     `docs/plans/2026-09-13-the-wire-is-not-valid-utf8.md` (perl5-son)
     carries the measurement; 4 of 34 files in that corpus are affected.
-    *Check:* decode the document with an ASCII-strict decoder and compare
-    against the perl decode; a divergence is the producer's, not T2's.
+    *Check:* round-trip each string value through a non-perl decoder and
+    compare the VALUE; a divergence is the producer's, not T2's.
 
 12. **Named by sigil and symbol.** A node that names a variable carries the
     sigil and the bare symbol SEPARATELY, and the symbol is bare: `x`, not
@@ -416,7 +429,8 @@ and over live B::SoN output through `from_json` -- at the pin `b96087c`
   (`docs/plans/2026-09-13-the-wire-is-not-valid-utf8.md`, perl5-son). The
   clause is stated ahead of the fix because the finding does not depend on
   it: what T2 can decode is a property of the input, and a producer-side
-  `->ascii` closes it without changing anything here.
+  `->utf8` at its single encode site closes it without changing anything
+  here.
 - Clause 12. Met at producer `2aa5fd7` and NOT before it. The pre-split
   wire carried one `varname` blob with the sigil inside; `2aa5fd7` sends
   `sigil` + `symbol` (and `package` for a stash variable), with the symbol
