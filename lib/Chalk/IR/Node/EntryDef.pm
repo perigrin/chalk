@@ -7,8 +7,13 @@ use experimental 'class';
 use Chalk::IR::Node::Access;
 
 class Chalk::IR::Node::EntryDef :isa(Chalk::IR::Node::Access) {
-    field $stash_name :param :reader = '';
-    field $var_name   :param :reader = '';
+    field $package :param :reader = '';
+
+    # `symbol` is the BARE identifier -- 'g', never '$g'. perl's own terms, from
+    # Symbol.pm: qualify turns unqualified SYMBOL NAMES into qualified VARIABLE
+    # NAMES, and qualify("x") is "main::x" with no sigil, because the symbol
+    # table is sigil-free and the sigil selects a slot within the glob.
+    field $symbol  :param :reader = '';
 
     # THE SIGIL IS PART OF THE IDENTITY, and it is REQUIRED -- there is no
     # sensible default.
@@ -28,8 +33,13 @@ class Chalk::IR::Node::EntryDef :isa(Chalk::IR::Node::Access) {
     method operation() { 'EntryDef' }
     sub identity_kind { q(hash_consed) }
 
+    # The qualified spelling, composed in ONE place -- see the note on
+    # PadAccess::name. This is the variable's name WITHOUT its package;
+    # `_pkg_*_global_name` consumers pass `package` alongside it.
+    method name() { $sigil . $symbol }
+
     method content_hash() {
-        return join('|', 'EntryDef', "stash_name=$stash_name",
-            "sigil=$sigil", "var_name=$var_name", $self->_serialize_inputs());
+        return join('|', 'EntryDef', "package=$package",
+            "sigil=$sigil", "symbol=$symbol", $self->_serialize_inputs());
     }
 }

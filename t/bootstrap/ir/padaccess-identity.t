@@ -13,8 +13,8 @@ use Chalk::IR::Node::PadAccess;
 # Chalk consumer (LLVM backend, scheduler, elaborator) reads targ behaviorally;
 # they resolve PadAccess -> VarDecl via inputs[0]. See PadAccess::content_hash.
 
-my $a = Chalk::IR::Node::PadAccess->new(id => 'pad_a', targ => 1, varname => '$x');
-my $b = Chalk::IR::Node::PadAccess->new(id => 'pad_b', targ => 2, varname => '$x');
+my $a = Chalk::IR::Node::PadAccess->new(id => 'pad_a', targ => 1, sigil => '$', symbol => 'x');
+my $b = Chalk::IR::Node::PadAccess->new(id => 'pad_b', targ => 2, sigil => '$', symbol => 'x');
 
 isnt($a->targ, $b->targ, 'the two reads have different pad indices (the instability)');
 is($a->content_hash, $b->content_hash,
@@ -22,10 +22,10 @@ is($a->content_hash, $b->content_hash,
 
 # targ is preserved as a (non-identity) field for diagnostics / round-trip.
 is($a->targ, 1, 'targ still readable');
-is($a->varname, '$x', 'varname still readable');
+is($a->name, '$x', 'name is the qualified spelling');
 
 # Regression guard: distinct variable names stay distinct.
-my $y = Chalk::IR::Node::PadAccess->new(id => 'pad_y', targ => 1, varname => '$y');
+my $y = Chalk::IR::Node::PadAccess->new(id => 'pad_y', targ => 1, sigil => '$', symbol => 'y');
 isnt($a->content_hash, $y->content_hash,
     'different variable names produce different identity');
 

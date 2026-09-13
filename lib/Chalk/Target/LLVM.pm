@@ -567,8 +567,8 @@ sub _method_param_reprs {
                 my $r = $n->stamp or next;
                 $repr_at{$i} = $r;
             }
-            elsif ($op eq 'PadAccess' && $n->can('varname')) {
-                my $i = $index_of{ $n->varname // '' };
+            elsif ($op eq 'PadAccess' && $n->can('name')) {
+                my $i = $index_of{ $n->name() };
                 next unless defined $i;
                 # A Parameter node is the more direct statement of the same
                 # fact, so it wins where both exist.

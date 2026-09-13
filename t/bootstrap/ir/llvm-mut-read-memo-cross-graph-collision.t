@@ -141,7 +141,7 @@ subtest 'callee pure node id-collides with caller mutable-read: memo must not le
     my $vx = $f->make('VarDecl', inputs => [$nx, int_const($f, 1)]);
     $vx->set_stamp('Int');
 
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $collision_id = $rx->id;
 
@@ -179,7 +179,7 @@ subtest 'callee pure node id-collides with caller mutable-read: memo must not le
     $asg->set_stamp('Int');
     $asg->set_control_in($call);
 
-    my $rxF = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rxF = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     is($rxF->id, $collision_id, 'precondition: final PadAccess($x) shares the forced collision id');
     my $ret = $f->make_cfg('Return', inputs => [$rxF]);
     $ret->set_control_in($asg);

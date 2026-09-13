@@ -39,7 +39,7 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $xn = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx = $f->make('VarDecl', inputs => [$xn, $c1]);
     $vx->set_stamp('Int');
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $ret->set_control_in($vx);
@@ -94,12 +94,12 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
     $vx->set_stamp('Int');
 
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
     $as1->set_stamp('Int');
 
-    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs2->set_stamp('Int');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
     $as2->set_stamp('Int');
@@ -113,7 +113,7 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     $as1->set_control_in($proj0);
     $as2->set_control_in($proj1);
 
-    my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
@@ -201,9 +201,9 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $vs   = $f->make('VarDecl', inputs => [$sn, $c0a]);
     $vs->set_stamp('Int');
 
-    my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    my $rn0  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'n', inputs => [$vn]);
     $rn0->set_stamp('Int');
-    my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs0  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs0->set_stamp('Int');
 
     my $loop = $f->make('Loop', inputs => [$vs, undef]);
@@ -311,17 +311,17 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $cmp_in  = $f->make('NumGt', inputs => [$n, $three]);
     $cmp_in->set_stamp('Boolean');
 
-    my $lhs3 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs3 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs3->set_stamp('Int');
     my $as3  = $f->make('Assign', inputs => [$lhs3, $c3v]);
     $as3->set_stamp('Int');
 
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1v]);
     $as1->set_stamp('Int');
 
-    my $lhs0 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs0 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs0->set_stamp('Int');
     my $as0  = $f->make('Assign', inputs => [$lhs0, $c0v]);
     $as0->set_stamp('Int');
@@ -343,7 +343,7 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     $as0->set_control_in($outer_p1);
     $inner_if->set_control_in($outer_p0);
 
-    my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $outer_if->set_control_in($vx);
@@ -422,7 +422,7 @@ ok(Chalk::IR::Schedule::Dominators->can('from_return_node'),
     my $region  = $f->make('Region', inputs => [$proj0, $proj1]);
     $if_node->set_region($region);
 
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);

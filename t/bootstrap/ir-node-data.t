@@ -37,12 +37,12 @@ my $v3 = Chalk::IR::Node->new(id => 'v3');
 $phi->set_backedge($v3);
 is($phi->inputs()->[1]->id(), 'v3', 'Phi backedge updated');
 
-my $pad = Chalk::IR::Node::PadAccess->new(id => 'pad_0', targ => 3, varname => '$x');
+my $pad = Chalk::IR::Node::PadAccess->new(id => 'pad_0', targ => 3, sigil => '$', symbol => 'x');
 isa_ok($pad, 'Chalk::IR::Node::Access', 'PadAccess isa Access');
 is($pad->operation(), 'PadAccess', 'PadAccess operation');
 is($pad->targ(), 3, 'PadAccess targ');
-is($pad->varname(), '$x', 'PadAccess varname');
-like($pad->content_hash(), qr/PadAccess\|varname=\$x/, 'PadAccess content_hash keyed on varname, not targ');
+is($pad->name(), '$x', 'PadAccess name is the qualified spelling');
+like($pad->content_hash(), qr/PadAccess\|name=\$x/, 'PadAccess content_hash keyed on the qualified name, not targ');
 
 my $fa = Chalk::IR::Node::FieldAccess->new(id => 'fa_0', field_index => 0, field_stash => 'MyClass');
 isa_ok($fa, 'Chalk::IR::Node::Access', 'FieldAccess isa Access');

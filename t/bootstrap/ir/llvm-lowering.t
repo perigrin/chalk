@@ -373,7 +373,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     # $x = 1 (then branch)
     my $c1   = $f->make('Constant', value => '1', const_type => 'integer');
     $c1->set_stamp('Int');
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
     $as1->set_stamp('Int');
@@ -382,7 +382,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $c2   = $f->make('Constant', value => '2', const_type => 'integer');
     $c2->set_stamp('Int');
     # Note: lhs2 hash-cons == lhs1 (same targ/varname/vd) — that's correct.
-    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs2->set_stamp('Int');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
     $as2->set_stamp('Int');
@@ -399,7 +399,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $as2->set_control_in($proj1);
 
     # $x (read after if/else)
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
 
     # Return $x; control chain: vx -> if
@@ -468,9 +468,9 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $vs   = $f->make('VarDecl', inputs => [$sn, $c0s]);
     $vs->set_stamp('Int');
 
-    my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    my $rn0  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'n', inputs => [$vn]);
     $rn0->set_stamp('Int');
-    my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs0  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs0->set_stamp('Int');
 
     # Loop node (entry_ctrl = %vs)
@@ -508,7 +508,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $s_new->set_control_in($body_proj);
 
     # Return $s (the s_phi value at exit)
-    my $rs = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs->set_stamp('Int');
 
     # Existing chain: vn -> vs -> loop; the Print goes after the loop.
@@ -580,7 +580,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $vx->set_stamp('Int');
 
     # $x = 1 (then branch only; no else branch)
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
     $as1->set_stamp('Int');
@@ -596,7 +596,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $as1->set_control_in($proj0);
 
     # $x (read after if)
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
 
     # Return $x; control: vx -> if
@@ -664,7 +664,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     # $x = 2.5 (then)
     my $c25 = $f->make('Constant', value => '2.5', const_type => 'integer');
     $c25->set_stamp('Num');
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Num');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c25]);
     $as1->set_stamp('Num');
@@ -672,7 +672,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     # $x = 1.5 (else)
     my $c15 = $f->make('Constant', value => '1.5', const_type => 'integer');
     $c15->set_stamp('Num');
-    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs2->set_stamp('Num');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c15]);
     $as2->set_stamp('Num');
@@ -686,7 +686,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $as1->set_control_in($proj0);
     $as2->set_control_in($proj1);
 
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Num');
 
     # Existing chain: vx -> if_node; the Print goes after the merge.
@@ -763,11 +763,11 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $vt   = $f->make('VarDecl', inputs => [$tn, $add]);
     $vt->set_stamp('Int');
 
-    my $rt   = $f->make('PadAccess', targ => 0, varname => '$t', inputs => [$vt]);
+    my $rt   = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 't', inputs => [$vt]);
     $rt->set_stamp('Int');
     my $mul  = $f->make('Multiply', inputs => [$rt, $c2]);
     $mul->set_stamp('Int');
-    my $lhsx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhsx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhsx->set_stamp('Int');
     my $asx  = $f->make('Assign', inputs => [$lhsx, $mul]);
     $asx->set_stamp('Int');
@@ -787,7 +787,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $vt->set_control_in($proj0);
 
     # Return $x
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
 
     # Existing chain: vx -> if_node; the Print goes after the merge.
@@ -862,9 +862,9 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $vs   = $f->make('VarDecl', inputs => [$sn, $c0a]);
     $vs->set_stamp('Int');
 
-    my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    my $rn0  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'n', inputs => [$vn]);
     $rn0->set_stamp('Int');
-    my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs0  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs0->set_stamp('Int');
 
     my $loop = $f->make('Loop', inputs => [$vs, undef]);

@@ -1183,8 +1183,7 @@ sub _seed_direct_call_arg_reprs ($graphs) {
                     for my $n ($callee->nodes->@*) {
                         next unless blessed($n)
                                  && $n->operation eq 'PadAccess'
-                                 && $n->can('varname')
-                                 && ($n->varname // '') eq $pname;
+                                 && $n->name() eq $pname;
                         # A HOLE IS `Unknown` OR ABSENT, not merely undef.
                         # `defined ->stamp` reads Unknown as a
                         # committed answer and would skip the very case
@@ -2509,15 +2508,18 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
             # FieldAccess arm below is the only rule that ever typed it, so the
             # accessor body reached the end of the pipeline untyped.
             #
-            # Record (graph name, varname) -> type so the walk can type it. The
-            # varname is matched too: an accessor graph contains exactly one
-            # field read, but keying on the graph alone would type ANY PadAccess
-            # that appeared there, and a future accessor body with a local would
-            # be silently mistyped.
+            # Record (graph name, variable name) -> type so the walk can type
+            # it. The variable name is matched too: an accessor graph contains
+            # exactly one field read, but keying on the graph alone would type
+            # ANY PadAccess that appeared there, and a future accessor body with
+            # a local would be silently mistyped.
+            #
+            # The GRAPH key is sigil-free (it names a method) while the stored
+            # name keeps its sigil (it is compared against PadAccess::name).
             if ($f->{is_reader} && defined $f->{type} && defined $f->{name}) {
                 my $accessor = $f->{name} =~ s/^[\$\@\%]//r;
                 $reader_graph_type{"$cname\::$accessor"} =
-                    { varname => $f->{name}, type => $f->{type} };
+                    { name => $f->{name}, type => $f->{type} };
             }
             # An aggregate default's element repr (widest of its elements).
             if (defined $f->{default_ref}
@@ -2540,8 +2542,7 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
             # The :reader accessor's field read (see %reader_graph_type above).
             if ($reader && $node->operation eq 'PadAccess'
                     && !_is_narrowed($node->stamp)
-                    && $node->can('varname')
-                    && ($node->varname // '') eq $reader->{varname}) {
+                    && $node->name() eq $reader->{name}) {
                 $node->set_stamp($reader->{type});
                 next;
             }

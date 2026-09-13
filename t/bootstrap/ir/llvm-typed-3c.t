@@ -273,7 +273,7 @@ sub print_program {
     $vd->set_stamp('Int');
 
     # PadAccess: inputs[0] = VarDecl (the source slot)
-    my $pad  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
+    my $pad  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vd]);
     $pad->set_stamp('Int');
 
     my $ret  = print_program($f, $pad);
@@ -309,7 +309,7 @@ sub print_program {
     $vd->set_stamp('Int');
 
     # PadAccess for the LHS of Assign (the target slot)
-    my $lhs  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
+    my $lhs  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vd]);
     $lhs->set_stamp('Int');
 
     # Assign: inputs[0] = lhs PadAccess (target), inputs[1] = new value
@@ -319,7 +319,7 @@ sub print_program {
     $asgn->set_control_in($vd);
 
     # The PadAccess that Return reads (after the Assign)
-    my $pad  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
+    my $pad  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vd]);
     $pad->set_stamp('Int');
 
     # The Print comes after the Assign in the control chain, so it observes the
@@ -357,7 +357,7 @@ sub print_program {
     $vd->set_stamp('Int');
 
     # PadAccess for reading current $x (the read side of +=)
-    my $read_pad = $f->make('PadAccess', targ => 0, varname => '$x_read', inputs => [$vd]);
+    my $read_pad = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x_read', inputs => [$vd]);
     $read_pad->set_stamp('Int');
 
     # The Add node for $x + 2
@@ -365,7 +365,7 @@ sub print_program {
     $added->set_stamp('Int');
 
     # PadAccess for the LHS of the CompoundAssign (the target slot)
-    my $lhs_pad = $f->make('PadAccess', targ => 0, varname => '$x_lhs', inputs => [$vd]);
+    my $lhs_pad = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x_lhs', inputs => [$vd]);
     $lhs_pad->set_stamp('Int');
 
     # CompoundAssign: inputs[0] = lhs (target slot), inputs[1] = computed value
@@ -374,7 +374,7 @@ sub print_program {
     $ca->set_control_in($vd);
 
     # PadAccess for return (after compound assign)
-    my $ret_pad = $f->make('PadAccess', targ => 0, varname => '$x_ret', inputs => [$vd]);
+    my $ret_pad = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x_ret', inputs => [$vd]);
     $ret_pad->set_stamp('Int');
 
     my $ret = print_program($f, $ret_pad, $ca);
@@ -529,22 +529,22 @@ sub print_program {
     my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_stamp('Int');
 
     # my $y = $x;  (pre-assign read of $x — x=1)
-    my $rx1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx1->set_stamp('Int');
     my $ny  = $f->make('Constant', value => '$y', const_type => 'string');
     my $vy  = $f->make('VarDecl', inputs => [$ny, $rx1]); $vy->set_stamp('Int');
 
     # $x = 2;  (reassignment — updates var_table[vx] to new SSA value)
     my $c2  = int_const($f, 2);
-    my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rxL = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rxL->set_stamp('Int');
     my $asg = $f->make('Assign', inputs => [$rxL, $c2]); $asg->set_stamp('Int');
 
     # return $x + $y;  ($x and $rxL and $rx1 are all the same hash-consed node;
     # the scoped model reads var_table[vx] which now holds x=2)
-    my $rx2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx2->set_stamp('Int');
-    my $ryF = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
+    my $ryF = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'y', inputs => [$vy]);
     $ryF->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$rx2, $ryF]); $add->set_stamp('Int');
     $asg->set_control_in($vy); $vy->set_control_in($vx);

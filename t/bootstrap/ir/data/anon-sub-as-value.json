@@ -61,9 +61,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "%",
-                  "stash_name" : "main",
-                  "var_name" : "SIG"
+                  "symbol" : "SIG"
                },
                "id" : 3,
                "inputs" : [],

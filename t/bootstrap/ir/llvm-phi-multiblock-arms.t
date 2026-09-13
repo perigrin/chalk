@@ -99,7 +99,7 @@ subtest 'if-merge explicit Phi with a multi-block then-arm (I5)' => sub {
     my $vn = $f->make('VarDecl', inputs => [$nn, int_const($f, 1)]);
     $vn->set_stamp('Int');
 
-    my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    my $rn = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'n', inputs => [$vn]);
     $rn->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
     $cmp->set_stamp('Boolean');
@@ -143,7 +143,7 @@ subtest 'two explicit Phis on one Region, later arm multi-block (review C1)' => 
     my $vn = $f->make('VarDecl', inputs => [$nn, int_const($f, 1)]);
     $vn->set_stamp('Int');
 
-    my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    my $rn = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'n', inputs => [$vn]);
     $rn->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
     $cmp->set_stamp('Boolean');
@@ -206,7 +206,7 @@ subtest 'loop phi with a multi-block init value (I5)' => sub {
     my $sn = $f->make('Constant', value => '$s', const_type => 'string');
     my $vs = $f->make('VarDecl', inputs => [$sn, int_const($f, 0)]);
     $vs->set_stamp('Int');
-    my $rs0 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs0 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs0->set_stamp('Int');
 
     my $loop = $f->make('Loop', inputs => [$vs, undef]);
@@ -269,7 +269,7 @@ subtest 'loop phi with a multi-block backedge value (I5)' => sub {
     my $sn = $f->make('Constant', value => '$s', const_type => 'string');
     my $vs = $f->make('VarDecl', inputs => [$sn, int_const($f, 0)]);
     $vs->set_stamp('Int');
-    my $rs0 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs0 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs0->set_stamp('Int');
 
     my $loop = $f->make('Loop', inputs => [$vs, undef]);
@@ -326,7 +326,7 @@ subtest 'elab phi labels + branch-snapshot arm reads (review gaps 2+3)' => sub {
     my $vt = $f->make('VarDecl', inputs => [$nt, int_const($f, 0)]);
     $vt->set_stamp('Int');
 
-    my $rn = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    my $rn = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'n', inputs => [$vn]);
     $rn->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$rn, int_const($f, 0)]);
     $cmp->set_stamp('Boolean');
@@ -338,7 +338,7 @@ subtest 'elab phi labels + branch-snapshot arm reads (review gaps 2+3)' => sub {
     $if_node->set_region($region);
 
     # then: $t = 1; else: $t = 2  (divergence -> elab phi for $t)
-    my $rt_lhs = $f->make('PadAccess', targ => 1, varname => '$t', inputs => [$vt]);
+    my $rt_lhs = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 't', inputs => [$vt]);
     $rt_lhs->set_stamp('Int');
     my $asg_then = $f->make('Assign', inputs => [$rt_lhs, int_const($f, 1)]);
     $asg_then->set_stamp('Int');
@@ -352,7 +352,7 @@ subtest 'elab phi labels + branch-snapshot arm reads (review gaps 2+3)' => sub {
     $aref->set_stamp('ArrayRef');
     my $sub = $f->make('Subscript', inputs => [$aref, int_const($f, 0)]);
     $sub->set_stamp('Int');
-    my $rt_arm = $f->make('PadAccess', targ => 1, varname => '$t', inputs => [$vt]);
+    my $rt_arm = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 't', inputs => [$vt]);
     $rt_arm->set_stamp('Int');
     my $arm = $f->make('Add', inputs => [$sub, $rt_arm]);
     $arm->set_stamp('Int');
@@ -360,7 +360,7 @@ subtest 'elab phi labels + branch-snapshot arm reads (review gaps 2+3)' => sub {
     $phi->set_stamp('Int');
 
     # return V + $t  ($t post-merge = the elab phi)
-    my $rt_post = $f->make('PadAccess', targ => 1, varname => '$t', inputs => [$vt]);
+    my $rt_post = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 't', inputs => [$vt]);
     $rt_post->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$phi, $rt_post]);
     $sum->set_stamp('Int');

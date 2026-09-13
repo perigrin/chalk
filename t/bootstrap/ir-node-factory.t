@@ -64,7 +64,7 @@ is($call->dispatch_kind(), 'builtin');
 is($call->name(), 'push');
 
 # PadAccess and FieldAccess
-my $pad = $f->make('PadAccess', targ => 0, varname => '$x');
+my $pad = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x');
 isa_ok($pad, 'Chalk::IR::Node::PadAccess');
 my $fa = $f->make('FieldAccess', field_index => 1, field_stash => 'Foo');
 isa_ok($fa, 'Chalk::IR::Node::FieldAccess');

@@ -7,19 +7,36 @@ use experimental 'class';
 use Chalk::IR::Node::Access;
 
 class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
-    field $targ    :param :reader;
-    field $varname :param :reader;
+    field $targ   :param :reader;
+
+    # The sigil and the bare symbol are carried SEPARATELY, matching the wire
+    # and perl's own terms: the symbol table is sigil-free and the sigil selects
+    # a slot within the glob, so `symbol` is 'x', never '$x'.
+    #
+    # Both are required. A sigil-less variable lookup is not expressible, for
+    # the same reason it is not expressible on EntryDef: `_` alone names the
+    # scalar `$_`, the array `@_`, and the `-f _` filetest handle, and a
+    # name-only identity hash-cons collapses unrelated variables into one node.
+    field $sigil  :param :reader;
+    field $symbol :param :reader;
 
     method operation() { 'PadAccess' }
     sub identity_kind { q(hash_consed) }
 
+    # The qualified spelling, composed in ONE place. Consumers comparing against
+    # a sigil-carrying string ('$self', a signature parameter name) read this
+    # rather than re-joining the halves, because a site that composes it itself
+    # and is later missed fails SILENTLY -- the comparison simply stops matching.
+    method name() { $sigil . $symbol }
+
     method content_hash() {
-        # Identity is the variable name plus inputs. `targ` (the pad-slot index)
-        # is CV-local and unstable across compilation units, so it is NOT
-        # identity-bearing: two semantically identical reads at different pad
-        # indices must hash-cons together. `targ` is retained as a field for
-        # diagnostics / round-trip only (no consumer reads it behaviorally;
-        # PadAccess resolves to its VarDecl via inputs[0]).
-        return join('|', 'PadAccess', "varname=$varname", $self->_serialize_inputs());
+        # Identity is the qualified variable name plus inputs. `targ` (the
+        # pad-slot index) is CV-local and unstable across compilation units, so
+        # it is NOT identity-bearing: two semantically identical reads at
+        # different pad indices must hash-cons together. `targ` is retained as a
+        # field for diagnostics / round-trip only (no consumer reads it
+        # behaviorally; PadAccess resolves to its VarDecl via inputs[0]).
+        return join('|', 'PadAccess', 'name=' . $self->name(),
+            $self->_serialize_inputs());
     }
 }

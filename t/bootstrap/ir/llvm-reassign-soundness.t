@@ -116,21 +116,21 @@ sub print_and_return {
     my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_stamp('Int');
 
     # my $y = $x (pre-assign read)
-    my $rx1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx1->set_stamp('Int');
     my $ny  = $f->make('Constant', value => '$y', const_type => 'string');
     my $vy  = $f->make('VarDecl', inputs => [$ny, $rx1]); $vy->set_stamp('Int');
 
     # $x = 2
     my $c2  = int_const($f, 2);
-    my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rxL = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rxL->set_stamp('Int');
     my $asg = $f->make('Assign', inputs => [$rxL, $c2]); $asg->set_stamp('Int');
 
     # return $x + $y  (post-assign read)
-    my $rx2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx2->set_stamp('Int');
-    my $ryF = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
+    my $ryF = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'y', inputs => [$vy]);
     $ryF->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$rx2, $ryF]); $add->set_stamp('Int');
     # Existing chain: vx -> vy -> asg; the Print goes after asg.
@@ -172,35 +172,35 @@ sub print_and_return {
     my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_stamp('Int');
 
     # my $y = $x  (x=1)
-    my $rx_for_y = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx_for_y = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx_for_y->set_stamp('Int');
     my $ny = $f->make('Constant', value => '$y', const_type => 'string');
     my $vy = $f->make('VarDecl', inputs => [$ny, $rx_for_y]); $vy->set_stamp('Int');
 
     # $x = 2
     my $c2   = int_const($f, 2);
-    my $rxL1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rxL1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rxL1->set_stamp('Int');
     my $asg1 = $f->make('Assign', inputs => [$rxL1, $c2]); $asg1->set_stamp('Int');
 
     # my $z = $x  (x=2 after first assign)
-    my $rx_for_z = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx_for_z = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx_for_z->set_stamp('Int');
     my $nz = $f->make('Constant', value => '$z', const_type => 'string');
     my $vz = $f->make('VarDecl', inputs => [$nz, $rx_for_z]); $vz->set_stamp('Int');
 
     # $x = 3
     my $c3   = int_const($f, 3);
-    my $rxL2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rxL2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rxL2->set_stamp('Int');
     my $asg2 = $f->make('Assign', inputs => [$rxL2, $c3]); $asg2->set_stamp('Int');
 
     # return $x + $y + $z  (x=3 after second assign)
-    my $rx_final = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx_final = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx_final->set_stamp('Int');
-    my $ry_final = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
+    my $ry_final = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'y', inputs => [$vy]);
     $ry_final->set_stamp('Int');
-    my $rz_final = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
+    my $rz_final = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'z', inputs => [$vz]);
     $rz_final->set_stamp('Int');
 
     my $sum1 = $f->make('Add', inputs => [$rx_final, $ry_final]); $sum1->set_stamp('Int');
@@ -259,14 +259,14 @@ for my $pair ([5, 6], [-1, 2]) {
     my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_stamp('Int');
 
     # my $y = $x  (pre-branch read; x=1)
-    my $rx_for_y = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx_for_y = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx_for_y->set_stamp('Int');
     my $ny = $f->make('Constant', value => '$y', const_type => 'string');
     my $vy = $f->make('VarDecl', inputs => [$ny, $rx_for_y]); $vy->set_stamp('Int');
 
     # condition: $n > 0
     my $c0  = int_const($f, 0);
-    my $rn  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    my $rn  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'n', inputs => [$vn]);
     $rn->set_stamp('Int');
     my $cmp = $f->make('NumGt', inputs => [$rn, $c0]); $cmp->set_stamp('Boolean');
 
@@ -279,15 +279,15 @@ for my $pair ([5, 6], [-1, 2]) {
 
     # then-branch: $x = 5
     my $c5  = int_const($f, 5);
-    my $lhs = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs->set_stamp('Int');
     my $asg = $f->make('Assign', inputs => [$lhs, $c5]); $asg->set_stamp('Int');
     $asg->set_control_in($proj0);
 
     # post-merge reads
-    my $rx_post = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx_post = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx_post->set_stamp('Int');
-    my $ry_post = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
+    my $ry_post = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'y', inputs => [$vy]);
     $ry_post->set_stamp('Int');
 
     my $add = $f->make('Add', inputs => [$rx_post, $ry_post]); $add->set_stamp('Int');
@@ -345,9 +345,9 @@ for my $pair ([5, 6], [-1, 2]) {
     my $vx  = $f->make('VarDecl', inputs => [$nxl, $c0x]); $vx->set_stamp('Int');
     my $vs  = $f->make('VarDecl', inputs => [$ns, $c0s]); $vs->set_stamp('Int');
 
-    my $ri0 = $f->make('PadAccess', targ => 0, varname => '$i', inputs => [$vi]); $ri0->set_stamp('Int');
-    my $rx0 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]); $rx0->set_stamp('Int');
-    my $rs0 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rs0->set_stamp('Int');
+    my $ri0 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'i', inputs => [$vi]); $ri0->set_stamp('Int');
+    my $rx0 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]); $rx0->set_stamp('Int');
+    my $rs0 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]); $rs0->set_stamp('Int');
 
     my $loop   = $f->make('Loop', inputs => [$vs, undef]);
     my $i_phi  = $f->make('Phi', region => $loop, values => [$ri0]); $i_phi->set_stamp('Int');
@@ -408,41 +408,41 @@ for my $pair ([5, 6], [-1, 2]) {
     my $vx = $f->make('VarDecl', inputs => [$nx, $c1]); $vx->set_stamp('Int');
 
     # acc1 = $x  (x=1)
-    my $r1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $r1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $r1->set_stamp('Int');
     my $n1 = $f->make('Constant', value => '$acc1', const_type => 'string');
     my $v1 = $f->make('VarDecl', inputs => [$n1, $r1]); $v1->set_stamp('Int');
 
     # $x = 2
     my $c2   = int_const($f, 2);
-    my $rxL1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rxL1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rxL1->set_stamp('Int');
     my $asg1 = $f->make('Assign', inputs => [$rxL1, $c2]); $asg1->set_stamp('Int');
 
     # acc2 = $x  (x=2)
-    my $r2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $r2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $r2->set_stamp('Int');
     my $n2 = $f->make('Constant', value => '$acc2', const_type => 'string');
     my $v2 = $f->make('VarDecl', inputs => [$n2, $r2]); $v2->set_stamp('Int');
 
     # $x = 3
     my $c3   = int_const($f, 3);
-    my $rxL2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rxL2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rxL2->set_stamp('Int');
     my $asg2 = $f->make('Assign', inputs => [$rxL2, $c3]); $asg2->set_stamp('Int');
 
     # acc3 = $x  (x=3)
-    my $r3 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $r3 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $r3->set_stamp('Int');
     my $n3 = $f->make('Constant', value => '$acc3', const_type => 'string');
     my $v3 = $f->make('VarDecl', inputs => [$n3, $r3]); $v3->set_stamp('Int');
 
     # return acc1+acc2+acc3
-    my $ra1 = $f->make('PadAccess', targ => 0, varname => '$acc1', inputs => [$v1]);
+    my $ra1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'acc1', inputs => [$v1]);
     $ra1->set_stamp('Int');
-    my $ra2 = $f->make('PadAccess', targ => 0, varname => '$acc2', inputs => [$v2]);
+    my $ra2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'acc2', inputs => [$v2]);
     $ra2->set_stamp('Int');
-    my $ra3 = $f->make('PadAccess', targ => 0, varname => '$acc3', inputs => [$v3]);
+    my $ra3 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'acc3', inputs => [$v3]);
     $ra3->set_stamp('Int');
 
     my $sum1 = $f->make('Add', inputs => [$ra1, $ra2]); $sum1->set_stamp('Int');

@@ -95,7 +95,7 @@ subtest 'a DYNAMIC index is left alone' => sub {
     $arr->set_stamp('ArrayRef');
 
     # A PadAccess index is not a Constant, so nothing is statically decidable.
-    my $idx = $f->make('PadAccess', targ => 1, varname => '$i', inputs => []);
+    my $idx = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 'i', inputs => []);
     $idx->set_stamp('Int');
 
     my $sub = $f->make('Subscript', inputs => [$arr, $idx]);

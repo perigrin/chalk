@@ -156,8 +156,8 @@ $SPEC{Proj} = sub ($f) {
 };
 
 $SPEC{PadAccess} = sub ($f) {
-    my $node = $f->make('PadAccess', targ => 3, varname => 'x', inputs => []);
-    return ($node, { targ => 3, varname => 'x' });
+    my $node = $f->make('PadAccess', targ => 3, sigil => '$', symbol => 'x', inputs => []);
+    return ($node, { targ => 3, sigil => '$', symbol => 'x' });
 };
 
 $SPEC{FieldAccess} = sub ($f) {
@@ -172,8 +172,8 @@ $SPEC{EntryDef} = sub ($f) {
     # the pass-by-omission this file exists to prevent. `sigil` was added and
     # this spec did not notice.
     my $node = $f->make('EntryDef',
-        stash_name => 'main', sigil => '@', var_name => 'g', inputs => []);
-    return ($node, { stash_name => 'main', sigil => '@', var_name => 'g' });
+        package => 'main', sigil => '@', symbol => 'g', inputs => []);
+    return ($node, { package => 'main', sigil => '@', symbol => 'g' });
 };
 
 $SPEC{ArgsSource} = sub ($f) {

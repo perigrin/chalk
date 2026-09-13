@@ -143,12 +143,12 @@ my %REQUIRED;
 BEGIN {
     %REQUIRED = (
         Constant       => { value => 1, const_type => 'integer' },
-        PadAccess      => { targ => 1, varname => '$x' },
+        PadAccess      => { targ => 1, sigil => '$', symbol => 'x' },
         FieldAccess    => { field_index => 0, field_stash => 'Foo' },
         Coerce         => { from_repr => 'Int', to_repr => 'Str' },
         PostfixDeref   => { sigil => '@' },
         Proj           => { index => 0 },
-        EntryDef    => { stash_name => 'main', var_name => 'x' },
+        EntryDef    => { package => 'main', sigil => '$', symbol => 'x' },
         Call           => { dispatch_kind => 'direct', name => 'f' },
         CompoundAssign => { op => '+=' },
         EnvRead        => { key => 'PATH' },

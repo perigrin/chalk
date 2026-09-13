@@ -161,7 +161,11 @@ sub _extract_fields ($node, $id_remap) {
         return { index => $node->index };
     }
     if ($op eq 'PadAccess') {
-        return { targ => $node->targ, varname => $node->varname };
+        return {
+            targ   => $node->targ,
+            sigil  => $node->sigil,
+            symbol => $node->symbol,
+        };
     }
     if ($op eq 'FieldAccess') {
         return { field_index => $node->field_index, field_stash => $node->field_stash };
@@ -179,9 +183,9 @@ sub _extract_fields ($node, $id_remap) {
     }
     if ($op eq 'EntryDef') {
         return {
-            stash_name => $node->stash_name,
-            sigil      => $node->sigil,
-            var_name   => $node->var_name,
+            package => $node->package,
+            sigil   => $node->sigil,
+            symbol  => $node->symbol,
         };
     }
     if ($op eq 'CompoundAssign') {
@@ -630,8 +634,18 @@ sub _deserialize_graph ($method_data) {
             $args{index} = $fields->{index};
         }
         elsif ($op eq 'PadAccess') {
-            $args{targ}    = $fields->{targ};
-            $args{varname} = $fields->{varname};
+            $args{targ} = $fields->{targ};
+            # REQUIRED, not defaulted, for the reason spelled out on EntryDef
+            # below: the sigil is identity-bearing, and defaulting one invents
+            # an identity. A wire carrying the pre-split `varname` blob reaches
+            # here with no sigil, and must fail LOUDLY rather than hash-cons
+            # `$a` and `@a` together.
+            die "GAP: PadAccess '" . ($fields->{symbol} // '?')
+              . "' arrived with no sigil -- the wire predates the sigil/symbol "
+              . "split (perl5-son 2aa5fd7), or the producer failed to stamp it."
+                unless defined $fields->{sigil};
+            $args{sigil}  = $fields->{sigil};
+            $args{symbol} = $fields->{symbol};
         }
         elsif ($op eq 'Parameter') {
             # index is REQUIRED -- it is the node's identity. A missing one is a
@@ -651,17 +665,17 @@ sub _deserialize_graph ($method_data) {
             $args{sigil} = $fields->{sigil};
         }
         elsif ($op eq 'EntryDef') {
-            $args{stash_name} = $fields->{stash_name} // '';
-            $args{var_name}   = $fields->{var_name}   // '';
+            $args{package} = $fields->{package} // '';
+            $args{symbol}  = $fields->{symbol}  // '';
             # REQUIRED, not defaulted. `_` alone names three different things
             # ($_, @_, and the `-f _` filetest handle), so a wire without a
             # sigil does not identify a variable -- defaulting one here would
             # invent an identity and re-merge what the producer kept apart.
-            die "GAP: EntryDef '" . ($fields->{var_name} // '?')
+            die "GAP: EntryDef '" . ($fields->{symbol} // '?')
               . "' arrived with no sigil -- the wire predates sigil-qualified "
               . "stash identity, or the producer failed to stamp it."
                 unless defined $fields->{sigil};
-            $args{sigil}      = $fields->{sigil};
+            $args{sigil}   = $fields->{sigil};
         }
         elsif ($op eq 'RegexMatch') {
             $args{pattern} = $fields->{pattern} // '';

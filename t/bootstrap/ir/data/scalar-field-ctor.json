@@ -7753,8 +7753,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 12,
                "inputs" : [],
@@ -7900,8 +7901,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 12,
                "inputs" : [],
@@ -8004,8 +8006,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "%BUILTIN_SIGNATURES"
+                  "sigil" : "%",
+                  "symbol" : "BUILTIN_SIGNATURES",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -8061,8 +8064,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "%SIGNATURES"
+                  "sigil" : "%",
+                  "symbol" : "SIGNATURES",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -8128,8 +8132,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$cv"
+                  "sigil" : "$",
+                  "symbol" : "cv",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -8193,9 +8198,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "0"
+                  "symbol" : "0"
                },
                "id" : 8,
                "inputs" : [],
@@ -8337,8 +8342,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$node"
+                  "sigil" : "$",
+                  "symbol" : "node",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -8526,8 +8532,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$pkg"
+                  "sigil" : "$",
+                  "symbol" : "pkg",
+                  "targ" : 2
                },
                "id" : 2,
                "inputs" : [],
@@ -8536,8 +8543,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$filter"
+                  "sigil" : "$",
+                  "symbol" : "filter",
+                  "targ" : 1
                },
                "id" : 3,
                "inputs" : [],
@@ -8668,8 +8676,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$pkg_name"
+                  "sigil" : "$",
+                  "symbol" : "pkg_name",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -8812,8 +8821,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$node"
+                  "sigil" : "$",
+                  "symbol" : "node",
+                  "targ" : 1
                },
                "id" : 3,
                "inputs" : [],
@@ -9036,8 +9046,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$node"
+                  "sigil" : "$",
+                  "symbol" : "node",
+                  "targ" : 1
                },
                "id" : 3,
                "inputs" : [],
@@ -9278,8 +9289,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$key"
+                  "sigil" : "$",
+                  "symbol" : "key",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -9369,8 +9381,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$cv"
+                  "sigil" : "$",
+                  "symbol" : "cv",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -9379,8 +9392,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$targ"
+                  "sigil" : "$",
+                  "symbol" : "targ",
+                  "targ" : 2
                },
                "id" : 3,
                "inputs" : [],
@@ -9891,8 +9905,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$graphs"
+                  "sigil" : "$",
+                  "symbol" : "graphs",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -9901,8 +9916,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$classes"
+                  "sigil" : "$",
+                  "symbol" : "classes",
+                  "targ" : 2
                },
                "id" : 3,
                "inputs" : [],
@@ -10434,8 +10450,9 @@
             },
             {
                "fields" : {
-                  "targ" : 12,
-                  "varname" : "$before"
+                  "sigil" : "$",
+                  "symbol" : "before",
+                  "targ" : 12
                },
                "id" : 47,
                "inputs" : [],
@@ -10610,8 +10627,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$obj"
+                  "sigil" : "$",
+                  "symbol" : "obj",
+                  "targ" : 1
                },
                "id" : 7,
                "inputs" : [],
@@ -10631,8 +10649,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$name"
+                  "sigil" : "$",
+                  "symbol" : "name",
+                  "targ" : 2
                },
                "id" : 9,
                "inputs" : [],
@@ -10702,8 +10721,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$op_count"
+                  "sigil" : "$",
+                  "symbol" : "op_count",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -10773,8 +10793,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$value"
+                  "sigil" : "$",
+                  "symbol" : "value",
+                  "targ" : 2
                },
                "id" : 1,
                "inputs" : [],
@@ -10867,8 +10888,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$class"
+                  "sigil" : "$",
+                  "symbol" : "class",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -11044,8 +11066,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "@parents"
+                  "sigil" : "@",
+                  "symbol" : "parents",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -11572,8 +11595,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$cache"
+                  "sigil" : "$",
+                  "symbol" : "cache",
+                  "targ" : 1
                },
                "id" : 8,
                "inputs" : [],
@@ -11593,8 +11617,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$pkg"
+                  "sigil" : "$",
+                  "symbol" : "pkg",
+                  "targ" : 2
                },
                "id" : 10,
                "inputs" : [],
@@ -11627,8 +11652,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$i"
+                  "sigil" : "$",
+                  "symbol" : "i",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -11682,8 +11708,9 @@
             },
             {
                "fields" : {
-                  "targ" : 16,
-                  "varname" : "%i"
+                  "sigil" : "%",
+                  "symbol" : "i",
+                  "targ" : 16
                },
                "id" : 6,
                "inputs" : [],
@@ -11993,8 +12020,9 @@
             },
             {
                "fields" : {
-                  "targ" : 9,
-                  "varname" : "$tid_msg"
+                  "sigil" : "$",
+                  "symbol" : "tid_msg",
+                  "targ" : 9
                },
                "id" : 38,
                "inputs" : [],
@@ -12014,8 +12042,9 @@
             },
             {
                "fields" : {
-                  "targ" : 6,
-                  "varname" : "$err"
+                  "sigil" : "$",
+                  "symbol" : "err",
+                  "targ" : 6
                },
                "id" : 40,
                "inputs" : [],
@@ -12056,8 +12085,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "@error"
+                  "sigil" : "@",
+                  "symbol" : "error",
+                  "targ" : 2
                },
                "id" : 44,
                "inputs" : [],
@@ -12110,9 +12140,9 @@
             },
             {
                "fields" : {
+                  "package" : "Carp",
                   "sigil" : "$",
-                  "stash_name" : "Carp",
-                  "var_name" : "Verbose"
+                  "symbol" : "Verbose"
                },
                "id" : 3,
                "inputs" : [],
@@ -12185,8 +12215,9 @@
             },
             {
                "fields" : {
-                  "targ" : 10,
-                  "varname" : "$i"
+                  "sigil" : "$",
+                  "symbol" : "i",
+                  "targ" : 10
                },
                "id" : 11,
                "inputs" : [],
@@ -12338,8 +12369,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$str"
+                  "sigil" : "$",
+                  "symbol" : "str",
+                  "targ" : 1
                },
                "id" : 6,
                "inputs" : [],
@@ -12419,8 +12451,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$max"
+                  "sigil" : "$",
+                  "symbol" : "max",
+                  "targ" : 2
                },
                "id" : 14,
                "inputs" : [],
@@ -12814,8 +12847,9 @@
             },
             {
                "fields" : {
-                  "targ" : 4,
-                  "varname" : "$callpkg"
+                  "sigil" : "$",
+                  "symbol" : "callpkg",
+                  "targ" : 4
                },
                "id" : 4,
                "inputs" : [],
@@ -12878,8 +12912,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$pkg"
+                  "sigil" : "$",
+                  "symbol" : "pkg",
+                  "targ" : 1
                },
                "id" : 9,
                "inputs" : [],
@@ -12899,8 +12934,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$level"
+                  "sigil" : "$",
+                  "symbol" : "level",
+                  "targ" : 2
                },
                "id" : 11,
                "inputs" : [],
@@ -13003,8 +13039,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$wanted"
+                  "sigil" : "$",
+                  "symbol" : "wanted",
+                  "targ" : 2
                },
                "id" : 7,
                "inputs" : [],
@@ -13036,8 +13073,9 @@
             },
             {
                "fields" : {
-                  "targ" : 6,
-                  "varname" : "$pkg"
+                  "sigil" : "$",
+                  "symbol" : "pkg",
+                  "targ" : 6
                },
                "id" : 10,
                "inputs" : [],
@@ -13088,8 +13126,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 15,
                "inputs" : [],
@@ -13200,8 +13239,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$c"
+                  "sigil" : "$",
+                  "symbol" : "c",
+                  "targ" : 1
                },
                "id" : 9,
                "inputs" : [],
@@ -13268,8 +13308,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 5,
                "inputs" : [],
@@ -13412,8 +13453,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 13,
                "inputs" : [],
@@ -13564,8 +13606,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$class"
+                  "sigil" : "$",
+                  "symbol" : "class",
+                  "targ" : 1
                },
                "id" : 13,
                "inputs" : [],
@@ -13608,8 +13651,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$text"
+                  "sigil" : "$",
+                  "symbol" : "text",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -13628,8 +13672,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$at"
+                  "sigil" : "$",
+                  "symbol" : "at",
+                  "targ" : 2
                },
                "id" : 4,
                "inputs" : [],
@@ -13648,8 +13693,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$ch"
+                  "sigil" : "$",
+                  "symbol" : "ch",
+                  "targ" : 3
                },
                "id" : 6,
                "inputs" : [],
@@ -13668,8 +13714,9 @@
             },
             {
                "fields" : {
-                  "targ" : 4,
-                  "varname" : "$len"
+                  "sigil" : "$",
+                  "symbol" : "len",
+                  "targ" : 4
                },
                "id" : 8,
                "inputs" : [],
@@ -13688,8 +13735,9 @@
             },
             {
                "fields" : {
-                  "targ" : 5,
-                  "varname" : "$depth"
+                  "sigil" : "$",
+                  "symbol" : "depth",
+                  "targ" : 5
                },
                "id" : 10,
                "inputs" : [],
@@ -13708,8 +13756,9 @@
             },
             {
                "fields" : {
-                  "targ" : 6,
-                  "varname" : "$encoding"
+                  "sigil" : "$",
+                  "symbol" : "encoding",
+                  "targ" : 6
                },
                "id" : 12,
                "inputs" : [],
@@ -13728,8 +13777,9 @@
             },
             {
                "fields" : {
-                  "targ" : 7,
-                  "varname" : "$is_valid_utf8"
+                  "sigil" : "$",
+                  "symbol" : "is_valid_utf8",
+                  "targ" : 7
                },
                "id" : 14,
                "inputs" : [],
@@ -13790,8 +13840,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$depth"
+                  "sigil" : "$",
+                  "symbol" : "depth",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -13810,8 +13861,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$indent_count"
+                  "sigil" : "$",
+                  "symbol" : "indent_count",
+                  "targ" : 2
                },
                "id" : 4,
                "inputs" : [],
@@ -13993,8 +14045,9 @@
             },
             {
                "fields" : {
-                  "targ" : 11,
-                  "varname" : "$un"
+                  "sigil" : "$",
+                  "symbol" : "un",
+                  "targ" : 11
                },
                "id" : 15,
                "inputs" : [],
@@ -14036,8 +14089,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$uni"
+                  "sigil" : "$",
+                  "symbol" : "uni",
+                  "targ" : 1
                },
                "id" : 19,
                "inputs" : [],
@@ -14133,8 +14187,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$un"
+                  "sigil" : "$",
+                  "symbol" : "un",
+                  "targ" : 1
                },
                "id" : 7,
                "inputs" : [],
@@ -14438,8 +14493,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$text"
+                  "sigil" : "$",
+                  "symbol" : "text",
+                  "targ" : 1
                },
                "id" : 28,
                "inputs" : [],
@@ -14496,8 +14552,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$indent_count"
+                  "sigil" : "$",
+                  "symbol" : "indent_count",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -14546,8 +14603,9 @@
             },
             {
                "fields" : {
-                  "targ" : 7,
-                  "varname" : "$cb_sk_object"
+                  "sigil" : "$",
+                  "symbol" : "cb_sk_object",
+                  "targ" : 7
                },
                "id" : 1,
                "inputs" : [],
@@ -14556,8 +14614,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "@ks"
+                  "sigil" : "@",
+                  "symbol" : "ks",
+                  "targ" : 3
                },
                "id" : 2,
                "inputs" : [],
@@ -14653,8 +14712,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$value"
+                  "sigil" : "$",
+                  "symbol" : "value",
+                  "targ" : 1
                },
                "id" : 4,
                "inputs" : [],
@@ -14997,8 +15057,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$keysort"
+                  "sigil" : "$",
+                  "symbol" : "keysort",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -15227,8 +15288,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -15349,8 +15411,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -15471,8 +15534,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -15593,8 +15657,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -15715,8 +15780,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -15837,8 +15903,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -15959,8 +16026,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -16081,8 +16149,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -16203,8 +16272,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -16271,8 +16341,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 5,
                "inputs" : [],
@@ -16612,8 +16683,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -16734,8 +16806,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -16802,8 +16875,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 5,
                "inputs" : [],
@@ -16823,9 +16897,9 @@
             },
             {
                "fields" : {
+                  "package" : "JSON::PP",
                   "sigil" : "$",
-                  "stash_name" : "JSON::PP",
-                  "var_name" : "true"
+                  "symbol" : "true"
                },
                "id" : 7,
                "inputs" : [],
@@ -16914,9 +16988,9 @@
             },
             {
                "fields" : {
+                  "package" : "JSON::PP",
                   "sigil" : "$",
-                  "stash_name" : "JSON::PP",
-                  "var_name" : "false"
+                  "symbol" : "false"
                },
                "id" : 17,
                "inputs" : [],
@@ -16971,8 +17045,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$core_bools"
+                  "sigil" : "$",
+                  "symbol" : "core_bools",
+                  "targ" : 2
                },
                "id" : 23,
                "inputs" : [],
@@ -17055,8 +17130,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$JSON"
+                  "sigil" : "$",
+                  "symbol" : "JSON",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -17167,8 +17243,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$error"
+                  "sigil" : "$",
+                  "symbol" : "error",
+                  "targ" : 1
                },
                "id" : 7,
                "inputs" : [],
@@ -17201,8 +17278,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$JSON"
+                  "sigil" : "$",
+                  "symbol" : "JSON",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -17341,8 +17419,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -17375,9 +17454,9 @@
             },
             {
                "fields" : {
+                  "package" : "JSON::PP",
                   "sigil" : "$",
-                  "stash_name" : "JSON::PP",
-                  "var_name" : "false"
+                  "symbol" : "false"
                },
                "id" : 1,
                "inputs" : [],
@@ -17510,8 +17589,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 8,
                "inputs" : [],
@@ -17594,8 +17674,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 6,
                "inputs" : [],
@@ -17716,8 +17797,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -17794,8 +17876,9 @@
             },
             {
                "fields" : {
-                  "targ" : 7,
-                  "varname" : "$max_unicode_length"
+                  "sigil" : "$",
+                  "symbol" : "max_unicode_length",
+                  "targ" : 7
                },
                "id" : 6,
                "inputs" : [],
@@ -17804,8 +17887,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$text"
+                  "sigil" : "$",
+                  "symbol" : "text",
+                  "targ" : 2
                },
                "id" : 7,
                "inputs" : [],
@@ -17814,8 +17898,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$at"
+                  "sigil" : "$",
+                  "symbol" : "at",
+                  "targ" : 3
                },
                "id" : 8,
                "inputs" : [],
@@ -17926,8 +18011,9 @@
             },
             {
                "fields" : {
-                  "targ" : 10,
-                  "varname" : "$copy"
+                  "sigil" : "$",
+                  "symbol" : "copy",
+                  "targ" : 10
                },
                "id" : 19,
                "inputs" : [],
@@ -18055,8 +18141,9 @@
             },
             {
                "fields" : {
-                  "targ" : 6,
-                  "varname" : "$limit"
+                  "sigil" : "$",
+                  "symbol" : "limit",
+                  "targ" : 6
                },
                "id" : 30,
                "inputs" : [],
@@ -18076,8 +18163,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$start_point"
+                  "sigil" : "$",
+                  "symbol" : "start_point",
+                  "targ" : 1
                },
                "id" : 32,
                "inputs" : [],
@@ -18220,8 +18308,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -18342,8 +18431,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -18436,8 +18526,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$max"
+                  "sigil" : "$",
+                  "symbol" : "max",
+                  "targ" : 1
                },
                "id" : 8,
                "inputs" : [],
@@ -18530,8 +18621,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$max"
+                  "sigil" : "$",
+                  "symbol" : "max",
+                  "targ" : 1
                },
                "id" : 8,
                "inputs" : [],
@@ -18713,8 +18805,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$class"
+                  "sigil" : "$",
+                  "symbol" : "class",
+                  "targ" : 1
                },
                "id" : 16,
                "inputs" : [],
@@ -18734,8 +18827,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 2
                },
                "id" : 18,
                "inputs" : [],
@@ -18778,8 +18872,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$at"
+                  "sigil" : "$",
+                  "symbol" : "at",
+                  "targ" : 2
                },
                "id" : 2,
                "inputs" : [],
@@ -18812,8 +18907,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$len"
+                  "sigil" : "$",
+                  "symbol" : "len",
+                  "targ" : 3
                },
                "id" : 5,
                "inputs" : [],
@@ -19143,8 +19239,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 20,
                "inputs" : [],
@@ -19164,8 +19261,9 @@
             },
             {
                "fields" : {
-                  "targ" : 6,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 6
                },
                "id" : 22,
                "inputs" : [],
@@ -19185,8 +19283,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$v"
+                  "sigil" : "$",
+                  "symbol" : "v",
+                  "targ" : 2
                },
                "id" : 24,
                "inputs" : [],
@@ -19307,8 +19406,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -19429,8 +19529,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -19551,8 +19652,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -19673,8 +19775,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -19707,8 +19810,9 @@
             },
             {
                "fields" : {
-                  "targ" : 7,
-                  "varname" : "$ch"
+                  "sigil" : "$",
+                  "symbol" : "ch",
+                  "targ" : 7
                },
                "id" : 1,
                "inputs" : [],
@@ -19748,8 +19852,9 @@
             },
             {
                "fields" : {
-                  "targ" : 8,
-                  "varname" : "$singlequote"
+                  "sigil" : "$",
+                  "symbol" : "singlequote",
+                  "targ" : 8
                },
                "id" : 5,
                "inputs" : [],
@@ -19833,9 +19938,9 @@
             },
             {
                "fields" : {
+                  "package" : "JSON::PP",
                   "sigil" : "$",
-                  "stash_name" : "JSON::PP",
-                  "var_name" : "true"
+                  "symbol" : "true"
                },
                "id" : 1,
                "inputs" : [],
@@ -19915,8 +20020,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 6,
                "inputs" : [],
@@ -20037,8 +20143,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$enable"
+                  "sigil" : "$",
+                  "symbol" : "enable",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -20400,8 +20507,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$proto"
+                  "sigil" : "$",
+                  "symbol" : "proto",
+                  "targ" : 2
                },
                "id" : 1,
                "inputs" : [],
@@ -20410,8 +20518,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$code"
+                  "sigil" : "$",
+                  "symbol" : "code",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -20681,8 +20790,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$entry"
+                  "sigil" : "$",
+                  "symbol" : "entry",
+                  "targ" : 3
                },
                "id" : 17,
                "inputs" : [],
@@ -20907,8 +21017,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$entry"
+                  "sigil" : "$",
+                  "symbol" : "entry",
+                  "targ" : 3
                },
                "id" : 17,
                "inputs" : [],
@@ -21093,8 +21204,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$entry"
+                  "sigil" : "$",
+                  "symbol" : "entry",
+                  "targ" : 3
                },
                "id" : 17,
                "inputs" : [],
@@ -21279,8 +21391,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$entry"
+                  "sigil" : "$",
+                  "symbol" : "entry",
+                  "targ" : 3
                },
                "id" : 17,
                "inputs" : [],
@@ -21313,8 +21426,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "%MAP"
+                  "sigil" : "%",
+                  "symbol" : "MAP",
+                  "targ" : 2
                },
                "id" : 1,
                "inputs" : [],
@@ -21485,8 +21599,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$entry"
+                  "sigil" : "$",
+                  "symbol" : "entry",
+                  "targ" : 3
                },
                "id" : 12,
                "inputs" : [],
@@ -21620,8 +21735,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$entry"
+                  "sigil" : "$",
+                  "symbol" : "entry",
+                  "targ" : 3
                },
                "id" : 12,
                "inputs" : [],
@@ -21755,8 +21871,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$entry"
+                  "sigil" : "$",
+                  "symbol" : "entry",
+                  "targ" : 3
                },
                "id" : 12,
                "inputs" : [],
@@ -21789,8 +21906,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$node"
+                  "sigil" : "$",
+                  "symbol" : "node",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -22750,8 +22868,9 @@
             },
             {
                "fields" : {
-                  "targ" : 5,
-                  "varname" : "%args"
+                  "sigil" : "%",
+                  "symbol" : "args",
+                  "targ" : 5
                },
                "id" : 3,
                "inputs" : [],
@@ -23280,8 +23399,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$str"
+                  "sigil" : "$",
+                  "symbol" : "str",
+                  "targ" : 2
                },
                "id" : 34,
                "inputs" : [],
@@ -23674,8 +23794,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$zero"
+                  "sigil" : "$",
+                  "symbol" : "zero",
+                  "targ" : 3
                },
                "id" : 19,
                "inputs" : [],
@@ -23848,8 +23969,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$cv"
+                  "sigil" : "$",
+                  "symbol" : "cv",
+                  "targ" : 3
                },
                "id" : 1,
                "inputs" : [],
@@ -23858,8 +23980,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$coderef"
+                  "sigil" : "$",
+                  "symbol" : "coderef",
+                  "targ" : 2
                },
                "id" : 2,
                "inputs" : [],
@@ -24312,8 +24435,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$anon_id"
+                  "sigil" : "$",
+                  "symbol" : "anon_id",
+                  "targ" : 2
                },
                "id" : 1,
                "inputs" : [],
@@ -24404,8 +24528,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 7,
                "inputs" : [],
@@ -24548,8 +24673,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 3,
                "inputs" : [],
@@ -25293,8 +25419,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 21,
                "inputs" : [],
@@ -25739,8 +25866,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -26018,8 +26146,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 7,
                "inputs" : [],
@@ -26974,8 +27103,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 15,
                "inputs" : [],
@@ -27223,8 +27353,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 7,
                "inputs" : [],
@@ -27480,8 +27611,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -27667,8 +27799,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -27752,8 +27885,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$region"
+                  "sigil" : "$",
+                  "symbol" : "region",
+                  "targ" : 2
                },
                "id" : 1,
                "inputs" : [],
@@ -27793,8 +27927,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -28000,8 +28135,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$old"
+                  "sigil" : "$",
+                  "symbol" : "old",
+                  "targ" : 3
                },
                "id" : 22,
                "inputs" : [],
@@ -28282,8 +28418,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -28328,8 +28465,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -28374,8 +28512,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -28428,8 +28567,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -28544,8 +28684,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -28629,8 +28770,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$region"
+                  "sigil" : "$",
+                  "symbol" : "region",
+                  "targ" : 2
                },
                "id" : 1,
                "inputs" : [],
@@ -28679,8 +28821,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 3,
                "inputs" : [],
@@ -28838,8 +28981,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$old"
+                  "sigil" : "$",
+                  "symbol" : "old",
+                  "targ" : 3
                },
                "id" : 18,
                "inputs" : [],
@@ -28882,8 +29026,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -29089,8 +29234,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$old"
+                  "sigil" : "$",
+                  "symbol" : "old",
+                  "targ" : 3
                },
                "id" : 22,
                "inputs" : [],
@@ -30083,8 +30229,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 7,
                "inputs" : [],
@@ -30565,8 +30712,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 8,
                "inputs" : [],
@@ -30739,8 +30887,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 3,
                "inputs" : [],
@@ -30898,8 +31047,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$old"
+                  "sigil" : "$",
+                  "symbol" : "old",
+                  "targ" : 3
                },
                "id" : 18,
                "inputs" : [],
@@ -30993,8 +31143,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 7,
                "inputs" : [],
@@ -31199,8 +31350,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 3,
                "inputs" : [],
@@ -31352,8 +31504,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 7,
                "inputs" : [],
@@ -31760,8 +31913,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -32043,8 +32197,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 7,
                "inputs" : [],
@@ -32259,8 +32414,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 4,
                "inputs" : [],
@@ -32508,8 +32664,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$head"
+                  "sigil" : "$",
+                  "symbol" : "head",
+                  "targ" : 2
                },
                "id" : 1,
                "inputs" : [],
@@ -32725,8 +32882,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -33727,8 +33885,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -33812,8 +33971,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -33858,8 +34018,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -33904,8 +34065,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -33958,8 +34120,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -34208,8 +34371,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -34374,8 +34538,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -34553,8 +34718,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -34728,8 +34894,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 6,
                "inputs" : [],
@@ -35141,8 +35308,9 @@
             },
             {
                "fields" : {
-                  "targ" : 11,
-                  "varname" : "$id"
+                  "sigil" : "$",
+                  "symbol" : "id",
+                  "targ" : 11
                },
                "id" : 4,
                "inputs" : [],
@@ -35256,8 +35424,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 15,
                "inputs" : [],
@@ -35266,8 +35435,9 @@
             },
             {
                "fields" : {
-                  "targ" : 15,
-                  "varname" : "$node"
+                  "sigil" : "$",
+                  "symbol" : "node",
+                  "targ" : 15
                },
                "id" : 16,
                "inputs" : [],
@@ -35442,8 +35612,9 @@
             },
             {
                "fields" : {
-                  "targ" : 13,
-                  "varname" : "$id"
+                  "sigil" : "$",
+                  "symbol" : "id",
+                  "targ" : 13
                },
                "id" : 5,
                "inputs" : [],
@@ -35579,8 +35750,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$self"
+                  "sigil" : "$",
+                  "symbol" : "self",
+                  "targ" : 1
                },
                "id" : 18,
                "inputs" : [],
@@ -35589,8 +35761,9 @@
             },
             {
                "fields" : {
-                  "targ" : 17,
-                  "varname" : "$node"
+                  "sigil" : "$",
+                  "symbol" : "node",
+                  "targ" : 17
                },
                "id" : 19,
                "inputs" : [],
@@ -35834,8 +36007,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$node"
+                  "sigil" : "$",
+                  "symbol" : "node",
+                  "targ" : 3
                },
                "id" : 8,
                "inputs" : [],
@@ -36106,8 +36280,9 @@
             },
             {
                "fields" : {
-                  "targ" : 3,
-                  "varname" : "$other_type"
+                  "sigil" : "$",
+                  "symbol" : "other_type",
+                  "targ" : 3
                },
                "id" : 24,
                "inputs" : [],
@@ -36127,8 +36302,9 @@
             },
             {
                "fields" : {
-                  "targ" : 10,
-                  "varname" : "$ancestors"
+                  "sigil" : "$",
+                  "symbol" : "ancestors",
+                  "targ" : 10
                },
                "id" : 26,
                "inputs" : [],
@@ -36256,9 +36432,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "\b"
+                  "symbol" : "\b"
                },
                "id" : 1,
                "inputs" : [],
@@ -36279,9 +36455,9 @@
             },
             {
                "fields" : {
+                  "package" : "bytes",
                   "sigil" : "$",
-                  "stash_name" : "bytes",
-                  "var_name" : "hint_bits"
+                  "symbol" : "hint_bits"
                },
                "id" : 3,
                "inputs" : [],
@@ -36497,9 +36673,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "\b"
+                  "symbol" : "\b"
                },
                "id" : 1,
                "inputs" : [],
@@ -36520,9 +36696,9 @@
             },
             {
                "fields" : {
+                  "package" : "bytes",
                   "sigil" : "$",
-                  "stash_name" : "bytes",
-                  "var_name" : "hint_bits"
+                  "symbol" : "hint_bits"
                },
                "id" : 3,
                "inputs" : [],
@@ -36905,8 +37081,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$feature"
+                  "sigil" : "$",
+                  "symbol" : "feature",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -36915,9 +37092,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "\u0016"
+                  "symbol" : "\u0016"
                },
                "id" : 3,
                "inputs" : [],
@@ -37023,8 +37200,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$feature"
+                  "sigil" : "$",
+                  "symbol" : "feature",
+                  "targ" : 1
                },
                "id" : 2,
                "inputs" : [],
@@ -37033,9 +37211,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "\u0016"
+                  "symbol" : "\u0016"
                },
                "id" : 3,
                "inputs" : [],
@@ -37334,8 +37512,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$package"
+                  "sigil" : "$",
+                  "symbol" : "package",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -37479,8 +37658,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$package"
+                  "sigil" : "$",
+                  "symbol" : "package",
+                  "targ" : 1
                },
                "id" : 1,
                "inputs" : [],
@@ -38030,8 +38210,9 @@
             },
             {
                "fields" : {
-                  "targ" : 6,
-                  "varname" : "%constants"
+                  "sigil" : "%",
+                  "symbol" : "constants",
+                  "targ" : 6
                },
                "id" : 16,
                "inputs" : [],
@@ -38070,9 +38251,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "\b"
+                  "symbol" : "\b"
                },
                "id" : 20,
                "inputs" : [],
@@ -38102,9 +38283,9 @@
             },
             {
                "fields" : {
+                  "package" : "bytes",
                   "sigil" : "$",
-                  "stash_name" : "bytes",
-                  "var_name" : "hint_bits"
+                  "symbol" : "hint_bits"
                },
                "id" : 23,
                "inputs" : [],
@@ -38195,9 +38376,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "\b"
+                  "symbol" : "\b"
                },
                "id" : 1,
                "inputs" : [],
@@ -38293,9 +38474,9 @@
             },
             {
                "fields" : {
+                  "package" : "bytes",
                   "sigil" : "$",
-                  "stash_name" : "bytes",
-                  "var_name" : "hint_bits"
+                  "symbol" : "hint_bits"
                },
                "id" : 11,
                "inputs" : [],
@@ -38352,9 +38533,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "\b"
+                  "symbol" : "\b"
                },
                "id" : 2,
                "inputs" : [],
@@ -38541,9 +38722,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "\b"
+                  "symbol" : "\b"
                },
                "id" : 1,
                "inputs" : [],
@@ -38564,9 +38745,9 @@
             },
             {
                "fields" : {
+                  "package" : "utf8",
                   "sigil" : "$",
-                  "stash_name" : "utf8",
-                  "var_name" : "ascii_hint_bits"
+                  "symbol" : "ascii_hint_bits"
                },
                "id" : 3,
                "inputs" : [],
@@ -38612,9 +38793,9 @@
             },
             {
                "fields" : {
+                  "package" : "bytes",
                   "sigil" : "$",
-                  "stash_name" : "bytes",
-                  "var_name" : "hint_bits"
+                  "symbol" : "hint_bits"
                },
                "id" : 8,
                "inputs" : [],
@@ -38657,9 +38838,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "\b"
+                  "symbol" : "\b"
                },
                "id" : 1,
                "inputs" : [],
@@ -38680,9 +38861,9 @@
             },
             {
                "fields" : {
+                  "package" : "utf8",
                   "sigil" : "$",
-                  "stash_name" : "utf8",
-                  "var_name" : "utf8_hint_bits"
+                  "symbol" : "utf8_hint_bits"
                },
                "id" : 3,
                "inputs" : [],
@@ -38728,9 +38909,9 @@
             },
             {
                "fields" : {
+                  "package" : "bytes",
                   "sigil" : "$",
-                  "stash_name" : "bytes",
-                  "var_name" : "hint_bits"
+                  "symbol" : "hint_bits"
                },
                "id" : 8,
                "inputs" : [],
@@ -38869,9 +39050,9 @@
             },
             {
                "fields" : {
+                  "package" : "warnings",
                   "sigil" : "$",
-                  "stash_name" : "warnings",
-                  "var_name" : "LAST_BIT"
+                  "symbol" : "LAST_BIT"
                },
                "id" : 6,
                "inputs" : [],
@@ -39198,8 +39379,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$bits"
+                  "sigil" : "$",
+                  "symbol" : "bits",
+                  "targ" : 1
                },
                "id" : 39,
                "inputs" : [],
@@ -39219,8 +39401,9 @@
             },
             {
                "fields" : {
-                  "targ" : 7,
-                  "varname" : "$len"
+                  "sigil" : "$",
+                  "symbol" : "len",
+                  "targ" : 7
                },
                "id" : 41,
                "inputs" : [],
@@ -39293,8 +39476,9 @@
             },
             {
                "fields" : {
-                  "targ" : 2,
-                  "varname" : "$want_len"
+                  "sigil" : "$",
+                  "symbol" : "want_len",
+                  "targ" : 2
                },
                "id" : 48,
                "inputs" : [],
@@ -39345,8 +39529,9 @@
             },
             {
                "fields" : {
-                  "targ" : 5,
-                  "varname" : "$mask"
+                  "sigil" : "$",
+                  "symbol" : "mask",
+                  "targ" : 5
                },
                "id" : 3,
                "inputs" : [],
@@ -39422,8 +39607,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$bit"
+                  "sigil" : "$",
+                  "symbol" : "bit",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],
@@ -39682,8 +39868,9 @@
             },
             {
                "fields" : {
-                  "targ" : 5,
-                  "varname" : "$mask"
+                  "sigil" : "$",
+                  "symbol" : "mask",
+                  "targ" : 5
                },
                "id" : 3,
                "inputs" : [],
@@ -39759,8 +39946,9 @@
             },
             {
                "fields" : {
-                  "targ" : 1,
-                  "varname" : "$bit"
+                  "sigil" : "$",
+                  "symbol" : "bit",
+                  "targ" : 1
                },
                "id" : 11,
                "inputs" : [],

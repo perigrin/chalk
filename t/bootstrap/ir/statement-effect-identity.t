@@ -85,7 +85,7 @@ subtest 'Assign with a scalar-rebind lhs ALSO has per-call identity' => sub {
             $f->make('Constant', value => 'x', const_type => 'string'),
             $f->make('Constant', value => '1', const_type => 'integer'),
         ]);
-    my $pa = $f->make('PadAccess', targ => 0, varname => 'x', inputs => [$vd]);
+    my $pa = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vd]);
     $pa->set_stamp('Int');
     my $v = $f->make('Constant', value => '9', const_type => 'integer');
     $v->set_stamp('Int');
@@ -105,7 +105,7 @@ subtest 'CompoundAssign has per-call identity' => sub {
             $f->make('Constant', value => 'x', const_type => 'string'),
             $f->make('Constant', value => '1', const_type => 'integer'),
         ]);
-    my $pa = $f->make('PadAccess', targ => 0, varname => 'x', inputs => [$vd]);
+    my $pa = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vd]);
     my $v  = $f->make('Constant', value => '2', const_type => 'integer');
 
     my $c1 = $f->make('CompoundAssign', op => '+=', inputs => [$pa, $v]);
@@ -123,7 +123,7 @@ subtest 'RegexSubst has per-call identity' => sub {
             $f->make('Constant', value => 's', const_type => 'string'),
             $f->make('Constant', value => 'aaa', const_type => 'string'),
         ]);
-    my $pa = $f->make('PadAccess', targ => 0, varname => 's', inputs => [$vd]);
+    my $pa = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vd]);
 
     my $r1 = $f->make('RegexSubst', pattern => 'a', replacement => 'b',
         flags => '', inputs => [$pa]);
@@ -247,7 +247,7 @@ subtest 'content-hash ids that merely END in #N are not treated per-call' => sub
             $f->make('Constant', value => 'x', const_type => 'string'),
             $f->make('Constant', value => '1', const_type => 'integer'),
         ]);
-    my $pa = $f->make('PadAccess', targ => 0, varname => 'x', inputs => [$vd]);
+    my $pa = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vd]);
     like($pa->id, qr/#\d+$/,
         'precondition: the hash-consed PadAccess id ends in the per-call suffix');
 
@@ -255,7 +255,7 @@ subtest 'content-hash ids that merely END in #N are not treated per-call' => sub
     # deserialization and _seed produce).
     require Chalk::IR::Node::PadAccess;
     my $clone = Chalk::IR::Node::PadAccess->new(
-        id => $pa->content_hash, targ => 0, varname => 'x', inputs => [$vd]);
+        id => $pa->content_hash, targ => 0, sigil => '$', symbol => 'x', inputs => [$vd]);
 
     is($g->merge($pa), $pa, 'first merge returns the node');
     is($g->merge($clone), $pa,

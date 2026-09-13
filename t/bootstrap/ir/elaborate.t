@@ -79,7 +79,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $xn = $f->make('Constant', value => '$x', const_type => 'string');
     my $vx = $f->make('VarDecl', inputs => [$xn, $c5]);
     $vx->set_stamp('Int');
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $ret->set_control_in($vx);
@@ -118,12 +118,12 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
     $vx->set_stamp('Int');
 
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
     $as1->set_stamp('Int');
 
-    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs2->set_stamp('Int');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
     $as2->set_stamp('Int');
@@ -137,7 +137,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $as1->set_control_in($proj0);
     $as2->set_control_in($proj1);
 
-    my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
@@ -203,7 +203,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $vx->set_stamp('Int');
 
     # then-branch only: $x = 1
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
     $as1->set_stamp('Int');
@@ -218,7 +218,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $as1->set_control_in($proj0);  # then-branch: $x = 1
     # No else body — proj1 has no control_in consumers
 
-    my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
@@ -290,7 +290,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $region  = $f->make('Region', inputs => [$proj0, $proj1]);
     $if_node->set_region($region);
 
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
@@ -346,7 +346,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $vn->set_stamp('Int');
     $vn->inputs->[1]->set_stamp('Int');
 
-    my $rn   = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    my $rn   = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'n', inputs => [$vn]);
     $rn->set_stamp('Int');
 
     # Variable $x = 0
@@ -363,17 +363,17 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $cmp_in->set_stamp('Boolean');
 
     # Assignments
-    my $lhs3 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs3 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs3->set_stamp('Int');
     my $as3  = $f->make('Assign', inputs => [$lhs3, $c3]);
     $as3->set_stamp('Int');
 
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
     $as1->set_stamp('Int');
 
-    my $lhs0 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs0 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs0->set_stamp('Int');
     my $as0  = $f->make('Assign', inputs => [$lhs0, $c0]);
     $as0->set_stamp('Int');
@@ -401,7 +401,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $outer_if->set_control_in($vx);
 
     # Return $x
-    my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $ret->set_control_in($outer_if);
@@ -487,9 +487,9 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $vs    = $f->make('VarDecl', inputs => [$sn, $c0a]);
     $vs->set_stamp('Int');
 
-    my $rn0   = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]);
+    my $rn0   = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'n', inputs => [$vn]);
     $rn0->set_stamp('Int');
-    my $rs0   = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs0   = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs0->set_stamp('Int');
 
     # Outer condition: $n > 0 (static: 3>0 = true)
@@ -541,7 +541,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $outer_if->set_control_in($vs);
 
     # Return $s
-    my $rx    = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rx    = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rx->set_stamp('Int');
     my $ret   = $f->make_cfg('Return', inputs => [$rx]);
     $ret->set_control_in($outer_if);
@@ -601,12 +601,12 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
     $vx->set_stamp('Int');
 
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
     $as1->set_stamp('Int');
 
-    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs2->set_stamp('Int');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
     $as2->set_stamp('Int');
@@ -619,7 +619,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $as1->set_control_in($proj0);
     $as2->set_control_in($proj1);
 
-    my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $if_node->set_control_in($vx);
@@ -670,12 +670,12 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $vx   = $f->make('VarDecl', inputs => [$xn]);
     $vx->set_stamp('Int');
 
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Int');
     my $as1  = $f->make('Assign', inputs => [$lhs1, $c1]);
     $as1->set_stamp('Int');
 
-    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs2->set_stamp('Int');
     my $as2  = $f->make('Assign', inputs => [$lhs2, $c2]);
     $as2->set_stamp('Int');
@@ -688,7 +688,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $as1->set_control_in($proj0);
     $as2->set_control_in($proj1);
 
-    my $rx  = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
 
@@ -766,8 +766,8 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     my $vn   = $f->make('VarDecl', inputs => [$nn, $c3]);  $vn->set_stamp('Int');
     my $vs   = $f->make('VarDecl', inputs => [$sn, $c0a]); $vs->set_stamp('Int');
 
-    my $rn0  = $f->make('PadAccess', targ => 0, varname => '$n', inputs => [$vn]); $rn0->set_stamp('Int');
-    my $rs0  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rs0->set_stamp('Int');
+    my $rn0  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'n', inputs => [$vn]); $rn0->set_stamp('Int');
+    my $rs0  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]); $rs0->set_stamp('Int');
 
     # Loop
     my $loop  = $f->make('Loop', inputs => [$vs, undef]);
@@ -815,7 +815,7 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $loop->set_control_in($vs);
 
     # Return $s
-    my $rx  = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]); $rx->set_stamp('Int');
+    my $rx  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]); $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
     $ret->set_control_in($loop);
 

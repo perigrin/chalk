@@ -140,9 +140,9 @@
             },
             {
                "fields" : {
+                  "package" : "main",
                   "sigil" : "$",
-                  "stash_name" : "main",
-                  "var_name" : "\""
+                  "symbol" : "\""
                },
                "id" : 6,
                "inputs" : [],

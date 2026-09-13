@@ -81,7 +81,7 @@ subtest 'pure Add over reassigned PadAccess re-lowers per consumption (C1)' => s
     my $vx = $f->make('VarDecl', inputs => [$nx, int_const($f, 1)]);
     $vx->set_stamp('Int');
 
-    my $rx1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx1->set_stamp('Int');
     my $c10 = int_const($f, 10);
     my $add1 = $f->make('Add', inputs => [$rx1, $c10]);
@@ -90,11 +90,11 @@ subtest 'pure Add over reassigned PadAccess re-lowers per consumption (C1)' => s
     my $vy = $f->make('VarDecl', inputs => [$ny, $add1]);
     $vy->set_stamp('Int');
 
-    my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rxL = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     my $asg = $f->make('Assign', inputs => [$rxL, int_const($f, 2)]);
     $asg->set_stamp('Int');
 
-    my $rx2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     my $add2 = $f->make('Add', inputs => [$rx2, $c10]);
     $add2->set_stamp('Int');
     is($add2->id, $add1->id, 'precondition: the two pure Adds hash-cons to one node');
@@ -102,9 +102,9 @@ subtest 'pure Add over reassigned PadAccess re-lowers per consumption (C1)' => s
     my $vz = $f->make('VarDecl', inputs => [$nz, $add2]);
     $vz->set_stamp('Int');
 
-    my $ryF = $f->make('PadAccess', targ => 0, varname => '$y', inputs => [$vy]);
+    my $ryF = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'y', inputs => [$vy]);
     $ryF->set_stamp('Int');
-    my $rzF = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
+    my $rzF = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'z', inputs => [$vz]);
     $rzF->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$ryF, $rzF]);
     $sum->set_stamp('Int');
@@ -129,7 +129,7 @@ subtest 'repeat scalar rebind increments twice (C1+C3 interaction)' => sub {
     my $vx = $f->make('VarDecl', inputs => [$nx, int_const($f, 1)]);
     $vx->set_stamp('Int');
 
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $c1 = int_const($f, 1);
 
@@ -145,7 +145,7 @@ subtest 'repeat scalar rebind increments twice (C1+C3 interaction)' => sub {
 
     isnt($asg1->id, $asg2->id, 'precondition: the two Assigns are distinct (Family-A)');
 
-    my $rxF = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rxF = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rxF->set_stamp('Int');
     # Existing chain: vx -> asg1 -> asg2; the Print goes after asg2.
     $asg2->set_control_in($asg1);
@@ -212,7 +212,7 @@ subtest 'pre-store binding keeps its old value (no over-correction)' => sub {
         inputs => [$f->make('Subscript', inputs => [$arr, $i0]), int_const($f, 9)]);
     $st->set_stamp('Int');
 
-    my $rp = $f->make('PadAccess', targ => 0, varname => '$p', inputs => [$vp]);
+    my $rp = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'p', inputs => [$vp]);
     $rp->set_stamp('Slot');
 
     # Existing chain: vp -> st; the Print goes after st.
@@ -236,7 +236,7 @@ subtest 'repeat compound assign fires twice (C3 behavioral)' => sub {
     ]);
     $vd->set_stamp('Int');
 
-    my $pa = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
+    my $pa = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vd]);
     $pa->set_stamp('Int');
     my $c2 = int_const($f, 2);
 
@@ -252,7 +252,7 @@ subtest 'repeat compound assign fires twice (C3 behavioral)' => sub {
 
     isnt($ca1->id, $ca2->id, 'precondition: the two CompoundAssigns are distinct (Family-A)');
 
-    my $ret_pad = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vd]);
+    my $ret_pad = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vd]);
     $ret_pad->set_stamp('Int');
     # Existing chain: vd -> ca1 -> ca2; the Print goes after ca2.
     $ca2->set_control_in($ca1);

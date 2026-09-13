@@ -46,7 +46,7 @@ subtest 'an if-arm die preceded by a Print still emits the abort' => sub {
     $vx->set_stamp('Int');
     $vx->set_control_in($start);
 
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $zero = $f->make('Constant', value => 0, const_type => 'integer');
     $zero->set_stamp('Int');

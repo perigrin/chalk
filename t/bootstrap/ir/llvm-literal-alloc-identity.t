@@ -116,14 +116,14 @@ subtest 'identical array literals do not alias' => sub {
     my $vb = $f->make('VarDecl', inputs => [$nb, $lit_b]);
     $vb->set_stamp('ArrayRef');
 
-    my $rb = $f->make('PadAccess', targ => 1, varname => '$b', inputs => [$vb]);
+    my $rb = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 'b', inputs => [$vb]);
     $rb->set_stamp('ArrayRef');
     my $store_lv = $f->make('Subscript', inputs => [$rb, int_const($f, 0)]);
     $store_lv->set_stamp('Int');
     my $st = $f->make('Assign', inputs => [$store_lv, int_const($f, 9)]);
     $st->set_stamp('Int');
 
-    my $ra = $f->make('PadAccess', targ => 0, varname => '$a', inputs => [$va]);
+    my $ra = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'a', inputs => [$va]);
     $ra->set_stamp('ArrayRef');
     my $rd = $f->make('Subscript', inputs => [$ra, int_const($f, 0)]);
     $rd->set_stamp('Int');

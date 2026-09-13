@@ -163,7 +163,7 @@ subtest 'capture crossing a Str phi merge prints exactly the capture' => sub {
     my $sname = $f->make('Constant', value => '$s', const_type => 'string');
     my $vs = $f->make('VarDecl', inputs => [$sname, $sval]);
     $vs->set_stamp('Str');
-    my $rs = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs->set_stamp('Str');
     my $m = $f->make('RegexMatch', pattern => 'x(ab)y', flags => '', inputs => [$rs]);
     $m->set_stamp('Boolean');
@@ -184,14 +184,14 @@ subtest 'capture crossing a Str phi merge prints exactly the capture' => sub {
     my $cmp = $f->make('NumGt', inputs => [$c1, $c0]);
     $cmp->set_stamp('Boolean');
 
-    my $lhs1 = $f->make('PadAccess', targ => 1, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Str');
     my $as1 = $f->make('Assign', inputs => [$lhs1, $cap]);
     $as1->set_stamp('Str');
 
     my $ww = $f->make('Constant', value => 'ww', const_type => 'string');
     $ww->set_stamp('Str');
-    my $lhs2 = $f->make('PadAccess', targ => 1, varname => '$x', inputs => [$vx]);
+    my $lhs2 = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs2->set_stamp('Str');
     my $as2 = $f->make('Assign', inputs => [$lhs2, $ww]);
     $as2->set_stamp('Str');
@@ -204,7 +204,7 @@ subtest 'capture crossing a Str phi merge prints exactly the capture' => sub {
     $as1->set_control_in($proj0);
     $as2->set_control_in($proj1);
 
-    my $rx = $f->make('PadAccess', targ => 1, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Str');
 
     # Existing chain: vs -> vx -> if_node; the Print goes after the merge.

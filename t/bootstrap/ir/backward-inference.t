@@ -106,7 +106,7 @@ subtest 'a hole is filled once, and a filled hole is never revisited' => sub {
     # ever loosened -- which is exactly what an optimistic (CCP-style) phase
     # for recursive calls would have to do.
     my $f   = Chalk::IR::NodeFactory->new;
-    my $pad = $f->make('PadAccess', targ => 0, varname => '$s', inputs => []);
+    my $pad = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => []);
     my $cat = $f->make('Concat', inputs => [$pad, $pad]);
     my $g   = TerminationTest::Graph->new([$pad, $cat]);
 
@@ -143,7 +143,7 @@ subtest 'exhausting the round cap is LOUD, never a silent truncation' => sub {
     # truncated. Forcing a node to keep moving proves the die fires rather
     # than the loop quietly running out.
     my $f   = Chalk::IR::NodeFactory->new;
-    my $pad = $f->make('PadAccess', targ => 0, varname => '$s', inputs => []);
+    my $pad = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => []);
     my $cat = $f->make('Concat', inputs => [$pad, $pad]);
     my $g   = TerminationTest::Graph->new([$pad, $cat]);
     $pad->set_stamp('Unknown');

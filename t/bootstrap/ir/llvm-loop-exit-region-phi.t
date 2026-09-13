@@ -32,7 +32,7 @@ subtest 'an exit-Region phi consumer dies with a diagnostic' => sub {
     my $ni = $f->make('Constant', value => '$i', const_type => 'string');
     my $vi = $f->make('VarDecl', inputs => [$ni, int_const($f, 0)]);
     $vi->set_stamp('Int');
-    my $ri0 = $f->make('PadAccess', targ => 0, varname => '$i', inputs => [$vi]);
+    my $ri0 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'i', inputs => [$vi]);
     $ri0->set_stamp('Int');
 
     my $loop = $f->make('Loop', inputs => [$vi, undef]);

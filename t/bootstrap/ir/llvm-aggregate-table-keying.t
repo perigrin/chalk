@@ -88,7 +88,7 @@ subtest 'subscript after ref reassign reads the new array' => sub {
     my $vr = $f->make('VarDecl', inputs => [$nr, $a1]);
     $vr->set_stamp('ArrayRef');
 
-    my $rr0 = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
+    my $rr0 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'r', inputs => [$vr]);
     $rr0->set_stamp('ArrayRef');
     my $sub0 = $f->make('Subscript', inputs => [$rr0, int_const($f, 0)]);
     $sub0->set_stamp('Int');
@@ -98,11 +98,11 @@ subtest 'subscript after ref reassign reads the new array' => sub {
 
     my $a2 = $f->make('ArrayLiteral', inputs => [int_const($f, 9)]);
     $a2->set_stamp('ArrayRef');
-    my $rrL = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
+    my $rrL = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'r', inputs => [$vr]);
     my $asg = $f->make('Assign', inputs => [$rrL, $a2]);
     $asg->set_stamp('ArrayRef');
 
-    my $rr1 = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
+    my $rr1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'r', inputs => [$vr]);
     $rr1->set_stamp('ArrayRef');
     my $sub1 = $f->make('Subscript', inputs => [$rr1, int_const($f, 0)]);
     $sub1->set_stamp('Int');
@@ -129,7 +129,7 @@ subtest 'element store after ref reassign hits the new array' => sub {
     my $vr = $f->make('VarDecl', inputs => [$nr, $a1]);
     $vr->set_stamp('ArrayRef');
 
-    my $rr0 = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
+    my $rr0 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'r', inputs => [$vr]);
     $rr0->set_stamp('ArrayRef');
     my $sub0 = $f->make('Subscript', inputs => [$rr0, int_const($f, 0)]);
     $sub0->set_stamp('Int');
@@ -139,18 +139,18 @@ subtest 'element store after ref reassign hits the new array' => sub {
 
     my $a2 = $f->make('ArrayLiteral', inputs => [int_const($f, 9)]);
     $a2->set_stamp('ArrayRef');
-    my $rrL = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
+    my $rrL = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'r', inputs => [$vr]);
     my $asg = $f->make('Assign', inputs => [$rrL, $a2]);
     $asg->set_stamp('ArrayRef');
 
-    my $rr1 = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
+    my $rr1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'r', inputs => [$vr]);
     $rr1->set_stamp('ArrayRef');
     my $store_lv = $f->make('Subscript', inputs => [$rr1, int_const($f, 0)]);
     $store_lv->set_stamp('Int');
     my $st = $f->make('Assign', inputs => [$store_lv, int_const($f, 7)]);
     $st->set_stamp('Int');
 
-    my $rr2 = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vr]);
+    my $rr2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'r', inputs => [$vr]);
     $rr2->set_stamp('ArrayRef');
     my $sub2 = $f->make('Subscript', inputs => [$rr2, int_const($f, 0)]);
     $sub2->set_stamp('Int');
@@ -158,9 +158,9 @@ subtest 'element store after ref reassign hits the new array' => sub {
     my $vq = $f->make('VarDecl', inputs => [$nq, $sub2]);
     $vq->set_stamp('Int');
 
-    my $rp = $f->make('PadAccess', targ => 0, varname => '$p', inputs => [$vp]);
+    my $rp = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'p', inputs => [$vp]);
     $rp->set_stamp('Int');
-    my $rq = $f->make('PadAccess', targ => 1, varname => '$q', inputs => [$vq]);
+    my $rq = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 'q', inputs => [$vq]);
     $rq->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$rp, $rq]);
     $sum->set_stamp('Int');

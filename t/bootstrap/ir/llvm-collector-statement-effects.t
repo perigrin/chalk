@@ -126,7 +126,7 @@ subtest 'a method Call in an if-branch is collected and lowered' => sub {
     my $region = $f->make('Region', inputs => [$proj0, $proj1]);
     $if_node->set_region($region);
 
-    my $rc1 = $f->make('PadAccess', targ => 0, varname => '$c', inputs => [$vc]);
+    my $rc1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'c', inputs => [$vc]);
     $rc1->set_stamp('Object');
     my $bump_call = $f->make('Call', dispatch_kind => 'method', name => 'bump',
         class_name => 'C', inputs => [$rc1]);
@@ -134,7 +134,7 @@ subtest 'a method Call in an if-branch is collected and lowered' => sub {
     $bump_call->set_control_in($proj0);   # the then-branch body
 
     # return $c->val
-    my $rc2 = $f->make('PadAccess', targ => 0, varname => '$c', inputs => [$vc]);
+    my $rc2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'c', inputs => [$vc]);
     $rc2->set_stamp('Object');
     my $val_call = $f->make('Call', dispatch_kind => 'method', name => 'val',
         class_name => 'C', inputs => [$rc2]);

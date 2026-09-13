@@ -3216,7 +3216,7 @@ sub _lower_padaccess {
     # dispatch ($self->m()) lowers its receiver to that pointer. Handle before the
     # VarDecl lookup, which would die "no VarDecl input" (zhi 019f5dec).
     if ($self->{_in_method_body}
-            && $node->can('varname') && ($node->varname // '') eq '$self'
+            && $node->can('name') && $node->name() eq '$self'
             && !defined $node->inputs->[0]) {
         my $self_ref = $self->{_method_self_name}
             // die "LLVM backend: a \$self receiver PadAccess in a method body "
@@ -3236,9 +3236,9 @@ sub _lower_padaccess {
     # a parameter is positional by declared index -- and collapsing them would
     # make the invocant just another entry in a table it is not part of.
     if ($self->{_in_method_body}
-            && $node->can('varname')
+            && $node->can('name')
             && !defined $node->inputs->[0]) {
-        my $vn  = $node->varname // '';
+        my $vn  = $node->name();
         my $idx = $self->{_method_param_index}{$vn};
         if (defined $idx) {
             my $ref = "%arg$idx";
@@ -3365,7 +3365,7 @@ sub _lower_assign {
     # runtime-free (the slot is i64), matching the read side.
     if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'EntryDef') {
         my $rhs_repr = _require_repr($rhs, 'Assign(EntryDef-lvalue).rhs');
-        my $var   = $lhs->var_name;
+        my $var   = $lhs->symbol;
 
         # A package scalar is modeled as a TYPED module-level slot, and its
         # kind is chosen per-repr: i64 for Int, a (ptr,len) pair for Str, a
@@ -3404,7 +3404,7 @@ sub _lower_assign {
         # len), since a Str value is a (ptr, len) pair. Store both; the read
         # loads both and re-registers the loaded ptr in the length table.
         if ($rhs_repr eq 'Str') {
-            my ($pname, $lname) = $self->_pkg_str_global_names($lhs->stash_name, $var);
+            my ($pname, $lname) = $self->_pkg_str_global_names($lhs->package, $var);
             my ($str_ptr, $tracked_len) = $self->_str_parts($rhs_ref);
             my $len_ref = $tracked_len
                 // die "GAP: Assign(EntryDef-lvalue) Str rhs has no tracked "
@@ -3418,7 +3418,7 @@ sub _lower_assign {
         # the Int i64 slot, in its own global so the read knows which face the
         # bits hold.
         if ($rhs_repr eq 'Num') {
-            my $nname = $self->_pkg_num_global_name($lhs->stash_name, $var);
+            my $nname = $self->_pkg_num_global_name($lhs->package, $var);
             my $nty = _repr_to_llvm_type($rhs_repr);
             $self->_emit("  store $nty $rhs_ref, $nty* $nname  ; Assign(EntryDef-lvalue): store \$$var (Num package scalar)");
             $self->{cache}{ $node->id } = $rhs_ref;
@@ -3427,7 +3427,7 @@ sub _lower_assign {
         die "GAP: Assign(EntryDef-lvalue) rhs repr=$rhs_repr; only Int, Num "
           . "and Str package scalars are lowered runtime-free."
             unless $rhs_repr eq 'Int';
-        my $gname = $self->_pkg_global_name($lhs->stash_name, $var);
+        my $gname = $self->_pkg_global_name($lhs->package, $var);
         $self->_emit("  store i64 $rhs_ref, i64* $gname  ; Assign(EntryDef-lvalue): store \$$var (package scalar)");
         $self->{cache}{ $node->id } = $rhs_ref;
         return $rhs_ref;
@@ -10355,12 +10355,12 @@ sub _lower_stash_access {
     my ($self, $node) = @_;
 
     my $repr = _require_repr($node, 'EntryDef');
-    my $var  = $node->var_name;
+    my $var  = $node->symbol;
     # A Str package scalar: load BOTH slots (ptr + len) and re-register the
     # loaded ptr's length so a downstream print/concat/return slices exactly
     # len bytes. Mirrors the two-slot store.
     if ($repr eq 'Str') {
-        my ($pname, $lname) = $self->_pkg_str_global_names($node->stash_name, $var);
+        my ($pname, $lname) = $self->_pkg_str_global_names($node->package, $var);
         my $ptr = $self->_fresh;
         my $len = $self->_fresh;
         $self->_emit("  $ptr = load i8*, i8** $pname  ; EntryDef: read \$$var ptr (Str package scalar)");
@@ -10371,7 +10371,7 @@ sub _lower_stash_access {
     }
     # A Num package scalar: load the `double` slot. Mirrors the Num store.
     if ($repr eq 'Num') {
-        my $nname = $self->_pkg_num_global_name($node->stash_name, $var);
+        my $nname = $self->_pkg_num_global_name($node->package, $var);
         my $val   = $self->_fresh;
         my $nty = _repr_to_llvm_type($repr);
         $self->_emit("  $val = load $nty, $nty* $nname  ; EntryDef: read \$$var (Num package scalar)");
@@ -10382,7 +10382,7 @@ sub _lower_stash_access {
       . "lowered runtime-free (a ref slot needs a differently-typed global)."
         unless $repr eq 'Int';
 
-    my $gname = $self->_pkg_global_name($node->stash_name, $var);
+    my $gname = $self->_pkg_global_name($node->package, $var);
     my $val   = $self->_fresh;
     $self->_emit("  $val = load i64, i64* $gname  ; EntryDef: read \$$var (package scalar)");
     $self->{cache}{ $node->id } = $val;

@@ -102,7 +102,7 @@ subtest 'undef-repr VarDecl dies loudly instead of silently lowering as Int' => 
     $c1->set_stamp('Int');
     my $vx = $f->make('VarDecl', inputs => [$nx, $c1]);
     # Intentionally do NOT set representation on vx — this is the gap.
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
 
@@ -129,7 +129,7 @@ subtest 'undef-repr PadAccess dies loudly instead of silently lowering as Int' =
     $c1->set_stamp('Int');
     my $vx = $f->make('VarDecl', inputs => [$nx, $c1]);
     $vx->set_stamp('Int');
-    my $rx = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     # Intentionally do NOT set representation on PadAccess.
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
 
@@ -158,7 +158,7 @@ subtest 'undef-repr Assign dies loudly instead of silently lowering as Int' => s
     $c2->set_stamp('Int');
     my $vx  = $f->make('VarDecl', inputs => [$nx, $c1]);
     $vx->set_stamp('Int');
-    my $rxL = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $rxL = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rxL->set_stamp('Int');
     my $asg = $f->make('Assign', inputs => [$rxL, $c2]);
     # Intentionally do NOT set representation on Assign.
@@ -240,12 +240,12 @@ subtest 'undef-repr Phi at Region merge (lower_with_elaboration path) dies loudl
     my $vx = $f->make('VarDecl', inputs => [$xn, $c1]);
     $vx->set_stamp('Int');
 
-    my $lhs1 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs1->set_stamp('Int');
     my $as1 = $f->make('Assign', inputs => [$lhs1, $c1]);
     $as1->set_stamp('Int');
 
-    my $lhs2 = $f->make('PadAccess', targ => 0, varname => '$x', inputs => [$vx]);
+    my $lhs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $lhs2->set_stamp('Int');
     my $as2 = $f->make('Assign', inputs => [$lhs2, $c2]);
     $as2->set_stamp('Int');

@@ -111,7 +111,7 @@ subtest 'match re-tested after subject reassign sees the new value' => sub {
     my $vs = $f->make('VarDecl', inputs => [$ns, str_const($f, 'b')]);
     $vs->set_stamp('Str');
 
-    my $rs1 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs1->set_stamp('Str');
     my $m1 = $f->make('RegexMatch', pattern => 'b', flags => '', inputs => [$rs1]);
     $m1->set_stamp('Boolean');
@@ -119,11 +119,11 @@ subtest 'match re-tested after subject reassign sees the new value' => sub {
     my $vy = $f->make('VarDecl', inputs => [$ny, $m1]);
     $vy->set_stamp('Boolean');
 
-    my $rsL = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rsL = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     my $asg = $f->make('Assign', inputs => [$rsL, str_const($f, 'x')]);
     $asg->set_stamp('Str');
 
-    my $rs2 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     my $m2 = $f->make('RegexMatch', pattern => 'b', flags => '', inputs => [$rs2]);
     $m2->set_stamp('Boolean');
     isnt($m2->id, $m1->id, 'precondition: the two matches are distinct nodes');
@@ -131,7 +131,7 @@ subtest 'match re-tested after subject reassign sees the new value' => sub {
     my $vz = $f->make('VarDecl', inputs => [$nz, $m2]);
     $vz->set_stamp('Boolean');
 
-    my $rzF = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
+    my $rzF = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'z', inputs => [$vz]);
     $rzF->set_stamp('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$rzF]);
     $ret->set_control_in($vz);
@@ -154,7 +154,7 @@ subtest 'capture records are per program point' => sub {
     my $vs = $f->make('VarDecl', inputs => [$ns, str_const($f, 'aa x')]);
     $vs->set_stamp('Str');
 
-    my $rs1 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs1->set_stamp('Str');
     my $m1 = $f->make('RegexMatch', pattern => '(a+)', flags => '', inputs => [$rs1]);
     $m1->set_stamp('Boolean');
@@ -164,11 +164,11 @@ subtest 'capture records are per program point' => sub {
     my $vp = $f->make('VarDecl', inputs => [$np, $cap1]);
     $vp->set_stamp('Str');
 
-    my $rsL = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rsL = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     my $asg = $f->make('Assign', inputs => [$rsL, str_const($f, 'aaa x')]);
     $asg->set_stamp('Str');
 
-    my $rs2 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     my $m2 = $f->make('RegexMatch', pattern => '(a+)', flags => '', inputs => [$rs2]);
     $m2->set_stamp('Boolean');
     my $cap2 = $f->make('RegexCapture', n => 1, inputs => [$m2]);
@@ -177,9 +177,9 @@ subtest 'capture records are per program point' => sub {
     my $vq = $f->make('VarDecl', inputs => [$nq, $cap2]);
     $vq->set_stamp('Str');
 
-    my $rp = $f->make('PadAccess', targ => 0, varname => '$p', inputs => [$vp]);
+    my $rp = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'p', inputs => [$vp]);
     $rp->set_stamp('Str');
-    my $rq = $f->make('PadAccess', targ => 1, varname => '$q', inputs => [$vq]);
+    my $rq = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 'q', inputs => [$vq]);
     $rq->set_stamp('Str');
     my $dash = str_const($f, '-');
     my $c1 = $f->make('Concat', inputs => [$rp, $dash]);
@@ -211,7 +211,7 @@ subtest 'qr-apply (Match) re-applied after subject reassign sees the new value' 
     my $vs = $f->make('VarDecl', inputs => [$ns, str_const($f, 'b')]);
     $vs->set_stamp('Str');
 
-    my $rs1 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs1->set_stamp('Str');
     my $m1 = $f->make('Match', inputs => [$rs1, $qr]);
     $m1->set_stamp('Boolean');
@@ -219,11 +219,11 @@ subtest 'qr-apply (Match) re-applied after subject reassign sees the new value' 
     my $vy = $f->make('VarDecl', inputs => [$ny, $m1]);
     $vy->set_stamp('Boolean');
 
-    my $rsL = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rsL = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     my $asg = $f->make('Assign', inputs => [$rsL, str_const($f, 'x')]);
     $asg->set_stamp('Str');
 
-    my $rs2 = $f->make('PadAccess', targ => 0, varname => '$s', inputs => [$vs]);
+    my $rs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     my $m2 = $f->make('Match', inputs => [$rs2, $qr]);
     $m2->set_stamp('Boolean');
     isnt($m2->id, $m1->id, 'precondition: the two qr-applies are distinct nodes');
@@ -231,7 +231,7 @@ subtest 'qr-apply (Match) re-applied after subject reassign sees the new value' 
     my $vz = $f->make('VarDecl', inputs => [$nz, $m2]);
     $vz->set_stamp('Boolean');
 
-    my $rzF = $f->make('PadAccess', targ => 0, varname => '$z', inputs => [$vz]);
+    my $rzF = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'z', inputs => [$vz]);
     $rzF->set_stamp('Boolean');
     my $ret = $f->make_cfg('Return', inputs => [$rzF]);
     $ret->set_control_in($vz);

@@ -27,7 +27,7 @@ sub graph_of (@nodes) { return TestGraph->new([@nodes]) }
 
 subtest 'the report carries all four spec 9.4 fields' => sub {
     my $f = Chalk::IR::NodeFactory->new;
-    my $n = $f->make('PadAccess', targ => 0, varname => '$x', inputs => []);
+    my $n = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => []);
     my $t1 = $T1->new;
     $t1->run(graph_of($n));
     my $r = $t1->report;
@@ -45,14 +45,14 @@ subtest 'the report carries all four spec 9.4 fields' => sub {
 subtest 'unknown_at_exit counts what T1 could not determine' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     # A bare PadAccess with no source: nothing can type it, so it stays Unknown.
-    my $bare = $f->make('PadAccess', targ => 0, varname => '$y', inputs => []);
+    my $bare = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'y', inputs => []);
     my $t1 = $T1->new;
     $t1->run(graph_of($bare));
     is($t1->report->{unknown_at_exit}, 1,
        'a node still Unknown at exit is counted');
 
     # A node that arrives typed is not.
-    my $typed = $f->make('PadAccess', targ => 1, varname => '$z', inputs => []);
+    my $typed = $f->make('PadAccess', targ => 1, sigil => '$', symbol => 'z', inputs => []);
     $typed->set_stamp('Int');
     my $t2 = $T1->new;
     $t2->run(graph_of($typed));
@@ -61,7 +61,7 @@ subtest 'unknown_at_exit counts what T1 could not determine' => sub {
 
 subtest 'narrowed_count counts what T1 improved' => sub {
     my $f = Chalk::IR::NodeFactory->new;
-    my $n = $f->make('PadAccess', targ => 0, varname => '$w', inputs => []);
+    my $n = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'w', inputs => []);
     my $t1 = $T1->new;
     $t1->run(graph_of($n));
     # Entry normalization turns an absence into Unknown -- that is not a
@@ -72,7 +72,7 @@ subtest 'narrowed_count counts what T1 improved' => sub {
 
 subtest 'widened_without_merge is a soundness counter, and reads zero' => sub {
     my $f = Chalk::IR::NodeFactory->new;
-    my $n = $f->make('PadAccess', targ => 0, varname => '$v', inputs => []);
+    my $n = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'v', inputs => []);
     $n->set_stamp('Int');
     my $t1 = $T1->new;
     $t1->run(graph_of($n));
@@ -95,7 +95,7 @@ subtest 'the counters MOVE -- narrowing and widening are distinguished' => sub {
                    [ 'Int',    'Scalar', 0, 1 ] ) # widening: a soundness fault
     {
         my ($from, $to, $want_narrow, $want_widen) = $case->@*;
-        my $n = $f->make('PadAccess', targ => 0, varname => "\$v_$from", inputs => []);
+        my $n = $f->make('PadAccess', targ => 0, sigil => '$', symbol => "v_$from", inputs => []);
         $n->set_stamp($from);
 
         {

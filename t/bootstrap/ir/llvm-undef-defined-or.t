@@ -122,7 +122,7 @@ subtest 'U2: DefinedOr(Int :defined, Int) => left operand via lli' => sub {
     $ca->set_stamp('Int');
     my $vda   = $f->make('VarDecl', inputs => [$cn_a, $ca]);
     $vda->set_stamp('Int');
-    my $pa    = $f->make('PadAccess', targ => 0, varname => '$a', inputs => [$vda]);
+    my $pa    = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'a', inputs => [$vda]);
     $pa->set_stamp('Int');
 
     # $b = 7
@@ -132,7 +132,7 @@ subtest 'U2: DefinedOr(Int :defined, Int) => left operand via lli' => sub {
     $cb->set_stamp('Int');
     my $vdb   = $f->make('VarDecl', inputs => [$cn_b, $cb]);
     $vdb->set_stamp('Int');
-    my $pb    = $f->make('PadAccess', targ => 0, varname => '$b', inputs => [$vdb]);
+    my $pb    = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'b', inputs => [$vdb]);
     $pb->set_stamp('Int');
 
     # $a // $b :Int
@@ -192,7 +192,7 @@ subtest 'U3: DefinedOr(Undef :undef, Int) => right operand via lli' => sub {
     $cundef->set_stamp('Undef');
     my $vda    = $f->make('VarDecl', inputs => [$cn_a, $cundef]);
     $vda->set_stamp('Undef');
-    my $pa     = $f->make('PadAccess', targ => 0, varname => '$a', inputs => [$vda]);
+    my $pa     = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'a', inputs => [$vda]);
     $pa->set_stamp('Undef');
 
     # $b = 7
@@ -202,7 +202,7 @@ subtest 'U3: DefinedOr(Undef :undef, Int) => right operand via lli' => sub {
     $cb->set_stamp('Int');
     my $vdb   = $f->make('VarDecl', inputs => [$cn_b, $cb]);
     $vdb->set_stamp('Int');
-    my $pb    = $f->make('PadAccess', targ => 0, varname => '$b', inputs => [$vdb]);
+    my $pb    = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'b', inputs => [$vdb]);
     $pb->set_stamp('Int');
 
     # $a // $b :Int

@@ -69,7 +69,7 @@ subtest 'an inlined effectful callee used as both a statement and a value lowers
     $vdecl->set_stamp('Int');
     $vdecl->set_control_in($call);
 
-    my $rread = $f->make('PadAccess', targ => 0, varname => '$r', inputs => [$vdecl]);
+    my $rread = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'r', inputs => [$vdecl]);
     $rread->set_stamp('Int');
 
     my $ret = $f->make_cfg('Return', inputs => [$rread]);

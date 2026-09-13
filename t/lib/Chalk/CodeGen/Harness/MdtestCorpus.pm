@@ -535,15 +535,20 @@ sub _build_node_from_rhs {
             inputs => [ $sym->{$nc_name}, $sym->{$init_name} ]);
     }
 
-    # PadAccess(%vd, "$varname")
+    # PadAccess(%vd, "$x") — the corpus spells the variable the way perl does,
+    # sigil included; the node carries the halves separately, so split here at
+    # the parse boundary rather than changing the corpus notation.
     if ($rhs =~ /^PadAccess\(\s*(%\w+)\s*,\s*"([^"]*)"\s*\)$/) {
-        my ($vd_name, $varname) = ($1, $2);
+        my ($vd_name, $spelling) = ($1, $2);
         croak "build_graph_from_ir: PadAccess VarDecl '$vd_name' undefined at $name"
             unless exists $sym->{$vd_name};
+        my ($sigil, $symbol) = $spelling =~ /^([\$\@\%])(.*)$/
+            or croak "build_graph_from_ir: PadAccess '$spelling' has no sigil at $name";
         return $factory->make('PadAccess',
-            targ    => 0,
-            varname => $varname,
-            inputs  => [ $sym->{$vd_name} ]);
+            targ   => 0,
+            sigil  => $sigil,
+            symbol => $symbol,
+            inputs => [ $sym->{$vd_name} ]);
     }
 
     # General N-ary ops with optional keyword args:

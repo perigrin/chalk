@@ -30,7 +30,7 @@ subtest 'the transform exists and normalizes at entry' => sub {
     eval "require $T1; 1" or do { fail("$T1 does not load: $@"); return };
 
     my $f = Chalk::IR::NodeFactory->new;
-    my $bare = $f->make('PadAccess', targ => 0, varname => '$x', inputs => []);
+    my $bare = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => []);
     is($bare->stamp, undef, 'the node arrives stamp-less');
 
     my $t1 = $T1->new;
@@ -44,7 +44,7 @@ subtest 'the absence is COUNTED, whether or not T1 later types it' => sub {
     eval "require $T1; 1" or do { plan skip_all => "$T1 does not load" };
 
     my $f = Chalk::IR::NodeFactory->new;
-    my $bare = $f->make('PadAccess', targ => 0, varname => '$y', inputs => []);
+    my $bare = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'y', inputs => []);
     my $t1 = $T1->new;
     $t1->run(TestGraph->new([$bare]));
     my $r = $t1->report;
@@ -59,7 +59,7 @@ subtest 'a node that ARRIVES Unknown is not counted as absent' => sub {
     eval "require $T1; 1" or do { plan skip_all => "$T1 does not load" };
 
     my $f = Chalk::IR::NodeFactory->new;
-    my $stamped = $f->make('PadAccess', targ => 0, varname => '$z', inputs => []);
+    my $stamped = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'z', inputs => []);
     $stamped->set_stamp('Unknown');
     my $t1 = $T1->new;
     $t1->run(TestGraph->new([$stamped]));
