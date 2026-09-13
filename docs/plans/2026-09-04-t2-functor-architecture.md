@@ -467,6 +467,22 @@ and over live B::SoN output through `from_json` -- at the pin `b96087c`
   the clause is enforced rather than assumed -- measured across the corpus
   gate, a pre-split wire produces exactly 7 refusals naming the missing
   sigil and a post-split wire produces none.
+  ENFORCED AT BOTH ENDS as of producer `7dbe810`, which is what makes this
+  a contract rather than a convention: the producer's `PadAccess` now dies
+  on construction without a sigil, as its `EntryDef` always has, so the
+  wire cannot carry a sigil-less variable even by mistake. A guarantee
+  checked only by the consumer is an assumption about the producer; checked
+  at both, it is a property of the wire. The same change closed a third
+  return path in the producer's `_padparts` that yielded an undef sigil for
+  an unrecognisable pad name -- measured at ZERO of 424 named nodes across
+  its corpus, so a hole rather than a live case, and one that would
+  otherwise have surfaced as an internal error inside a node constructor
+  rather than a named refusal.
+  What the producer's test pins is the COLLISION, not the die: `$_` and
+  `@_` built with the same targ and symbol get different node ids with the
+  sigil and would be one node without it. That is the property worth
+  holding -- the die is only the mechanism that enforces it, and a test
+  asserting the die alone would still pass if the ids merged.
 
 - Outside the contract, two loader gaps: `EntryWrite` is unknown to the
   loader (independent of T2), and `to_json` drops any non-lattice stamp
@@ -926,6 +942,26 @@ our %UNCHECKED = (
     Length       => 'Str or aggregate operand checked by TypedInvariant on the source',
     Count        => 'aggregate operand checked by TypedInvariant on the source',
 );
+
+# EVERY ROW ABOVE THAT SAYS "ON THE SOURCE" INHERITS THE SOURCE'S ERRORS, and
+# one of them is live. An aggregate-wide read (`keys`, `values`, `each`) takes
+# NO MEMORY INPUT at the producer, so it cannot observe a store and answers
+# from the literal alone. Measured (perl5-son,
+# docs/plans/2026-09-06-keys-values-each-do-not-observe-stores.md):
+#
+#     my %h = (a => 1); $h{b} = 2; print scalar(keys %h)
+#       perl  : 2
+#       graph : Call(keys) in=[HashLiteral]   -- reports 1
+#
+# The aggregate NAMING work (producer d130e56) did not close this and was
+# never going to: naming was not the defect, the missing memory edge is.
+# The distinction matters to T2 because the corpus reports that file CLEAN --
+# nothing refuses, the answer is simply wrong -- so this is invisible to every
+# gate in section 6, which count refusals. It is the D8b shape (section 5.5)
+# one layer earlier: a graph that satisfies the invariants and does not mean
+# what the program meant.
+# T2 must not key anything on these ops observing stores. Nothing here does
+# today; this note exists so that stays deliberate rather than accidental.
 
 # The relation at position $i of $op: 'tie', 'own', a fixed repr, or undef
 # for an unchecked position -- and undef for every position of an %UNCHECKED
