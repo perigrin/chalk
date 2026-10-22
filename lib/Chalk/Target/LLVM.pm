@@ -962,9 +962,12 @@ sub _emit_class_registry_ir {
                     push @lines, "  %r = call i1 $parent_fn($p_fwd)";
                     push @lines, '  ret i1 %r';
                 }
+                # The function's own return type, as the Num arm says: an
+                # inherited list-returning method (a bare `return`) forwarded
+                # `ret i64` over its %Array*, and lli rejected the module.
                 else {
-                    push @lines, "  %r = call i64 $parent_fn($p_fwd)";
-                    push @lines, '  ret i64 %r';
+                    push @lines, "  %r = call $fn_ret $parent_fn($p_fwd)";
+                    push @lines, "  ret $fn_ret %r";
                 }
                 push @lines, '}';
                 push @lines, '';

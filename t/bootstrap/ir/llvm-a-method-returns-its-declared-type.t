@@ -42,6 +42,7 @@ sub through_llvm ($src) {
 for my $case (
     [ q{use v5.42; use experimental "class"; class K { method nada { return } } K->new->nada; print "ok\n";}, "ok\n", 'a method returning nothing' ],
     [ q{use v5.42; use experimental "class"; class K { field $t = ""; method mark ($c) { $t .= $c; return } method t { $t } } my $k = K->new; $k->mark("x"); print $k->t, "\n";}, "x\n", 'a method that stores and returns nothing' ],
+    [ q{use v5.42; use experimental "class"; class Pb { field $t = ""; method mark ($c) { $t .= $c; return } method t { $t } } class Pd :isa(Pb) { ADJUST { $self->mark("d") } } print Pd->new->t, "\n";}, "d\n", 'an inherited method returning nothing' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };
