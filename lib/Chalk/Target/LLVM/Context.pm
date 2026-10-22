@@ -4319,7 +4319,11 @@ sub _lower_defined_or {
 
     # Get the definedness condition (i1).
     my $defined_cond;
-    if ($lhs_repr eq 'Undef') {
+    if (defined( my $bit = $self->_env_defined_bit($lhs_node) )) {
+        # An %ENV read is defined only when getenv found the key.
+        $defined_cond = $bit;
+    }
+    elsif ($lhs_repr eq 'Undef') {
         # The defined bit was set by _lower_constant to the alloca/load result.
         # lhs_ref IS the defined bit (i1 false for Constant(undef)).
         $defined_cond = $lhs_ref;
@@ -4477,6 +4481,14 @@ sub _lower_defined_or {
 #               must consult that bit -- folding to true silently miscompiles
 #               defined($a[$i]) on an out-of-bounds index (019f61ab).
 #   Other repr: always true (Int/Num/Str/Boolean are always defined). Returns i1 1.
+# _env_defined_bit($node) -> the i1 an EnvRead recorded when it was lowered
+# (true when getenv found the key), or undef for any other node.
+sub _env_defined_bit {
+    my ($self, $node) = @_;
+    return undef unless ($node isa Chalk::IR::Node) && $node->operation eq 'EnvRead';
+    return $self->{_env_defined}{ $node->id };
+}
+
 sub _lower_defined {
     my ($self, $node) = @_;
 
@@ -4487,7 +4499,11 @@ sub _lower_defined {
     # Lower the operand to get its value ref (or defined bit for Undef-typed).
     my $op_ref = $self->lower_value($operand);
 
-    if ($op_repr eq 'Slot') {
+    if (defined( my $bit = $self->_env_defined_bit($operand) )) {
+        $self->{cache}{$node->id} = $bit;
+        return $bit;
+    }
+    elsif ($op_repr eq 'Slot') {
         # A Slot's value is the %Slot aggregate; its defined bit is field 0.
         # Split from the Undef arm below, which is genuinely a bare i1 -- the
         # two shared a branch while a Slot was ALSO carried as its defined bit.
@@ -10300,10 +10316,10 @@ sub _lower_regex_capture {
 # _lower_env_read($node) -> $llvm_ref (i8* value string)
 #
 # Lowers EnvRead: a getenv(key) call against host process state. A missing
-# key reads as the EMPTY string (perl yields undef there — the undef face is
-# a tracked follow-up that composes with the L3 Undef representation; the
-# NULL-guarded select keeps the read crash-free meanwhile). The value length
-# is a runtime strlen, tracked in _str_len_table.
+# key reads as the EMPTY string, which is how perl prints its undef; its
+# defined bit is kept in {_env_defined} for `//` and `defined`
+# (_env_defined_bit). The value length is a runtime strlen, tracked in
+# _str_len_table.
 sub _lower_env_read {
     my ($self, $node) = @_;
 
@@ -10332,6 +10348,12 @@ sub _lower_env_read {
     $self->_emit("  $raw = call i8* \@getenv(i8* $kptr)  ; EnvRead: getenv(\"$key\")");
     my $isnull = $self->_fresh;
     $self->_emit("  $isnull = icmp eq i8* $raw, null  ; EnvRead: key unset?");
+    # THE KEY'S DEFINEDNESS, kept for `//` and `defined`: an unset key prints
+    # as the empty string below, but it is undef to them -- read as defined,
+    # `$ENV{N} // 3` was "" and a loop bounded by it never ran.
+    my $isset = $self->_fresh;
+    $self->_emit("  $isset = icmp ne i8* $raw, null  ; EnvRead: key set (its defined bit)");
+    $self->{_env_defined}{ $node->id } = $isset;
     my $val = $self->_fresh;
     $self->_emit("  $val = select i1 $isnull, i8* $eptr, i8* $raw  ; EnvRead: value (empty if unset)");
     my $len = $self->_fresh;

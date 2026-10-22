@@ -8,7 +8,7 @@ use lib 'lib', 't/lib';
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
 unless (-x $LLI) {
     plan skip_all => "lli not found at $LLI";
 }
@@ -80,7 +80,7 @@ subtest 'EnvRead of a set variable returns its value' => sub {
     like($ll, qr/\@getenv/, 'the read goes through the host C getenv');
 };
 
-subtest 'EnvRead of an UNSET variable yields the empty string (documented divergence: perl gives undef)' => sub {
+subtest 'EnvRead of an UNSET variable prints as the empty string, as perl prints undef' => sub {
     delete local $ENV{CHALK_G7_UNSET};
     my $f = _mk();
     my $e = $f->make('EnvRead', key => 'CHALK_G7_UNSET');
@@ -88,7 +88,54 @@ subtest 'EnvRead of an UNSET variable yields the empty string (documented diverg
     my $ret = $f->make_cfg('Return', inputs => [$e]);
     my ($out) = eval { lli_run($ret, factory => $f) };
     ok(!$@, 'lowering + lli succeeded (no NULL-deref)') or do { diag("error: $@"); return };
-    is($out, '[]', 'missing key reads as the empty string (undef face = tracked follow-up)');
+    is($out, '[]', 'missing key prints as the empty string');
+};
+
+# AN UNSET KEY IS UNDEF TO `//` AND `defined`, though it still prints as the
+# empty string. Read as defined, `my $n = $ENV{N} // 3` set $n to "" and a
+# `while ($i < $n)` never ran -- thirteen pvm corpus cases printed the wrong
+# thing through lli (perl5-son's corpus-llvm-roundtrip.pl).
+subtest 'EnvRead of an UNSET variable is undef to //' => sub {
+    delete local $ENV{CHALK_G7_UNSET};
+    my $f = _mk();
+    my $e = $f->make('EnvRead', key => 'CHALK_G7_UNSET');
+    $e->set_stamp('Str');
+    my $d = $f->make('Constant', value => 'dflt', const_type => 'string');
+    $d->set_stamp('Str');
+    my $dor = $f->make('DefinedOr', inputs => [$e, $d]);
+    $dor->set_stamp('Str');
+    my $ret = $f->make_cfg('Return', inputs => [$dor]);
+    my ($out) = eval { lli_run($ret, factory => $f) };
+    ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
+    is($out, '[dflt]', 'an unset key takes the // default');
+};
+
+subtest 'EnvRead of a SET variable is defined to //' => sub {
+    local $ENV{CHALK_G7_TEST} = 'hostval';
+    my $f = _mk();
+    my $e = $f->make('EnvRead', key => 'CHALK_G7_TEST');
+    $e->set_stamp('Str');
+    my $d = $f->make('Constant', value => 'dflt', const_type => 'string');
+    $d->set_stamp('Str');
+    my $dor = $f->make('DefinedOr', inputs => [$e, $d]);
+    $dor->set_stamp('Str');
+    my $ret = $f->make_cfg('Return', inputs => [$dor]);
+    my ($out) = eval { lli_run($ret, factory => $f) };
+    ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
+    is($out, '[hostval]', 'a set key is its value');
+};
+
+subtest 'defined($ENV{...}) is false for an unset key' => sub {
+    delete local $ENV{CHALK_G7_UNSET};
+    my $f = _mk();
+    my $e = $f->make('EnvRead', key => 'CHALK_G7_UNSET');
+    $e->set_stamp('Str');
+    my $def = $f->make('Defined', inputs => [$e]);
+    $def->set_stamp('Boolean');
+    my $ret = $f->make_cfg('Return', inputs => [$def]);
+    my ($out) = eval { lli_run($ret, factory => $f) };
+    ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
+    is($out, '[]', 'not defined (false prints as the empty string)');
 };
 
 subtest 'EnvRead composes: length($ENV{...})' => sub {
