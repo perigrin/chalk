@@ -5346,6 +5346,12 @@ sub _process_if_node {
         $self->_emit("  $bool_ref = icmp ne i64 $cond_ref, 0  ; If (elab): coerce Int to i1");
         $cond_ref = $bool_ref;
     }
+    # ANY OTHER REPR TOO, by perl's truthiness for it: a %Str condition went
+    # to `br i1` as it was and lli rejected the module (`my $c = $ENV{X} // 1;
+    # if ($c)`). _emit_coercion refuses, naming the repr, where it has no rule.
+    elsif ($cond_repr ne 'Boolean') {
+        $cond_ref = $self->_emit_coercion($cond_ref, $cond_repr, 'Boolean', 'If.cond');
+    }
 
     my $then_label  = $self->_fresh_label('if.then.');
     my $else_label  = $self->_fresh_label('if.else.');
