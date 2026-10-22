@@ -874,13 +874,13 @@ sub from_json ($json_string) {
     # A BEGIN OR END BLOCK WITH EFFECTS OF ITS OWN is refused, not dropped: only
     # `methods` is loaded, so a program's `BEGIN { print }` and `END { print }`
     # vanished and it printed its main line alone. A `use` is a BEGIN block
-    # too, of a `require` and an `import`; those are compile-time and leave the
-    # program as it was.
+    # too, of a `require` and an `import` (a `no`, an `unimport`); those are
+    # compile-time and leave the program as it was.
     for my $p (($data->{phase_blocks} // [])->@*) {
         my @effects = grep {
             ( $_->{op} // '' ) !~ /\A(?:Start|Constant|MemStart|Return)\z/
                 && !( ( $_->{op} // '' ) eq 'Call'
-                      && ( ( $_->{fields} // {} )->{name} // '' ) =~ /\A(?:require|import)\z/ )
+                      && ( ( $_->{fields} // {} )->{name} // '' ) =~ /\A(?:require|import|unimport)\z/ )
         } ($p->{nodes} // [])->@*;
         die "GAP: a $p->{phase} block with effects of its own is not lowered "
           . "(a BEGIN or END block runs outside the main program)\n" if @effects;

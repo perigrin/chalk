@@ -48,7 +48,7 @@ sub through_llvm ($src) {
 
 # A `use` IS A BEGIN BLOCK TOO, of a require and an import, and the program
 # around it still lowers.
-is(eval { through_llvm(q{use strict; use List::Util qw(sum); print "ok\n";}) } // "died: $@",
-    "ok\n", 'a program with use statements still lowers');
+is(eval { through_llvm(q{use strict; no warnings 'once'; use List::Util qw(sum); print "ok\n";}) } // "died: $@",
+    "ok\n", 'a program with use and no statements still lowers');
 
 done_testing;
