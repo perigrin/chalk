@@ -692,6 +692,23 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'EnvRead') {
             $args{key} = $fields->{key};
         }
+        # B::SoN's ops the backend does not lower yet still LOAD, so it can say
+        # by name what it lacks instead of the loader dying on the op.
+        elsif ($op =~ /\A(?:Exists|Delete|ElemRestore|Chomp|ChompValue)\z/) {
+            $args{kind} = $fields->{kind} if defined $fields->{kind};
+        }
+        elsif ($op eq 'EntryWrite') {
+            $args{binds} = $fields->{binds} ? 1 : 0;
+        }
+        elsif ($op eq 'LocalAlias') {
+            $args{name} = $fields->{name} if defined $fields->{name};
+        }
+        elsif ($op eq 'PackageMark') {
+            $args{package} = $fields->{package};
+        }
+        elsif ($op eq 'Transliterate') {
+            $args{$_} = $fields->{$_} // '' for qw(from to flags);
+        }
         elsif ($op eq 'VarDecl') {
             $args{scope} = $fields->{scope} // 'my';
         }

@@ -94,6 +94,19 @@ use Chalk::IR::Node::MakeCell;
 use Chalk::IR::Node::CellRead;
 use Chalk::IR::Node::CellWrite;
 use Chalk::IR::Node::CellParam;
+use Chalk::IR::Node::Exists;
+use Chalk::IR::Node::Delete;
+use Chalk::IR::Node::ElemRestore;
+use Chalk::IR::Node::EntryWrite;
+use Chalk::IR::Node::LocalAlias;
+use Chalk::IR::Node::PackageMark;
+use Chalk::IR::Node::Increment;
+use Chalk::IR::Node::Transliterate;
+use Chalk::IR::Node::TransliterateCount;
+use Chalk::IR::Node::Wantarray;
+use Chalk::IR::Node::Chomp;
+use Chalk::IR::Node::ChompValue;
+use Chalk::IR::Node::RegexSubstCount;
 
 my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     Constant Phi
@@ -111,6 +124,8 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
     TernaryExpr StructRef StructFieldAccess
     ExpressionList ListAppend
     MakeCell CellRead CellWrite CellParam
+    Exists Delete ElemRestore EntryWrite LocalAlias PackageMark Increment
+    Transliterate TransliterateCount Wantarray Chomp ChompValue RegexSubstCount
     Start MemStart Return Unwind
     Coerce
 );
@@ -172,6 +187,7 @@ class Chalk::IR::NodeFactory {
     our %STATEMENT_EFFECT_OPS = map { $_ => 1 } qw(
         Assign CompoundAssign RegexSubst TryCatch Call
         RegexMatch Match NotMatch BacktickExpr Print
+        EntryWrite Delete ElemRestore LocalAlias Transliterate
     );
 
     # %ALLOC_OPS is DELETED. It named ArrayRef/HashRef as per-call because each

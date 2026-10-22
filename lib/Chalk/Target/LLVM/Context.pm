@@ -5098,6 +5098,16 @@ sub process_control_node {
         # aborts once, not twice.
         $self->_emit_unwind_terminator($node, 'mainline die (abort)');
     }
+    # A PACKAGE CHANGE computes nothing: the producer has already qualified
+    # every name the following statements use.
+    elsif ($op eq 'PackageMark') {
+    }
+    # A WRITE NOTHING ABOVE LOWERS IS REFUSED, not dropped: an EntryWrite
+    # reached this branch before it was a statement node, and `our $g = 1;
+    # $g = 2; print $g` printed 0.
+    elsif ($node->is_fixed && $op !~ /\A(?:Return|Region|Proj|Phi|Start)\z/) {
+        die "GAP: $op on the control chain is not lowered -- refusing to drop its effect\n";
+    }
     # Other ops in the control chain (Return, Region, Proj, Phi, etc.) are
     # either handled by their driving structure or ignored here.
 }
