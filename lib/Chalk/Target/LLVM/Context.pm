@@ -5971,10 +5971,36 @@ sub _arm_loop_exit_label {
     my $ctx = $stack->[-1];
     my $exit_id = $ctx->{exit_region_id};
     return undef unless defined $exit_id;
-    for my $c (($proj->consumers // [])->@*) {
-        next unless defined $c && ref($c) && $c->can('operation');
-        next unless $c->operation eq 'Region';
+    my @regions = grep { defined $_ && ref($_) && $_->can('operation') && $_->operation eq 'Region' }
+        ($proj->consumers // [])->@*;
+    for my $c (@regions) {
         return $ctx->{exit_label} if $c->id eq $exit_id;
+    }
+    # A JUMP TO AN ENCLOSING LOOP (`next OUTER`, `last OUTER`): the arm joins a
+    # Region that control reaches only by leaving this loop -- past its exit.
+    # Placed inside this loop's body it ran as this loop's own `next` (`acacac`
+    # for perl's `aaa`). Lowering it needs a branch into the enclosing loop's
+    # latch or exit with phis for the extra predecessor; until then, refused.
+    if (@regions) {
+        # `last OUTER` joins an enclosing loop's own exit Region directly.
+        my %outer_exit = map { ( $_->{exit_region_id} // '' ) => 1 } @$stack[ 0 .. $#$stack - 1 ];
+        die "GAP: a jump from inside a loop to an enclosing loop (next or last with a label) "
+          . "is not lowered -- it needs a branch into that loop's latch or exit\n"
+            if grep { $outer_exit{ $_->id } } @regions;
+        my $exit = $ctx->{exit_region};
+        my (%past, @q) = ();
+        @q = ($exit) if $exit;
+        while (my $n = shift @q) {
+            next if $past{ $n->id }++;
+            push @q, grep {
+                defined $_ && ref($_) && $_->can('operation')
+                    && ( $_->operation eq 'Region'
+                         || ( $_->can('control_in') && defined $_->control_in && $_->control_in == $n ) )
+            } ($n->consumers // [])->@*;
+        }
+        die "GAP: a jump from inside a loop to an enclosing loop (next or last with a label) "
+          . "is not lowered -- it needs a branch into that loop's latch or exit\n"
+            if grep { $past{ $_->id } } @regions;
     }
     return undef;
 }
@@ -6210,7 +6236,8 @@ sub _process_loop_node {
     # before the body walk, pop after (nested loops stack).
     my $exit_region_id = defined $exit_region ? $exit_region->id : undef;
     push @{ $self->{_loop_ctx_stack} //= [] },
-        { exit_label => $exit_label, exit_region_id => $exit_region_id };
+        { exit_label => $exit_label, exit_region_id => $exit_region_id,
+          exit_region => $exit_region };
 
     # Process the body: VarDecl/Assign nodes reachable from the body Proj.
     $self->_process_loop_body($loop_node, $header_label);
