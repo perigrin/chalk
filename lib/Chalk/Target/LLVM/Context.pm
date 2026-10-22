@@ -1577,6 +1577,11 @@ sub lower_value {
             && defined $node->inputs->[2]) {
         return $self->{cache}{$id};
     }
+    # So is a frozen FieldAccess with its memory input (inputs[0]).
+    if ($op eq 'FieldAccess' && exists $self->{cache}{$id}
+            && defined $node->inputs->[0]) {
+        return $self->{cache}{$id};
+    }
     if (exists $self->{cache}{$id} && !$self->_reads_mutable_location($node)) {
         return $self->{cache}{$id};
     }
@@ -5316,10 +5321,20 @@ sub _freeze_memory_reads {
     my ($self, $mem_node) = @_;
     return unless $mem_node->can('consumers');
     for my $c ($mem_node->consumers->@*) {
-        next unless blessed($c) && $c->operation eq 'Subscript';
-        # A memory-having read: inputs[2] is the memory version. Guard against a
-        # 2-input lvalue Subscript (no memory input).
-        my $mem = $c->inputs->[2];
+        next unless blessed($c);
+        # A FIELD READ IS ONE TOO, its memory version its only input (an
+        # lvalue FieldAccess has none). Lowered at its use instead, `my $old =
+        # $n; $n = 5` read the 5.
+        my $mem;
+        if ($c->operation eq 'FieldAccess') {
+            $mem = $c->inputs->[0];
+        }
+        else {
+            next unless $c->operation eq 'Subscript';
+            # A memory-having read: inputs[2] is the memory version. Guard against a
+            # 2-input lvalue Subscript (no memory input).
+            $mem = $c->inputs->[2];
+        }
         next unless defined $mem && blessed($mem) && $mem->id eq $mem_node->id;
         next if exists $self->{cache}{ $c->id };   # already frozen
         # A read whose INDEX (or container) is a loop-header Phi cannot be frozen

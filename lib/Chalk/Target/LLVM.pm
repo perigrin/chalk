@@ -1204,6 +1204,18 @@ sub _emit_class_registry_ir {
                     push @lines, '  ret %Slot %ret_s1';
                 }
             }
+            # A LIST RETURN IS THE LIST POINTER the signature declares: a bare
+            # `return` is an empty list, and `ret i64` over its %Array* was a
+            # module lli rejected.
+            elsif ($fn_ret eq '%Array*'
+                   && ( ($body_node isa Chalk::IR::Value) ? ($body_node->stamp // '') : '' )
+                      =~ /\A(?:List|Array)\z/) {
+                push @lines, "  ret %Array* $body_val";
+            }
+            elsif ($fn_ret ne 'i64') {
+                die "GAP: a method returning repr=$ret_repr ($fn_ret) from a body of another "
+                  . "shape is not lowered -- refusing to emit a mistyped ret\n";
+            }
             else {
                 push @lines, "  ret i64 $body_val";
             }
