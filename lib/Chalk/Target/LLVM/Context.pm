@@ -8983,10 +8983,16 @@ sub _lower_call_direct {
     # own repr, and the caller reads the call at the call's: g's `$_[0] * 2`
     # is an Int, the call to it was stamped Num, and the i64 went where a
     # double was wanted -- lli rejected the module. Reconciled here, once.
+    # A CALL IN VOID CONTEXT HAS NO VALUE TO REACH ITS CALLER. Its effects
+    # are inlined; its value is not lowered -- a sub ending in an if makes
+    # that value inside an arm, and refusing it refused every statement call
+    # to such a sub. Nothing reads the call, so its ref is a placeholder.
+    my $void = ($want // '') eq 'void';
     my $inline = sub {
         my $ref = $structured
-            ? $self->_lower_inlined_structure($returns[0], $value)
-            : $self->_lower_inlined_effects_then_value(\@effect_chain, $value);
+            ? $self->_lower_inlined_structure($returns[0], $void ? undef : $value)
+            : $self->_lower_inlined_effects_then_value(\@effect_chain, $void ? undef : $value);
+        return '0' if $void;
         my $from = $value->operation eq 'Print' ? 'Boolean' : ($value->stamp // '');
         my $to   = $node->stamp // '';
         # Between SCALAR readings only: a list callee's Array value is what a
@@ -9240,7 +9246,7 @@ sub _lower_inlined_structure {
                   . "reach the caller through.\n";
     # Below an on-chain merge phi, an arm's value is lowered in its own arm --
     # effects and all -- so only a further merge there needs checking.
-    my @q = ([$value, 0]);
+    my @q = defined $value ? ([$value, 0]) : ();
     my %seen;
     while (defined(my $e = shift @q)) {
         my ($n, $in_arm) = @$e;
@@ -9273,7 +9279,7 @@ sub _lower_inlined_structure {
     local $self->{_branch_guarded_store} = 0;
     local $self->{_loop_ctx_stack}       = [];
     Chalk::Target::LLVM::_process_control_chain($self, $return);
-    return $self->lower_value($value);
+    return defined $value ? $self->lower_value($value) : undef;
 }
 
 # _lower_inlined_effects_then_value(\@effect_chain, $value) -> $llvm_ref
@@ -9346,7 +9352,7 @@ sub _lower_inlined_effects_then_value {
     local $self->{cache}         = {};
     local $self->{_frozen_reads} = {};   # keyed by id, as {cache} is
     $self->process_control_node($_) for reverse $effect_chain->@*;
-    return $self->lower_value($value);
+    return defined $value ? $self->lower_value($value) : undef;
 }
 
 # _is_args_array($node) -> bool

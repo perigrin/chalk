@@ -63,6 +63,12 @@ for my $case (
     # from both ran twice.
     [ q{sub f { if ($_[0]) { print "x\n" } return 1 } sub g { return 5 + f(1) } print g(), "\n";}, "x\n6\n", 'a branching callee under a straight-line one' ],
     [ q{sub h { print "H"; return 1 } sub g { my @l = (5, 6); return $l[h()] + $_[0] } print g(1), "\n";}, "H7\n", 'an effectful call in a straight-line value' ],
+    # A CALL IN VOID CONTEXT HAS NO VALUE TO REACH. A sub ending in an if
+    # makes its value inside an arm, which was refused -- also where the call
+    # is a statement and nothing reads it (48 pvm corpus cases, most of them
+    # called that way). Its effects are inlined and its value is not lowered.
+    [ q{sub f { my $n = shift; if ($n) { print "x" } } f(1); print "\n";}, "x\n", 'an if as the last statement, called for its effect' ],
+    [ q{sub report { my ($x, $y) = @_; if ($x > 3) { print "both $x $y\n" if $y > 3; } } report(5, 5); report(5, 1); report(1, 5);}, "both 5 5\n", 'a nested if as the last statement, called for its effect' ],
     # THE CALL HAS THE CALLER'S TYPE. g's product is an Int; the call to it
     # is stamped Num, and the inlined i64 went where a double was wanted --
     # lli rejected the module (verifier, review of 4182d850).
@@ -83,14 +89,9 @@ for my $case (
     # A VALUE NOTHING TYPED IS NOT AN EMPTY STRING. The rebind folds to a
     # ternary stamped Unknown, and stringifying Unknown printed "" for 9.
     [ q{sub f { my $n = shift; my $y = $n; if ($n) { $y = 9 } return $y } print f(1), "\n";}, "9\n", 'a rebind under a branch, returned' ],
-    # AN IF AS THE LAST STATEMENT IS THE SUB'S VALUE, and its arm's print was
-    # served past the merge: lli rejected the module.
-    [ q{sub f { my $n = shift; if ($n) { print "x" } } f(1); print "\n";}, "x\n", 'an if as the last statement' ],
     [ q{sub f { my $n = shift; if ($n) { print "x" } else { print "y" } } f(1); f(0); print "\n";}, "xy\n", 'an if/else as the last statement' ],
-    # A MERGE INSIDE AN ARM IS NOT THE SUB'S MERGE. A nested if as the last
-    # statement makes the value a phi over the inner if's phi, which does not
-    # dominate the outer merge (pvm subroutines.md, LLI_FAIL).
-    [ q{sub report { my ($x, $y) = @_; if ($x > 3) { print "both $x $y\n" if $y > 3; } } report(5, 5); report(5, 1); report(1, 5);}, "both 5 5\n", 'a nested if as the last statement' ],
+    # ...but its value, read, is still made inside an arm.
+    [ q{sub f { my $n = shift; if ($n) { print "x" } } my $r = f(1); print "[$r]\n";}, "x[1]\n", 'an if as the last statement, its value read' ],
     # A COERCION THAT LOSES THE VALUE IS NOT ONE TO MAKE. g's call is stamped
     # Str (its sites pass a number and a string); its 1/3 stringified to 15
     # digits and was read back as 0.999999999999999 for perl's 1 (review of
