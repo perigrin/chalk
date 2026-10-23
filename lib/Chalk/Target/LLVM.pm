@@ -1211,7 +1211,7 @@ sub _emit_class_registry_ir {
             # `return` is an empty list, and `ret i64` over its %Array* was a
             # module lli rejected.
             elsif ($fn_ret eq '%Array*'
-                   && ( ($body_node isa Chalk::IR::Value) ? ($body_node->stamp // '') : '' )
+                   && ( ($body_node isa Chalk::IR::Node) ? ($body_node->stamp // '') : '' )
                       =~ /\A(?:List|Array)\z/) {
                 push @lines, "  ret %Array* $body_val";
             }
