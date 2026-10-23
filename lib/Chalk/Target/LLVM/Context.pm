@@ -2445,13 +2445,14 @@ sub _emit_to_str {
         return $self->_emit_empty_str($label);
     }
 
-    # An UNKNOWN operand reaching stringification is an inference failure that
-    # got this far. "" is the only defensible rendering -- a value nothing
-    # typed can be treated only as perl treats undef -- but it is a FALLBACK,
-    # not a stringification, and it is worth being able to find later. The
-    # honest fix is upstream: whatever should have typed this did not.
+    # AN UNKNOWN OPERAND IS REFUSED, not printed as "". A value nothing typed
+    # is not therefore undef: an inlined `my $y = $n; if ($n) { $y = 9 }
+    # return $y` folds to a ternary stamped Unknown, and this arm printed ""
+    # for perl's 9. The fallback was a guess that a wrong answer could hide
+    # behind; the fix is upstream, wherever this should have been typed.
     if ($from eq 'Unknown') {
-        return $self->_emit_empty_str($label);
+        die "GAP: $label: 'Unknown' is the lattice TOP -- nothing typed this "
+          . "value, so it has no stringification (it is not therefore undef).\n";
     }
 
     # A Slot is Maybe[word]: its SSA ref is the %Slot aggregate, so both halves
@@ -8944,7 +8945,15 @@ sub _lower_call_direct {
     # OTHER shape (a loop/branch effect, or a store) still GAPs loudly here —
     # that heavier memory-SSA-re-entrant case is a separate, parked slice.
     my $control_in = $returns[0]->control_in;
-    my @effect_chain = $self->_collect_straight_line_effect_chain($control_in, $name);
+    # A CALLEE THAT BRANCHES, LOOPS OR STORES is inlined whole: its control
+    # structure is lowered in place by _lower_inlined_structure, as a method
+    # body's is. A straight line of prints and calls keeps the lighter path.
+    my $structured = !_is_straight_line_effect_chain($control_in);
+    my @effect_chain = $structured ? ()
+        : $self->_collect_straight_line_effect_chain($control_in, $name);
+    my $inline = $structured
+        ? sub { $self->_lower_inlined_structure($returns[0], $value) }
+        : sub { $self->_lower_inlined_effects_then_value(\@effect_chain, $value) };
 
     # A trailing VOID statement-effect attaches on Return.inputs[1..] rather
     # than control_in (see Chalk::IR::Serialize::JSON's _control_chain_nodes,
@@ -8972,7 +8981,7 @@ sub _lower_call_direct {
     # lower_value, both the SAME node — inlines the callee once instead of
     # re-running the effect chain and result subgraph a second time.
     unless (@args) {
-        my $ref = $self->_lower_inlined_effects_then_value(\@effect_chain, $value);
+        my $ref = $inline->();
         $self->{cache}{ $node->id } = $ref;
         return $ref;
     }
@@ -9029,7 +9038,7 @@ sub _lower_call_direct {
     # computation happens to be right for both sites -- which is why the corpus
     # case insists the arguments DIFFER.
     my %cache_before = $self->{cache}->%*;
-    my $ref = $self->_lower_inlined_effects_then_value(\@effect_chain, $value);
+    my $ref = $inline->();
     $self->{cache}->%* = %cache_before;
 
     # Memoize under the caller Call node's id, same reasoning as the
@@ -9099,6 +9108,63 @@ sub _collect_straight_line_effect_chain {
         $c = $c->can('control_in') ? $c->control_in : undef;
     }
     return @chain;
+}
+
+# _is_straight_line_effect_chain($control_in) -> bool
+#
+# Is the callee's control chain prints and calls back to Start, and nothing
+# else? That is what _collect_straight_line_effect_chain threads; anything
+# else is inlined by _lower_inlined_structure.
+sub _is_straight_line_effect_chain {
+    my ($c) = @_;
+    while (blessed($c) && $c->can('operation')) {
+        my $op = $c->operation;
+        return 1 if $op eq 'Start';
+        return 0 unless $op eq 'Print' || $op eq 'Call';
+        $c = $c->can('control_in') ? $c->control_in : undef;
+    }
+    return !defined $c;
+}
+
+# _lower_inlined_structure($return, $value) -> $llvm_ref
+#
+# INLINE A WHOLE CALLEE: its ifs, loops and stores, lowered in place through
+# the same _process_control_chain a method body or the main program goes
+# through, with the callee's own Elaborate plan placing its merge phis. The
+# straight-line path took prints alone, and a callee that branched, looped or
+# stored was refused -- 106 pvm corpus cases.
+#
+# EVERY TABLE KEYED BY NODE ID IS THE CALLEE'S FOR THE DURATION. Each graph
+# numbers its nodes from its own factory, so a callee node can share an id
+# with an unrelated caller node (see _lower_inlined_effects_then_value below);
+# the cache, the merge plan, and every per-node side table are swapped for
+# the callee's and restored on the way out. The caller's var_table is COPIED
+# rather than emptied -- a callee store to its own lexical is dropped with the
+# copy, and the arguments reach the body through _arg_bind, not the table.
+# The value is lowered inside the same frame: it is the callee's node, and a
+# Phi at its merge is only in the callee's plan.
+sub _lower_inlined_structure {
+    my ($self, $return, $value) = @_;
+    my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($return);
+    my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($return, $dom);
+    local $self->{elab}                  = $elab;
+    local $self->{elab_phi_by_block}     = _index_elab_phis($elab);
+    local $self->{cache}                 = {};
+    local $self->{var_table}             = { ($self->{var_table} // {})->%* };
+    local $self->{_mut_read_memo}        = {};
+    local $self->{_frozen_reads}         = {};
+    local $self->{_env_defined}          = {};
+    local $self->{_undef_payload}        = {};
+    local $self->{_undef_defined_bit}    = {};
+    local $self->{_phi_to_vd}            = {};
+    local $self->{_regex_captures}       = {};
+    local $self->{_phi_forcing}          = {};
+    local $self->{_vd_repr}              = {};
+    local $self->{_unwind_emitted}       = {};
+    local $self->{_branch_guarded_store} = 0;
+    local $self->{_loop_ctx_stack}       = [];
+    Chalk::Target::LLVM::_process_control_chain($self, $return);
+    return $self->lower_value($value);
 }
 
 # _lower_inlined_effects_then_value(\@effect_chain, $value) -> $llvm_ref
@@ -9187,6 +9253,32 @@ sub _is_args_array {
     return $node->operation eq 'ArgsSource';
 }
 
+# _graph_component($graph) -> @nodes, in a stable order
+#
+# EVERY NODE OF A CALLEE, not its membership. Graph::nodes walks data edges,
+# and an if's condition hangs off the If, which is reached by control: in
+# `sub f { my $n = shift; if ($n) {...} }` the shift is read only by the
+# condition, so membership never held it and the arguments went unbound
+# ("reads 0 positional argument(s)"). This follows inputs, control_in, a
+# Region's head and consumers -- a callee's nodes are its own objects, so the
+# walk stays in the callee.
+sub _graph_component {
+    my ($graph) = @_;
+    my (%seen, @out);
+    my @q = grep { blessed($_) } $graph->nodes->@*;
+    while (defined(my $n = shift @q)) {
+        next if $seen{ refaddr($n) }++;
+        push @out, $n;
+        push @q, grep { blessed($_) } (
+            $n->inputs->@*,
+            ($n->can('control_in') ? $n->control_in : ()),
+            ($n->can('head')       ? $n->head       : ()),
+            ($n->can('consumers')  ? ($n->consumers // [])->@* : ()),
+        );
+    }
+    return @out;
+}
+
 # _collect_positional_arg_reads($graph, $name) -> @shift_nodes
 #
 # Find the callee graph's positional argument reads: Call(builtin, shift) nodes
@@ -9200,7 +9292,7 @@ sub _collect_positional_arg_reads {
     my @shifts;
     my %subscripts;   # index => the $_[index] Subscript node
     my %params;       # index => the Parameter node (a DECLARED signature)
-    for my $n ($graph->nodes->@*) {
+    for my $n (_graph_component($graph)) {
         next unless blessed($n);
         my $op = $n->operation;
 

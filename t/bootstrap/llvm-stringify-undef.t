@@ -1,5 +1,5 @@
 # ABOUTME: Stringifying undef yields "" -- perl's answer, and a constant one.
-# ABOUTME: Undef is the unit type; Unknown reaching here is honestly the same "".
+# ABOUTME: Undef is the unit type; Unknown is refused -- untyped is not undef.
 
 use 5.42.0;
 use utf8;
@@ -32,6 +32,12 @@ use Chalk::Target::LLVM::Context;
 # "Scalar is a legitimate static answer, Unknown is an inference failure"), and
 # collapsing them here would erase the distinction at the one place it becomes
 # observable.
+#
+# UNKNOWN IS NOW REFUSED (2026-10-23). The fallback's premise -- that an
+# untyped value reaching stringification can only be undef -- was measured
+# false: an inlined `my $y = $n; if ($n) { $y = 9 } return $y` folds to a
+# ternary stamped Unknown, and "" was printed for perl's 9. A fallback a wrong
+# answer can hide behind is a miscompile, so the arm names the gap instead.
 
 sub emitted ($ctx) {
     return join "\n", map { ( $_->{insts} // [] )->@* }
@@ -47,10 +53,11 @@ subtest 'Undef stringifies to the empty string' => sub {
         'no runtime call -- a unit type renders at compile time';
 };
 
-subtest 'Unknown stringifies to the empty string too' => sub {
+subtest 'Unknown is refused, not rendered as the empty string' => sub {
     my $ctx = Chalk::Target::LLVM::Context->new;
-    my $ptr = $ctx->_emit_to_str('Unknown', '%unused', 'Coerce[Unknown->Str]');
-    ok defined $ptr, 'it returns a pointer rather than dying';
+    my $ptr = eval { $ctx->_emit_to_str('Unknown', '%unused', 'Coerce[Unknown->Str]') };
+    ok !defined $ptr, 'no string is made up for it';
+    like $@, qr/^GAP: .*Unknown/, 'refused, naming the lattice TOP';
 };
 
 subtest 'the length travels with the pointer' => sub {
