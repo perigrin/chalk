@@ -6712,8 +6712,23 @@ sub _collect_body_recursive {
     # the Print at all.
     if ($op eq 'If' || $op eq 'Loop'
         || Chalk::IR::NodeFactory::is_statement_node($op)) {
-        push @$body, $node if _owned_by_arm($node, $visited);
-        return if $op eq 'If' || $op eq 'Loop';
+        my $owned = _owned_by_arm($node, $visited);
+        push @$body, $node if $owned;
+        if ($op eq 'If' || $op eq 'Loop') {
+            # THE ARM GOES ON PAST A NESTED STRUCTURE'S MERGE. What follows
+            # an inner if or loop has that structure's Region as its
+            # control_in; stopping here left it in no arm and on no chain, and
+            # `foreach (...) { foreach (...) { print $y } print "|" }` printed
+            # abab for perl's ab|ab| (backlog c7113f1e). The structure's own
+            # arms are its processor's; its merge Region is this arm's again.
+            my $merge = $owned && $node->can('region') ? $node->region : undef;
+            if (blessed($merge) && !$visited->{ $merge->id }++) {
+                $visited->{continues}{ $merge->id } = 1;
+                _collect_body_recursive($_, $visited, $body)
+                    for grep { defined } ($merge->consumers // [])->@*;
+            }
+            return;
+        }
     }
 
     # Recurse into consumers that have this node as a control predecessor.
@@ -6747,7 +6762,9 @@ sub _owned_by_arm {
     return 1 unless defined $ctrl && blessed($ctrl);
 
     my $cop = $ctrl->can('operation') ? $ctrl->operation : '';
-    return 0 if $cop eq 'Region';
+    # A merge is post-branch -- unless it closes a structure inside this arm,
+    # whose merge the arm continues from.
+    return $visited->{continues}{ $ctrl->id } ? 1 : 0 if $cop eq 'Region';
 
     # Reached on this walk => the arm's control chain runs through it.
     return $visited->{ $ctrl->id } ? 1 : 0;
