@@ -888,17 +888,34 @@ sub _deserialize_graph ($method_data) {
 sub from_json ($json_string) {
     my $data    = JSON::PP->new->decode($json_string);
 
-    # A BEGIN OR END BLOCK WITH EFFECTS OF ITS OWN is refused, not dropped: only
-    # `methods` is loaded, so a program's `BEGIN { print }` and `END { print }`
-    # vanished and it printed its main line alone. A `use` is a BEGIN block
-    # too, of a `require` and an `import` (a `no`, an `unimport`); those are
-    # compile-time and leave the program as it was.
+    # A BEGIN OR END BLOCK WITH EFFECTS OF ITS OWN is refused, not dropped:
+    # only `methods` is loaded, so a program's `BEGIN { print }` and `END {
+    # print }` vanished and it printed its main line alone. A `use` is a
+    # BEGIN block too, and compile-time: ONE `require` of a module's file and
+    # import, unimport or VERSION calls on that module (`no` unimports, `use
+    # X 1.0` checks a VERSION). Only that shape is let through -- the bare
+    # names were, and a program's own `BEGIN { Foo->import }` and a `require`
+    # of a file by path were dropped with whatever they printed.
     for my $p (($data->{phase_blocks} // [])->@*) {
+        my @nodes = ($p->{nodes} // [])->@*;
+        my %by_id = map { ( $_->{id} // '' ) => $_ } @nodes;
+        my @calls = grep { ( $_->{op} // '' ) eq 'Call' } @nodes;
+        my @req   = grep { ( ( $_->{fields} // {} )->{name} // '' ) eq 'require' } @calls;
+        my $file  = @req == 1
+            ? ( ( $by_id{ ( $req[0]{inputs} // [] )->[0] // '' } // {} )->{fields} // {} )->{value}
+            : undef;
+        my $module = defined $file && $file =~ m{\A(\w+(?:/\w+)*)\.pm\z}
+            ? $1 =~ s{/}{::}gr : undef;
+        my $is_use = defined $module && !grep {
+            my $f = $_->{fields} // {};
+            ( $f->{name} // '' ) ne 'require'
+                && !( ( $f->{name} // '' ) =~ /\A(?:import|unimport|VERSION)\z/
+                      && ( $f->{class_name} // '' ) eq $module )
+        } @calls;
         my @effects = grep {
             ( $_->{op} // '' ) !~ /\A(?:Start|Constant|MemStart|Return)\z/
-                && !( ( $_->{op} // '' ) eq 'Call'
-                      && ( ( $_->{fields} // {} )->{name} // '' ) =~ /\A(?:require|import|unimport)\z/ )
-        } ($p->{nodes} // [])->@*;
+                && !( $is_use && ( $_->{op} // '' ) eq 'Call' )
+        } @nodes;
         die "GAP: a $p->{phase} block with effects of its own is not lowered "
           . "(a BEGIN or END block runs outside the main program)\n" if @effects;
     }

@@ -51,4 +51,27 @@ sub through_llvm ($src) {
 is(eval { through_llvm(q{use strict; no warnings 'once'; use List::Util qw(sum); print "ok\n";}) } // "died: $@",
     "ok\n", 'a program with use and no statements still lowers');
 
+# A `use` WITH A VERSION calls VERSION, and loaded before the guard: it is a
+# `use` still (review of 59e7b915, I4).
+is(eval { through_llvm(q{use Scalar::Util 1.0 (); print "ok\n";}) } // "died: $@",
+    "ok\n", 'a use with a version still lowers');
+
+# ONLY A `use` IS LET THROUGH, not a call that happens to be named import or
+# require: the program's own import printed, and was dropped (I5).
+my $setup = do {
+    my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh qq{print "setup\\n"; 1;\n};
+    close $fh;
+    $f;
+};
+for my $case (
+    [ q{package Foo; sub import { print "imported\n" } package main; BEGIN { Foo->import } print "main\n";}, 'a BEGIN calling an import of its own' ],
+    [ qq{BEGIN { require "$setup" } print "main\\n";}, 'a BEGIN requiring a file by path' ],
+) {
+    my ($src, $name) = @$case;
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "$name: not lowered") or diag "got: $got";
+    like($@, qr/^load: .*(?:BEGIN or END block|GAP)/, "$name: refused, naming why");
+}
+
 done_testing;
