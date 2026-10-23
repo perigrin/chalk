@@ -1437,7 +1437,8 @@ sub _lex_global_name {
 
 # _refuse_an_in_place_write_to_a_location($node, $op): die by name when
 # $node writes a location's value in place -- `$s =~ s///`, `tr///`,
-# `chop $s`, an lvalue `substr` -- rather than through an Assign. The next
+# `chop $s`, an lvalue `substr` -- rather than through an Assign (s/// on
+# its own subject stores back; see _lower_regex_subst). The next
 # read of the location is versioned at that write, but nothing stores its
 # result back to the %Slot, so the read would see the value before it
 # (`s/a/$n+1/e` left "abc" for perl's "2bc").
@@ -1449,11 +1450,22 @@ sub _refuse_an_in_place_write_to_a_location {
         || ( $op eq 'Call' && ( $node->dispatch_kind // '' ) eq 'builtin'
              && $_IN_PLACE_BUILTIN{ $node->name // '' } );
     return unless $writes;
-    for my $in (grep { blessed($_) && $_->operation eq 'PadAccess' } $node->inputs->@*) {
+    my @in = $node->inputs->@*;
+    shift @in if $op eq 'RegexSubst';   # its subject is stored back
+    for my $in (grep { blessed($_) && $_->operation eq 'PadAccess' } @in) {
         die "GAP: " . ( $op eq 'Call' ? 'builtin ' . $node->name : $op )
           . " writing the location " . $in->name . " in place is not lowered\n"
             if $in->is_location;
     }
+}
+
+# _is_memory_version($node) -> true when $node is a state of memory (what a
+# memory input names), not a value.
+sub _is_memory_version {
+    my ($node) = @_;
+    my $op = $node->operation;
+    return 1 if $op =~ /\A(?:MemStart|Assign|Call|RegexSubst|Transliterate|EntryWrite|CellWrite|Delete|ElemRestore)\z/;
+    return $op eq 'Phi' && _is_memory_phi($node) ? 1 : 0;
 }
 
 # _location_ptr($pad) -> the %Slot* a location PadAccess (is_location) is
@@ -5291,7 +5303,7 @@ sub process_control_node {
         # shared lexical, and a read at that call's version must be taken
         # there, not at its use after a later store.
         $self->_freeze_memory_reads($node)
-            if $op eq 'Assign' || $self->_is_array_mutating_call($node)
+            if $op eq 'Assign' || $op eq 'RegexSubst' || $self->_is_array_mutating_call($node)
             || ($op eq 'Call' && ($node->dispatch_kind // '') eq 'direct');
     }
     elsif ($op eq 'Unwind') {
@@ -6918,9 +6930,20 @@ sub _collect_body_recursive {
     # ON THE ARM'S CONTROL CHAIN is any node pinned to it -- a statement, or
     # a read pinned between two (an element read the next store's control
     # names). _owned_by_arm asks this of a statement's control_in.
-    $visited->{owned}{$id} = 1
-        if $op ne 'If' && $op ne 'Loop' && $node->can('control_in')
-        && blessed($node->control_in) && _owned_by_arm($node, $visited);
+    #
+    # A PINNED NODE NOT ON IT YET is left unvisited: the walk follows data
+    # edges too, and may reach a statement before its control predecessor.
+    # Marked visited then, it was never taken when the chain did reach it --
+    # `print ld($s); $s =~ s/a/Q/` in an arm dropped the s///, reached first
+    # through the read it rewrites. A node outside the arm stays outside;
+    # the walk does not go on through it.
+    if ($node->can('control_in') && blessed($node->control_in)) {
+        unless (_owned_by_arm($node, $visited)) {
+            delete $visited->{$id};
+            return;
+        }
+        $visited->{owned}{$id} = 1 unless $op eq 'If' || $op eq 'Loop';
+    }
 
     # Statement nodes (is_statement_node: VarDecl + the shared
     # statement-effect table) and control flow (If/Loop) go into the body.
@@ -11205,7 +11228,19 @@ sub _lower_regex_subst {
     die "GAP: s///$flags flags not yet supported by the G6 sub-compiler "
       . "(/g is a tracked follow-up)" if length $flags;
 
-    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($self->lower_value($subj_node));
+    # A COMPUTED REPLACEMENT arrives as an operand between the subject and
+    # the memory version, the `replacement` field then "". Lowered from the
+    # field, `s/(\d)/<$1>/` deleted the digit.
+    my @rest = grep { blessed($_) } @{ $node->inputs }[ 1 .. $#{ $node->inputs } ];
+    die "GAP: s/// with a computed replacement is not lowered -- only a literal one\n"
+        if @rest > 1 || ( @rest == 1 && !_is_memory_version($rest[0]) );
+
+    # s/// READS ITS SUBJECT AS A STRING: a Scalar (a location's Slot) is
+    # read as one, by its tag. Taken apart as a %Str, lli rejected it.
+    my $subj_ref = $self->lower_value($subj_node);
+    $subj_ref = $self->_emit_coercion($subj_ref, 'Scalar', 'Str', 's/// subject')
+        if ( $subj_node->stamp // '' ) eq 'Scalar';
+    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($subj_ref);
     my $subj_len  = $subj_len_tracked
         // die "GAP: RegexSubst subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";
@@ -11303,6 +11338,13 @@ sub _lower_regex_subst {
     $self->_emit("  $res_len = phi i64 [ $new_len, \%$lbl_do ], [ $subj_len, \%$lbl_pre ]  ; RegexSubst: result length");
 
     $res = $self->_set_str_len($res, $res_len);
+    # A LOCATION'S s/// IS STORED BACK: the RegexSubst is its next memory
+    # version, and the read after it is frozen there -- at the slot.
+    if ($subj_node->operation eq 'PadAccess' && $subj_node->is_location) {
+        my $boxed = $self->_emit_coercion($res, 'Str', 'Scalar', 's/// store-back');
+        $self->_emit("  store %Slot $boxed, %Slot* " . $self->_location_ptr($subj_node)
+            . "  ; s/// stores lexical " . $subj_node->name);
+    }
     $self->{cache}{ $node->id } = $res;
     return $res;
 }

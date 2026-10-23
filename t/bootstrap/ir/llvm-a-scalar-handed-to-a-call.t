@@ -55,6 +55,32 @@ for my $case (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
+# s/// ON A LOCATION stores the rewritten string back. It was refused by
+# name (10 of the 38 cases stopped there): the RegexSubst is the next memory
+# version, and the read after it took the slot's value from before it.
+for my $case (
+    [ q{sub ld { "l" . $_[0] } my $s = "abc"; print ld($s); $s =~ s/b/X/; print ld($s), "\n";}, "labclaXc\n", 's/// on a scalar handed to a call' ],
+    [ q{sub ld { "l" . $_[0] } my $s = "abc"; my $r = ld($s); $s =~ s/a/z/; print $r, ld($s), "\n";}, "labclzbc\n", 'a read before it keeps its value' ],
+    [ q{sub ld { "l" . $_[0] } my $s = "abc"; $s =~ s/q/X/; print ld($s), "\n";}, "labc\n", 'no match leaves it' ],
+    [ q{sub ld { "l" . $_[0] } my $s = "abc"; my $n = 1; $n = $n + 0; if ($n) { $s =~ s/c/Z/ } print ld($s), "\n";}, "labZ\n", 's/// in an arm' ],
+    # ...after a read in the same arm, which the arm's walk reached first
+    # and so took the s/// for another arm's: it was never lowered.
+    [ q{sub ld { "l" . $_[0] } my $s = "abc"; ld($s); my $n = 1; $n = $n + 0; if ($n) { print ld($s); $s =~ s/a/Q/ } print ld($s), "\n";}, "labclQbc\n", 's/// in an arm after a read there' ],
+) {
+    my ($src, $want, $name) = @$case;
+    my $got = eval { through_llvm($src) };
+    is($got, $want, "$name: perl's answer") or diag $@;
+}
+
+# A COMPUTED REPLACEMENT is an operand, not the `replacement` field (which
+# is then ""): lowered from the field, `s/(\d)/<$1>/` deleted the digit.
+{
+    my $got = eval { through_llvm(q{my $s = "ab1"; $s =~ s/(\d)/<$1>/; print "$s\n";}) };
+    ok(defined $got ? $got eq "ab<1>\n" : $@ =~ /^(?:load|lower): /,
+        's/// with a computed replacement is refused or right')
+        or diag defined $got ? "got: $got" : $@;
+}
+
 # A CALLEE THAT WRITES ITS ARGUMENT writes the caller's variable. Lowered
 # with the argument bound by value, the caller would print 1: refused, or
 # right -- never that.
