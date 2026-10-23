@@ -4493,8 +4493,32 @@ sub _lower_defined_or {
 # (true when getenv found the key), or undef for any other node.
 sub _env_defined_bit {
     my ($self, $node) = @_;
-    return undef unless ($node isa Chalk::IR::Node) && $node->operation eq 'EnvRead';
-    return $self->{_env_defined}{ $node->id };
+    return undef unless $node isa Chalk::IR::Node;
+    my $op = $node->operation;
+    return $self->{_env_defined}{ $node->id } if $op eq 'EnvRead';
+    # THE BIT FOLLOWS THE VALUE through `//` and `?:`. Taken only off the
+    # EnvRead itself, `$ENV{U} // $ENV{U} // "z"` gave "" for perl's "z".
+    # undef is "always defined", as above.
+    if ($op eq 'DefinedOr') {
+        # Defined when either side is; a side with no bit always is.
+        my ($l, $r) = map { $self->_env_defined_bit($_) } $node->inputs->@[0, 1];
+        return undef unless defined $l && defined $r;
+        my $t = $self->_fresh;
+        $self->_emit("  $t = or i1 $l, $r  ; defined(//): either side");
+        return $t;
+    }
+    if ($op eq 'TernaryExpr') {
+        my ($c, $a, $b) = $node->inputs->@*;
+        my ($l, $r) = map { $self->_env_defined_bit($_) } $a, $b;
+        return undef unless defined $l || defined $r;
+        my $cond = $self->_ensure_i1($self->lower_value($c),
+                                     _require_repr($c, 'TernaryExpr.condition'));
+        my $t = $self->_fresh;
+        $self->_emit("  $t = select i1 $cond, i1 " . ($l // 'true') . ", i1 " . ($r // 'true')
+                   . "  ; defined(?:): the arm taken");
+        return $t;
+    }
+    return undef;
 }
 
 sub _lower_defined {

@@ -195,4 +195,43 @@ subtest 'EnvRead in two method bodies: declared getenv, no duplicate globals' =>
         or diag("duplicates: @dups");
 };
 
+# THE BIT FOLLOWS THE VALUE (review of 59e7b915, I6). It was taken only when
+# `//` or `defined` read the EnvRead itself: `$ENV{U} // $ENV{U} // "z"`
+# gave "" for perl's "z", and a ternary over an unset key was defined.
+subtest 'a chained // over an unset key takes the last default' => sub {
+    delete local $ENV{CHALK_G7_UNSET};
+    my $f = _mk();
+    my $e = $f->make('EnvRead', key => 'CHALK_G7_UNSET');
+    $e->set_stamp('Str');
+    my $inner = $f->make('DefinedOr', inputs => [$e, $e]);
+    $inner->set_stamp('Str');
+    my $d = $f->make('Constant', value => 'z', const_type => 'string');
+    $d->set_stamp('Str');
+    my $outer = $f->make('DefinedOr', inputs => [$inner, $d]);
+    $outer->set_stamp('Str');
+    my $ret = $f->make_cfg('Return', inputs => [$outer]);
+    my ($out) = eval { lli_run($ret, factory => $f) };
+    ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
+    is($out, '[z]', 'neither side is defined, so the default');
+};
+
+subtest 'defined over a ternary choosing an unset key is false' => sub {
+    delete local $ENV{CHALK_G7_UNSET};
+    my $f = _mk();
+    my $e = $f->make('EnvRead', key => 'CHALK_G7_UNSET');
+    $e->set_stamp('Str');
+    my $c = $f->make('Constant', value => '1', const_type => 'boolean');
+    $c->set_stamp('Boolean');
+    my $z = $f->make('Constant', value => 'z', const_type => 'string');
+    $z->set_stamp('Str');
+    my $t = $f->make('TernaryExpr', inputs => [$c, $e, $z]);
+    $t->set_stamp('Str');
+    my $def = $f->make('Defined', inputs => [$t]);
+    $def->set_stamp('Boolean');
+    my $ret = $f->make_cfg('Return', inputs => [$def]);
+    my ($out) = eval { lli_run($ret, factory => $f) };
+    ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
+    is($out, '[]', 'the arm taken is the unset key: not defined');
+};
+
 done_testing;
