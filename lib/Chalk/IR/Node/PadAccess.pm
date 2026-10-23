@@ -28,6 +28,18 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     method operation() { 'PadAccess' }
     sub identity_kind { q(hash_consed) }
 
+    # A SCALAR THAT IS A LOCATION is read and stored through memory, not
+    # bound as an SSA value: a shared file lexical, or a `my $x` the producer
+    # keeps in memory (handed to a call, so `@_` aliases it) -- its input is
+    # then a memory version, not a VarDecl. The producer spells a second of
+    # one name in one sub apart, so (graph, symbol) names the variable.
+    method is_location() {
+        return 0 unless $sigil eq '$';
+        return 1 if $shared;
+        my $in = $self->inputs->[0];
+        return ( defined $in && $in->can('operation') && $in->operation ne 'VarDecl' ) ? 1 : 0;
+    }
+
     # The qualified spelling, composed in ONE place. Consumers comparing against
     # a sigil-carrying string ('$self', a signature parameter name) read this
     # rather than re-joining the halves, because a site that composes it itself

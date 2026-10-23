@@ -86,7 +86,7 @@ for my $case (
 # THESE MAY BE REFUSED, by name, for what they are -- never for having
 # effects, and never answered wrongly.
 for my $case (
-    [ q{sub g { my $n = shift; if ($n > 2) { print "g" } return $n + 1 } sub f { my $n = shift; print "f"; return g($n) * 2 } print f(1), " ", f(5), "\n";}, "f4 gf12\n", 'nested calls' ],
+    [ q{sub g { my $n = shift; if ($n > 2) { print "g" } return $n + 1 } sub f { my $n = shift; print "f"; return g($n) * 2 } print f(1), " ", f(5), "\n";}, "ffg4 12\n", 'nested calls' ],   # perl's own output: print's arguments run first
     [ q{sub classify { return "zero" if $_[0] == 0; return "negative" if $_[0] < 0; return "positive"; } print classify(0), " ", classify(-5), " ", classify(7), "\n";}, "zero negative positive\n", 'early returns (pvm arguments.md)' ],
     [ q{sub big { my ($k) = @_; return "big" if $k > 1 } print "[", big(5), "]\n";}, "[big]\n", 'an early return with no else (pvm chalk-found-gaps.md)' ],
     # A VALUE NOTHING TYPED IS NOT AN EMPTY STRING. The rebind folds to a

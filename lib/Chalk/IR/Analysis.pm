@@ -2088,9 +2088,17 @@ sub _propagate_computed_reprs ($graphs) {
                     # what was written since: `my @a = (10); push @a, 4, 5;
                     # $a[2]` was "statically" undef, and printed "" for 5.
                     # B::SoN draws the same line (memory still at MemStart).
+                    #
+                    # Only the MISS is the literal's alone to decide. Its
+                    # element TYPE joins every element store's, so it still
+                    # holds once memory has moved -- unless a call was handed
+                    # the container (push, or a sub through @_), whose values
+                    # no store records. Dropped too, a hash read after a store
+                    # in an arm had no type, and printed nothing for 3.
                     my $mem = $node->inputs->[2];
-                    next if blessed($mem) && $mem->operation ne 'MemStart';
-                    if (_static_miss( $node->inputs->[0], $node->inputs->[1] )) {
+                    my $written = blessed($mem) && $mem->operation ne 'MemStart';
+                    next if $written && _handed_to_a_call( $node->inputs->[0] );
+                    if (!$written && _static_miss( $node->inputs->[0], $node->inputs->[1] )) {
                         # `Undef`, not `Slot` (perigrin, 2026-08-27/29). A read
                         # that is not there has a TYPE -- undef -- and `Undef`
                         # is a lattice member. `Slot` is its ENCODING and is not
@@ -2337,6 +2345,21 @@ sub _element_store_values ($container) {
 # are decidable here; a dynamic container or index returns false (the read keeps
 # the element repr and is bounds-checked at runtime). A miss reads perl's undef,
 # so the Subscript must load as Slot, not the element type.
+# _handed_to_a_call($container) -> true when a Call takes the container (or
+# a reference to it) as an argument: it may write elements no Subscript
+# store records (push, unshift, splice; a sub writing through @_).
+sub _handed_to_a_call ($container) {
+    $container = _resolve_aggregate(_unwrap_ref($container));
+    return false unless defined $container && blessed($container);
+    for my $c (($container->consumers // [])->@*) {
+        next unless blessed($c);
+        return true if $c->operation eq 'Call';
+        return true if $c->operation eq 'Ref'
+            && grep { blessed($_) && $_->operation eq 'Call' } ($c->consumers // [])->@*;
+    }
+    return false;
+}
+
 sub _static_miss ($container, $index) {
     # Resolve a nested container the SAME way _element_repr does: a Subscript over
     # a literal aggregate at a constant index resolves to the inner literal, so an

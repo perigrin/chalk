@@ -657,8 +657,13 @@ sub _deserialize_graph ($method_data) {
             # ...and what it holds is whatever was last stored, from any graph:
             # a Scalar, which the backend reads as its Slot. Unknown (nothing
             # typed it) is what a read stamped where no store is in sight says.
+            # A `my $x` KEPT IN MEMORY (its input a memory version, not a
+            # VarDecl -- handed to a call) is a location too, and likewise.
+            my $location = $fields->{shared}
+                || ( ( $fields->{sigil} // '' ) eq '$' && blessed($inputs[0])
+                     && $inputs[0]->operation ne 'VarDecl' );
             $nd->{stamp} = 'Scalar'
-                if $fields->{shared} && ( $nd->{stamp} // 'Unknown' ) eq 'Unknown';
+                if $location && ( $nd->{stamp} // 'Unknown' ) eq 'Unknown';
             # AN @ VARIABLE IS AN ARRAY, a % one a HASH, whatever inference
             # missed: `my @r;` arrives as a bare PadAccess stamped Unknown.
             if (( $nd->{stamp} // 'Unknown' ) eq 'Unknown' && !$fields->{shared}) {

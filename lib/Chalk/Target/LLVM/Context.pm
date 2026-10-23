@@ -1435,6 +1435,46 @@ sub _lex_global_name {
     return $self->{_lex_globals}{$symbol} = "\@$ident";
 }
 
+# _refuse_an_in_place_write_to_a_location($node, $op): die by name when
+# $node writes a location's value in place -- `$s =~ s///`, `tr///`,
+# `chop $s`, an lvalue `substr` -- rather than through an Assign. The next
+# read of the location is versioned at that write, but nothing stores its
+# result back to the %Slot, so the read would see the value before it
+# (`s/a/$n+1/e` left "abc" for perl's "2bc").
+my %_IN_PLACE_WRITER   = map { $_ => 1 } qw(RegexSubst Transliterate Chomp ChompValue);
+my %_IN_PLACE_BUILTIN  = map { $_ => 1 } qw(chop chomp substr undef read sysread recv vec pos);
+sub _refuse_an_in_place_write_to_a_location {
+    my ($node, $op) = @_;
+    my $writes = $_IN_PLACE_WRITER{$op}
+        || ( $op eq 'Call' && ( $node->dispatch_kind // '' ) eq 'builtin'
+             && $_IN_PLACE_BUILTIN{ $node->name // '' } );
+    return unless $writes;
+    for my $in (grep { blessed($_) && $_->operation eq 'PadAccess' } $node->inputs->@*) {
+        die "GAP: " . ( $op eq 'Call' ? 'builtin ' . $node->name : $op )
+          . " writing the location " . $in->name . " in place is not lowered\n"
+            if $in->is_location;
+    }
+}
+
+# _location_ptr($pad) -> the %Slot* a location PadAccess (is_location) is
+# stored to and read from. A shared file lexical is its module global. A
+# `my $x` kept in memory is one alloca per variable per graph INSTANCE --
+# an inlined sub's `my $x` is not its caller's, nor its own last call's --
+# allocated in the function's entry block (outside any loop) and set undef
+# where its graph's lowering began, so each call, each pass of a loop the
+# call sits in, starts it fresh as perl's `my` does.
+sub _location_ptr {
+    my ($self, $pad) = @_;
+    return $self->_lex_global_name($pad->symbol) if $pad->shared;
+    my $sym = $pad->symbol;
+    return $self->{_local_slots}{$sym} if $self->{_local_slots}{$sym};
+    my $slot = $self->_fresh;
+    $self->_emit_entry("  $slot = alloca %Slot, align 8  ; my \$$sym, a location");
+    push $self->{blocks}[ $self->{_graph_entry_idx} // 0 ]{insts}->@*,
+        "  store %Slot zeroinitializer, %Slot* $slot  ; my \$$sym starts undef";
+    return $self->{_local_slots}{$sym} = $slot;
+}
+
 # _pkg_str_global_names($stash, $var) -> ($ptr_gname, $len_gname)
 #
 # A Str package/global scalar (`our $g = "hi"`) needs TWO mutable module-level
@@ -1602,6 +1642,7 @@ sub lower_value {
     # once at their control position; re-lowering would double the effect.
     my $id = $node->id();
     my $op = $node->operation();
+    _refuse_an_in_place_write_to_a_location($node, $op);
     # Memory-SSA: a Subscript with a memory input (inputs[2]) that has already
     # been frozen (_freeze_memory_reads emitted it at its memory version's
     # control position) is served from the cache -- its memory input fixes its
@@ -2173,9 +2214,29 @@ sub _lower_modulo {
     #   %adj   = add  i64 %t, %b
     #   %res   = select i1 %fix, i64 %adj, i64 %t
 
+    # EACH OPERAND IS READ AS AN INTEGER, as perl's % reads one: a Num is
+    # truncated toward zero (7.5 % 2 is 7 % 2). Lowered raw, a double reached
+    # `srem i64` and lli rejected the module.
     my $inputs  = $node->inputs;
-    my $lhs_ref = $self->lower_value($inputs->[0]);
-    my $rhs_ref = $self->lower_value($inputs->[1]);
+    my ($lhs_ref, $rhs_ref) = map {
+        my ($in, $ref) = ($_, $self->lower_value($_));
+        my $st = $in->stamp // '';
+        if ($st eq 'Num') {
+            my $i = $self->_fresh;
+            $self->_emit("  $i = fptosi " . _repr_to_llvm_type('Num')
+                . " $ref to i64  ; Modulo: operand truncated to an integer");
+            $ref = $i;
+        }
+        elsif ($st eq 'Boolean') {
+            my $i = $self->_fresh;
+            $self->_emit("  $i = zext i1 $ref to i64  ; Modulo: Boolean operand as 0/1");
+            $ref = $i;
+        }
+        elsif ($st ne 'Int') {
+            die "GAP: a % operand with repr=" . ($st || 'NONE') . " is not lowered\n";
+        }
+        $ref;
+    } @$inputs[0, 1];
 
     my $t    = $self->_fresh;
     my $xorv = $self->_fresh;
@@ -3268,15 +3329,15 @@ sub _lower_vardecl {
 sub _lower_padaccess {
     my ($self, $node) = @_;
 
-    # A SHARED FILE LEXICAL is read from its global, at this read's memory
-    # version (frozen there by _freeze_memory_reads), and unboxed to the
-    # reading's repr.
-    if ($node->can('shared') && $node->shared) {
-        die "GAP: a shared file lexical " . $node->name . " that is not a scalar "
-          . "is not lowered\n" unless $node->sigil eq '$';
-        my $g    = $self->_lex_global_name($node->symbol);
+    # A LOCATION (a shared file lexical, a `my $x` kept in memory) is read
+    # from its %Slot, at this read's memory version (frozen there by
+    # _freeze_memory_reads), and unboxed to the reading's repr.
+    die "GAP: a shared file lexical " . $node->name . " that is not a scalar "
+      . "is not lowered\n" if $node->shared && $node->sigil ne '$';
+    if ($node->is_location) {
+        my $g    = $self->_location_ptr($node);
         my $slot = $self->_fresh;
-        $self->_emit("  $slot = load %Slot, %Slot* $g  ; read shared lexical " . $node->name);
+        $self->_emit("  $slot = load %Slot, %Slot* $g  ; read lexical " . $node->name);
         my $repr = $node->stamp // '';
         my $ref  = $repr =~ /\A(?:Int|Num|Str|Boolean)\z/
             ? $self->_emit_coercion($slot, 'Scalar', $repr, 'shared lexical ' . $node->name)
@@ -3707,20 +3768,21 @@ sub _lower_assign {
         }
     }
 
-    # A SHARED FILE LEXICAL is stored to its global: the value boxed into the
-    # Slot every reading unboxes. Not a rebind -- another graph reads it.
+    # A LOCATION is stored to its %Slot: the value boxed into the Slot every
+    # reading unboxes. Not a rebind -- another graph, or a callee through
+    # `@_`, reads it.
     if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'PadAccess'
-            && $lhs->can('shared') && $lhs->shared) {
+            && ($lhs->shared || $lhs->is_location)) {
         die "GAP: a store to a shared file lexical " . $lhs->name
           . " that is not a scalar is not lowered\n" unless $lhs->sigil eq '$';
-        my $g    = $self->_lex_global_name($lhs->symbol);
+        my $g    = $self->_location_ptr($lhs);
         my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');
         die "GAP: a store to shared lexical " . $lhs->name . " of a $from value "
           . "is not lowered\n" unless $from =~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot)\z/;
         my $boxed = $from =~ /\A(?:Scalar|Slot)\z/
             ? $rhs_ref
             : $self->_emit_coercion($rhs_ref, $from, 'Scalar', 'store to ' . $lhs->name);
-        $self->_emit("  store %Slot $boxed, %Slot* $g  ; store shared lexical " . $lhs->name);
+        $self->_emit("  store %Slot $boxed, %Slot* $g  ; store lexical " . $lhs->name);
         $self->{cache}{ $node->id } = $rhs_ref;
         return $rhs_ref;
     }
@@ -4467,6 +4529,12 @@ sub _lower_defined_or {
     # dominates the edge, which is what the phi needs.
     my $slot_payload;
     $slot_payload = $self->_slot_payload_of($lhs_ref) if $lhs_repr eq 'Slot';
+    # A Scalar LHS IS its %Slot, and merges whole into a Scalar result; into
+    # any other, its unboxing would open blocks before this branch. Its phi
+    # operand was left empty, and lli rejected the module.
+    die "GAP: a `//` over a Scalar whose result is a "
+      . ( $node->stamp // 'NONE' ) . " is not lowered -- only a Scalar\n"
+        if $lhs_repr eq 'Scalar' && ( $node->stamp // '' ) ne 'Scalar';
 
     # Allocate block labels.
     my $undef_label = $self->_fresh_label('dor.undef.');
@@ -4569,7 +4637,7 @@ sub _lower_defined_or {
             }
         }
     }
-    elsif ($lhs_repr eq 'Slot' || $lhs_repr eq 'Scalar') {  # a Scalar is its %Slot, defined bit and all
+    elsif ($lhs_repr eq 'Slot') {
         # The element value on the defined path is field 1 of the aggregate,
         # extracted in the entry block above (see the comment there).
         $lhs_phi_val = $slot_payload;
@@ -5466,7 +5534,7 @@ sub _freeze_memory_reads {
         # $n; $n = 5` read the 5.
         my $mem;
         if ($c->operation eq 'FieldAccess'
-                || ($c->operation eq 'PadAccess' && $c->can('shared') && $c->shared)) {
+                || ($c->operation eq 'PadAccess' && $c->is_location)) {
             $mem = $c->inputs->[0];
         }
         else {
@@ -6693,7 +6761,7 @@ sub _is_memory_phi {
                              $in->inputs->@*;
             my $lhs = $in->inputs->[0];
             return 1 if blessed($lhs) && ( $lhs->operation eq 'FieldAccess'
-                || ( $lhs->operation eq 'PadAccess' && $lhs->can('shared') && $lhs->shared ) );
+                || ( $lhs->operation eq 'PadAccess' && $lhs->is_location ) );
         }
         # a direct call: an inlined sub may store any of those
         return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') eq 'direct';
@@ -6826,6 +6894,7 @@ sub _collect_branch_body {
     my ($proj_node) = @_;
     my @body;
     my %visited;
+    $visited{owned}{ $proj_node->id } = 1;
     _collect_body_recursive($proj_node, \%visited, \@body);
     return @body;
 }
@@ -6845,6 +6914,13 @@ sub _collect_body_recursive {
     # dropped when the guard is false (zhi 019f2df7). The Region itself and its
     # post-merge consumers are handled by the outer control chain.
     return if $op eq 'Region';
+
+    # ON THE ARM'S CONTROL CHAIN is any node pinned to it -- a statement, or
+    # a read pinned between two (an element read the next store's control
+    # names). _owned_by_arm asks this of a statement's control_in.
+    $visited->{owned}{$id} = 1
+        if $op ne 'If' && $op ne 'Loop' && $node->can('control_in')
+        && blessed($node->control_in) && _owned_by_arm($node, $visited);
 
     # Statement nodes (is_statement_node: VarDecl + the shared
     # statement-effect table) and control flow (If/Loop) go into the body.
@@ -6874,6 +6950,7 @@ sub _collect_body_recursive {
         || Chalk::IR::NodeFactory::is_statement_node($op)) {
         my $owned = _owned_by_arm($node, $visited);
         push @$body, $node if $owned;
+        $visited->{owned}{$id} = 1 if $owned;
         if ($op eq 'If' || $op eq 'Loop') {
             # THE ARM GOES ON PAST A NESTED STRUCTURE'S MERGE. What follows
             # an inner if or loop has that structure's Region as its
@@ -6903,8 +6980,8 @@ sub _collect_body_recursive {
 #
 # Does this statement belong to the arm currently being collected?
 #
-# YES when its control_in is a node already reached on this walk -- the arm's
-# Proj, or another statement inside the arm. That is what "in this arm" means:
+# YES when its control_in is on the arm's control chain -- the arm's Proj,
+# or another statement already owned by the arm. That is what "in this arm" means:
 # the control chain from the arm's Proj passes through it.
 #
 # NO when its control_in is a Region (the merge: it is post-branch, owned by
@@ -6926,8 +7003,12 @@ sub _owned_by_arm {
     # whose merge the arm continues from.
     return $visited->{continues}{ $ctrl->id } ? 1 : 0 if $cop eq 'Region';
 
-    # Reached on this walk => the arm's control chain runs through it.
-    return $visited->{ $ctrl->id } ? 1 : 0;
+    # On the arm's control chain => in the arm. Not merely REACHED: the walk
+    # follows data edges too, and from a store in the arm through a loop's
+    # memory phi it reaches the next pass's statements -- the If this arm
+    # belongs to among them, which then counted as its own arm's and
+    # recursed without end (backlog 34066162).
+    return $visited->{owned}{ $ctrl->id } ? 1 : 0;
 }
 
 # _find_block_idx($label) -> index in $self->{blocks} for the given label.
@@ -7268,6 +7349,15 @@ sub _lower_hash_ref {
 
     my $inputs = $node->inputs;
     my $npairs = scalar(@$inputs) / 2;
+
+    # ONE READING FOR EVERY VALUE. A %HashEntry stores an i64 payload and no
+    # tag; a read decodes it by its own stamp, the join of the values. Mixed,
+    # an Int 1 was decoded as the double 4.94e-324, and Int with Str crashed.
+    my %scalar_reprs = map { $_ => 1 } grep { /\A(?:Int|Num|Str|Boolean)\z/ }
+        map { $inputs->[ $_ * 2 + 1 ]->stamp // '' } 0 .. $npairs - 1;
+    die "GAP: a hash whose values are " . join(' and ', sort keys %scalar_reprs)
+      . " is not lowered -- %HashEntry carries no tag to tell them apart\n"
+        if keys %scalar_reprs > 1;
 
     # Sized by LLVM from %HashEntry: it embeds a slot's worth of value fields,
     # so a hand-written 48 goes wrong exactly when those change.
@@ -8563,6 +8653,12 @@ sub _lower_hash_read {
     # which for the Slot arm is un-narrowed, i.e. 'Opaque'. When %HashEntry
     # grows a tag (see the note at %HashEntry's declaration) this reads it
     # instead, and nothing else here changes.
+    # A HIT WITH NO READING is a value no one can read back: an Opaque cell
+    # reads as undef, so a hash written by a call (whose values no store
+    # records) printed "" for its value. Refused until the entry has a tag.
+    die "GAP: a hash element read whose type is not established (repr="
+      . ( $repr // 'NONE' ) . ") is not lowered -- %HashEntry carries no tag\n"
+        if _slot_tag_for_repr($repr) eq 'Opaque';
     my $slot_hit = $self->_build_slot($vd_val, $vp_val,
                                       _slot_tag_for_repr($repr), 'HashRead hit');
     $self->_set_terminator("  br label \%$lbl_end");
@@ -9515,6 +9611,7 @@ sub _lower_inlined_structure {
     local $self->{_vd_repr}              = {};
     local $self->{_unwind_emitted}       = {};
     local $self->{_empty_arrays}         = {};
+    local $self->{_local_slots}          = {};
     local $self->{_graph_entry_idx}      = $self->{current_idx};
     local $self->{_branch_guarded_store} = 0;
     local $self->{_loop_ctx_stack}       = [];
@@ -9592,6 +9689,7 @@ sub _lower_inlined_effects_then_value {
     local $self->{cache}         = {};
     local $self->{_frozen_reads} = {};   # keyed by id, as {cache} is
     local $self->{_empty_arrays} = {};   # the callee's `my @a`, fresh per call
+    local $self->{_local_slots}  = {};   # and its `my $x` kept in memory
     local $self->{_graph_entry_idx} = $self->{current_idx};
     $self->process_control_node($_) for reverse $effect_chain->@*;
     return defined $value ? $self->lower_value($value) : undef;

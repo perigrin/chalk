@@ -58,6 +58,11 @@ for my $case (
     # arm does not dominate -- lli rejected the module.
     [ q{my $n = 1; $n = $n + 0; my @a = (1, 2); if ($n) { push @a, 3 } print scalar(@a), "\n";}, "3\n", 'a push in an arm, read after the merge' ],
     [ q{sub f { my $n = shift; my @a = (1, 2); if ($n) { push @a, 3 } return scalar(@a) } print f(1), f(0), "\n";}, "32\n", "a push in an arm of a sub's body" ],
+    # A HASH WRITTEN IN AN ARM, READ AFTER IT. "The literal speaks for an
+    # unwritten array only" took the element's type from neither the literal
+    # nor the stores once memory had moved; a %HashEntry has no tag, so the
+    # read was tagged Opaque and printed nothing for perl's 3 (b019b022).
+    [ q{my %h = (a => 1); my $n = 1; $n = $n + 0; if ($n) { $h{a} = $h{a} + 2 } print "$h{a}\n";}, "3\n", 'a hash element stored in an arm, read after it' ],
     # The same hole held shift before push existed (red at e1a15d3a).
     [ q{my $n = 1; $n = $n + 0; my @a = (1, 2); if ($n) { shift @a } print scalar(@a), "\n";}, "1\n", 'a shift in an arm, read after the merge' ],
 ) {

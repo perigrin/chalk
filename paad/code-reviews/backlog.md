@@ -8,18 +8,6 @@
 
 ---
 
-## `34066162` — Unbounded recursion lowering an element store plus a guarded store in a foreach
-- **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
-- **Symbol:** `process_control_node`
-- **Bug class:** Concurrency
-- **Description:** `my @a = (1, 2); foreach my $x (1, 2) { $a[1] = $x; if ($x > 1) { $a[0] = 9 } print $a[0], $a[1] } print "\n";` recurses without bound in process_control_node (Deep recursion, OOM). Pre-existing at a7023ef3.
-- **Suggested fix:** Find the control cycle the walk re-enters and add a visited guard that refuses with a GAP.
-- **Confidence:** High
-- **Found by:** Concurrency & State (`claude-opus-5-5[1m]`)
-- **First seen:** 2026-10-23 on branch `bson/llvm-corpus` at `4182d850`
-- **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `e1a15d3a`
-- **Severity:** Important
-
 ## `552af56b` — die prints no message to stderr
 - **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
 - **Symbol:** `_emit_unwind_terminator`
