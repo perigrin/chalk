@@ -119,7 +119,7 @@ my %OP_PER_POSITION_REPR = (
 # chain so their effect is ordered and survives DCE. Derived from reading the
 # producer's construction sites (perl5-son 40d8f8b), NOT from
 # lib/Chalk/Bootstrap/Perl/Actions.pm's %STATEMENT_EFFECT_OPS threading
-# (that table wires ten ops by POSITION, not by op, and never runs on
+# (that table wires its ops by POSITION, not by op, and never runs on
 # producer-built graphs — using it to derive this set would be the wrong
 # source; that mistake was already made twice):
 #   Print   — FromOptree.pm:2091-2096, control-pinned when $sim->control is defined

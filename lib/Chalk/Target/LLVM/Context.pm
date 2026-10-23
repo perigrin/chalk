@@ -5070,7 +5070,8 @@ sub process_control_node {
     elsif (Chalk::IR::NodeFactory::is_statement_node($op)) {
         # Every statement node (VarDecl + the shared statement-effect table:
         # Assign, CompoundAssign, Call, RegexSubst, RegexMatch, Match,
-        # NotMatch, BacktickExpr, TryCatch) is lowered here so its side
+        # NotMatch, BacktickExpr, TryCatch, Print, and B::SoN's EntryWrite,
+        # Delete, ElemRestore, LocalAlias, Transliterate) is lowered here so its side
         # effect — a store, a dispatched call's field mutation, a
         # substitution — is emitted at its control position, before any
         # later read.

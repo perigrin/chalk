@@ -124,7 +124,7 @@ class Chalk::IR::Node {
     # control chain, rather than being a pure value free to float?
     #
     # A PROPERTY OF THE TYPE, deliberately. The same question is answered today
-    # by %STATEMENT_EFFECT_OPS, a list of ten op NAMES held beside the classes,
+    # by %STATEMENT_EFFECT_OPS, a list of op NAMES held beside the classes,
     # consulted by string comparison (96 such comparisons over 19 ops across
     # lib/). That registry is already incomplete: `Unwind` — a `die`, which
     # ABORTS — is absent from it, and the backend compensates with hand-written

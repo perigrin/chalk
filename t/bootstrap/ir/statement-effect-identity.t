@@ -20,11 +20,12 @@ subtest 'STATEMENT_EFFECT_OPS table is the shared contract' => sub {
     my %expected = map { $_ => 1 } qw(
         Assign CompoundAssign RegexSubst TryCatch Call
         RegexMatch Match NotMatch BacktickExpr Print
+        EntryWrite Delete ElemRestore LocalAlias Transliterate
     );
     is_deeply(
         { map { $_ => 1 } keys %Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS },
         \%expected,
-        'table contains exactly the statement-effect ops (incl. the match family, 019eb6ff)');
+        'table contains exactly the statement-effect ops (incl. the match family, 019eb6ff, and the B::SoN writes)');
 };
 
 subtest 'Assign(FieldAccess-lvalue) has per-call identity' => sub {
