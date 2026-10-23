@@ -2438,9 +2438,9 @@ sub _emit_to_str {
     # `print undef` prints the empty string. Undef is a UNIT TYPE -- one value,
     # so one answer, and no runtime work: the input ref is not even read.
     #
-    # Kept SEPARATE from the Unknown arm below although both emit "". They are
-    # different claims, and the lattice keeps them apart for that reason
-    # ("Scalar is a legitimate static answer, Unknown is an inference failure").
+    # NOT shared with the Unknown arm below, which refuses: undef IS a value
+    # whose string is "", while Unknown is a value nothing typed ("Scalar is a
+    # legitimate static answer, Unknown is an inference failure").
     if ($from eq 'Undef') {
         return $self->_emit_empty_str($label);
     }
@@ -2514,13 +2514,13 @@ sub _emit_to_str {
     }
 
     die "GAP: $label is not lowered runtime-free (Int, Boolean, Num, Slot, "
-      . "Undef, Unknown and Str are wired; an aggregate has no "
+      . "Undef and Str are wired; an aggregate has no "
       . "stringification).";
 }
 
 # _emit_empty_str($label) -> $ptr to "", with its length recorded as 0.
 #
-# The shared tail of the Undef and Unknown arms. The length REGISTRATION is the
+# The Undef arm's tail (Unknown refuses instead). The length REGISTRATION is the
 # part that matters: a Str is a (ptr, len) pair, and an unrecorded length on a
 # shared "" global is how the Boolean arm once printed a stray byte of "1".
 # Zero is a length, and it has to be written down like any other.
@@ -5658,8 +5658,11 @@ sub _coerce_arm {
     my ($self, $arm_node, $arm_val, $phi_repr, $arm_label, $what) = @_;
 
     return $arm_val unless defined $phi_repr && defined $arm_val;
-    return $arm_val unless ref($arm_node) && $arm_node isa Chalk::IR::Value;
-    my $arm_repr = $arm_node->stamp;
+    return $arm_val unless ref($arm_node) && $arm_node isa Chalk::IR::Node;
+    # A PRINT IS ITS i1, whatever its stamp says: B::SoN stamps it Scalar,
+    # and an if/else ending a sub merged two prints' i1s in a %Slot phi --
+    # lli rejected the module (review of 4e1e9969).
+    my $arm_repr = $arm_node->operation eq 'Print' ? 'Boolean' : $arm_node->stamp;
     return $arm_val unless defined $arm_repr && $arm_repr ne $phi_repr;
 
     my $idx = $self->_find_block_idx($arm_label);
@@ -8942,8 +8945,8 @@ sub _lower_call_direct {
     # loop/branch Region. A STRAIGHT-LINE effect chain (Print -> ... -> Start,
     # no Region/Loop/If/Assign) is threaded in program order by
     # _collect_straight_line_effect_chain below (Slice B Commit 2-print). Any
-    # OTHER shape (a loop/branch effect, or a store) still GAPs loudly here —
-    # that heavier memory-SSA-re-entrant case is a separate, parked slice.
+    # other shape -- a loop, a branch, a store -- goes through
+    # _lower_inlined_structure.
     my $control_in = $returns[0]->control_in;
     # A CALLEE THAT BRANCHES, LOOPS OR STORES is inlined whole: its control
     # structure is lowered in place by _lower_inlined_structure, as a method
@@ -9138,19 +9141,44 @@ sub _is_straight_line_effect_chain {
 # numbers its nodes from its own factory, so a callee node can share an id
 # with an unrelated caller node (see _lower_inlined_effects_then_value below);
 # the cache, the merge plan, and every per-node side table are swapped for
-# the callee's and restored on the way out. The caller's var_table is COPIED
-# rather than emptied -- a callee store to its own lexical is dropped with the
-# copy, and the arguments reach the body through _arg_bind, not the table.
+# the callee's and restored on the way out. The var_table starts EMPTY: the
+# arguments reach the body through _arg_bind, not the table, and a copy of the
+# caller's let a callee VarDecl#1 read the caller's VarDecl#1 (8 for 10).
 # The value is lowered inside the same frame: it is the callee's node, and a
 # Phi at its merge is only in the callee's plan.
 sub _lower_inlined_structure {
     my ($self, $return, $value) = @_;
+
+    # A VALUE MADE INSIDE AN ARM HAS NO MERGE. A sub ending in `if ($n) {
+    # print "x" }` returns that if's value -- B::SoN spells it And($n, Print)
+    # or a ternary over the arms' prints -- and the print's result exists only
+    # in its arm: served past the merge, lli rejected the module. An effect
+    # the value reads must be on the callee's main chain; a Phi is the merge
+    # that makes an arm's value legal, so the walk stops there.
+    my %on_chain;
+    for (my $c = $return->control_in; blessed($c); ) {
+        last if $on_chain{ refaddr($c) }++;
+        $c = ($c->operation eq 'Region' && $c->can('head') && blessed($c->head))
+           ? $c->head
+           : ($c->can('control_in') ? $c->control_in : undef);
+    }
+    my @q = ($value);
+    my %seen;
+    while (defined(my $n = shift @q)) {
+        next unless blessed($n) && !$seen{ refaddr($n) }++;
+        next if $n->operation eq 'Phi';
+        die "GAP: an inlined sub's value is a " . $n->operation . " made inside "
+          . "one of its arms (an if as its last statement) -- that value has no "
+          . "merge to reach the caller through.\n"
+            if $n->is_fixed && !$on_chain{ refaddr($n) };
+        push @q, $n->inputs->@*;
+    }
     my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($return);
     my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($return, $dom);
     local $self->{elab}                  = $elab;
     local $self->{elab_phi_by_block}     = _index_elab_phis($elab);
     local $self->{cache}                 = {};
-    local $self->{var_table}             = { ($self->{var_table} // {})->%* };
+    local $self->{var_table}             = {};
     local $self->{_mut_read_memo}        = {};
     local $self->{_frozen_reads}         = {};
     local $self->{_env_defined}          = {};
@@ -9229,12 +9257,14 @@ sub _lower_inlined_effects_then_value {
 
     local $self->{_mut_read_memo} = {};
 
-    if ($effect_chain->@*) {
-        local $self->{cache} = {};
-        local $self->{_frozen_reads} = {};   # keyed by id, as {cache} is
-        $self->process_control_node($_) for reverse $effect_chain->@*;
-    }
-
+    # THE VALUE IS LOWERED IN THE SAME FRAME AS THE EFFECTS. Lowered under
+    # the caller's cache, a Call the effect chain had already run -- `return
+    # 5 + f(1)`, `$l[h()]` -- missed its memo and was lowered, and run, a
+    # second time: `print "x"` printed twice (review of 4e1e9969). This is the
+    # invariant the PRECONDITION above asked to be re-established.
+    local $self->{cache}         = {};
+    local $self->{_frozen_reads} = {};   # keyed by id, as {cache} is
+    $self->process_control_node($_) for reverse $effect_chain->@*;
     return $self->lower_value($value);
 }
 
@@ -9253,15 +9283,20 @@ sub _is_args_array {
     return $node->operation eq 'ArgsSource';
 }
 
-# _graph_component($graph) -> @nodes, in a stable order
+# _graph_component($graph) -> @nodes
 #
 # EVERY NODE OF A CALLEE, not its membership. Graph::nodes walks data edges,
 # and an if's condition hangs off the If, which is reached by control: in
 # `sub f { my $n = shift; if ($n) {...} }` the shift is read only by the
 # condition, so membership never held it and the arguments went unbound
-# ("reads 0 positional argument(s)"). This follows inputs, control_in, a
-# Region's head and consumers -- a callee's nodes are its own objects, so the
-# walk stays in the callee.
+# ("reads 0 positional argument(s)").
+#
+# BACKWARD from what membership holds -- inputs, control_in, a Region's head
+# -- and FORWARD only from a control node to what it controls (an If's or a
+# Loop's Projs, the statements a Proj or Region heads). Following every
+# consumer walked out of the callee through any node another graph shared:
+# the coercion passes once minted one Coerce for two graphs, and g's walk
+# counted f's shift as its own (review of 4e1e9969).
 sub _graph_component {
     my ($graph) = @_;
     my (%seen, @out);
@@ -9269,12 +9304,19 @@ sub _graph_component {
     while (defined(my $n = shift @q)) {
         next if $seen{ refaddr($n) }++;
         push @out, $n;
+        my $op = $n->operation;
         push @q, grep { blessed($_) } (
             $n->inputs->@*,
             ($n->can('control_in') ? $n->control_in : ()),
             ($n->can('head')       ? $n->head       : ()),
-            ($n->can('consumers')  ? ($n->consumers // [])->@* : ()),
         );
+        next unless $op =~ /\A(?:If|Loop|Proj|Region)\z/ && $n->can('consumers');
+        push @q, grep {
+            blessed($_) && (
+                $_->operation eq 'Proj'
+                || ( $_->can('control_in') && blessed($_->control_in)
+                     && refaddr($_->control_in) == refaddr($n) ) )
+        } ($n->consumers // [])->@*;
     }
     return @out;
 }

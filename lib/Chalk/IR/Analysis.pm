@@ -1370,12 +1370,14 @@ sub _required_operand_repr ($op, $position) {
 
 sub _insert_str_coercions ($graphs) {
     my $inserted = 0;
-    # Its own factory: _deserialize_graph's is per-graph and not retained, and a
-    # node's identity is its content hash, so nodes minted here are consistent
-    # with the ones already in the graph.
-    my $factory = Chalk::IR::NodeFactory->new();
     for my $name (sort keys %$graphs) {
         my $g = $graphs->{$name} or next;
+        # ONE FACTORY PER GRAPH, as _deserialize_graph's is. A node's identity
+        # is its content hash over its inputs' ids, and ids are numbered per
+        # graph -- so one factory for every graph handed f's Coerce(shift#2)
+        # the node main had already made for Coerce(g(5)#2), and an inlined f
+        # tested main's value (review of 4e1e9969).
+        my $factory = Chalk::IR::NodeFactory->new();
         for my $node (_all_graph_nodes($g)) {
             next unless $node->can('operation');
             my $op = $node->operation;
@@ -1463,11 +1465,12 @@ sub _insert_str_coercions ($graphs) {
 # scalar type is not lowered"; an Unknown GAP means "nothing ever typed this".
 sub _narrow_unknown_coercions ($graphs) {
     my $narrowed = 0;
-    my $factory  = Chalk::IR::NodeFactory->new();
     my @stale;      # consumers whose stamp was derived from a retired coercion
 
     for my $name (sort keys %$graphs) {
         my $g = $graphs->{$name} or next;
+        # One factory per graph -- see _insert_str_coercions.
+        my $factory = Chalk::IR::NodeFactory->new();
         for my $node (_all_graph_nodes($g)) {
             my $inputs = ($node->can('inputs') ? $node->inputs : undef) or next;
 
