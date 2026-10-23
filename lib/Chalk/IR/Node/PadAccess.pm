@@ -19,6 +19,11 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     # name-only identity hash-cons collapses unrelated variables into one node.
     field $sigil  :param :reader;
     field $symbol :param :reader;
+    # A FILE LEXICAL SHARED WITH A NAMED SUB (B::SoN `shared`): one variable
+    # read and written from several graphs, so a location reached through
+    # memory rather than an SSA value. Its symbol is unique in the program
+    # (the producer spells a second of one name apart).
+    field $shared :param :reader = 0;
 
     method operation() { 'PadAccess' }
     sub identity_kind { q(hash_consed) }
@@ -37,6 +42,6 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
         # field for diagnostics / round-trip only (no consumer reads it
         # behaviorally; PadAccess resolves to its VarDecl via inputs[0]).
         return join('|', 'PadAccess', 'name=' . $self->name(),
-            $self->_serialize_inputs());
+            ($shared ? 'shared' : ()), $self->_serialize_inputs());
     }
 }

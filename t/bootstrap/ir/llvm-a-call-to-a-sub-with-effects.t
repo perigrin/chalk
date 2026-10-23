@@ -74,6 +74,9 @@ for my $case (
     # lli rejected the module (verifier, review of 4182d850).
     [ q{sub g { return $_[0] * 2 } sub f { return g($_[0] + 1) } my $r = f(3); print $r + 1, "\n";}, "9\n", 'a nested call whose value is used' ],
     [ q{sub g { return $_[0] * 2 } sub f { return g($_[0] + 1) } print f(1), " ", f(3), "\n";}, "4 8\n", 'a nested call, twice' ],
+    # A BARE RETURN IN SCALAR CONTEXT IS UNDEF. The call was stamped List,
+    # and `defined` over a List answered true (backlog 7cbb3220).
+    [ q{sub g { return } my $x = g(); print defined($x) ? "d\n" : "u\n";}, "u\n", 'a bare return read in scalar context' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };

@@ -181,6 +181,10 @@ sub absorb_need_flags_from {
     for my $flag (@NEED_FLAGS) {
         $self->{$flag} = 1 if $src_ctx->{$flag};
     }
+    # A body that touches a shared lexical names its global; the module
+    # declares it once.
+    $self->{_lex_globals}{$_} = $src_ctx->{_lex_globals}{$_}
+        for keys %{ $src_ctx->{_lex_globals} // {} };
     return $self;
 }
 
@@ -729,6 +733,14 @@ sub render_need_flag_prologue {
             my $enc = _encode_c_string($content);
             push @lines, "$gname = private unnamed_addr constant [$total x i8] c\"$enc\\00\", align 1";
         }
+    }
+
+    # Shared file lexicals: one %Slot each, zero-init -- an undefined Slot,
+    # as an unassigned `my` is.
+    if (my $lex = $self->{_lex_globals}) {
+        push @lines, '';
+        push @lines, "$lex->{$_} = internal global %Slot zeroinitializer, align 8  ; shared lexical \$$_"
+            for sort keys %$lex;
     }
 
     # Emit package-scalar globals (EntryDef): one mutable i64 slot per
@@ -1406,6 +1418,23 @@ sub _pkg_global_name {
     return $gname;
 }
 
+# _lex_global_name($symbol) -> the module global for a shared file lexical.
+#
+# A FILE LEXICAL A NAMED SUB SHARES (PadAccess shared) is one variable read
+# and written from several graphs, so it lives in memory, not in an SSA
+# value: one `%Slot` module global, boxed on store and unboxed at each read
+# to the reading's repr -- a Slot because its reads disagree (a counter is
+# Num in the sub and Str where it is printed). The producer spells a second
+# lexical of one name apart, so the symbol is the identity.
+sub _lex_global_name {
+    my ($self, $symbol) = @_;
+    my $ident = "lex_$symbol";
+    die "GAP: shared lexical global '\@$ident' is not a legal unquoted LLVM "
+      . "identifier (\\w+)\n"
+        unless $ident =~ /\A\w+\z/;
+    return $self->{_lex_globals}{$symbol} = "\@$ident";
+}
+
 # _pkg_str_global_names($stash, $var) -> ($ptr_gname, $len_gname)
 #
 # A Str package/global scalar (`our $g = "hi"`) needs TWO mutable module-level
@@ -1587,7 +1616,7 @@ sub lower_value {
     # read at any other version (a call's, a Phi's) is cached where it was
     # first lowered, and served to a block that one does not dominate, lli
     # rejected the module.
-    if ($op eq 'FieldAccess' && $self->{_frozen_reads}{$id}
+    if (($op eq 'FieldAccess' || $op eq 'PadAccess') && $self->{_frozen_reads}{$id}
             && exists $self->{cache}{$id}) {
         return $self->{cache}{$id};
     }
@@ -2846,6 +2875,11 @@ sub _lower_coerce {
     # falls back to the wire's static claim.
     my $from      = Chalk::IR::Analysis::_is_narrowed($operand->stamp)
                   ? $operand->stamp
+                  # A Scalar operand IS its Slot, which says more than an
+                  # Unknown the coercion was built with: a shared lexical, and
+                  # a call returning one.
+                  : ( ( $operand->stamp // '' ) eq 'Scalar'
+                      && ( $node->from_repr // '' ) eq 'Unknown' ) ? 'Scalar'
                   : $node->from_repr;
 
     my $ref = $self->_emit_coercion($input_ref, $from, $to, 'Coerce');
@@ -3222,6 +3256,23 @@ sub _lower_vardecl {
 # _lower_padaccess: read the current SSA value from the var_table.
 sub _lower_padaccess {
     my ($self, $node) = @_;
+
+    # A SHARED FILE LEXICAL is read from its global, at this read's memory
+    # version (frozen there by _freeze_memory_reads), and unboxed to the
+    # reading's repr.
+    if ($node->can('shared') && $node->shared) {
+        die "GAP: a shared file lexical " . $node->name . " that is not a scalar "
+          . "is not lowered\n" unless $node->sigil eq '$';
+        my $g    = $self->_lex_global_name($node->symbol);
+        my $slot = $self->_fresh;
+        $self->_emit("  $slot = load %Slot, %Slot* $g  ; read shared lexical " . $node->name);
+        my $repr = $node->stamp // '';
+        my $ref  = $repr =~ /\A(?:Int|Num|Str|Boolean)\z/
+            ? $self->_emit_coercion($slot, 'Scalar', $repr, 'shared lexical ' . $node->name)
+            : $slot;
+        $self->{cache}{ $node->id } = $ref;
+        return $ref;
+    }
 
     # The method receiver `$self`: a PadAccess with varname '$self' and NO VarDecl
     # input (it is not a declared lexical -- it is the method's implicit object
@@ -3621,6 +3672,24 @@ sub _lower_assign {
             die "GAP: Assign(Subscript-lvalue) container has repr=$ctr_repr; "
               . "only Array/ArrayRef element stores are lowered runtime-free.";
         }
+    }
+
+    # A SHARED FILE LEXICAL is stored to its global: the value boxed into the
+    # Slot every reading unboxes. Not a rebind -- another graph reads it.
+    if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'PadAccess'
+            && $lhs->can('shared') && $lhs->shared) {
+        die "GAP: a store to a shared file lexical " . $lhs->name
+          . " that is not a scalar is not lowered\n" unless $lhs->sigil eq '$';
+        my $g    = $self->_lex_global_name($lhs->symbol);
+        my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');
+        die "GAP: a store to shared lexical " . $lhs->name . " of a $from value "
+          . "is not lowered\n" unless $from =~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot)\z/;
+        my $boxed = $from =~ /\A(?:Scalar|Slot)\z/
+            ? $rhs_ref
+            : $self->_emit_coercion($rhs_ref, $from, 'Scalar', 'store to ' . $lhs->name);
+        $self->_emit("  store %Slot $boxed, %Slot* $g  ; store shared lexical " . $lhs->name);
+        $self->{cache}{ $node->id } = $rhs_ref;
+        return $rhs_ref;
     }
 
     # Mode (b): scalar rebind — find the VarDecl the lhs points to.
@@ -4341,7 +4410,7 @@ sub _lower_defined_or {
         # lhs_ref IS the defined bit (i1 false for Constant(undef)).
         $defined_cond = $lhs_ref;
     }
-    elsif ($lhs_repr eq 'Slot') {
+    elsif ($lhs_repr eq 'Slot' || $lhs_repr eq 'Scalar') {  # a Scalar is its %Slot, defined bit and all
         # A Slot LHS (an array/hash element read) is runtime-decided: read the
         # defined bit off the aggregate and branch on it. Folding to
         # always-defined would make `$a[$i] // rhs` on an out-of-bounds index
@@ -4467,7 +4536,7 @@ sub _lower_defined_or {
             }
         }
     }
-    elsif ($lhs_repr eq 'Slot') {
+    elsif ($lhs_repr eq 'Slot' || $lhs_repr eq 'Scalar') {  # a Scalar is its %Slot, defined bit and all
         # The element value on the defined path is field 1 of the aggregate,
         # extracted in the entry block above (see the comment there).
         $lhs_phi_val = $slot_payload;
@@ -4540,7 +4609,7 @@ sub _lower_defined {
         $self->{cache}{$node->id} = $bit;
         return $bit;
     }
-    elsif ($op_repr eq 'Slot') {
+    elsif ($op_repr eq 'Slot' || $op_repr eq 'Scalar') {  # a Scalar is its %Slot, defined bit and all
         # A Slot's value is the %Slot aggregate; its defined bit is field 0.
         # Split from the Undef arm below, which is genuinely a bare i1 -- the
         # two shared a branch while a Slot was ALSO carried as its defined bit.
@@ -5117,8 +5186,12 @@ sub process_control_node {
         # version producer (it mutates the array header) -- an element read whose
         # memory input is THIS shift/pop must be frozen here, before a later
         # shift/pop advances the header again (WAR hazard).
+        # A DIRECT CALL IS A MEMORY VERSION TOO: an inlined sub may store a
+        # shared lexical, and a read at that call's version must be taken
+        # there, not at its use after a later store.
         $self->_freeze_memory_reads($node)
-            if $op eq 'Assign' || $self->_is_array_mutating_call($node);
+            if $op eq 'Assign' || $self->_is_array_mutating_call($node)
+            || ($op eq 'Call' && ($node->dispatch_kind // '') eq 'direct');
     }
     elsif ($op eq 'Unwind') {
         # A MAINLINE `die` — one not inside an if/else arm. Its Unwind sits
@@ -5359,7 +5432,8 @@ sub _freeze_memory_reads {
         # lvalue FieldAccess has none). Lowered at its use instead, `my $old =
         # $n; $n = 5` read the 5.
         my $mem;
-        if ($c->operation eq 'FieldAccess') {
+        if ($c->operation eq 'FieldAccess'
+                || ($c->operation eq 'PadAccess' && $c->can('shared') && $c->shared)) {
             $mem = $c->inputs->[0];
         }
         else {
@@ -6385,6 +6459,7 @@ sub _process_loop_node {
         my @live_exit_phis = grep {
             defined $_ && ref($_) && $_->can('operation') && $_->operation eq 'Phi'
                 && !exists $self->{cache}{ $_->id }
+                && !_is_memory_phi($_)
                 && _phi_has_live_consumer($_)
         } ($exit_region->consumers // [])->@*;
 
@@ -6556,18 +6631,28 @@ sub _collect_loop_phis {
 # scalar values. It is a scheduling token: the read that consumes it loads the
 # merged heap. Distinguished from a value-Phi by its inputs being memory nodes.
 sub _is_memory_phi {
-    my ($phi) = @_;
+    my ($phi, $seen) = @_;
     return 0 unless blessed($phi) && $phi->operation eq 'Phi';
+    $seen //= {};
+    return 0 if $seen->{ refaddr($phi) }++;   # a loop's phis reach each other
     my $inputs = $phi->inputs // [];
     return 0 unless @$inputs;
     for my $in (@$inputs) {
         next unless blessed($in);
         return 1 if $in->operation eq 'MemStart';
-        # an element store: an Assign whose lhs is a Subscript
+        # an element store: an Assign whose lhs is a Subscript -- or a field,
+        # or a shared file lexical, each a location stored through memory
         if ($in->operation eq 'Assign') {
             return 1 if grep { blessed($_) && $_->operation eq 'Subscript' }
                              $in->inputs->@*;
+            my $lhs = $in->inputs->[0];
+            return 1 if blessed($lhs) && ( $lhs->operation eq 'FieldAccess'
+                || ( $lhs->operation eq 'PadAccess' && $lhs->can('shared') && $lhs->shared ) );
         }
+        # a direct call: an inlined sub may store any of those
+        return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') eq 'direct';
+        # a memory phi of a nested structure
+        return 1 if $in->operation eq 'Phi' && _is_memory_phi($in, $seen);
     }
     return 0;
 }
@@ -8994,6 +9079,20 @@ sub _lower_call_direct {
             : $self->_lower_inlined_effects_then_value(\@effect_chain, $void ? undef : $value);
         return '0' if $void;
         my $from = $value->operation eq 'Print' ? 'Boolean' : ($value->stamp // '');
+        # A CALL NOTHING TYPED RETURNS WHAT ITS CALLEE DOES. A sub returning
+        # a shared lexical returns a Scalar (that lexical's Slot); the call to
+        # it, stamped Unknown, is that Scalar -- this call node is this call
+        # site's own, so saying so is no one else's business.
+        $node->set_stamp('Scalar')
+            if ( $node->stamp // 'Unknown' ) eq 'Unknown' && $from eq 'Scalar';
+        # A SCALAR-CONTEXT CALL STAMPED AS A LIST reads its callee's scalar
+        # reading, which is what was lowered: `sub g { return }` gives undef
+        # there, and the call stamped List was "always defined" (backlog
+        # 7cbb3220).
+        $node->set_stamp($from)
+            if ($want // '') eq 'scalar'
+            && ( $node->stamp // '' ) =~ /\A(?:List|Array)\z/
+            && $from =~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/;
         my $to   = $node->stamp // '';
         # Between SCALAR readings only: a list callee's Array value is what a
         # List-stamped call already reads, and has no arrow to coerce along.

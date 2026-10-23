@@ -165,6 +165,7 @@ sub _extract_fields ($node, $id_remap) {
             targ   => $node->targ,
             sigil  => $node->sigil,
             symbol => $node->symbol,
+            ( $node->shared ? ( shared => 1 ) : () ),
         };
     }
     if ($op eq 'FieldAccess') {
@@ -646,6 +647,14 @@ sub _deserialize_graph ($method_data) {
                 unless defined $fields->{sigil};
             $args{sigil}  = $fields->{sigil};
             $args{symbol} = $fields->{symbol};
+            # A FILE LEXICAL A NAMED SUB SHARES is a location, read and written
+            # through memory -- the backend lowers it to a module global.
+            $args{shared} = 1 if $fields->{shared};
+            # ...and what it holds is whatever was last stored, from any graph:
+            # a Scalar, which the backend reads as its Slot. Unknown (nothing
+            # typed it) is what a read stamped where no store is in sight says.
+            $nd->{stamp} = 'Scalar'
+                if $fields->{shared} && ( $nd->{stamp} // 'Unknown' ) eq 'Unknown';
         }
         elsif ($op eq 'Parameter') {
             # index is REQUIRED -- it is the node's identity. A missing one is a

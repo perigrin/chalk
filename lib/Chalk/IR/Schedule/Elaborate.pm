@@ -347,10 +347,18 @@ class Chalk::IR::Schedule::Elaborate {
     sub _resolve_vd_from_node($node) {
         return undef unless defined $node;
         return $node if $node->can('operation') && $node->operation eq 'VarDecl';
-        if ($node->can('operation') && $node->operation eq 'PadAccess') {
-            return $node->inputs->[0];
-        }
-        return undef;
+        return _pad_vardecl($node);
+    }
+
+    # _pad_vardecl($pad) -> the VarDecl a PadAccess reads, or undef. A SHARED
+    # file lexical's input is a memory version, not a declaration: it is a
+    # location every graph stores through, and is no rebind of a VarDecl --
+    # taken for one, its store planned a merge phi for "VarDecl MemStart".
+    sub _pad_vardecl($node) {
+        return undef unless $node->can('operation') && $node->operation eq 'PadAccess';
+        my $in = $node->inputs->[0];
+        return ( defined $in && $in->can('operation') && $in->operation eq 'VarDecl' )
+            ? $in : undef;
     }
 
     # _collect_branch_chain($proj_node) -> ordered list of body nodes for a branch.
@@ -404,9 +412,6 @@ class Chalk::IR::Schedule::Elaborate {
     sub _resolve_vd($node) {
         return undef unless defined $node;
         return $node if $node->can('operation') && $node->operation eq 'VarDecl';
-        if ($node->can('operation') && $node->operation eq 'PadAccess') {
-            return $node->inputs->[0];
-        }
-        return undef;
+        return _pad_vardecl($node);
     }
 }
