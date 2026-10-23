@@ -64,4 +64,19 @@ for my $case (
     is(eval { through_llvm($src) } // "died: $@", $want, $name);
 }
 
+# A `next` IS NOT A `last` (backlog 2c7696e7). A next arm joins the Region
+# where the loop body's arms merge -- headed by the Loop, like its exit -- and
+# was branched to the exit: `if ($x == 2) { next } else { print "e" }` over
+# three items printed e for perl's ee. Until a next lowers, it is refused.
+for my $case (
+    [ q{foreach my $x (1, 2, 3) { if ($x == 2) { next } else { print "e" } } print "\n";}, "ee\n", 'next in the then arm, an else' ],
+    [ q{foreach my $x (1, 2, 3) { if ($x != 2) { print "e" } else { next } print "|" } print "\n";}, "e|e|\n", 'next in the else arm, a statement after' ],
+    [ q{foreach my $x (1, 2, 3) { next if $x == 2; print $x } print "\n";}, "13\n", 'a postfix next' ],
+) {
+    my ($src, $want, $name) = @$case;
+    my $got = eval { through_llvm($src) };
+    if (defined $got) { is($got, $want, "$name: perl's answer") }
+    else { like($@, qr/^(?:load|lower): .*GAP/, "$name: refused, naming why") or diag $@ }
+}
+
 done_testing;

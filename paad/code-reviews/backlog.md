@@ -8,30 +8,6 @@
 
 ---
 
-## `2c7696e7` — next inside an if arm in a foreach is lowered as last
-- **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
-- **Symbol:** `_arm_loop_exit_label`
-- **Bug class:** Error Handling
-- **Description:** `foreach my $x (1,2,3) { if ($x == 2) { next } else { print "e" } } print "\n";` prints `e` for perl's `ee`: the next arm's Proj feeds a Region headed by the Loop and is branched to loop.exit. Pre-existing at a7023ef3.
-- **Suggested fix:** Distinguish the loop's exit Region from a continue/latch Region headed by the same Loop before treating an arm as a break.
-- **Confidence:** High
-- **Found by:** Error Handling (`claude-opus-5-5[1m]`)
-- **First seen:** 2026-10-23 on branch `bson/llvm-corpus` at `4182d850`
-- **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `e1a15d3a`
-- **Severity:** Important
-
-## `336a2f63` — A reference stringifies as its element count
-- **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
-- **Symbol:** `_emit_to_str`
-- **Bug class:** Logic
-- **Description:** The aggregate arm treats ArrayRef/HashRef like an aggregate in scalar context: `my $r = [1,2,3]; print $r` prints `3` for perl's `ARRAY(0x...)`. t/bootstrap/llvm-stringify-undef.t subtest 4 (ArrayRef must GAP) fails at a7023ef3 and after.
-- **Suggested fix:** Refuse (GAP) a Ref repr in _emit_to_str; keep the count only for Array/Hash in scalar context.
-- **Confidence:** High
-- **Found by:** Logic, Error Handling, Contract, Spec Compliance (`claude-opus-5-5[1m]`)
-- **First seen:** 2026-10-23 on branch `bson/llvm-corpus` at `4182d850`
-- **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `e1a15d3a`
-- **Severity:** Important
-
 ## `34066162` — Unbounded recursion lowering an element store plus a guarded store in a foreach
 - **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
 - **Symbol:** `process_control_node`

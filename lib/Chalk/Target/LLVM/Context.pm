@@ -2501,14 +2501,12 @@ sub _emit_to_str {
     # It is NOT string INTERPOLATION: `"@k"` joins the elements with $" and is
     # a different operation reached a different way. The refusal below stays
     # for anything that really has no scalar reading.
-    if ($from eq 'Array' || $from eq 'ArrayRef' || $from eq 'Hash' || $from eq 'HashRef') {
-        my $kind = ($from eq 'Hash' || $from eq 'HashRef') ? 'Hash' : 'Array';
+    # A REFERENCE IS NOT ITS CONTAINER. `print [1,2,3]` prints ARRAY(0x...),
+    # and this arm printed 3 (backlog 336a2f63). A Ref has no runtime-free
+    # stringification here, so it falls through to the refusal below.
+    if ($from eq 'Array' || $from eq 'Hash') {
+        my $kind = $from;
         my $ptr  = $input_ref;
-        if ($from =~ /Ref$/) {
-            my $typed = $self->_fresh;
-            $self->_emit("  $typed = bitcast i8* $input_ref to %$kind*  ; $label: ${from} -> %$kind*");
-            $ptr = $typed;
-        }
         # Field 0 of both %Array and %Hash is the count: %Array is
         # { i64 len, i64 cap, %Slot* } and %Hash is { i64 count, i64 cap,
         # %HashEntry* }, which is why one read serves both.
@@ -6040,6 +6038,17 @@ sub _arm_loop_exit_label {
     for my $c (@regions) {
         return $ctx->{exit_label} if $c->id eq $exit_id;
     }
+    # A REGION THIS LOOP HEADS THAT IS NOT ITS EXIT is where the body's arms
+    # merge before the back-edge: the arm is a `next`. Branched to the exit,
+    # it ended the loop; a next needs a branch to the latch with phis for
+    # what the body carries, which is not built -- so it is refused.
+    my $loop = $ctx->{exit_region} && $ctx->{exit_region}->can('head')
+        ? $ctx->{exit_region}->head : undef;
+    die "GAP: a `next` that skips the rest of a loop body from an if arm is "
+      . "not lowered -- it needs a branch to the loop's latch\n"
+        if blessed($loop) && grep {
+            $_->can('head') && blessed($_->head) && refaddr($_->head) == refaddr($loop)
+        } @regions;
     # A JUMP TO AN ENCLOSING LOOP (`next OUTER`, `last OUTER`): the arm joins a
     # Region that control reaches only by leaving this loop -- past its exit.
     # Placed inside this loop's body it ran as this loop's own `next` (`acacac`
@@ -6207,6 +6216,16 @@ sub _process_loop_node {
     # `last`; its id identifies "the block that routes to this loop's exit" for
     # the loop-context stack below).
     my $exit_region = $loop_node->region;
+    # THE EXIT IS THE REGION THE EXIT PROJ FEEDS. Every Region the producer
+    # heads with this Loop sets Loop.region at load, the last one winning --
+    # and a body whose if has a `next` arm adds a second, where the body's
+    # arms merge. Taken for the exit, it sent the next arm out of the loop
+    # (backlog 2c7696e7: e for perl's ee).
+    if (my $exit_proj = _find_proj_consumer($loop_node, 1)) {
+        my ($r) = grep { blessed($_) && $_->operation eq 'Region' }
+            ($exit_proj->consumers // [])->@*;
+        $exit_region = $r if $r;
+    }
 
     # ---- Lower init values in the preheader block ----
     # Each loop phi's inputs[0] is the initial value. Lower it NOW (while still
