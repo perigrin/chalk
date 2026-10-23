@@ -9246,6 +9246,21 @@ sub _lower_inlined_structure {
                   . "reach the caller through.\n";
     # Below an on-chain merge phi, an arm's value is lowered in its own arm --
     # effects and all -- so only a further merge there needs checking.
+    # MADE IN AN ARM means its control leads back to an arm's Proj before it
+    # reaches the main chain. An effect with no control at all -- a call the
+    # producer floats -- is no arm's, and refusing it refused 33 corpus cases
+    # for nothing. A loop's phi is lowered with its body, before the
+    # back-edge, wherever that loop sits; an if's merge inside an arm is not.
+    my $in_an_arm = sub ($n) {
+        for (my $c = $n->can('control_in') ? $n->control_in : undef; blessed($c); ) {
+            return 0 if $on_chain{ refaddr($c) };
+            return 1 if $c->operation eq 'Proj';
+            $c = ($c->operation eq 'Region' && $c->can('head') && blessed($c->head))
+               ? $c->head
+               : ($c->can('control_in') ? $c->control_in : undef);
+        }
+        return 0;
+    };
     my @q = defined $value ? ([$value, 0]) : ();
     my %seen;
     while (defined(my $e = shift @q)) {
@@ -9253,11 +9268,13 @@ sub _lower_inlined_structure {
         next unless blessed($n) && !$seen{ refaddr($n) . "/$in_arm" }++;
         if ($n->operation eq 'Phi') {
             my $r = $n->can('region') ? $n->region : undef;
-            die $arm_value unless blessed($r) && $on_chain{ refaddr($r) };
+            die $arm_value
+                unless blessed($r) && ( $on_chain{ refaddr($r) } || $r->operation eq 'Loop' );
             push @q, map { [$_, 1] } $n->inputs->@*;
             next;
         }
-        die $arm_value if !$in_arm && $n->is_fixed && !$on_chain{ refaddr($n) };
+        die $arm_value if !$in_arm && $n->is_fixed && !$on_chain{ refaddr($n) }
+            && $in_an_arm->($n);
         push @q, map { [$_, $in_arm] } $n->inputs->@*;
     }
     my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($return);
