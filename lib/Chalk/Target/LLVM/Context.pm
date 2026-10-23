@@ -1536,14 +1536,20 @@ sub lower_value {
     if ($self->{_arg_bind}) {
         my $bound = $self->{_arg_bind}{ refaddr($node) };
         if (defined $bound) {
-            # The binding carries the caller argument's REPR as well as its
-            # ref (see _lower_call_direct). Stamp the callee node with it so
-            # consumers in the inlined body read the value as what it actually
-            # is, not as the callee's un-narrowed `Scalar`.
-            if (defined $bound->{repr}
-                    && ($node->stamp // '') ne $bound->{repr}
-                    && $node isa Chalk::IR::Value) {
-                $node->set_stamp($bound->{repr});
+            # THE CALLER'S VALUE IS COERCED TO THE CALLEE'S READING, never the
+            # callee node restamped to the caller's. Analysis typed the
+            # callee's consumers from that node's own stamp: restamping `$a`
+            # from Num to Int left an Add and a NumGt built for doubles
+            # reading an i64, and lli rejected the module. The callee graph
+            # is shared by every call site, so it is not ours to rewrite.
+            if (defined $bound->{repr} && defined $node->stamp
+                    && $node->stamp ne $bound->{repr}) {
+                die "GAP: an inlined argument is a $bound->{repr} where the "
+                  . "callee reads a " . $node->stamp . " -- a coercion between "
+                  . "them would not keep the value.\n"
+                    unless _keeps_value($bound->{repr}, $node->stamp);
+                return $self->_emit_coercion($bound->{ref}, $bound->{repr},
+                    $node->stamp, 'inlined argument');
             }
             return $bound->{ref};
         }
@@ -8967,8 +8973,12 @@ sub _lower_call_direct {
         # Between SCALAR readings only: a list callee's Array value is what a
         # List-stamped call already reads, and has no arrow to coerce along.
         state %scalar = map { $_ => 1 } qw(Int Num Str Boolean Scalar Slot Undef);
-        $ref = $self->_emit_coercion($ref, $from, $to, "call $name result")
-            if $scalar{$from} && $scalar{$to} && $from ne $to;
+        if ($scalar{$from} && $scalar{$to} && $from ne $to) {
+            die "GAP: call $name: the callee's value is a $from but the call "
+              . "reads a $to -- that coercion would not keep the value.\n"
+                unless _keeps_value($from, $to);
+            $ref = $self->_emit_coercion($ref, $from, $to, "call $name result");
+        }
         return $ref;
     };
 
@@ -9127,6 +9137,31 @@ sub _collect_straight_line_effect_chain {
     return @chain;
 }
 
+# _keeps_value($from, $to) -> bool
+#
+# Does coercing a $from value to $to keep it, so that reading it back gives
+# what perl would? Used where the inliner reconciles a callee's reading with
+# its caller's -- a call's result, a bound argument -- and nowhere a program
+# itself asks for the conversion. A number made a Str and read back as a
+# number is NOT kept: `g(1/3) * 3` through a Str-stamped call gave
+# 0.999999999999999 for 1, and a big integer came back as 9.00719925474099e+15
+# (review of e1a15d3a). Widening to a Num, boxing into a Slot, unboxing one,
+# and numifying a Str (perl's own reading) are kept.
+my %KEEPS = (
+    Int     => { map { $_ => 1 } qw(Num Scalar Slot) },
+    Boolean => { map { $_ => 1 } qw(Int Num Scalar Slot) },
+    Num     => { map { $_ => 1 } qw(Scalar Slot) },
+    Str     => { map { $_ => 1 } qw(Num Scalar Slot) },
+    Undef   => { map { $_ => 1 } qw(Scalar Slot) },
+    Scalar  => { map { $_ => 1 } qw(Int Num Str Boolean Slot) },
+    Slot    => { map { $_ => 1 } qw(Int Num Str Boolean Scalar) },
+);
+sub _keeps_value {
+    my ($from, $to) = @_;
+    return 1 if $from eq $to;
+    return $KEEPS{$from} && $KEEPS{$from}{$to} ? 1 : 0;
+}
+
 # _is_straight_line_effect_chain($control_in) -> bool
 #
 # Is the callee's control chain prints and calls back to Start, and nothing
@@ -9176,16 +9211,29 @@ sub _lower_inlined_structure {
            ? $c->head
            : ($c->can('control_in') ? $c->control_in : undef);
     }
-    my @q = ($value);
+    # A PHI IS THAT MERGE only when its Region is on the main chain: a nested
+    # if's merge sits inside an outer arm, and its phi does not dominate the
+    # outer one (pvm subroutines.md, a nested if ending a sub: LLI_FAIL). A
+    # merge phi's own effect inputs are its arms' values, boxed in by
+    # _coerce_arm; anything deeper is walked like the rest.
+    my $arm_value = "GAP: an inlined sub's value is made inside one of its arms "
+                  . "(an if as its last statement) -- that value has no merge to "
+                  . "reach the caller through.\n";
+    # Below an on-chain merge phi, an arm's value is lowered in its own arm --
+    # effects and all -- so only a further merge there needs checking.
+    my @q = ([$value, 0]);
     my %seen;
-    while (defined(my $n = shift @q)) {
-        next unless blessed($n) && !$seen{ refaddr($n) }++;
-        next if $n->operation eq 'Phi';
-        die "GAP: an inlined sub's value is a " . $n->operation . " made inside "
-          . "one of its arms (an if as its last statement) -- that value has no "
-          . "merge to reach the caller through.\n"
-            if $n->is_fixed && !$on_chain{ refaddr($n) };
-        push @q, $n->inputs->@*;
+    while (defined(my $e = shift @q)) {
+        my ($n, $in_arm) = @$e;
+        next unless blessed($n) && !$seen{ refaddr($n) . "/$in_arm" }++;
+        if ($n->operation eq 'Phi') {
+            my $r = $n->can('region') ? $n->region : undef;
+            die $arm_value unless blessed($r) && $on_chain{ refaddr($r) };
+            push @q, map { [$_, 1] } $n->inputs->@*;
+            next;
+        }
+        die $arm_value if !$in_arm && $n->is_fixed && !$on_chain{ refaddr($n) };
+        push @q, map { [$_, $in_arm] } $n->inputs->@*;
     }
     my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($return);
     my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($return, $dom);
@@ -9324,6 +9372,15 @@ sub _graph_component {
             ($n->can('control_in') ? $n->control_in : ()),
             ($n->can('head')       ? $n->head       : ()),
         );
+        # @_ IS READ BY WHAT CONSUMES IT, and a `my (...) = @_` is consumed by
+        # nothing: the walk reaches it from @_, or from a target it assigns.
+        push @q, grep { blessed($_) } ($n->consumers // [])->@*
+            if $op eq 'ArgsSource' && $n->can('consumers');
+        push @q, grep {
+            blessed($_) && $_->operation eq 'Assign'
+                && blessed($_->inputs->[-1]) && _is_args_array($_->inputs->[-1])
+        } ($n->consumers // [])->@*
+            if $op eq 'PadAccess' && $n->can('consumers');
         next unless $op =~ /\A(?:If|Loop|Proj|Region)\z/ && $n->can('consumers');
         push @q, grep {
             blessed($_) && (
@@ -9346,6 +9403,7 @@ sub _collect_positional_arg_reads {
     my ($self, $graph, $name) = @_;
 
     my @shifts;
+    my @list_assigns; # `my (...) = @_`
     my %subscripts;   # index => the $_[index] Subscript node
     my %params;       # index => the Parameter node (a DECLARED signature)
     for my $n (_graph_component($graph)) {
@@ -9374,6 +9432,12 @@ sub _collect_positional_arg_reads {
               . "reads from the end, which inlining does not model)."
                 if $n->name eq 'pop';
             push @shifts, $n;
+        }
+        # `my (...) = @_`: an Assign whose last input is @_ and whose others
+        # are its targets, in order -- each target IS its argument's position.
+        elsif ($op eq 'Assign' && @{ $n->inputs } >= 2
+                && blessed($n->inputs->[-1]) && _is_args_array($n->inputs->[-1])) {
+            push @list_assigns, $n;
         }
         # `$_[N]`: a positional subscript on @_, i.e. Subscript(ArgsSource,
         # Constant(N), Mem). Bindable: the caller's Nth argument substitutes for
@@ -9412,6 +9476,8 @@ sub _collect_positional_arg_reads {
                         && ($_->dispatch_kind // '') eq 'builtin'
                         && defined $_->name && $_->name eq 'shift' )
                     && $_->operation ne 'Subscript'
+                    && !( $_->operation eq 'Assign'
+                          && refaddr($_->inputs->[-1] // 0) == refaddr($n) )
             } $n->consumers->@*;
             die "GAP: direct call to '$name': callee accesses \@_ as an aggregate "
               . "(a list assignment `my (...) = \@_`) — inlining only binds "
@@ -9441,38 +9507,67 @@ sub _collect_positional_arg_reads {
         return map { $params{$_} } @idx;
     }
 
-    # A callee reads its positional args via EITHER `shift @_` OR `$_[N]`
-    # subscripts, not both (mixing them is an unusual shape we do not bind).
-    die "GAP: direct call to '$name': callee mixes `shift \@_` and `\$_[N]` "
-      . "positional reads — inlining binds one positional style per callee."
-        if @shifts && %subscripts;
+    # ONE POSITIONAL STYLE PER CALLEE: shifts, `$_[N]`, or one `my (...) =
+    # @_`. Mixed, which read takes which argument depends on order the graph
+    # does not carry, so it is refused rather than guessed.
+    die "GAP: direct call to '$name': callee mixes `shift \@_`, `\$_[N]` and "
+      . "`my (...) = \@_` positional reads -- inlining binds one style per callee."
+        if (@shifts ? 1 : 0) + (%subscripts ? 1 : 0) + (@list_assigns ? 1 : 0) > 1;
 
-    # A single positional read binds arg 0. Multiple distinct `$_[N]` subscripts
-    # (arg 0 AND arg 1) are a multi-arg shape; only a single-positional callee
-    # inlines (the same single-arg constraint as `shift @_`, which hash-conses).
-    if (%subscripts) {
-        die "GAP: direct call to '$name': callee reads "
-          . scalar(keys %subscripts) . " distinct `\$_[N]` positional subscripts "
-          . "— only a single-argument positional callee inlines."
-            if keys %subscripts > 1;
-        # The lone subscript reads arg N; return it (the caller binds arg[0] to it
-        # only when N == 0, which the arity check below enforces via count).
-        my ($idx) = keys %subscripts;
-        die "GAP: direct call to '$name': callee reads `\$_[$idx]` (arg $idx) but "
-          . "only a single first-argument `\$_[0]` positional read inlines."
-            if $idx != 0;
-        return ($subscripts{0});
+    # `my ($a, $b) = @_`: the targets, in order, are the arguments. A slurpy
+    # target (`@rest`, `%args`) takes all that remain and is no one position.
+    if (@list_assigns) {
+        die "GAP: direct call to '$name': callee assigns \@_ to a list "
+          . scalar(@list_assigns) . " times -- inlining binds one."
+            if @list_assigns > 1;
+        my @inputs  = $list_assigns[0]->inputs->@*;
+        my @targets = @inputs[ 0 .. $#inputs - 1 ];
+        for my $t (@targets) {
+            die "GAP: direct call to '$name': callee's `my (...) = \@_` has a "
+              . "slurpy target -- an array or hash takes every remaining "
+              . "argument, which inlining does not bind."
+                unless blessed($t) && $t->operation eq 'PadAccess'
+                    && ( $t->can('sigil') ? ($t->sigil // '$') : '$' ) eq '$';
+        }
+        return @targets;
     }
 
-    # More than one distinct `shift @_` cannot be ordered: two textually-distinct
-    # `shift`s hash-cons to a single node (same content), so the graph cannot say
-    # which reads arg 0 and which reads arg 1. A single `shift` binds arg 0.
-    die "GAP: direct call to '$name': callee has " . scalar(@shifts)
-      . " `shift \@_` reads — multiple positional shifts hash-cons to one node "
-      . "and lose their order; only a single-argument `shift \@_` callee inlines."
-        if @shifts > 1;
+    # `$_[N]`: bound by index, which must run from 0 with no hole -- a
+    # positional binding past a hole would shift every later argument.
+    if (%subscripts) {
+        my @idx = sort { $a <=> $b } keys %subscripts;
+        die "GAP: direct call to '$name': callee's `\$_[N]` reads are not dense "
+          . "from 0 (got " . join(',', @idx) . ") -- cannot bind positionally."
+            if $idx[0] != 0 || $idx[-1] != $#idx;
+        return map { $subscripts{$_} } @idx;
+    }
 
-    return @shifts;
+    # SHIFTS ARE ORDERED BY THEIR MEMORY. Each `shift @_` takes the shift
+    # before it as its memory input -- that chain IS their order, so several
+    # bind as surely as one. (They were said to hash-cons and lose it; they do
+    # not.) A chain that does not cover every shift -- one under a branch --
+    # has no single order and is refused.
+    return @shifts if @shifts <= 1;
+    my %is_shift = map { refaddr($_) => $_ } @shifts;
+    my ($first) = grep {
+        my $m = $_->inputs->[1];
+        !( blessed($m) && $is_shift{ refaddr($m) } )
+    } @shifts;
+    my @ordered;
+    my %next = map {
+        my $m = $_->inputs->[1];
+        ( blessed($m) && $is_shift{ refaddr($m) } ) ? ( refaddr($m) => $_ ) : ()
+    } @shifts;
+    for (my $c = $first; defined $c; $c = $next{ refaddr($c) }) {
+        push @ordered, $c;
+        last if @ordered > @shifts;
+    }
+    die "GAP: direct call to '$name': callee's " . scalar(@shifts)
+      . " `shift \@_` reads do not form one memory chain -- their order is not "
+      . "in the graph (a shift under a branch?)."
+        unless @ordered == @shifts
+            && scalar(grep { !blessed($_->inputs->[1]) || !$is_shift{ refaddr($_->inputs->[1]) } } @shifts) == 1;
+    return @ordered;
 }
 
 sub _lower_call_method {

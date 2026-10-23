@@ -87,6 +87,16 @@ for my $case (
     # served past the merge: lli rejected the module.
     [ q{sub f { my $n = shift; if ($n) { print "x" } } f(1); print "\n";}, "x\n", 'an if as the last statement' ],
     [ q{sub f { my $n = shift; if ($n) { print "x" } else { print "y" } } f(1); f(0); print "\n";}, "xy\n", 'an if/else as the last statement' ],
+    # A MERGE INSIDE AN ARM IS NOT THE SUB'S MERGE. A nested if as the last
+    # statement makes the value a phi over the inner if's phi, which does not
+    # dominate the outer merge (pvm subroutines.md, LLI_FAIL).
+    [ q{sub report { my ($x, $y) = @_; if ($x > 3) { print "both $x $y\n" if $y > 3; } } report(5, 5); report(5, 1); report(1, 5);}, "both 5 5\n", 'a nested if as the last statement' ],
+    # A COERCION THAT LOSES THE VALUE IS NOT ONE TO MAKE. g's call is stamped
+    # Str (its sites pass a number and a string); its 1/3 stringified to 15
+    # digits and was read back as 0.999999999999999 for perl's 1 (review of
+    # e1a15d3a).
+    [ q{sub g { return $_[0] } print g(1/3) * 3, " ", g("x"), "\n";}, "1 x\n", 'a number through a Str-stamped call' ],
+    [ q{sub g { return $_[0] } print g(9007199254740993) + 0, g("x"), "\n";}, "9007199254740993x\n", 'a big integer through a Str-stamped call' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };
