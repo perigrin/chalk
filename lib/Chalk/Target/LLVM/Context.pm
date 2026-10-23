@@ -1459,6 +1459,33 @@ sub _refuse_an_in_place_write_to_a_location {
     }
 }
 
+# _as_phi_reading($ref, $value_node, $phi, $what) -> $ref as the phi's repr
+#
+# A LOOP PHI'S TWO VALUES ARE READ AS THE PHI IS. `my $s = 0` carried
+# through `$s + $x / 2` was a double phi over an i64 0, and `my $s; ...
+# $s = $i` a %Slot phi over an undef's bare defined bit and an i64 counter:
+# lli rejected both (backlog 22f3248c; pvm case 106). A Scalar phi boxes its
+# values; any other widens along an arrow that keeps the value. Both ends may
+# open blocks (a stringify does): each is lowered before its edge's label is
+# taken.
+sub _as_phi_reading {
+    my ($self, $ref, $value_node, $phi, $what) = @_;
+    return $ref unless blessed($value_node);
+    my ($from, $to) = ( $value_node->stamp // '', $phi->stamp // '' );
+    return $self->_build_slot($ref, '0', 'Undef', $what)
+        if $to eq 'Scalar' && $from eq 'Undef';
+    return $ref if $from eq $to || $to eq '' || $from eq '';
+    # An integer stringified is exact, and numified back is the same integer.
+    return $self->_emit_coercion($ref, $from, $to, $what)
+        if $from =~ /\A(?:Int|Num|Str|Boolean)\z/
+        && ( $to eq 'Scalar' || ( $from eq 'Int' && $to eq 'Str' )
+             || ( $to =~ /\A(?:Int|Num|Str)\z/ && _keeps_value($from, $to) ) );
+    die "GAP: a loop phi read as a $to carries a $from ($what) -- no coercion "
+      . "between them keeps the value\n"
+        if ( eval { _repr_to_llvm_type($from) } // '' ) ne ( eval { _repr_to_llvm_type($to) } // '' );
+    return $ref;
+}
+
 # _is_memory_version($node) -> true when $node is a state of memory (what a
 # memory input names), not a value.
 sub _is_memory_version {
@@ -6461,6 +6488,8 @@ sub _process_loop_node {
         }
         # Lower init value in the preheader block (current block before _new_block).
         my $init_ref = $self->lower_value($inputs->[0]);
+        # Coerced here, in the preheader, where it is lowered.
+        $init_ref = $self->_as_phi_reading($init_ref, $inputs->[0], $phi_node, 'loop phi init');
         my $phi_ref  = $self->_fresh;
         push @phi_records, {
             node     => $phi_node,
@@ -6540,8 +6569,9 @@ sub _process_loop_node {
     # label and setting the back-edge branch, so the phi's incoming label
     # names the block that actually branches to the header.
     for my $rec (@phi_records) {
-        $rec->{backedge_ref} =
-            $self->_find_phi_backedge_value($rec->{node}, \%body_vars, $rec->{phi_ref});
+        $rec->{backedge_ref} = $self->_as_phi_reading(
+            $self->_find_phi_backedge_value($rec->{node}, \%body_vars, $rec->{phi_ref}),
+            $rec->{node}->inputs->[1], $rec->{node}, 'loop phi back-edge');
     }
 
     my $body_end_label = $self->_current_block_label;
@@ -7285,6 +7315,18 @@ sub _emit_array_of {
     my $slots = $self->_fresh;
     $self->_emit("  $slots = bitcast i8* $slot_buf to %Slot*  ; ArrayRef: slot array ptr");
 
+    # INTS AMONG NUMS ARE STORED AS NUMS. The literal's reading is the join
+    # of its elements, and a read stamped Num takes the payload as a double:
+    # `(1.5, 2)` stored 2 as an i64, read back as 9.88e-324.
+    # INTS AMONG STRS ARE STORED AS STRS, for the same reason: stringifying
+    # an integer is exact, and `(1, "x")` read the 1 as a string pointer.
+    # A Num among Strs is not -- its 15 digits are not the number.
+    my %numeric = map { ( $_->stamp // '' ) => 1 } grep { blessed($_) } @$inputs;
+    die "GAP: an array literal of Num and Str elements is not lowered -- read "
+      . "as Str, its Nums would lose digits\n" if $numeric{Num} && $numeric{Str};
+    my $as_num  = $numeric{Num} && $numeric{Int};
+    my $as_str  = $numeric{Str} && $numeric{Int};
+
     # Store each element as a defined slot {i1=true, i64=value}.
     for my $i (0 .. $n - 1) {
         my $elem_ref = $self->lower_value($inputs->[$i]);
@@ -7298,6 +7340,11 @@ sub _emit_array_of {
         $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_pay  ; ArrayRef: slot[$i] payload ptr");
         $self->_emit("  store i1 true, i1* $slot_def  ; ArrayRef: slot[$i] defined=true");
         my $elem_repr = $inputs->[$i]->stamp // '';
+        if (($as_num || $as_str) && $elem_repr eq 'Int') {
+            my $to = $as_num ? 'Num' : 'Str';
+            $elem_ref  = $self->_emit_coercion($elem_ref, 'Int', $to, "ArrayRef elem[$i]");
+            $elem_repr = $to;
+        }
         # The element's own repr IS the reading its payload carries -- the very
         # repr _box_payload boxes by on the next line. Recording it here is what
         # lets a later consumer read the payload back without guessing.
@@ -9383,10 +9430,21 @@ sub _lower_call_direct {
     # validates the shape and GAPs loudly on any @_ access that inlining cannot
     # bind soundly), then lower the caller's args in this context.
     my @arg_reads = $self->_collect_positional_arg_reads($graph, $name);
+    my $args_array = $self->{_args_read_as_a_list};
     die "GAP: direct call to '$name': callee reads " . scalar(@arg_reads)
       . " positional argument(s) via `shift \@_` but the call passes "
       . scalar(@args) . " — arity mismatch, cannot bind."
-        if @arg_reads != @args;
+        if $args_array ? @arg_reads > @args : @arg_reads != @args;
+    # @_ READ AS A LIST is one argument per element: an argument that is
+    # itself a list would flatten, which this does not build.
+    if ($args_array) {
+        for my $a (@args) {
+            die "GAP: direct call to '$name': an argument stamped "
+              . ( $a->stamp // 'NONE' ) . " flattens into \@_, which inlining "
+              . "does not build.\n"
+                unless ( $a->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean|Scalar)\z/;
+        }
+    }
 
     my @arg_refs = map { $self->lower_value($_) } @args;
 
@@ -9407,6 +9465,9 @@ sub _lower_call_direct {
     $self->{_arg_bind}{ refaddr($arg_reads[$_]) } =
         { ref => $arg_refs[$_], repr => $args[$_]->stamp }
         for 0 .. $#arg_reads;
+    $self->{_arg_bind}{ refaddr($args_array) } =
+        { ref => $self->_emit_array_of(\@args), repr => 'Array' }
+        if $args_array;
 
     # The callee's body nodes must NOT outlive this inline frame in the value
     # cache. The callee graph is ONE object shared by every call site (measured:
@@ -9794,6 +9855,8 @@ sub _collect_positional_arg_reads {
     my @list_assigns; # `my (...) = @_`
     my %subscripts;   # index => the $_[index] Subscript node
     my %params;       # index => the Parameter node (a DECLARED signature)
+    my $args_array;   # @_ itself, when the callee reads it as a list
+    $self->{_args_read_as_a_list} = undef;
     for my $n (_graph_component($graph)) {
         next unless blessed($n);
         my $op = $n->operation;
@@ -9825,6 +9888,10 @@ sub _collect_positional_arg_reads {
         # are its targets, in order -- each target IS its argument's position.
         elsif ($op eq 'Assign' && @{ $n->inputs } >= 2
                 && blessed($n->inputs->[-1]) && _is_args_array($n->inputs->[-1])) {
+            # `my @p = @_` is a copy of the list, not a position.
+            my @t = $n->inputs->@[ 0 .. $#{ $n->inputs } - 1 ];
+            next if @t == 1 && blessed($t[0]) && $t[0]->operation eq 'PadAccess'
+                && ( $t[0]->sigil // '' ) eq '@';
             push @list_assigns, $n;
         }
         # `$_[N]`: a positional subscript on @_, i.e. Subscript(ArgsSource,
@@ -9867,12 +9934,47 @@ sub _collect_positional_arg_reads {
                     && !( $_->operation eq 'Assign'
                           && refaddr($_->inputs->[-1] // 0) == refaddr($n) )
             } $n->consumers->@*;
-            die "GAP: direct call to '$name': callee accesses \@_ as an aggregate "
-              . "(a list assignment `my (...) = \@_`) — inlining only binds "
-              . "positional `shift \@_` / `\$_[N]` reads; this shape does not "
-              . "connect to the caller's arguments in the graph."
-                if @other;
+            # READ AS A LIST -- counted, walked, joined, copied -- @_ is an
+            # array of the call's arguments, built at the call (see
+            # _lower_call_direct). Only reads: a copy cannot carry a write
+            # back to the caller's variable, nor a shift out of the list.
+            if (@other) {
+                for my $c (@other) {
+                    my $cop = $c->operation;
+                    next if $cop eq 'Count';
+                    next if $cop eq 'Call' && ( $c->dispatch_kind // '' ) eq 'builtin'
+                        && ( $c->name // '' ) =~ /\A(?:join|sort|reverse)\z/;
+                    next if $cop eq 'Assign' && blessed($c->inputs->[0])
+                        && refaddr($c->inputs->[-1]) == refaddr($n)
+                        && $c->inputs->[0]->operation eq 'PadAccess'
+                        && ( $c->inputs->[0]->sigil // '' ) eq '@';
+                    die "GAP: direct call to '$name': callee hands \@_ to a $cop"
+                      . ( $cop eq 'Call' ? ' ' . ( $c->name // '?' ) : '' )
+                      . " -- inlining reads \@_ as a list of the arguments, and "
+                      . "that may write it.\n";
+                }
+                $args_array = $n;
+            }
+            # A WRITE THROUGH AN ELEMENT reaches the caller's variable, which
+            # a copy cannot: `$_[0] = 9` is refused whatever else reads @_.
+            for my $sub (grep { blessed($_) && $_->operation eq 'Subscript' } $n->consumers->@*) {
+                for my $u (($sub->consumers // [])->@*) {
+                    next unless blessed($u);
+                    die "GAP: direct call to '$name': callee writes \$_[N] -- an "
+                      . "alias of the caller's argument, which inlining does not "
+                      . "write back.\n"
+                        if ( $u->operation eq 'Assign' && refaddr($u->inputs->[0] // 0) == refaddr($sub) )
+                        || $u->operation =~ /\A(?:Ref|LocalAlias)\z/;
+                }
+            }
         }
+    }
+
+    if ($args_array) {
+        die "GAP: direct call to '$name': callee shifts \@_ and reads it as a "
+          . "list -- the list after a shift is not the call's arguments.\n"
+            if @shifts;
+        $self->{_args_read_as_a_list} = $args_array;
     }
 
     # A DECLARED SIGNATURE WINS, and it is not capped at one argument. The

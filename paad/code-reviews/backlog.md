@@ -44,18 +44,6 @@
 - **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `73b983bc`
 - **Severity:** Important
 
-## `22f3248c` — An Int accumulator that becomes a Num in a loop emits phi double over an i64
-- **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
-- **Symbol:** `_process_loop_node`
-- **Bug class:** Logic
-- **Description:** my $s = 0; for my $i (1..3) { $s += $i / 2 } -- phi double [ i64 ... ]; lli rejects the module. Pre-existing.
-- **Suggested fix:** Coerce the loop phi's init value to the phi's repr in the preheader.
-- **Confidence:** High
-- **Found by:** review of e1a15d3a (`claude-opus-5-5[1m]`)
-- **First seen:** 2026-10-23 on branch `bson/llvm-corpus` at `e1a15d3a`
-- **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `73b983bc`
-- **Severity:** Important
-
 ## `4d7c2e19` — An element store past an array's end corrupts the heap or is dropped
 - **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
 - **Symbol:** `_prelower_branch_store_operands`
