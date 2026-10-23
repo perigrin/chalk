@@ -43,6 +43,17 @@ sub through_llvm ($src) {
 for my $case (
     [ q{use v5.42; use experimental "class"; class K { field $n = 1; method swap { my $old = $n; $n = 5; return "$old$n" } } print K->new->swap, "\n";}, "15\n", 'a read before a store to the same field' ],
     [ q{use v5.42; use experimental "class"; class K { field $n = 1; method bump { $n = $n + 1 } } my $k = K->new; print $k->bump, " ", $k->bump, "\n";}, "2 3\n", 'an assignment returns the value stored' ],
+    # ONLY A FROZEN READ IS SERVED FROM THE CACHE (review of 59e7b915, C1).
+    # A read at a call's memory version is not frozen; lowered in one arm and
+    # served to the other, lli rejected the module.
+    [ q{use v5.42; use experimental "class"; class K { field $n = 1; method bump { $n = $n + 1; return 0 } method m ($c) { $self->bump; if ($c > 1) { print $n, "\n" } else { print $n, "!\n" } return 0 } } K->new->m(1); K->new->m(2);}, "2!\n2\n", 'a read after a call, in each arm' ],
+    # A COMPOUND STORE (C2): B::SoN left memory at the old version.
+    [ q{use v5.42; use experimental "class"; class K { field $n = 1; method m { $n += 1; my $old = $n; $n = 5; return "$old$n" } } print K->new->m, "\n";}, "25\n", 'a read after a compound store' ],
+    # A STORE UNDER A BRANCH (C3): the field's value after the merge is the
+    # arm's store or the old value, and nothing merged them.
+    [ q{use v5.42; use experimental "class"; class K { field $n = 1; method m ($c) { if ($c) { $n = 3 } return $n } } print K->new->m(1), K->new->m(0), "\n";}, "31\n", 'a store under a branch, read after it' ],
+    [ q{use v5.42; use experimental "class"; class K { field $n = 1; method m ($c) { if ($c) { $n = 2 } if ($c > 0) { print $n, "\n" } else { print $n, "!\n" } return 0 } } K->new->m(1); K->new->m(0);}, "2\n1!\n", 'a store under a branch, read in the arms of the next' ],
+    [ q{use v5.42; use experimental "class"; class K { field $n = 1; method m ($c) { if ($c) { print $n } print $n, "\n" } } K->new->m(1);}, "11\n", 'a read in an arm and again after it' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };

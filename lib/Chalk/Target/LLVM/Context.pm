@@ -1577,9 +1577,12 @@ sub lower_value {
             && defined $node->inputs->[2]) {
         return $self->{cache}{$id};
     }
-    # So is a frozen FieldAccess with its memory input (inputs[0]).
-    if ($op eq 'FieldAccess' && exists $self->{cache}{$id}
-            && defined $node->inputs->[0]) {
+    # So is a FieldAccess _freeze_memory_reads froze. Only that one: a field
+    # read at any other version (a call's, a Phi's) is cached where it was
+    # first lowered, and served to a block that one does not dominate, lli
+    # rejected the module.
+    if ($op eq 'FieldAccess' && $self->{_frozen_reads}{$id}
+            && exists $self->{cache}{$id}) {
         return $self->{cache}{$id};
     }
     if (exists $self->{cache}{$id} && !$self->_reads_mutable_location($node)) {
@@ -5349,6 +5352,7 @@ sub _freeze_memory_reads {
         } @{ $c->inputs }[0, 1];
         my $ref = $self->lower_value($c);
         $self->{cache}{ $c->id } = $ref;           # freeze at this memory version
+        $self->{_frozen_reads}{ $c->id } = 1;
     }
 }
 
@@ -9120,6 +9124,7 @@ sub _lower_inlined_effects_then_value {
 
     if ($effect_chain->@*) {
         local $self->{cache} = {};
+        local $self->{_frozen_reads} = {};   # keyed by id, as {cache} is
         $self->process_control_node($_) for reverse $effect_chain->@*;
     }
 
@@ -9518,6 +9523,13 @@ sub _lower_call_method {
                 $sp = $self->_set_str_len($sp, $sl);
                 $self->{cache}{ $node->id } = $sp;
                 return $sp;
+            }
+            # A BOOLEAN IS AN i1, the payload an i64: a method returning
+            # print's 1 handed its consumer the word where a bit was wanted.
+            if (($node->stamp // '') eq 'Boolean') {
+                my $bit = $self->_fresh;
+                $self->_emit("  $bit = icmp ne i64 $pay, 0  ; Call(method) $method_name: payload -> i1");
+                $pay = $bit;
             }
 
             $self->{cache}{ $node->id } = $pay;

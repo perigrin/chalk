@@ -1191,6 +1191,22 @@ sub _emit_class_registry_ir {
                     push @lines, "  %ret_s1 = insertvalue %Slot %ret_st, i64 %ret_pi, $ri_pay";
                     push @lines, '  ret %Slot %ret_s1';
                 }
+                elsif ($body_node->operation eq 'Print') {
+                    # A PRINT IS AN i1, perl's 1: widened to the Int payload.
+                    # Boxed as it was, the i1 sat where the payload wants an
+                    # i64, and lli rejected the module.
+                    my $C = 'Chalk::Target::LLVM::Context';
+                    my $int_tag = $C->can('_slot_tag_value')->(
+                                      $C->can('_slot_tag_for_repr')->('Int'));
+                    push @lines, "  %ret_pz = zext i1 $body_val to i64  ; print's 1";
+                    push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, "
+                               . $C->can('_slot_idx')->('defined');
+                    push @lines, "  %ret_st = insertvalue %Slot %ret_s0, i8 $int_tag, "
+                               . $C->can('_slot_idx')->('tag');
+                    push @lines, "  %ret_s1 = insertvalue %Slot %ret_st, i64 %ret_pz, "
+                               . $C->can('_slot_idx')->('payload');
+                    push @lines, '  ret %Slot %ret_s1';
+                }
                 else {
                     my $ri_def = Chalk::Target::LLVM::Context::_slot_idx('defined');
                     my $ri_tag = Chalk::Target::LLVM::Context::_slot_idx('tag');
@@ -1518,6 +1534,23 @@ sub _process_control_chain {
             }
         }
     }
+    # A CONTROL CHAIN THAT FORKS IS REFUSED, NOT DROPPED. This walk follows
+    # one predecessor per node, so a node two statements both follow loses
+    # one of them: B::SoN hung an else-less `if`'s field store off Start
+    # beside the Return, and `if ($c) { $n = 3 } return $n` returned 1 for
+    # perl's 3. SoN::Deparse refuses the same shape.
+    for my $node (@chain) {
+        next unless $node->can('consumers');
+        my @succ = grep {
+            blessed($_) && $_->can('control_in') && blessed($_->control_in)
+                && $_->control_in->id eq $node->id
+        } $node->consumers->@*;
+        my %by_id = map { $_->id => $_ } @succ;
+        die "GAP: a control node with " . scalar(keys %by_id) . " successors is not lowered "
+          . "(one of " . join(', ', sort map { $_->operation } values %by_id)
+          . " would be dropped)\n" if keys %by_id > 1;
+    }
+
     # Memory-SSA: scan the graph's memory shape (a store under a branch/loop
     # needs phase 2b), then freeze the element reads valid at ENTRY
     # (memory=MemStart), before the control chain emits any store, so a pre-store

@@ -43,6 +43,11 @@ for my $case (
     [ q{use v5.42; use experimental "class"; class K { method nada { return } } K->new->nada; print "ok\n";}, "ok\n", 'a method returning nothing' ],
     [ q{use v5.42; use experimental "class"; class K { field $t = ""; method mark ($c) { $t .= $c; return } method t { $t } } my $k = K->new; $k->mark("x"); print $k->t, "\n";}, "x\n", 'a method that stores and returns nothing' ],
     [ q{use v5.42; use experimental "class"; class Pb { field $t = ""; method mark ($c) { $t .= $c; return } method t { $t } } class Pd :isa(Pb) { ADJUST { $self->mark("d") } } print Pd->new->t, "\n";}, "d\n", 'an inherited method returning nothing' ],
+    # A METHOD ENDING IN A PRINT RETURNS PRINT'S 1. The print lowers to an i1
+    # and the Scalar return put it where the %Slot payload wants an i64; lli
+    # rejected the module (review of 59e7b915, C3).
+    [ q{use v5.42; use experimental "class"; class K { method m ($c) { print "x\n" } } my $r = K->new->m(1); print "[$r]\n";}, "x\n[1]\n", 'a method whose last statement prints' ],
+    [ q{use v5.42; use experimental "class"; class K { field $n = 1; method m ($c) { if ($c) { print $n } print $n, "\n" } } K->new->m(1);}, "11\n", 'a method that prints in an arm and after it' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };
