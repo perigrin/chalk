@@ -67,3 +67,39 @@
 - **First seen:** 2026-10-23 on branch `bson/llvm-corpus` at `4182d850`
 - **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `e1a15d3a`
 - **Severity:** Important
+
+## `7cbb3220` — A bare return reads as defined
+- **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
+- **Symbol:** `_lower_call_direct`
+- **Bug class:** Logic
+- **Description:** sub g { return } my $x = g(); print defined($x) ? "d" : "u" prints d for perl's u: the empty Return's scalar reading is not undef. Pre-existing at 4182d850.
+- **Suggested fix:** Make an empty Return's scalar reading an Undef constant, or refuse.
+- **Confidence:** High
+- **Found by:** review of e1a15d3a (`claude-opus-5-5[1m]`)
+- **First seen:** 2026-10-23 on branch `bson/llvm-corpus` at `e1a15d3a`
+- **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `73b983bc`
+- **Severity:** Important
+
+## `81c5efed` — An inlined call in a short-circuit arm does not dominate the merge
+- **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
+- **Symbol:** `_lower_inlined_effects_then_value`
+- **Bug class:** Logic
+- **Description:** sub g { return $_[0] * 2 } my $c = 0; my $x = $c && g(3); lli rejects the module: the inlined callee's mul is defined in the && arm block, which does not dominate the merge phi. Pre-existing at 4182d850.
+- **Suggested fix:** Lower the call's value in the arm's tail block, as phi arms are, or refuse a call inside an And/Or arm.
+- **Confidence:** High
+- **Found by:** review of e1a15d3a (`claude-opus-5-5[1m]`)
+- **First seen:** 2026-10-23 on branch `bson/llvm-corpus` at `e1a15d3a`
+- **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `73b983bc`
+- **Severity:** Important
+
+## `22f3248c` — An Int accumulator that becomes a Num in a loop emits phi double over an i64
+- **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
+- **Symbol:** `_process_loop_node`
+- **Bug class:** Logic
+- **Description:** my $s = 0; for my $i (1..3) { $s += $i / 2 } -- phi double [ i64 ... ]; lli rejects the module. Pre-existing.
+- **Suggested fix:** Coerce the loop phi's init value to the phi's repr in the preheader.
+- **Confidence:** High
+- **Found by:** review of e1a15d3a (`claude-opus-5-5[1m]`)
+- **First seen:** 2026-10-23 on branch `bson/llvm-corpus` at `e1a15d3a`
+- **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `73b983bc`
+- **Severity:** Important
