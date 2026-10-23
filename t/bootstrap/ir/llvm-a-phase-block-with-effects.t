@@ -55,6 +55,8 @@ is(eval { through_llvm(q{use strict; no warnings 'once'; use List::Util qw(sum);
 # `use` still (review of 59e7b915, I4).
 is(eval { through_llvm(q{use Scalar::Util 1.0 (); print "ok\n";}) } // "died: $@",
     "ok\n", 'a use with a version still lowers');
+is(eval { through_llvm(q{use v5.42; print "ok\n";}) } // "died: $@",
+    "ok\n", 'a use of a perl version still lowers');
 
 # ONLY A `use` IS LET THROUGH, not a call that happens to be named import or
 # require: the program's own import printed, and was dropped (I5).

@@ -891,7 +891,8 @@ sub from_json ($json_string) {
     # A BEGIN OR END BLOCK WITH EFFECTS OF ITS OWN is refused, not dropped:
     # only `methods` is loaded, so a program's `BEGIN { print }` and `END {
     # print }` vanished and it printed its main line alone. A `use` is a
-    # BEGIN block too, and compile-time: ONE `require` of a module's file and
+    # BEGIN block too, and compile-time: ONE `require` of a module's file (or of a
+    # perl version) and
     # import, unimport or VERSION calls on that module (`no` unimports, `use
     # X 1.0` checks a VERSION). Only that shape is let through -- the bare
     # names were, and a program's own `BEGIN { Foo->import }` and a `require`
@@ -906,7 +907,10 @@ sub from_json ($json_string) {
             : undef;
         my $module = defined $file && $file =~ m{\A(\w+(?:/\w+)*)\.pm\z}
             ? $1 =~ s{/}{::}gr : undef;
-        my $is_use = defined $module && !grep {
+        # `use v5.42` requires a perl version: a number, and nothing else.
+        my $is_version = @calls == 1 && @req == 1 && defined $file
+            && $file =~ /\A\d+(?:\.\d+)*\z/;
+        my $is_use = $is_version || defined $module && !grep {
             my $f = $_->{fields} // {};
             ( $f->{name} // '' ) ne 'require'
                 && !( ( $f->{name} // '' ) =~ /\A(?:import|unimport|VERSION)\z/
