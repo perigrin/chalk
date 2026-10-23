@@ -63,6 +63,11 @@ for my $case (
     # from both ran twice.
     [ q{sub f { if ($_[0]) { print "x\n" } return 1 } sub g { return 5 + f(1) } print g(), "\n";}, "x\n6\n", 'a branching callee under a straight-line one' ],
     [ q{sub h { print "H"; return 1 } sub g { my @l = (5, 6); return $l[h()] + $_[0] } print g(1), "\n";}, "H7\n", 'an effectful call in a straight-line value' ],
+    # THE CALL HAS THE CALLER'S TYPE. g's product is an Int; the call to it
+    # is stamped Num, and the inlined i64 went where a double was wanted --
+    # lli rejected the module (verifier, review of 4182d850).
+    [ q{sub g { return $_[0] * 2 } sub f { return g($_[0] + 1) } my $r = f(3); print $r + 1, "\n";}, "9\n", 'a nested call whose value is used' ],
+    [ q{sub g { return $_[0] * 2 } sub f { return g($_[0] + 1) } print f(1), " ", f(3), "\n";}, "4 8\n", 'a nested call, twice' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };

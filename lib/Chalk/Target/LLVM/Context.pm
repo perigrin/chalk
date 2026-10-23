@@ -2514,7 +2514,7 @@ sub _emit_to_str {
     }
 
     die "GAP: $label is not lowered runtime-free (Int, Boolean, Num, Slot, "
-      . "Undef and Str are wired; an aggregate has no "
+      . "Undef, Str and an aggregate's count are wired; this repr has no "
       . "stringification).";
 }
 
@@ -8954,9 +8954,23 @@ sub _lower_call_direct {
     my $structured = !_is_straight_line_effect_chain($control_in);
     my @effect_chain = $structured ? ()
         : $self->_collect_straight_line_effect_chain($control_in, $name);
-    my $inline = $structured
-        ? sub { $self->_lower_inlined_structure($returns[0], $value) }
-        : sub { $self->_lower_inlined_effects_then_value(\@effect_chain, $value) };
+    # THE CALL HAS THE CALLER'S TYPE. The callee's value is lowered at its
+    # own repr, and the caller reads the call at the call's: g's `$_[0] * 2`
+    # is an Int, the call to it was stamped Num, and the i64 went where a
+    # double was wanted -- lli rejected the module. Reconciled here, once.
+    my $inline = sub {
+        my $ref = $structured
+            ? $self->_lower_inlined_structure($returns[0], $value)
+            : $self->_lower_inlined_effects_then_value(\@effect_chain, $value);
+        my $from = $value->operation eq 'Print' ? 'Boolean' : ($value->stamp // '');
+        my $to   = $node->stamp // '';
+        # Between SCALAR readings only: a list callee's Array value is what a
+        # List-stamped call already reads, and has no arrow to coerce along.
+        state %scalar = map { $_ => 1 } qw(Int Num Str Boolean Scalar Slot Undef);
+        $ref = $self->_emit_coercion($ref, $from, $to, "call $name result")
+            if $scalar{$from} && $scalar{$to} && $from ne $to;
+        return $ref;
+    };
 
     # A trailing VOID statement-effect attaches on Return.inputs[1..] rather
     # than control_in (see Chalk::IR::Serialize::JSON's _control_chain_nodes,
