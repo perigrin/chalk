@@ -66,6 +66,10 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # reasoning that keeps control_in out of the hash (Node.pm:42).
     field $want :param :reader = undef;
 
+    # Whether the last input is the MEMORY version this call follows rather
+    # than an argument (B::SoN `memory_input`). Not identity: the inputs are.
+    field $memory_input :param :reader = 0;
+
     # A FOLDED sort's comparison kind and direction. perl folds the standard
     # comparators into flags on the op (OPpSORT_NUMERIC, OPpSORT_DESCEND), so
     # by the time a producer sees `sort { $a <=> $b }` the block is GONE and

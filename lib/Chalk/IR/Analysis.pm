@@ -2083,6 +2083,13 @@ sub _propagate_computed_reprs ($graphs) {
                 # dynamic index/key or a flattened container stays the element
                 # repr (019f2e25).
                 if ($op eq 'Subscript') {
+                    # THE LITERAL SPEAKS FOR AN UNWRITTEN ARRAY ONLY. A read at
+                    # a later memory version -- after a push, a store -- reads
+                    # what was written since: `my @a = (10); push @a, 4, 5;
+                    # $a[2]` was "statically" undef, and printed "" for 5.
+                    # B::SoN draws the same line (memory still at MemStart).
+                    my $mem = $node->inputs->[2];
+                    next if blessed($mem) && $mem->operation ne 'MemStart';
                     if (_static_miss( $node->inputs->[0], $node->inputs->[1] )) {
                         # `Undef`, not `Slot` (perigrin, 2026-08-27/29). A read
                         # that is not there has a TYPE -- undef -- and `Undef`

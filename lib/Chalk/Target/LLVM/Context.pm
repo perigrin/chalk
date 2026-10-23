@@ -1759,6 +1759,11 @@ sub lower_value {
             && defined $node->name && ($node->name eq 'shift' || $node->name eq 'pop')) {
         return $self->_lower_builtin_shift_pop($node);
     }
+    # Call(builtin, push): append to a mutable %Array.
+    elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
+            && defined $node->name && $node->name eq 'push') {
+        return $self->_lower_builtin_push($node);
+    }
     # Call(builtin, sort): the operand's elements, ordered.
     elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
             && defined $node->name && $node->name eq 'sort') {
@@ -1846,11 +1851,17 @@ sub lower_value {
           . "unwind.";
     }
     else {
+        # A CALL IS NAMED BY WHAT IT CALLS: "op=Call" alone pooled forty
+        # different builtins into one refusal, and said nothing of which.
+        my $what = $op;
+        $what = "Call " . ($node->can('dispatch_kind') ? ($node->dispatch_kind // '?') : '?')
+              . " " . $node->name
+            if $op eq 'Call' && $node->can('name') && defined $node->name;
         if (defined $node->stamp && $node->stamp eq 'Scalar') {
-            die "node op=$op repr=Scalar reached LLVM backend — cannot lower runtime-free. "
+            die "node op=$what repr=Scalar reached LLVM backend — cannot lower runtime-free. "
               . "This value requires libperl; it is a GAP on the L corner.";
         }
-        die "LLVM backend: cannot lower op=$op (not in literal-arithmetic slice)";
+        die "LLVM backend: cannot lower op=$what (not in literal-arithmetic slice)";
     }
 }
 
@@ -3309,6 +3320,28 @@ sub _lower_padaccess {
             $self->{cache}{ $node->id } = $ref;
             return $ref;
         }
+    }
+
+    # AN ARRAY DECLARED EMPTY (`my @r;` at a graph's top level) arrives as a
+    # bare @ PadAccess: no VarDecl, no literal. It is one empty %Array, built
+    # where its graph's lowering began -- the function's entry for the
+    # program, the call point for an inlined sub, so a call inside a loop
+    # gets a fresh one each pass, as perl's `my` does. A `my @r` re-run in a
+    # loop arrives instead as an ArrayLiteral on the control chain.
+    if (!defined $node->inputs->[0] && ($node->sigil // '') eq '@'
+            && ($node->stamp // '') eq 'Array') {
+        # Once: a PadAccess is a mutable read, re-lowered at every use, and
+        # each re-lowering allocated another empty array -- push filled one
+        # and "@r" printed another.
+        return $self->{_empty_arrays}{ $node->id } if $self->{_empty_arrays}{ $node->id };
+        my ($saved, $nblocks) = ($self->{current_idx}, scalar @{ $self->{blocks} });
+        $self->{current_idx} = $self->{_graph_entry_idx} // 0;
+        my $ref = $self->_lower_array_ref($node);
+        $self->{current_idx} = $saved;
+        die "GAP: an empty array's allocation opened blocks in the entry block\n"
+            if @{ $self->{blocks} } != $nblocks;
+        $self->{cache}{ $node->id } = $self->{_empty_arrays}{ $node->id } = $ref;
+        return $ref;
     }
 
     my $repr = _require_repr($node, 'PadAccess');
@@ -5420,7 +5453,7 @@ sub _is_array_mutating_call {
     return 0 unless blessed($node) && $node->operation eq 'Call';
     return 0 unless $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin';
     my $name = $node->name // '';
-    return ($name eq 'shift' || $name eq 'pop') ? 1 : 0;
+    return ($name eq 'shift' || $name eq 'pop' || $name eq 'push') ? 1 : 0;
 }
 
 sub _freeze_memory_reads {
@@ -5960,6 +5993,19 @@ sub _prelower_branch_store_operands {
             next unless defined $invocant;
             next if $branch_body{ $invocant->id };
             $self->lower_value($invocant);
+        }
+        elsif ($self->_is_array_mutating_call($node)) {
+            # A branch-guarded push/shift/pop: its ARRAY is a pre-branch value
+            # a post-merge read shares, as an element store's container is.
+            # Lowered lazily inside the arm, `push @a, 3 if $n; scalar(@a)`
+            # read a value the arm does not dominate and lli rejected it.
+            my ($array) = grep {
+                blessed($_) && ( ($_->stamp // '') =~ /\AArray(?:Ref)?\z/
+                    || $_->operation eq 'ArrayLiteral' )
+            } $node->inputs->@*;
+            next unless defined $array;
+            next if $branch_body{ $array->id };
+            $self->lower_value($array);
         }
     }
     return;
@@ -8061,20 +8107,39 @@ sub _lower_builtin_join {
     my ($self, $node) = @_;
 
     my @inputs = grep { blessed($_) } $node->inputs->@*;
+    # A join over an array reads it at a memory version, its last input --
+    # not an operand (`"@r"` after a push).
+    my $mem = ($node->can('memory_input') && $node->memory_input) ? pop @inputs : undef;
     die "GAP: join expects a separator and a list; got " . scalar(@inputs) . " operand(s)."
-        unless @inputs == 2;
+        unless @inputs >= 2;
 
-    my ($sep_node, $list_node) = @inputs;
+    my ($sep_node, $list_node, @more) = @inputs;
 
     # Resolve the list operand to the node that actually states the arity. A
     # direct call resolves through the CALLEE'S LIST READING -- Return
-    # inputs[0], never inputs[-1], which is the scalar face.
-    my $elements = $self->_static_list_elements($list_node);
+    # inputs[0], never inputs[-1], which is the scalar face. A LIST OF
+    # SCALARS FLATTENED INTO THE CALL -- `"@a"` over a literal arrives as
+    # join($", 1, 2) -- is its own static element list.
+    my $elements = @more
+        ? do {
+            die "GAP: join over a flattened operand that is not a scalar\n"
+                if grep { ( $_->stamp // '' ) !~ /\A(?:Int|Num|Str|Boolean)\z/ }
+                   $list_node, @more;
+            [ $list_node, @more ];
+          }
+        # A LIST READ AFTER IT WAS WRITTEN has no static elements: its
+        # declaration said empty, and a push since made it 2 4 6 -- read as
+        # the declaration, "@r" printed "". It is walked at run time.
+        : ( blessed($mem) && $mem->operation ne 'MemStart' ) ? undef
+        : $self->_static_list_elements($list_node);
 
     # The separator is a Str by join's signature; anything else is bridged the
-    # same way an operand of any Str-context operator is.
-    my $sep_ref = $self->lower_value($sep_node);
-    my $sep_repr = ($sep_node isa Chalk::IR::Value)
+    # same way an operand of any Str-context operator is. $" IS " " UNTIL A
+    # PROGRAM WRITES IT: read where nothing can have, it is perl's default.
+    my $default_sep = _unwritten_list_separator($sep_node);
+    my $sep_ref = $self->lower_value($default_sep // $sep_node);
+    my $sep_repr = $default_sep ? 'Str'
+                 : ($sep_node isa Chalk::IR::Value)
                  ? $sep_node->stamp : undef;
     $sep_ref = $self->_emit_coercion($sep_ref, $sep_repr, 'Str', 'join separator')
         if defined $sep_repr && $sep_repr ne 'Str';
@@ -8128,6 +8193,33 @@ sub _lower_builtin_join {
 # The accumulator is a %Str carried through a phi, so its pointer and length
 # travel together and a merge cannot desynchronise them (the same reason %Str
 # is a first-class aggregate rather than two parallel values).
+# _unwritten_list_separator($sep_node) -> a Constant " " node, or undef.
+#
+# `$"` read where nothing can have written it: its EntryDef's memory version
+# leads back to MemStart through builtins that cannot assign it. The Constant
+# belongs to no graph; it is minted once.
+sub _unwritten_list_separator {
+    my ($sep) = @_;
+    $sep = $sep->inputs->[0] if blessed($sep) && $sep->operation eq 'Coerce';
+    return undef unless blessed($sep) && $sep->operation eq 'EntryDef'
+        && ($sep->can('package') ? ($sep->package // '') : '') eq 'main'
+        && ($sep->can('symbol') ? ($sep->symbol // '') : '') eq '"';
+    my $m = $sep->inputs->[0];
+    while (blessed($m) && $m->operation eq 'Call'
+            && ($m->dispatch_kind // '') eq 'builtin'
+            && ($m->name // '') =~ /\A(?:push|unshift|shift|pop|join|keys|values|sort)\z/
+            && $m->can('memory_input') && $m->memory_input) {
+        $m = $m->inputs->[-1];
+    }
+    return undef unless blessed($m) && $m->operation eq 'MemStart';
+    state $space = do {
+        my $c = Chalk::IR::NodeFactory->new->make('Constant', value => ' ', const_type => 'string');
+        $c->set_stamp('Str');
+        $c;
+    };
+    return $space;
+}
+
 sub _emit_join_loop {
     my ($self, $list_node, $sep_ref) = @_;
     $self->{_need_aggregate_types} = 1;
@@ -8250,6 +8342,36 @@ sub _static_list_elements {
     }
 
     return undef;
+}
+
+# _lower_builtin_push($node) -> $llvm_ref (the new element count, Int)
+#
+# `push @a, LIST`: B::SoN's inputs are the array, the values, and -- the
+# call being a memory version (memory_input) -- the memory it follows. Each
+# value is appended through _emit_append_one, the grow-and-store a map's
+# accumulator uses; an array value is appended element by element. It was
+# not lowered at all: the commonest builtin refusal in the pvm corpus.
+sub _lower_builtin_push {
+    my ($self, $node) = @_;
+    $self->{_need_aggregate_types} = 1;
+    my @in = grep { blessed($_) } $node->inputs->@*;
+    pop @in if $node->can('memory_input') && $node->memory_input;
+    my ($array, @values) = @in;
+    die "GAP: push onto a " . (($array && $array->stamp) // 'NONE')
+      . " is not lowered -- only an Array\n"
+        unless $array && ( $array->stamp // '' ) eq 'Array';
+    _seed_container_repr($array);
+    my $acc = $self->_container_ptr($array, 'Array');
+    for my $v (@values) {
+        die "GAP: push of a " . ($v->stamp // 'NONE') . " value is not lowered\n"
+            unless ( $v->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/;
+        $self->_emit_append_one($acc, $v);
+    }
+    my ($len_ptr, $len) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $len_ptr = getelementptr inbounds %Array, %Array* $acc, i32 0, i32 0  ; push: len ptr");
+    $self->_emit("  $len = load i64, i64* $len_ptr  ; push: the new count");
+    $self->{cache}{ $node->id } = $len;
+    return $len;
 }
 
 sub _lower_builtin_shift_pop {
@@ -9392,6 +9514,8 @@ sub _lower_inlined_structure {
     local $self->{_phi_forcing}          = {};
     local $self->{_vd_repr}              = {};
     local $self->{_unwind_emitted}       = {};
+    local $self->{_empty_arrays}         = {};
+    local $self->{_graph_entry_idx}      = $self->{current_idx};
     local $self->{_branch_guarded_store} = 0;
     local $self->{_loop_ctx_stack}       = [];
     Chalk::Target::LLVM::_process_control_chain($self, $return);
@@ -9467,6 +9591,8 @@ sub _lower_inlined_effects_then_value {
     # invariant the PRECONDITION above asked to be re-established.
     local $self->{cache}         = {};
     local $self->{_frozen_reads} = {};   # keyed by id, as {cache} is
+    local $self->{_empty_arrays} = {};   # the callee's `my @a`, fresh per call
+    local $self->{_graph_entry_idx} = $self->{current_idx};
     $self->process_control_node($_) for reverse $effect_chain->@*;
     return defined $value ? $self->lower_value($value) : undef;
 }

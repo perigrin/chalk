@@ -587,6 +587,10 @@ sub _deserialize_graph ($method_data) {
             $args{param_names}   = $fields->{param_names}
                 if exists $fields->{param_names};
             $args{want}          = $fields->{want} if exists $fields->{want};
+            # THE LAST INPUT IS MEMORY, not an argument: a builtin that reads
+            # or writes an aggregate (push, shift, ...) follows a memory
+            # version. Dropped, push took its MemStart for a value to append.
+            $args{memory_input}  = 1 if $fields->{memory_input};
             $args{class_name}    = $fields->{class_name}
                 if exists $fields->{class_name};
             $args{paren_form}    = $fields->{paren_form}
@@ -655,6 +659,12 @@ sub _deserialize_graph ($method_data) {
             # typed it) is what a read stamped where no store is in sight says.
             $nd->{stamp} = 'Scalar'
                 if $fields->{shared} && ( $nd->{stamp} // 'Unknown' ) eq 'Unknown';
+            # AN @ VARIABLE IS AN ARRAY, a % one a HASH, whatever inference
+            # missed: `my @r;` arrives as a bare PadAccess stamped Unknown.
+            if (( $nd->{stamp} // 'Unknown' ) eq 'Unknown' && !$fields->{shared}) {
+                $nd->{stamp} = 'Array' if ( $fields->{sigil} // '' ) eq '@';
+                $nd->{stamp} = 'Hash'  if ( $fields->{sigil} // '' ) eq '%';
+            }
         }
         elsif ($op eq 'Parameter') {
             # index is REQUIRED -- it is the node's identity. A missing one is a
