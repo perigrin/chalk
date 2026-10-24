@@ -6837,7 +6837,8 @@ sub _is_memory_phi {
         # a package scalar's store
         return 1 if $in->operation eq 'EntryWrite';
         # a direct call: an inlined sub may store any of those
-        return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') eq 'direct';
+        return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') eq 'direct'
+            && !( defined $phi->memory && !$phi->memory );
         # a memory phi of a nested structure
         return 1 if $in->operation eq 'Phi' && _is_memory_phi($in, $seen);
     }
@@ -10015,7 +10016,8 @@ sub _lower_inlined_structure {
         if ($n->operation eq 'Phi') {
             my $r = $n->can('region') ? $n->region : undef;
             die $arm_value
-                unless blessed($r) && ( $on_chain{ refaddr($r) } || $r->operation eq 'Loop' );
+                unless blessed($r) && ( $on_chain{ refaddr($r) } || $r->operation eq 'Loop'
+                    || ( $in_arm && $r->can('head') && blessed($r->head) && $r->head->operation eq 'If' ) );
             # A LOOP ON THE MAIN CHAIN carries its phi in its header, which
             # dominates what follows the loop; its back-edge is the body's,
             # lowered with it, ifs and all. Only the first value comes from

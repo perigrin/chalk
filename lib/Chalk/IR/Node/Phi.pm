@@ -36,6 +36,11 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Value) {
     # recorded", never as "no predecessors".
     field $predecessors :param :reader = undef;
 
+    # Whether this Phi merges MEMORY versions rather than a value, when the
+    # producer said: B::SoN flags its memory Phis. Undef is "not said", and
+    # the backend then guesses from the inputs (_is_memory_phi).
+    field $memory :param :reader = undef;
+
     method operation() { 'Phi' }
     method staleness_kind() { 'opaque' }
 

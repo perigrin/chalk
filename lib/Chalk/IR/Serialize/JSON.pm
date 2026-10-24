@@ -607,6 +607,9 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];
+            # B::SoN flags a memory Phi; a stamped Phi it did not flag is a value.
+            $args{memory} = $fields->{memory} ? 1 : 0
+                if $fields->{memory} || defined $nd->{stamp};
 
             # predecessors[i] is the Proj that inputs[i] arrives along, carried
             # as node indices. It makes arm identity a field read instead of a
