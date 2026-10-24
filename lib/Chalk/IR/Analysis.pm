@@ -13,6 +13,7 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Coerce;             # _insert_str_coercions builds these
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype / join_types: the lattice
 use Chalk::IR::Node;   # stamp reads gate on isa Chalk::IR::Node
+use Chalk::MOP::Sub;   # an anonymous callee's metaobject, from its graph
 
 # NOTE: no `use Chalk::IR::Serialize::JSON` here, and none is needed. The passes
 # below used to live in that module and were called back into it from here,
@@ -756,6 +757,7 @@ sub _all_graph_nodes ($g) {
 # Keyed by the callee's fully-qualified name (`main::f`), which is how the
 # producer names the graph and how declare_sub records the metaobject.
 sub _attach_call_targets ($graphs, $mop) {
+    my %anon;   # one metaobject per anonymous body, however many calls name it
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
             next unless $node->operation eq 'Call'
@@ -784,6 +786,19 @@ sub _attach_call_targets ($graphs, $mop) {
             }
 
             next unless $kind eq 'direct';
+
+            # AN ANONYMOUS SUB HAS A GRAPH AND NO SUB RECORD: B::SoN records
+            # only named subs, and `main::__PROGRAM__::__ANON__:1:2` would not
+            # split below anyway. The Call names its callee graph exactly, so
+            # the graph is the metaobject's source -- the producer's own
+            # resolution does the same (B::SoN _callee_return_type).
+            my $cname = $node->name // '';
+            if ($cname =~ /::__ANON__:\d+:\d+\z/ && $graphs->{$cname}) {
+                $node->set_target($anon{$cname} //= Chalk::MOP::Sub->new(
+                    name => $cname, class => $mop->for_class('main'),
+                    graph => $graphs->{$cname}, params => ['@_'], uses_args => true));
+                next;
+            }
 
             my ($cls_name, $sub_name) = ($node->name // '') =~ /^(.*)::([^:]+)$/;
             my $cls = defined $cls_name ? $mop->for_class($cls_name) : undef;

@@ -9982,6 +9982,13 @@ sub _lower_call_direct {
     # lower_value, both the SAME node — inlines the callee once instead of
     # re-running the effect chain and result subgraph a second time.
     unless (@args) {
+        # @_ READ AS A LIST with nothing passed is an empty list: `"c[@_]"`
+        # called as `c()` reached ArgsSource unbound and refused.
+        my @reads = eval { $self->_collect_positional_arg_reads($graph, $name) };
+        local $self->{_arg_bind} = { ($self->{_arg_bind} // {})->%* };
+        if (!$@ && !@reads && (my $aa = $self->{_args_read_as_a_list})) {
+            $self->{_arg_bind}{ refaddr($aa) } = { ref => $self->_emit_array_of([]), repr => 'Array' };
+        }
         my $ref = $inline->();
         $self->{cache}{ $node->id } = $ref;
         return $ref;
