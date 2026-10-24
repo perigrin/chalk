@@ -638,6 +638,9 @@ sub _deserialize_graph ($method_data) {
                 $args{inputs} = [ $inputs[0] ];
             }
         }
+        elsif ($op eq 'Assign') {
+            $args{targets} = $fields->{targets} if defined $fields->{targets};
+        }
         elsif ($op eq 'ListAppend') {
             $args{collector} = $fields->{collector} if defined $fields->{collector};
         }

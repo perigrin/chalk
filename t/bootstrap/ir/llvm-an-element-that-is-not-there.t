@@ -52,6 +52,12 @@ for my $case (
     # Slot that its Undef arm branched on: lli rejected it (9c217485).
     [ q{my @a = (1); if (defined $a[3]) { print "d\n" } else { print "u\n" }}, "u\n", 'defined at a constant index past the end' ],
     [ q{my @a = (1); my $n = $a[3]; print defined($n) ? "d" : "u", "\n";}, "u\n", 'held in a variable first' ],
+    # A MISS IS CARRIED BY WHAT IT IS STORED IN: an element read stamped as
+    # the container's values (Str here) read a missing key as a defined "".
+    [ q{my %h = (k => "s"); my @a = (1, 2); $a[1] = $h{k}; $a[0] = $h{z}; print defined $a[0] ? "d" : "u", " $a[1]\n";}, "u s\n", 'stored into an array' ],
+    [ q{my %h = (k => "s"); my %g; $g{x} = $h{z}; $g{y} = $h{k}; print exists $g{x} ? "e" : "n", defined $g{x} ? "d" : "u", "\n";}, "eu\n", 'stored into a hash' ],
+    [ q{sub f { defined $_[0] ? "d" : "u" } my %h = (k => "s"); print f($h{z}), f($h{k}), "\n";}, "ud\n", 'handed to a call' ],
+    [ q{sub f { defined $_[0] ? "d" : "u" } my %h = (k => "s"); my $v = $h{z}; my $w = $h{k}; print f($v), f($w), "\n"; our $p = $h{z}; print defined $p ? "d" : "u", "\n";}, "ud\nu\n", 'stored into a variable kept in memory, and a package scalar' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };

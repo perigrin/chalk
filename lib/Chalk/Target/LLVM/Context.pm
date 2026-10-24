@@ -3463,6 +3463,45 @@ sub _lower_padaccess {
     return $val_ref;
 }
 
+
+# _lower_list_assign_into_locations($node): `my ($a, $b) = (1, 2)` where the
+# targets are kept in memory. Pairwise, all values read before any store.
+# Anything else on the wire's list form -- a target that is not a scalar
+# location, a value that would flatten -- is refused by name.
+sub _lower_list_assign_into_locations {
+    my ($self, $node) = @_;
+    my @in = $node->inputs->@*;
+    my $n  = $node->targets;
+    my @t  = @in[ 0 .. $n - 1 ];
+    my @v  = @in[ $n .. $#in ];
+    for my $t (@t) {
+        die "GAP: a list assignment to a " . ( blessed($t) ? $t->operation : 'undef' )
+          . " that is not a scalar kept in memory is not lowered\n"
+            unless blessed($t) && $t->operation eq 'PadAccess'
+                && ( $t->sigil // '' ) eq '$' && ( $t->shared || $t->is_location );
+    }
+    for my $v (@v) {
+        my $s = $v->operation eq 'Print' ? 'Boolean' : ( $v->stamp // '' );
+        die "GAP: a list assignment of a $s value, which may flatten, is not lowered\n"
+            unless $s =~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot)\z/;
+    }
+    my @boxed = map {
+        my $v = $v[$_];
+        my $s = $v->operation eq 'Print' ? 'Boolean' : $v->stamp;
+        my $r = $self->lower_value($v);
+        ($r, $s) = $self->_miss_kept($v, $r, $s);
+        $s =~ /\A(?:Scalar|Slot)\z/ ? $r
+            : $s eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', 'list assign')
+            : $self->_emit_coercion($r, $s, 'Scalar', 'list assign');
+    } 0 .. ( $#v < $#t ? $#v : $#t );
+    for my $i (0 .. $#t) {
+        my $val = $boxed[$i] // $self->_build_slot('false', '0', 'Undef', 'list assign: no value');
+        $self->_emit("  store %Slot $val, %Slot* " . $self->_location_ptr($t[$i])
+            . "  ; list assign: " . $t[$i]->name);
+    }
+    # In scalar context a list assignment is the count of its values.
+    return $self->{cache}{ $node->id } = scalar @v;
+}
 # _lower_assign: lower the RHS value and update the target.
 # Returns the new SSA value (the RHS).
 # Two modes:
@@ -3474,6 +3513,13 @@ sub _lower_assign {
     my ($self, $node) = @_;
 
     my $repr = _require_repr($node, 'Assign');
+
+    # A LIST ASSIGNMENT INTO LOCATIONS: each target its own value, pairwise,
+    # every value read before any target is stored (a swap), a target past
+    # the values undef. Lowered as `t1 = t2` it stored the wrong value.
+    if ($node->can('targets') && defined $node->targets && !( blessed($node->inputs->[-1]) && _is_args_array($node->inputs->[-1]) )) {
+        return $self->_lower_list_assign_into_locations($node);
+    }
 
     my $lhs = $node->inputs->[0];
     my $rhs = $node->inputs->[1];
@@ -3561,45 +3607,13 @@ sub _lower_assign {
             $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 $gi_def  ; Assign(Array-lvalue): slot def ptr");
             $self->_emit("  $slot_tag = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 $gi_tag  ; Assign(Array-lvalue): slot tag ptr");
             $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx_ref, i32 $gi_pay  ; Assign(Array-lvalue): slot pay ptr");
-            $self->_emit("  store i1 true, i1* $slot_def  ; Assign(Array-lvalue): defined=true");
-            # The rhs is boxed into the Slot's one-word payload — see
-            # _box_payload for the per-repr rule.
-            #
-            # Str and Num are DELIBERATELY excluded here even though
-            # _box_payload can box them. A container's element repr is inferred
-            # from its literal initializers alone (_element_repr in
-            # Serialize/JSON.pm), so a store that CHANGES the element type
-            # leaves every read still stamped with the old repr: boxing a Str
-            # into an array of Ints emits a correct store and an Int read of a
-            # pointer, printing the raw address. Until the element-type
-            # inference joins stores as well as literals, this must stay a GAP.
-            my $rhs_repr = $rhs->stamp // '';
-            my $rhs_i64;
-            # `Str` is admitted now that _element_repr JOINS STORES as well as
-            # literal initializers (Analysis.pm's _element_store_values). The
-            # exclusion below was correct while the element type came from the
-            # initializers alone -- a Str stored into an Int-typed container
-            # would have been read back as an integer, printing a raw address.
-            # Measured: `my @arr=(1,2); $arr[0]="hello"; print $arr[0]` now
-            # infers element repr Str, so the store and the read agree.
-            #
-            # `Num` stays out: it is a distinct 64-bit ENCODING question (which
-            # reading of the payload bits), not an element-typing one, and it
-            # wants the %Slot type tag rather than this guard.
-            if ($rhs_repr =~ /\A(?:Int|Str|ArrayRef|HashRef|CodeRef|Object)\z/) {
-                $rhs_i64 = $self->_box_payload($rhs_ref, $rhs_repr,
-                                               'Assign(Array-lvalue) rhs');
-            }
-            else {
-                die "GAP: Assign(Array-lvalue) rhs repr=$rhs_repr cannot be stored "
-                  . "in an i64 Slot payload. The element repr joins stores as "
-                  . "well as initializers, so this is an ENCODING gap (how to "
-                  . "read the payload bits back), not a typing one.";
-            }
-            # The rhs repr is the reading _box_payload just used; record it.
-            my $rhs_tag = _slot_tag_for_repr($rhs_repr);
-            $self->_emit("  store i8 " . _slot_tag_value($rhs_tag) . ", i8* $slot_tag  ; Assign(Array-lvalue): tag=$rhs_tag");
-            $self->_emit("  store i64 $rhs_i64, i64* $slot_pay  ; Assign(Array-lvalue): store value");
+            # THE VALUE'S OWN THREE FIELDS: its defined bit, the reading a read
+            # decodes it by (reads go by the stored tag, so a Num or a Scalar
+            # stored into an array of Ints reads back as itself), its payload.
+            my ($wdef, $wtag, $wpay) = $self->_slot_fields_of_value($rhs, $rhs_ref, 'Assign(Array-lvalue)');
+            $self->_emit("  store i1 $wdef, i1* $slot_def  ; Assign(Array-lvalue): defined");
+            $self->_emit("  store i8 $wtag, i8* $slot_tag  ; Assign(Array-lvalue): tag");
+            $self->_emit("  store i64 $wpay, i64* $slot_pay  ; Assign(Array-lvalue): store value");
 
             $self->{cache}{ $node->id } = $rhs_ref;
             return $rhs_ref;
@@ -3722,6 +3736,7 @@ sub _lower_assign {
           . " that is not a scalar is not lowered\n" unless $lhs->sigil eq '$';
         my $g    = $self->_location_ptr($lhs);
         my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');
+        ($rhs_ref, $from) = $self->_miss_kept($rhs, $rhs_ref, $from);
         die "GAP: a store to shared lexical " . $lhs->name . " of a $from value "
           . "is not lowered\n" unless $from =~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot)\z/;
         my $boxed = $from =~ /\A(?:Scalar|Slot)\z/
@@ -7399,8 +7414,20 @@ sub _emit_array_of {
         $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_def  ; ArrayRef: slot[$i] defined ptr");
         $self->_emit("  $slot_tag = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_tag  ; ArrayRef: slot[$i] tag ptr");
         $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_pay  ; ArrayRef: slot[$i] payload ptr");
-        $self->_emit("  store i1 true, i1* $slot_def  ; ArrayRef: slot[$i] defined=true");
         my $elem_repr = $inputs->[$i]->stamp // '';
+        ($elem_ref, $elem_repr) = $self->_miss_kept($inputs->[$i], $elem_ref, $elem_repr);
+        # A SCALAR IS ALREADY A SLOT: its own defined bit, tag and payload are
+        # the element's (an argument kept in memory, handed to @_).
+        if ($elem_repr =~ /\A(?:Scalar|Slot)\z/) {
+            my %f = (defined => ['i1', $slot_def], tag => ['i8', $slot_tag], payload => ['i64', $slot_pay]);
+            for my $fname (qw(defined tag payload)) {
+                my $v = $self->_fresh;
+                $self->_emit("  $v = extractvalue %Slot $elem_ref, " . _slot_idx($fname) . "  ; ArrayRef: slot[$i] $fname");
+                $self->_emit("  store $f{$fname}[0] $v, $f{$fname}[0]* $f{$fname}[1]  ; ArrayRef: slot[$i] $fname");
+            }
+            next;
+        }
+        $self->_emit("  store i1 true, i1* $slot_def  ; ArrayRef: slot[$i] defined=true");
         if (($as_num || $as_str) && $elem_repr eq 'Int') {
             my $to = $as_num ? 'Num' : 'Str';
             $elem_ref  = $self->_emit_coercion($elem_ref, 'Int', $to, "ArrayRef elem[$i]");
@@ -7917,12 +7944,29 @@ sub _emit_hash_has_key {
     return $found;
 }
 
+# _miss_kept($node, $ref, $from) -> ($ref, $from): an element read stored
+# somewhere is stored as its own Slot, which carries a miss its narrowed
+# reading does not (a missing key read as Str is a defined "").
+sub _miss_kept {
+    my ($self, $node, $ref, $from) = @_;
+    return ($ref, $from)
+        unless $node->operation eq 'Subscript' && $from !~ /\A(?:Scalar|Slot)\z/;
+    return ($self->_subscript_slot($node), 'Slot');
+}
+
 # _slot_fields_of_value($node, $ref, $what) -> ($def_i1, $tag_i8, $pay_i64)
 #
 # A scalar value as the three fields a %Slot or a %HashEntry holds.
 sub _slot_fields_of_value {
     my ($self, $node, $ref, $what) = @_;
     my $repr = $node->operation eq 'Print' ? 'Boolean' : ($node->stamp // '');
+    # AN ELEMENT READ MAY MISS, whatever its stamp: stored as its narrowed
+    # reading, a missing key read as Str was a defined "". Its own Slot
+    # carries the miss.
+    if ($node->operation eq 'Subscript' && $repr !~ /\A(?:Scalar|Slot)\z/) {
+        $ref  = $self->_subscript_slot($node);
+        $repr = 'Slot';
+    }
     if ($repr eq 'Scalar' || $repr eq 'Slot') {
         return ($self->_slot_defined_bit($ref), $self->_slot_tag_of($ref), $self->_slot_payload_of($ref));
     }
@@ -9815,6 +9859,46 @@ sub _lower_call_new {
 # Otherwise: vtable-dispatch (same logic as the former _lower_method_call).
 # Inputs: the :param values for name='new'; inputs[0] = invocant for regular
 # method calls. The class rides as the class_name attribute (MOP-direct).
+# _copy_out_written_args($name, \@idx, \@args, $array): `$_[N] = ...` IS A
+# STORE TO THE CALLER'S ARGUMENT. The callee wrote the array the call built
+# for @_; each written element is stored back here, after the inline, to the
+# argument it aliases -- a variable kept in memory, or an element. A literal
+# is read-only in perl (it dies), and a temporary keeps no store; the first
+# is refused, the second needs nothing.
+sub _copy_out_written_args {
+    my ($self, $name, $written, $args, $arr) = @_;
+    for my $i (@$written) {
+        die "GAP: direct call to '$name': callee writes \$_[$i] past the "
+          . scalar(@$args) . " argument(s) passed -- that grows \@_, which "
+          . "is not lowered.\n" if $i > $#$args;
+        my $arg = $args->[$i];
+        my $op  = $arg->operation;
+        die "GAP: direct call to '$name': callee writes \$_[$i], a literal -- "
+          . "perl dies (a read-only value); that is not lowered.\n"
+            if $op eq 'Constant';
+        my $lvalue = ( $op eq 'PadAccess' && $arg->is_location )
+                  || ( $op eq 'Subscript' && blessed($arg->inputs->[0])
+                       && $arg->inputs->[0]->operation ne 'ArgsSource' );
+        die "GAP: direct call to '$name': callee writes \$_[$i], whose argument "
+          . "is a $op this does not store back to.\n"
+            unless $lvalue || $op =~ /\A(?:Add|Subtract|Multiply|Concat|Call)\z/;
+        next unless $lvalue;
+        my ($ep, $elems, $sp, $slot) = map { $self->_fresh } 1 .. 4;
+        $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2  ; \@_ elems ptr");
+        $self->_emit("  $elems = load %Slot*, %Slot** $ep  ; \@_ elems");
+        $self->_emit("  $sp = getelementptr inbounds %Slot, %Slot* $elems, i64 $i  ; \$_[$i]");
+        $self->_emit("  $slot = load %Slot, %Slot* $sp  ; \$_[$i] after the call");
+        my $f  = Chalk::IR::NodeFactory->new;
+        my $ph = $f->make('Constant', value => "\0copy-out:$i:" . refaddr($arg), const_type => 'string');
+        $ph->set_stamp('Scalar');
+        local $self->{_arg_bind} = { ($self->{_arg_bind} // {})->%*,
+                                     refaddr($ph) => { ref => $slot, repr => 'Scalar' } };
+        my $store = $f->make('Assign', inputs => [ $arg, $ph ]);
+        $store->set_stamp('Scalar');
+        $self->_lower_assign($store);
+    }
+}
+
 # _lower_call_direct($node) -> $llvm_ref
 #
 # Lower a direct named-sub call (dispatch_kind='direct'). The loader resolved
@@ -9834,6 +9918,7 @@ sub _lower_call_new {
 # hash-cons to one node (their ordering is lost), and `my ($a,$b)=@_` /
 # `$_[N]` do not connect to the args in the graph — those GAP loudly rather
 # than miscompile.
+
 sub _lower_call_direct {
     my ($self, $node) = @_;
 
@@ -10000,6 +10085,7 @@ sub _lower_call_direct {
     # bind soundly), then lower the caller's args in this context.
     my @arg_reads = $self->_collect_positional_arg_reads($graph, $name);
     my $args_array = $self->{_args_read_as_a_list};
+    my $written    = $self->{_args_written};
     die "GAP: direct call to '$name': callee reads " . scalar(@arg_reads)
       . " positional argument(s) via `shift \@_` but the call passes "
       . scalar(@args) . " — arity mismatch, cannot bind."
@@ -10034,8 +10120,8 @@ sub _lower_call_direct {
     $self->{_arg_bind}{ refaddr($arg_reads[$_]) } =
         { ref => $arg_refs[$_], repr => $args[$_]->stamp }
         for 0 .. $#arg_reads;
-    $self->{_arg_bind}{ refaddr($args_array) } =
-        { ref => $self->_emit_array_of(\@args), repr => 'Array' }
+    my $args_arr = $args_array ? $self->_emit_array_of(\@args) : undef;
+    $self->{_arg_bind}{ refaddr($args_array) } = { ref => $args_arr, repr => 'Array' }
         if $args_array;
 
     # The callee's body nodes must NOT outlive this inline frame in the value
@@ -10062,6 +10148,7 @@ sub _lower_call_direct {
     my %cache_before = $self->{cache}->%*;
     my $ref = $inline->();
     $self->{cache}->%* = %cache_before;
+    $self->_copy_out_written_args($name, $written, \@args, $args_arr) if $written;
 
     # Memoize under the caller Call node's id, same reasoning as the
     # no-argument path above: this Call can be reached a second time as the
@@ -10438,6 +10525,8 @@ sub _collect_positional_arg_reads {
     my %params;       # index => the Parameter node (a DECLARED signature)
     my $args_array;   # @_ itself, when the callee reads it as a list
     $self->{_args_read_as_a_list} = undef;
+    my (%written, $written_src);   # `$_[N] = ...`: N => 1, and @_
+    $self->{_args_written} = undef;
     for my $n (_graph_component($graph)) {
         next unless blessed($n);
         my $op = $n->operation;
@@ -10550,6 +10639,19 @@ sub _collect_positional_arg_reads {
                     for my $u (($v->consumers // [])->@*) {
                         next unless blessed($u);
                         my $uop = $u->operation;
+                        # A STORE TO `$_[N]` ITSELF, N a constant, is written back
+                        # to the caller's argument after the inline (copy-out,
+                        # _lower_call_direct). One through a reference is not.
+                        if ($uop eq 'Assign' && refaddr($v) == refaddr($sub)
+                                && refaddr($u->inputs->[0] // 0) == refaddr($v)) {
+                            my $ix = $sub->inputs->[1];
+                            if (blessed($ix) && $ix->operation eq 'Constant'
+                                    && ($ix->value // '') =~ /\A\d+\z/) {
+                                $written{ $ix->value } = 1;
+                                $written_src = $n;
+                                next;
+                            }
+                        }
                         die "GAP: direct call to '$name': callee writes \$_[N] -- an "
                           . "alias of the caller's argument, which inlining does not "
                           . "write back.\n"
@@ -10560,6 +10662,19 @@ sub _collect_positional_arg_reads {
                 }
             }
         }
+    }
+
+    # @_ WRITTEN is read as the array it is: every `$_[N]` reads the array the
+    # call builds, which the callee's stores change, and the call copies the
+    # written elements back. A positional binding would read the value from
+    # before the store.
+    if (%written) {
+        die "GAP: direct call to '$name': callee writes \@_ and binds it by "
+          . "`shift` or `my (...) = \@_` -- only `\$_[N]` reads see its stores.\n"
+            if @shifts || @list_assigns || %params;
+        $self->{_args_written} = [ sort { $a <=> $b } keys %written ];
+        $self->{_args_read_as_a_list} = $written_src;
+        return ();
     }
 
     if ($args_array) {
@@ -11914,6 +12029,7 @@ sub _store_package_scalar {
     die "GAP: a store to the package variable " . ($target->sigil // '?') . $target->symbol
       . " that is not a scalar is not lowered\n" unless ($target->sigil // '$') eq '$';
     my $from = $value->operation eq 'Print' ? 'Boolean' : ($value->stamp // '');
+    ($ref, $from) = $self->_miss_kept($value, $ref, $from);
     my $boxed = $from =~ /\A(?:Scalar|Slot)\z/ ? $ref
               : $from eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', 'store to $' . $target->symbol)
               : $from =~ /\A(?:Int|Num|Str|Boolean)\z/
