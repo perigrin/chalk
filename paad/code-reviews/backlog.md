@@ -32,14 +32,3 @@
 - **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `73b983bc`
 - **Severity:** Important
 
-## `4d7c2e19` — An element store past an array's end corrupts the heap or is dropped
-- **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
-- **Symbol:** `_prelower_branch_store_operands`
-- **Bug class:** Memory
-- **Description:** `my $n = 1; $n = $n + 0; my @a = (1, 2); if ($n) { $a[2] = 3 } print scalar(@a), "\n";` aborts in lli with `munmap_chunk(): invalid pointer` where perl prints 3. No arm is needed: `my @a = (1, 2); $a[2] = 3; print scalar(@a)` aborts the same way, and `$a[5] = 3` prints 2 for perl's 6 (a silent wrong answer). Pre-existing at e1a15d3a. `push` grows the same literal-built array correctly.
-- **Suggested fix:** Check how the element store grows a literal-built %Array (the literal's slots may not be heap memory that realloc/free can take) and allocate the literal's slots with malloc, or refuse a growing store.
-- **Confidence:** High
-- **Found by:** orchestrator probe (`claude-opus-5-5[1m]`)
-- **First seen:** 2026-10-23 on branch `bson/llvm-corpus` at `f65a372a`
-- **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `f65a372a`
-- **Severity:** Important
