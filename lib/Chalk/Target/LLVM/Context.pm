@@ -9671,6 +9671,15 @@ sub _lower_inlined_structure {
             my $r = $n->can('region') ? $n->region : undef;
             die $arm_value
                 unless blessed($r) && ( $on_chain{ refaddr($r) } || $r->operation eq 'Loop' );
+            # A LOOP ON THE MAIN CHAIN carries its phi in its header, which
+            # dominates what follows the loop; its back-edge is the body's,
+            # lowered with it, ifs and all. Only the first value comes from
+            # outside. Walked into the back-edge, an if's merge in the body
+            # refused 19 corpus cases.
+            if ($r->operation eq 'Loop' && $on_chain{ refaddr($r) }) {
+                push @q, [ $n->inputs->[0], $in_arm ];
+                next;
+            }
             push @q, map { [$_, 1] } $n->inputs->@*;
             next;
         }
