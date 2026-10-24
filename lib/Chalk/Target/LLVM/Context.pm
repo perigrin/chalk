@@ -117,6 +117,7 @@ sub new {
         _pkg_slots            => {},
         _need_malloc_memcpy   => 0,
         _need_str_to_num_helper => 0,
+        _need_argv              => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -154,6 +155,7 @@ my @NEED_FLAGS = qw(
     _need_malloc_memcpy
     _need_bool_str_globals
     _need_str_to_num_helper
+    _need_argv
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -644,6 +646,13 @@ sub require_class_support {
 # _strlen_declared. Three sites need this guard: here (before any class body
 # lowers, for Str field reads), and the two F6 post-class re-emit sites
 # (_need_getenv, which also needs strlen for the runtime value length).
+# _argv_helper_lines() -> @chalk_argv_array and the strlen it calls, once.
+sub _argv_helper_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_argv} && !$self->{_argv_helper_emitted}++;
+    return ('', $self->require_strlen_once, _emit_argv_helper());
+}
+
 sub require_strlen_once {
     my ($self) = @_;
     return () if $self->{_strlen_declared};
@@ -826,6 +835,7 @@ sub render_need_flag_prologue {
         push @lines, _emit_str_to_num_helper();
         $self->{_str_to_num_helper_emitted} = 1;
     }
+    push @lines, $self->_argv_helper_lines;
 
     return @lines;
 }
@@ -869,6 +879,7 @@ sub render_need_flag_postclass_reemit {
         push @lines, _emit_str_to_num_helper();
         $self->{_str_to_num_helper_emitted} = 1;
     }
+    push @lines, $self->_argv_helper_lines;
     # Post-class re-emit for _need_memcmp: a method body doing Subscript(Hash)
     # sets _need_memcmp on $body_ctx (propagated to $self by G.5), but the prologue
     # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
@@ -8395,9 +8406,33 @@ sub _lower_builtin_shift_pop {
     # No fallback: the die below already rejects everything but Int, so a
     # guessed 'Int' only made the message name a repr the node never had.
     my $repr = $node->stamp;
+    # A Scalar element is its whole Slot -- an @ARGV element, say -- and an
+    # empty array gives an undefined one.
     die "GAP: $name element repr=" . ($repr // 'NONE (undef)')
-      . " not lowered (only Int elements yet)"
-        unless defined $repr && $repr eq 'Int';
+      . " not lowered (only Int and Scalar elements yet)"
+        unless defined $repr && ($repr eq 'Int' || $repr eq 'Scalar');
+    # AN INT SHIFT OF AN EMPTY ARRAY IS UNDEF, which only a NUMBER reads as
+    # its 0: `shift(@a) // 7` gave 0 for 7, and defined() said yes. Lowered
+    # only where every value consumer reads a number (a later read taking it
+    # as its memory version is no value consumer).
+    if ($repr eq 'Int') {
+        for my $c (grep { blessed($_) } ($node->consumers // [])->@*) {
+            my $cop = $c->operation;
+            # A statement it only precedes (its control), or a merge naming it
+            # as a predecessor, reads no value.
+            next if $cop =~ /\A(?:Region|Proj|If|Loop)\z/;
+            next unless grep { blessed($_) && refaddr($_) == refaddr($node) } $c->inputs->@*;
+            next if $cop =~ /\A(?:Add|Subtract|Multiply|Divide|Modulo|Negate|Num(?:Eq|Ne|Lt|Gt|Le|Ge|Cmp))\z/;
+            next if $cop eq 'Coerce' && ( $c->to_repr // '' ) =~ /\A(?:Int|Num)\z/;
+            my @ci = $c->inputs->@*;
+            next if blessed($ci[-1]) && refaddr($ci[-1]) == refaddr($node)
+                && $cop =~ /\A(?:Subscript|Count|Call|Exists|PadAccess|EntryDef|FieldAccess|Phi)\z/
+                && !grep { blessed($_) && refaddr($_) == refaddr($node) } @ci[0 .. $#ci - 1];
+            next if $cop eq 'Phi' && _is_memory_phi($c);
+            die "GAP: $name of an Int array read by a $cop is not lowered -- an "
+              . "empty array gives undef, which only a number reads as 0\n";
+        }
+    }
 
     # The array is the aggregate input. Post-load the loader has already moved the
     # leading control token to control_in (the is_stmt_effect contract), so the
@@ -8441,9 +8476,14 @@ sub _lower_builtin_shift_pop {
     my $slot_pay = $self->_fresh;
     my $pay_val  = $self->_fresh;
     $self->_emit("  $slot_p   = getelementptr inbounds %Slot, %Slot* $elems, i64 $idx  ; $name: slot ptr");
-    my $gi_pay = _slot_idx('payload');
-    $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 $gi_pay  ; $name: payload ptr");
-    $self->_emit("  $pay_val  = load i64, i64* $slot_pay  ; $name: load payload");
+    if ($repr eq 'Scalar') {
+        $self->_emit("  $pay_val  = load %Slot, %Slot* $slot_p  ; $name: load the slot");
+    }
+    else {
+        my $gi_pay = _slot_idx('payload');
+        $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slot_p, i32 0, i32 $gi_pay  ; $name: payload ptr");
+        $self->_emit("  $pay_val  = load i64, i64* $slot_pay  ; $name: load payload");
+    }
     # Update the header: len := len-1; shift also advances elems by one slot.
     my $new_len = $self->_fresh;
     $self->_emit("  $new_len = sub i64 $len, 1  ; $name: new len");
@@ -8457,11 +8497,15 @@ sub _lower_builtin_shift_pop {
 
     # Empty: nothing to remove.
     $self->_new_block($lbl_mt);
+    my $none = $repr eq 'Scalar'
+        ? $self->_build_slot('false', '0', 'Undef', "$name: empty")
+        : '0';
     $self->_set_terminator("  br label \%$lbl_end");
 
     $self->_new_block($lbl_end);
     my $result = $self->_fresh;
-    $self->_emit("  $result = phi i64 [ $pay_val, \%$lbl_ne ], [ 0, \%$lbl_mt ]  ; $name :Int result (0 if empty)");
+    $self->_emit("  $result = phi " . ($repr eq 'Scalar' ? '%Slot' : 'i64')
+        . " [ $pay_val, \%$lbl_ne ], [ $none, \%$lbl_mt ]  ; $name :$repr result");
     $self->{cache}{ $node->id } = $result;
     return $result;
 }
@@ -11090,6 +11134,9 @@ sub _lower_env_read {
 # (_freeze_memory_reads); the entry definition re-lowers at each use.
 sub _lower_stash_access {
     my ($self, $node) = @_;
+    return $self->_argv_array($node)
+        if ($node->sigil // '') eq '@' && $node->symbol eq 'ARGV'
+        && ($node->package // 'main') eq 'main';
     my $repr = _require_repr($node, 'EntryDef');
     die "GAP: a package variable " . ($node->sigil // '?') . $node->symbol
       . " that is not a scalar is not lowered\n" unless ($node->sigil // '$') eq '$';
@@ -11104,6 +11151,83 @@ sub _lower_stash_access {
             : die "GAP: EntryDef repr=$repr is not lowered\n";
     $self->{cache}{ $node->id } = $ref;
     return $ref;
+}
+
+# _argv_array($node) -> the %Array* that is @ARGV
+#
+# @ARGV IS THE PROGRAM'S ARGUMENTS: argv[1..] as Strs, built ONCE in main's
+# entry block (by @chalk_argv_array) and shared by every read, so a shift
+# from it is seen by what follows. Only main has argv.
+sub _argv_array {
+    my ($self, $node) = @_;
+    die "GAP: \@ARGV read outside the main program is not lowered\n"
+        if $self->{_in_method_body};
+    unless (defined $self->{_argv_ref}) {
+        $self->{_need_argv}            = 1;
+        $self->{_need_aggregate_types} = 1;
+        $self->{_need_malloc_memcpy}   = 1;
+        my $ref = $self->_fresh;
+        $self->_emit_entry("  $ref = call %Array* \@chalk_argv_array(i32 %argc, i8** %argv)  ; \@ARGV");
+        $self->{_argv_ref} = $ref;
+    }
+    return $self->{cache}{ $node->id } = $self->{_argv_ref};
+}
+
+# _emit_argv_helper() -> the IR text of @chalk_argv_array(argc, argv): an
+# %Array of argv[1..argc-1], each a defined %Slot holding a boxed %Str. The
+# Slot's field order and the Str tag come from the tables every other Slot
+# is built from.
+sub _emit_argv_helper {
+    my ($d, $t, $p) = (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
+    my $str = _slot_tag_value('Str');
+    return <<"END_HELPER";
+define internal %Array* \@chalk_argv_array(i32 %argc, i8** %argv) {
+entry:
+  %n32 = sub i32 %argc, 1
+  %n = sext i32 %n32 to i64
+  %slot_sz = ptrtoint %Slot* getelementptr (%Slot, %Slot* null, i64 1) to i64
+  %n1 = add i64 %n, 1
+  %bytes = mul i64 %n1, %slot_sz
+  %buf = call i8* \@malloc(i64 %bytes)
+  %slots = bitcast i8* %buf to %Slot*
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i1, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %ai = add i64 %i, 1
+  %pp = getelementptr inbounds i8*, i8** %argv, i64 %ai
+  %ptr = load i8*, i8** %pp
+  %len = call i64 \@strlen(i8* %ptr)
+  %sbuf = call i8* \@malloc(i64 ptrtoint (%Str* getelementptr (%Str, %Str* null, i64 1) to i64))
+  %sp = bitcast i8* %sbuf to %Str*
+  %sp0 = getelementptr inbounds %Str, %Str* %sp, i64 0, i32 0
+  store i8* %ptr, i8** %sp0
+  %sp1 = getelementptr inbounds %Str, %Str* %sp, i64 0, i32 1
+  store i64 %len, i64* %sp1
+  %sp2 = getelementptr inbounds %Str, %Str* %sp, i64 0, i32 2
+  store i32 0, i32* %sp2
+  %pay = ptrtoint %Str* %sp to i64
+  %s0 = insertvalue %Slot undef, i1 true, $d
+  %s1 = insertvalue %Slot %s0, i8 $str, $t
+  %s2 = insertvalue %Slot %s1, i64 %pay, $p
+  %slot = getelementptr inbounds %Slot, %Slot* %slots, i64 %i
+  store %Slot %s2, %Slot* %slot
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  %abuf = call i8* \@malloc(i64 ptrtoint (%Array* getelementptr (%Array, %Array* null, i64 1) to i64))
+  %arr = bitcast i8* %abuf to %Array*
+  %a0 = getelementptr inbounds %Array, %Array* %arr, i32 0, i32 0
+  store i64 %n, i64* %a0
+  %a1 = getelementptr inbounds %Array, %Array* %arr, i32 0, i32 1
+  store i64 %n, i64* %a1
+  %a2 = getelementptr inbounds %Array, %Array* %arr, i32 0, i32 2
+  store %Slot* %slots, %Slot** %a2
+  ret %Array* %arr
+}
+END_HELPER
 }
 
 # _store_package_scalar($target, $value_node, $value_ref) -> $value_ref

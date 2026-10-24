@@ -1643,7 +1643,10 @@ sub lower_with_elaboration {
     push @lines, $ctx->render_need_flag_postclass_reemit($result_repr);
 
     push @lines, '';
-    push @lines, 'define i32 @main() {';
+    # @ARGV reads main's own arguments (see _argv_array).
+    push @lines, $ctx->{_need_argv}
+        ? 'define i32 @main(i32 %argc, i8** %argv) {'
+        : 'define i32 @main() {';
 
     # Current block renders last: the epilogue lines below (printf + ret)
     # attach textually to the final rendered block.
