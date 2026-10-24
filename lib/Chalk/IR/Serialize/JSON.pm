@@ -639,6 +639,9 @@ sub _deserialize_graph ($method_data) {
                 $args{inputs} = [ $inputs[0] ];
             }
         }
+        elsif ($op eq 'Return') {
+            $args{valueless} = 1 if $fields->{valueless};
+        }
         elsif ($op eq 'Assign') {
             $args{targets} = $fields->{targets} if defined $fields->{targets};
         }

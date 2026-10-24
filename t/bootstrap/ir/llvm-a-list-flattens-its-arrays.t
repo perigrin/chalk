@@ -49,6 +49,10 @@ for my $case (
     [ q{my %h = (a => 1, b => 2); my @k = (sort(keys %h), "z"); print scalar(@k), " $k[1]\n";}, "3 b\n", 'counted and indexed' ],
     [ q{sub f { my ($h) = @_; my %p = %$h; for my $k (sort keys %p) { my $v = $p{$k}; $h->{$k} = $v + 10; print "$v $p{$k};" } return "" } print f({a=>1, b=>2}), "\n";}, "1 1;2 2;\n", 'a copy taken at entry, in a sub whose body is a loop (pvm)' ],
     [ q{use feature 'class'; no warnings 'experimental::class'; class Node { method parts { my @p; push @p, "a", "b"; return @p } method hash { return join("|", "op", $self->parts) } } print Node->new->hash, "\n";}, "op|a|b\n", 'a method joins a list holding what a call returns (pvm)' ],
+    [ q{sub two { return (1, 2) } my @a = (0, two(), 3); print scalar(@a), " @a\n";}, "4 0 1 2 3\n", 'the list a sub returns' ],
+    [ q{sub arr { my @p = ("x", "y"); return @p } sub one { return "z" } my @a = (arr(), one(), arr()); print "@a\n";}, "x y z x y\n", 'the array one sub returns and the scalar another does' ],
+    [ q{sub f { (1,2,3) } sub g { () } my $c = () = f(); my $d = () = g(); print "$c $d\n";}, "3 0\n", 'an empty list returned is no element (pvm)' ],
+    [ q{sub a { return } sub b { return undef } my @x = (a(), b(), a()); print scalar(@x), "\n";}, "1\n", 'a bare return is nothing, return undef is one' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };

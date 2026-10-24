@@ -12,6 +12,10 @@ class Chalk::IR::Node::Return :isa(Chalk::IR::Node) {
     # expression). Codegen emits a synthetic Return as a bare value;
     # an explicit-source Return emits `return EXPR;`.
     field $synthetic :param :reader = false;
+    # The producer's `valueless`: the sub falls off its end on an empty list
+    # `()`, so in list context it returns nothing -- its value input is the
+    # undef only a scalar caller reads.
+    field $valueless :param :reader = false;
 
     method operation() { 'Return' }
     method staleness_kind() { 'opaque' }

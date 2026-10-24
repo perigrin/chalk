@@ -7567,6 +7567,8 @@ sub _emit_array_of {
     my ($self, $inputs) = @_;
     return $self->_emit_flattened_array_of($inputs)
         if grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @$inputs;
+    return $self->_emit_flattened_array_of($inputs)
+        if grep { _returns_nothing_in_a_list($_) } @$inputs;
 
     $self->{_need_aggregate_types} = 1;
     $self->{_need_malloc_memcpy}   = 1;
@@ -8162,6 +8164,17 @@ END_HELPER
     return @lines;
 }
 
+# _returns_nothing_in_a_list($node) -> bool: a direct call to a sub that falls
+# off its end on `()` -- in a list it is no element at all, whatever undef a
+# scalar caller would read.
+sub _returns_nothing_in_a_list {
+    my ($n) = @_;
+    return 0 unless blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct';
+    my $t = $n->can('target') ? $n->target : undef;
+    my ($r) = blessed($t) && $t->can('graph') ? $t->graph->returns->@* : ();
+    return blessed($r) && $r->can('valueless') && $r->valueless ? 1 : 0;
+}
+
 # _emit_flattened_array_of(\@inputs) -> %Array*: a list with an array in it.
 # `(0, @a, 3)` is each of @a's elements in its place, not @a as one slot:
 # built by appending, an aggregate's elements one by one, a scalar as its
@@ -8173,12 +8186,33 @@ sub _emit_flattened_array_of {
     my $acc = $self->_emit_array_of([]);
     for my $in (@$inputs) {
         my $s = $in->stamp // '';
+        if (_returns_nothing_in_a_list($in)) {
+            $self->lower_value($in);   # its effects, and no element
+            next;
+        }
         if ($s eq 'Array' || ( $s eq 'List' && $in->operation eq 'Call'
                 && ( $in->dispatch_kind // '' ) eq 'builtin'
                 && ( $in->name // '' ) =~ /\A(?:sort|keys|values|reverse)\z/ )) {
             my $src = $s eq 'Array' ? $self->_container_ptr($in, 'Array') : $self->lower_value($in);
             $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $src)  ; list: flatten");
             next;
+        }
+        # A SUB'S LIST is what its callee returned: an array flattens, a
+        # scalar is one element.
+        if ($s eq 'List' && $in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'direct') {
+            my $r    = $self->lower_value($in);
+            my $from = $self->{_inline_value_repr}{ $in->id } // '';
+            if ($from eq 'Array') {
+                $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $r)  ; list: a sub's array");
+                next;
+            }
+            if ($from =~ /\A(?:Int|Num|Str|Boolean|Scalar|Undef)\z/) {
+                my $v = $from eq 'Scalar' ? $r
+                      : $from eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', 'list: an undef a sub returned')
+                      : $self->_emit_coercion($r, $from, 'Scalar', 'list: a scalar a sub returned');
+                $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $v)  ; list: a sub's scalar");
+                next;
+            }
         }
         die "GAP: a list with a $s in it is not lowered -- it would flatten, and "
           . "only an array does here\n" if $s =~ /\A(?:List|Hash)\z/;
@@ -10701,6 +10735,9 @@ sub _lower_call_direct {
             : $self->_lower_inlined_effects_then_value(\@effect_chain, $void ? undef : $value);
         return '0' if $void;
         my $from = $value->operation eq 'Print' ? 'Boolean' : ($value->stamp // '');
+        # What the inlined value IS, for a list that flattens it
+        # (_emit_flattened_array_of): an Array, or one scalar.
+        $self->{_inline_value_repr}{ $node->id } = $from;
         # A CALL NOTHING TYPED RETURNS WHAT ITS CALLEE DOES. A sub returning
         # a shared lexical returns a Scalar (that lexical's Slot); the call to
         # it, stamped Unknown, is that Scalar -- this call node is this call
