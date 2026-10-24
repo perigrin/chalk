@@ -5672,10 +5672,11 @@ sub _is_array_mutating_call {
 }
 
 sub _freeze_memory_reads {
-    my ($self, $mem_node) = @_;
+    my ($self, $mem_node, $within) = @_;
     return unless $mem_node->can('consumers');
     for my $c ($mem_node->consumers->@*) {
         next unless blessed($c);
+        next if $within && !$within->{ refaddr($c) };
         # A FIELD READ IS ONE TOO, its memory version its only input (an
         # lvalue FieldAccess has none). Lowered at its use instead, `my $old =
         # $n; $n = 5` read the 5.
@@ -8832,6 +8833,10 @@ sub _lower_builtin_sort {
     $self->{_need_memcmp}          = 1;
 
     my @elems = grep { blessed($_) } $node->inputs->@*;
+    # The MEMORY version the sort reads at rides as its last input; it is
+    # not an element (it was taken for one: "sort element[1] ... NO
+    # representation").
+    pop @elems if $node->can('memory_input') && $node->memory_input;
     die "GAP: sort expects a list operand." unless @elems;
     my $operand = $elems[0];
 
@@ -8869,27 +8874,10 @@ sub _lower_builtin_sort {
     else {
         # Every element must be typed: _emit_array_of tags each slot from the
         # element's own repr, and an untyped one would be boxed as a guess.
-        for my $i (0 .. $#elems) {
-            my $er = _require_repr($elems[$i], "sort element[$i]");
-
-            # A `string` COMPARATOR OVER A NON-Str ELEMENT IS A SEGFAULT, not a
-            # wrong answer. _emit_slot_out_of_order's string arm does
-            # `inttoptr i64 <payload> to %Str*` -- it ASSUMES the payload
-            # is a boxed Str. An Int element's payload is the integer itself,
-            # so `sort (10,9,100)` dereferenced address 10. Measured: lli
-            # crashed with a signal, not a diagnostic.
-            #
-            # perl really does compare those AS STRINGS (`sort (10,9,100)` is
-            # 10,100,9), so the refusal is about the LOWERING lacking an
-            # Int-to-Str materialisation inside the comparator, not about the
-            # semantics being unclear. GAP loudly until that exists.
-            die "GAP: sort with a STRING comparator over a $er element — the "
-              . "string compare reads each slot payload as a boxed Str, and a "
-              . "$er payload is the value itself. perl compares these as "
-              . "strings (`sort (10,9,100)` is 10,100,9); lowering it needs a "
-              . "numeric-to-string materialisation the comparator does not have."
-                if $cmp eq 'string' && $er ne 'Str';
-        }
+        # Each element is boxed with its own tag; the comparator reads it
+        # by that tag (_emit_slot_out_of_order), so a string sort of numbers
+        # stringifies them as perl does.
+        _require_repr($elems[$_], "sort element[$_]") for 0 .. $#elems;
         $src = $self->_emit_array_of(\@elems);
     }
 
@@ -8989,36 +8977,31 @@ sub _lower_builtin_sort {
 sub _emit_slot_out_of_order {
     my ($self, $pa, $pb, $cmp, $order) = @_;
 
-    my $i_pay = _slot_idx('payload');
-    my ($ga, $gb, $a, $b) = ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
-    $self->_emit("  $ga = getelementptr inbounds %Slot, %Slot* $pa, i32 0, i32 $i_pay  ; sort: lhs payload");
-    $self->_emit("  $gb = getelementptr inbounds %Slot, %Slot* $pb, i32 0, i32 $i_pay  ; sort: rhs payload");
-    $self->_emit("  $a = load i64, i64* $ga  ; sort: lhs");
-    $self->_emit("  $b = load i64, i64* $gb  ; sort: rhs");
-
-    my $res = $self->_fresh;
+    # EACH ELEMENT BY ITS OWN TAG. The raw payloads are an Int's value, a
+    # Num's bits, a Str's pointer: compared as integers, a negative Num sorts
+    # backwards and a Str by its address. A numeric sort reads both as Nums --
+    # unless both are Ints, compared exactly, as perl's <=> does past 2**53 --
+    # and a string sort stringifies each as perl does.
+    my ($va, $vb) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $va = load %Slot, %Slot* $pa  ; sort: lhs");
+    $self->_emit("  $vb = load %Slot, %Slot* $pb  ; sort: rhs");
     if ($cmp eq 'numeric') {
-        my $pred = $order eq 'descending' ? 'slt' : 'sgt';
-        $self->_emit("  $res = icmp $pred i64 $a, $b  ; sort: numeric $order");
+        my $int = _slot_tag_value('Int');
+        my ($ta, $tb, $both, $ic, $fc, $res) = map { $self->_fresh } 1 .. 6;
+        $self->_emit("  $ta = icmp eq i8 " . $self->_slot_tag_of($va) . ", $int");
+        $self->_emit("  $tb = icmp eq i8 " . $self->_slot_tag_of($vb) . ", $int");
+        $self->_emit("  $both = and i1 $ta, $tb  ; sort: both Ints?");
+        my ($ia, $ib) = ($self->_slot_payload_of($va), $self->_slot_payload_of($vb));
+        $self->_emit("  $ic = icmp " . ($order eq 'descending' ? 'slt' : 'sgt') . " i64 $ia, $ib  ; sort: Ints");
+        my $na = $self->_emit_coercion($va, 'Scalar', 'Num', 'sort lhs');
+        my $nb = $self->_emit_coercion($vb, 'Scalar', 'Num', 'sort rhs');
+        $self->_emit("  $fc = fcmp " . ($order eq 'descending' ? 'olt' : 'ogt') . " "
+            . _repr_to_llvm_type('Num') . " $na, $nb  ; sort: numbers");
+        $self->_emit("  $res = select i1 $both, i1 $ic, i1 $fc  ; sort: numeric $order");
         return $res;
     }
-
-    # A Str slot's payload is a %Str* (ptr,len) -- the same boxing every
-    # other Str write uses. memcmp over the shorter length, then length as the
-    # tiebreak, is perl's `cmp`.
-    my ($sa, $sb) = ($self->_fresh, $self->_fresh);
-    $self->_emit("  $sa = inttoptr i64 $a to %Str*  ; sort: lhs StrPair");
-    $self->_emit("  $sb = inttoptr i64 $b to %Str*  ; sort: rhs StrPair");
-    my ($apg, $alg, $bpg, $blg) = ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
-    $self->_emit("  $apg = getelementptr inbounds %Str, %Str* $sa, i64 0, i32 0  ; sort: lhs ptr");
-    $self->_emit("  $alg = getelementptr inbounds %Str, %Str* $sa, i64 0, i32 1  ; sort: lhs len");
-    $self->_emit("  $bpg = getelementptr inbounds %Str, %Str* $sb, i64 0, i32 0  ; sort: rhs ptr");
-    $self->_emit("  $blg = getelementptr inbounds %Str, %Str* $sb, i64 0, i32 1  ; sort: rhs len");
-    my ($ap, $al, $bp, $bl) = ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
-    $self->_emit("  $ap = load i8*, i8** $apg");
-    $self->_emit("  $al = load i64, i64* $alg");
-    $self->_emit("  $bp = load i8*, i8** $bpg");
-    $self->_emit("  $bl = load i64, i64* $blg");
+    my ($ap, $al) = $self->_str_parts($self->_emit_coercion($va, 'Scalar', 'Str', 'sort lhs'));
+    my ($bp, $bl) = $self->_str_parts($self->_emit_coercion($vb, 'Scalar', 'Str', 'sort rhs'));
 
     my ($shorter_c, $shorter, $mc, $ne, $len_gt, $tie) =
         ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
@@ -11068,6 +11051,22 @@ sub _lower_inlined_effects_then_value {
     local $self->{_empty_arrays} = {};   # the callee's `my @a`, fresh per call
     local $self->{_local_slots}  = {};   # and its `my $x` kept in memory
     local $self->{_graph_entry_idx} = $self->{current_idx};
+    # READS AT ENTRY ARE TAKEN AT ENTRY, as _process_control_chain takes them:
+    # a `join(sort keys %h)` at the callee's MemStart, lowered at its use
+    # after a call that writes %h, read the write.
+    my ($memstart) = grep { defined } map { $self->_find_memstart($_) }
+        grep { blessed($_) } ($value, $effect_chain->@*);
+    # Only reads this callee reaches: a MemStart shared across graphs (an
+    # older wire) has every graph's reads for consumers.
+    if (defined $memstart) {
+        my (%in, @q);
+        @q = grep { blessed($_) } ($value, $effect_chain->@*);
+        while (defined(my $n = shift @q)) {
+            next if $in{ refaddr($n) }++;
+            push @q, grep { blessed($_) } $n->inputs->@*;
+        }
+        $self->_freeze_memory_reads($memstart, \%in);
+    }
     $self->process_control_node($_) for reverse $effect_chain->@*;
     return defined $value ? $self->lower_value($value) : undef;
 }
