@@ -112,19 +112,9 @@ sub new {
         #   _need_malloc_memcpy => bool
         #     Set when a Concat node is lowered; triggers malloc/memcpy declarations.
         _str_globals          => [],
-        # Package-scalar globals (EntryDef): each package/global scalar (`our
-        # $g`) is one module-level i64 slot `@pkg_<stash>_<var>` initialized to 0.
-        #   _pkg_globals => { "main::g" => "\@pkg_main_g", ... }
-        # Deduped by qualified name so store and read resolve the SAME slot and
-        # the module preamble emits each global exactly once.
-        _pkg_globals          => {},
-        # Str package-scalar globals: each Str `our $g` is a PAIR of mutable
-        # slots (an i8* ptr and an i64 len), deduped by qualified name.
-        #   _pkg_str_globals => { "main::g" => ["\@pkg_main_g_ptr", "\@pkg_main_g_len"], ... }
-        _pkg_str_globals      => {},
-        # Num package scalars: one `double` slot per qualified name.
-        #   _pkg_num_globals => { "main::g" => "\@pkg_main_g_num", ... }
-        _pkg_num_globals      => {},
+        # Package scalars: one %Slot global per qualified name (_pkg_slot_name).
+        #   _pkg_slots => { "main::g" => "\@pkg_main_g", ... }
+        _pkg_slots            => {},
         _need_malloc_memcpy   => 0,
         _need_str_to_num_helper => 0,
         # G4 Array/Hash aggregate tracking:
@@ -185,6 +175,8 @@ sub absorb_need_flags_from {
     # declares it once.
     $self->{_lex_globals}{$_} = $src_ctx->{_lex_globals}{$_}
         for keys %{ $src_ctx->{_lex_globals} // {} };
+    $self->{_pkg_slots}{$_} = $src_ctx->{_pkg_slots}{$_}
+        for keys %{ $src_ctx->{_pkg_slots} // {} };
     return $self;
 }
 
@@ -743,46 +735,12 @@ sub render_need_flag_prologue {
             for sort keys %$lex;
     }
 
-    # Emit package-scalar globals (EntryDef): one mutable i64 slot per
-    # package/global scalar (`our $g`), keyed by qualified name in _pkg_globals so
-    # each is emitted exactly once and store/read resolve the same slot. Zero-init:
-    # an unwritten package scalar reads as 0 (the numeric undef the backend uses).
-    if (defined $self->{_pkg_globals} && %{ $self->{_pkg_globals} }) {
+    # Package scalars: one %Slot each, zero-init -- an undefined Slot, as an
+    # unwritten package scalar is. See _pkg_slot_name.
+    if (my $pkg = $self->{_pkg_slots}) {
         push @lines, '';
-        for my $qual (sort keys $self->{_pkg_globals}->%*) {
-            my $gname = $self->{_pkg_globals}{$qual};
-            push @lines, "$gname = internal global i64 0, align 8  ; package scalar \$$qual";
-        }
-    }
-
-    # Emit Str package-scalar globals (EntryDef with a Str repr): a PAIR of
-    # mutable slots per qualified name — an i8* ptr (null-init) and an i64 len
-    # (zero-init). An unwritten Str package scalar reads as (null, 0), an empty
-    # string. Emitted once each via the _pkg_str_globals dedupe map.
-    if (defined $self->{_pkg_str_globals} && %{ $self->{_pkg_str_globals} }) {
-        push @lines, '';
-        for my $qual (sort keys $self->{_pkg_str_globals}->%*) {
-            my ($pname, $lname) = $self->{_pkg_str_globals}{$qual}->@*;
-            push @lines, "$pname = internal global i8* null, align 8  ; Str package scalar \$$qual (ptr)";
-            push @lines, "$lname = internal global i64 0, align 8  ; Str package scalar \$$qual (len)";
-        }
-    }
-
-    # Emit Num package-scalar globals (EntryDef with a Num repr): one mutable
-    # slot per qualified name in Num's own machine type, zero-init — an
-    # unwritten Num package scalar reads as that type's zero, the numeric undef
-    # the backend uses. Its own slot rather than the Int i64 one so the read
-    # knows which face the bits hold. The type and the zero both come from the
-    # representation so this global cannot disagree with the load at
-    # _lower_stash_access or the store at _lower_assign.
-    if (defined $self->{_pkg_num_globals} && %{ $self->{_pkg_num_globals} }) {
-        my $nty  = _repr_to_llvm_type('Num');
-        my $nzer = _repr_zero('Num');
-        push @lines, '';
-        for my $qual (sort keys $self->{_pkg_num_globals}->%*) {
-            my $nname = $self->{_pkg_num_globals}{$qual};
-            push @lines, "$nname = internal global $nty $nzer, align 8  ; Num package scalar \$$qual";
-        }
+        push @lines, "$pkg->{$_} = internal global %Slot zeroinitializer, align 8  ; package scalar \$$_"
+            for sort keys %$pkg;
     }
 
     # Declare malloc/memcpy when Str concat or aggregate operations were emitted.
@@ -1396,26 +1354,20 @@ sub _module_global_name {
     return ($gname, $byte_len, $byte_len + 1);
 }
 
-# _pkg_global_name($stash, $var) -> LLVM global name for a package-scalar slot.
+# _pkg_slot_name($stash, $var) -> the %Slot global a package scalar lives in.
 #
-# A package/global scalar (`our $g`, a EntryDef node) is modeled as a single
-# module-level i64 slot named `@pkg_<stash>_<var>`. Registered once per qualified
-# name in _pkg_globals so the store and the read resolve the SAME slot and the
-# module preamble (Target/LLVM.pm) emits each `@pkg_...` global exactly once as
-# `internal global i64 0`. The name must be a legal unquoted LLVM identifier
-# (\w+); a stash containing '::' would not be — die loudly rather than corrupt
-# the module (same rule as _module_global_name).
-sub _pkg_global_name {
+# ONE GLOBAL HOLDING A VALUE, not a typed family per representation (Part
+# H5): a store boxes, a read unboxes to its own reading, and an unwritten
+# one is an undefined Slot. The three families (i64, (ptr, len), double)
+# were perl's SV union rebuilt by hand, and a store in one was invisible to
+# a read of another. The name must be a legal unquoted LLVM identifier.
+sub _pkg_slot_name {
     my ($self, $stash, $var) = @_;
-    my $qual  = "${stash}::${var}";
     my $ident = "pkg_${stash}_${var}";
-    die "GAP: package-global slot '\@$ident' (from $qual) is not a legal "
-      . "unquoted LLVM identifier (\\w+) — the stash or variable name likely "
-      . "contains '::' or other non-identifier characters"
+    die "GAP: package-scalar global '\@$ident' (from ${stash}::${var}) is not a "
+      . "legal unquoted LLVM identifier (\\w+)\n"
         unless $ident =~ /\A\w+\z/;
-    my $gname = "\@$ident";
-    $self->{_pkg_globals}{$qual} = $gname;
-    return $gname;
+    return $self->{_pkg_slots}{"${stash}::${var}"} = "\@$ident";
 }
 
 # _lex_global_name($symbol) -> the module global for a shared file lexical.
@@ -1515,50 +1467,7 @@ sub _location_ptr {
     return $self->{_local_slots}{$sym} = $slot;
 }
 
-# _pkg_str_global_names($stash, $var) -> ($ptr_gname, $len_gname)
-#
-# A Str package/global scalar (`our $g = "hi"`) needs TWO mutable module-level
-# slots — an i8* pointer and an i64 length — because a Str value is a (ptr, len)
-# pair. Registered once per qualified name in _pkg_str_globals so store and read
-# resolve the SAME pair and the module preamble emits each exactly once (an i8*
-# null slot and an i64 0 slot). Same identifier rule as _pkg_global_name.
-sub _pkg_str_global_names {
-    my ($self, $stash, $var) = @_;
-    my $qual  = "${stash}::${var}";
-    my $ident = "pkg_${stash}_${var}";
-    die "GAP: package-global slot '\@$ident' (from $qual) is not a legal "
-      . "unquoted LLVM identifier (\\w+) — the stash or variable name likely "
-      . "contains '::' or other non-identifier characters"
-        unless $ident =~ /\A\w+\z/;
-    my $pname = "\@${ident}_ptr";
-    my $lname = "\@${ident}_len";
-    $self->{_pkg_str_globals}{$qual} = [ $pname, $lname ];
-    return ($pname, $lname);
-}
 
-# _pkg_num_global_name($stash, $var) -> LLVM global name for a Num package slot.
-#
-# A Num package/global scalar (`our $g = 0.5`) is a single module-level `double`
-# slot named `@pkg_<stash>_<var>_num`. It needs its own slot rather than reusing
-# the Int i64 one because the value is a genuine double: storing it through an
-# i64 slot would either truncate or require a bitcast on every access, and the
-# read side would have no way to tell which face the bits currently hold.
-#
-# Registered once per qualified name in _pkg_num_globals so store and read
-# resolve the SAME slot and the preamble emits it exactly once as
-# `internal global double 0.0`. Same identifier rule as _pkg_global_name.
-sub _pkg_num_global_name {
-    my ($self, $stash, $var) = @_;
-    my $qual  = "${stash}::${var}";
-    my $ident = "pkg_${stash}_${var}";
-    die "GAP: package-global slot '\@$ident' (from $qual) is not a legal "
-      . "unquoted LLVM identifier (\\w+) — the stash or variable name likely "
-      . "contains '::' or other non-identifier characters"
-        unless $ident =~ /\A\w+\z/;
-    my $gname = "\@${ident}_num";
-    $self->{_pkg_num_globals}{$qual} = $gname;
-    return $gname;
-}
 
 # Ops that LOAD from a mutable memory location when lowered: a pad slot
 # (PadAccess reads var_table), an aggregate element (Subscript), or an object
@@ -1697,7 +1606,7 @@ sub lower_value {
     # read at any other version (a call's, a Phi's) is cached where it was
     # first lowered, and served to a block that one does not dominate, lli
     # rejected the module.
-    if (($op eq 'FieldAccess' || $op eq 'PadAccess') && $self->{_frozen_reads}{$id}
+    if (($op eq 'FieldAccess' || $op eq 'PadAccess' || $op eq 'EntryDef') && $self->{_frozen_reads}{$id}
             && exists $self->{cache}{$id}) {
         return $self->{cache}{$id};
     }
@@ -1907,6 +1816,9 @@ sub lower_value {
     # every use and observes the post-store value.
     elsif ($op eq 'EntryDef') {
         return $self->_lower_stash_access($node);
+    }
+    elsif ($op eq 'EntryWrite') {
+        return $self->_lower_entry_write($node);
     }
     # Statement-effect ops that carry per-call identity (they are in
     # %STATEMENT_EFFECT_OPS, so the control collectors route them here) but
@@ -3556,79 +3468,12 @@ sub _lower_assign {
         return $stored;
     }
 
-    # Mode (sa): EntryDef-lvalue — package/global scalar store (`our $g = 5`).
-    # Store the rhs into the module-level i64 slot @pkg_<stash>_<var> (the same
-    # slot the EntryDef READ loads). A statement effect threaded onto the
-    # control chain; the stored value is the Assign's result. Only Int is lowered
-    # runtime-free (the slot is i64), matching the read side.
+    # Mode (sa): EntryDef-lvalue -- a package scalar store (`our $g = 5`),
+    # boxed into its %Slot global like an EntryWrite. See _pkg_slot_name.
     if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'EntryDef') {
-        my $rhs_repr = _require_repr($rhs, 'Assign(EntryDef-lvalue).rhs');
-        my $var   = $lhs->symbol;
-
-        # A package scalar is modeled as a TYPED module-level slot, and its
-        # kind is chosen per-repr: i64 for Int, a (ptr,len) pair for Str, a
-        # double for Num. The lvalue node is hash-consed, so every store and
-        # every read of `$var` share ONE node carrying ONE repr — while each
-        # store carries its own. When they disagree, this store writes a
-        # different slot family than any read will load from, and the store is
-        # silently lost:
-        #
-        #   our $g = 1; $g = "hi"; print $g   perl: hi    chalk: 1
-        #
-        # Refuse loudly. A read cannot see a store that went somewhere else.
-        #
-        # This is a symptom, not the disease. A scalar does not HAVE one
-        # representation that its storage must be wide enough to hold — each
-        # STORE has a representation, a read takes the reaching definition's,
-        # and a coercion belongs wherever a USE needs a different one. So
-        # `$x = "hello"; $x = 1; $x = 0.5` is three stores with three
-        # representations, not one cell that must be typed to cover all three.
-        # (A genuine two-representations-at-once scalar is a DualVar, which is a
-        # value kind, not a storage question.)
-        #
-        # That is just SSA, which is why a LEXICAL already handles every case
-        # here correctly with no slot at all. Modeling a package scalar as a
-        # typed cell types the VARIABLE instead of its dataflow, and the
-        # per-repr kinds are perl's SV union rebuilt one type at a time.
-        # The fix is to stop treating the slot as the unit — filed as Part H.
-        my $slot_repr = $lhs->stamp;
-        if (defined $slot_repr && $slot_repr ne $rhs_repr) {
-            die "GAP: package scalar \$$var is stored as $rhs_repr but its slot "
-              . "is $slot_repr — this store would be invisible to every read. "
-              . "A store's representation is its own; the slot is the wrong "
-              . "unit to carry it.";
-        }
-        # A Str package scalar needs TWO mutable slots (an i8* ptr and an i64
-        # len), since a Str value is a (ptr, len) pair. Store both; the read
-        # loads both and re-registers the loaded ptr in the length table.
-        if ($rhs_repr eq 'Str') {
-            my ($pname, $lname) = $self->_pkg_str_global_names($lhs->package, $var);
-            my ($str_ptr, $tracked_len) = $self->_str_parts($rhs_ref);
-            my $len_ref = $tracked_len
-                // die "GAP: Assign(EntryDef-lvalue) Str rhs has no tracked "
-                     . "length (\$$var); only length-tracked Str values lower.";
-            $self->_emit("  store i8* $str_ptr, i8** $pname  ; Assign(EntryDef-lvalue): store \$$var ptr (Str package scalar)");
-            $self->_emit("  store i64 $len_ref, i64* $lname  ; Assign(EntryDef-lvalue): store \$$var len (Str package scalar)");
-            $self->{cache}{ $node->id } = $rhs_ref;
-            return $rhs_ref;
-        }
-        # A Num package scalar is a single `double` slot — the float analogue of
-        # the Int i64 slot, in its own global so the read knows which face the
-        # bits hold.
-        if ($rhs_repr eq 'Num') {
-            my $nname = $self->_pkg_num_global_name($lhs->package, $var);
-            my $nty = _repr_to_llvm_type($rhs_repr);
-            $self->_emit("  store $nty $rhs_ref, $nty* $nname  ; Assign(EntryDef-lvalue): store \$$var (Num package scalar)");
-            $self->{cache}{ $node->id } = $rhs_ref;
-            return $rhs_ref;
-        }
-        die "GAP: Assign(EntryDef-lvalue) rhs repr=$rhs_repr; only Int, Num "
-          . "and Str package scalars are lowered runtime-free."
-            unless $rhs_repr eq 'Int';
-        my $gname = $self->_pkg_global_name($lhs->package, $var);
-        $self->_emit("  store i64 $rhs_ref, i64* $gname  ; Assign(EntryDef-lvalue): store \$$var (package scalar)");
-        $self->{cache}{ $node->id } = $rhs_ref;
-        return $rhs_ref;
+        my $stored = $self->_store_package_scalar($lhs, $rhs, $rhs_ref);
+        $self->{cache}{ $node->id } = $stored;
+        return $stored;
     }
 
     # Mode (a): Subscript-lvalue — element store into Array or Hash.
@@ -5331,7 +5176,8 @@ sub process_control_node {
         # shared lexical, and a read at that call's version must be taken
         # there, not at its use after a later store.
         $self->_freeze_memory_reads($node)
-            if $op eq 'Assign' || $op eq 'RegexSubst' || $self->_is_array_mutating_call($node)
+            if $op eq 'Assign' || $op eq 'RegexSubst' || $op eq 'EntryWrite'
+            || $self->_is_array_mutating_call($node)
             || ($op eq 'Call' && ($node->dispatch_kind // '') eq 'direct');
     }
     elsif ($op eq 'Unwind') {
@@ -5573,7 +5419,7 @@ sub _freeze_memory_reads {
         # lvalue FieldAccess has none). Lowered at its use instead, `my $old =
         # $n; $n = 5` read the 5.
         my $mem;
-        if ($c->operation eq 'FieldAccess'
+        if ($c->operation eq 'FieldAccess' || $c->operation eq 'EntryDef'
                 || ($c->operation eq 'PadAccess' && $c->is_location)) {
             $mem = $c->inputs->[0];
         }
@@ -5585,6 +5431,10 @@ sub _freeze_memory_reads {
         }
         next unless defined $mem && blessed($mem) && $mem->id eq $mem_node->id;
         next if exists $self->{cache}{ $c->id };   # already frozen
+        # A PUNCTUATION VARIABLE has no global to read (`$"`, which join
+        # takes as its separator without lowering the read); a consumer that
+        # does need it refuses by name when it lowers it.
+        next if $c->operation eq 'EntryDef' && ($c->symbol // '') !~ /\A\w+\z/;
         # A read whose INDEX (or container) is a loop-header Phi cannot be frozen
         # at entry -- the Phi has no SSA ref until _lower_loop emits it inside the
         # header. An `arr[$i]` element read in a foreach body is exactly this: its
@@ -6806,6 +6656,8 @@ sub _is_memory_phi {
             return 1 if blessed($lhs) && ( $lhs->operation eq 'FieldAccess'
                 || ( $lhs->operation eq 'PadAccess' && $lhs->is_location ) );
         }
+        # a package scalar's store
+        return 1 if $in->operation eq 'EntryWrite';
         # a direct call: an inlined sub may store any of those
         return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') eq 'direct';
         # a memory phi of a nested structure
@@ -11230,51 +11082,61 @@ sub _lower_env_read {
     return $val;
 }
 
-# _lower_stash_access($node) -> $llvm_ref (i64 loaded value)
+# _lower_stash_access($node) -> $llvm_ref, the read as its own repr
 #
-# A package/global scalar read (`our $g`): load the module-level i64 slot
-# `@pkg_<stash>_<var>`. The slot is registered (and emitted once) via
-# _pkg_global_name. A mutable-location read (EntryDef is in %MUTABLE_READ_OPS),
-# so lower_value bypasses the value cache and this re-lowers at every use — a load
-# after a store observes the post-store value. Only Int-repr package scalars are
-# lowered runtime-free; any other repr is an honest GAP (a Str/ref package scalar
-# would need a differently-typed slot).
+# A package scalar read (`our $g`): load its %Slot (_pkg_slot_name) and unbox
+# it to this read's reading. A mutable-location read (EntryDef is in
+# %MUTABLE_READ_OPS): one at a memory version is frozen there
+# (_freeze_memory_reads); the entry definition re-lowers at each use.
 sub _lower_stash_access {
     my ($self, $node) = @_;
-
     my $repr = _require_repr($node, 'EntryDef');
-    my $var  = $node->symbol;
-    # A Str package scalar: load BOTH slots (ptr + len) and re-register the
-    # loaded ptr's length so a downstream print/concat/return slices exactly
-    # len bytes. Mirrors the two-slot store.
-    if ($repr eq 'Str') {
-        my ($pname, $lname) = $self->_pkg_str_global_names($node->package, $var);
-        my $ptr = $self->_fresh;
-        my $len = $self->_fresh;
-        $self->_emit("  $ptr = load i8*, i8** $pname  ; EntryDef: read \$$var ptr (Str package scalar)");
-        $self->_emit("  $len = load i64, i64* $lname  ; EntryDef: read \$$var len (Str package scalar)");
-        $ptr = $self->_set_str_len($ptr, $len);
-        $self->{cache}{ $node->id } = $ptr;
-        return $ptr;
-    }
-    # A Num package scalar: load the `double` slot. Mirrors the Num store.
-    if ($repr eq 'Num') {
-        my $nname = $self->_pkg_num_global_name($node->package, $var);
-        my $val   = $self->_fresh;
-        my $nty = _repr_to_llvm_type($repr);
-        $self->_emit("  $val = load $nty, $nty* $nname  ; EntryDef: read \$$var (Num package scalar)");
-        $self->{cache}{ $node->id } = $val;
-        return $val;
-    }
-    die "GAP: EntryDef repr=$repr; only Int, Num and Str package scalars are "
-      . "lowered runtime-free (a ref slot needs a differently-typed global)."
-        unless $repr eq 'Int';
+    die "GAP: a package variable " . ($node->sigil // '?') . $node->symbol
+      . " that is not a scalar is not lowered\n" unless ($node->sigil // '$') eq '$';
+    my $g    = $self->_pkg_slot_name($node->package, $node->symbol);
+    my $slot = $self->_fresh;
+    $self->_emit("  $slot = load %Slot, %Slot* $g  ; read package scalar \$"
+        . $node->package . '::' . $node->symbol);
+    my $ref = $repr eq 'Undef'                          ? $self->_slot_defined_bit($slot)
+            : $repr =~ /\A(?:Int|Num|Str|Boolean)\z/  ? $self->_emit_coercion($slot, 'Scalar', $repr,
+                                                              'package scalar ' . $node->symbol)
+            : $repr eq 'Scalar'                         ? $slot
+            : die "GAP: EntryDef repr=$repr is not lowered\n";
+    $self->{cache}{ $node->id } = $ref;
+    return $ref;
+}
 
-    my $gname = $self->_pkg_global_name($node->package, $var);
-    my $val   = $self->_fresh;
-    $self->_emit("  $val = load i64, i64* $gname  ; EntryDef: read \$$var (package scalar)");
-    $self->{cache}{ $node->id } = $val;
-    return $val;
+# _store_package_scalar($target, $value_node, $value_ref) -> $value_ref
+#
+# Box a value into a package scalar's %Slot -- the store an EntryWrite and an
+# Assign to an EntryDef both are.
+sub _store_package_scalar {
+    my ($self, $target, $value, $ref) = @_;
+    die "GAP: a store to the package variable " . ($target->sigil // '?') . $target->symbol
+      . " that is not a scalar is not lowered\n" unless ($target->sigil // '$') eq '$';
+    my $from = $value->operation eq 'Print' ? 'Boolean' : ($value->stamp // '');
+    my $boxed = $from =~ /\A(?:Scalar|Slot)\z/ ? $ref
+              : $from eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', 'store to $' . $target->symbol)
+              : $from =~ /\A(?:Int|Num|Str|Boolean)\z/
+                  ? $self->_emit_coercion($ref, $from, 'Scalar', 'store to $' . $target->symbol)
+              : die "GAP: a store to package scalar \$" . $target->symbol
+                  . " of a $from value is not lowered\n";
+    $self->_emit("  store %Slot $boxed, %Slot* " . $self->_pkg_slot_name($target->package, $target->symbol)
+        . "  ; store package scalar \$" . $target->package . '::' . $target->symbol);
+    return $ref;
+}
+
+# _lower_entry_write($node): EntryWrite(target, value, memory) -- a package
+# scalar stored through memory, where another graph (a sub) or a later
+# version reads it.
+sub _lower_entry_write {
+    my ($self, $node) = @_;
+    my ($target, $value) = grep { blessed($_) } $node->inputs->@[0, 1];
+    die "GAP: an EntryWrite whose target is not an EntryDef is not lowered\n"
+        unless blessed($target) && $target->operation eq 'EntryDef' && blessed($value);
+    my $ref = $self->_store_package_scalar($target, $value, $self->lower_value($value));
+    $self->{cache}{ $node->id } = $ref;
+    return $ref;
 }
 
 # _parse_subst_replacement($replacement, $ngroups) -> \@segments
