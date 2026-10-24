@@ -22,6 +22,12 @@ class Chalk::IR::Node::ListAppend :isa(Chalk::IR::Value) {
     # on the wire distinguishes them -- a consumer that must tell them apart
     # has to read the input's own stamp, not the arity. There are no wire
     # `fields` on this op, so no loader arm is needed for it.
+    #
+    # The producer now says which it is: `collector` is "grep" or "map".
+    # A grep's last input is its test whatever it yields -- `grep { $_ }`
+    # tests the element itself, an Int, and read as a second element it was
+    # appended twice and nothing was filtered.
+    field $collector :param :reader = undef;
     method operation() { 'ListAppend' }
     method staleness_kind() { 'opaque' }
 

@@ -20,18 +20,6 @@
 - **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `e1a15d3a`
 - **Severity:** Suggestion
 
-## `9c217485` — defined over an out-of-range array element emits br on a %Slot
-- **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
-- **Symbol:** `_lower_defined`
-- **Bug class:** Logic
-- **Description:** `my @a = (1); if (defined $a[3]) {...}` -- the Subscript is stamped Undef but lowered as a %Slot; the Undef arm hands it to `br i1` and lli rejects the module. The ternary form fails the same way, and an inlined callee now reaches it too. Pre-existing at a7023ef3.
-- **Suggested fix:** Key the arm on the lowered value's representation (or reconcile the Subscript stamp to Slot) and extract the Slot's defined bit.
-- **Confidence:** High
-- **Found by:** Verifier (`claude-opus-5-5[1m]`)
-- **First seen:** 2026-10-23 on branch `bson/llvm-corpus` at `4182d850`
-- **Last seen:** 2026-10-23 on branch `bson/llvm-corpus` at `e1a15d3a`
-- **Severity:** Important
-
 ## `81c5efed` — An inlined call in a short-circuit arm does not dominate the merge
 - **File (at first sighting):** `lib/Chalk/Target/LLVM/Context.pm`
 - **Symbol:** `_lower_inlined_effects_then_value`

@@ -515,6 +515,7 @@ my %_SLOT_TAG = (
     CodeRef  => 7,
     Object   => 8,
     Opaque   => 9,
+    ScalarRef => 10,
 );
 
 # _slot_fields() -> the field list (for size computation and tests).
@@ -552,6 +553,24 @@ sub _slot_tag_for_repr {
 }
 
 # _slot_type_decl() -> the LLVM type declaration line.
+# %HashEntry's fields, BY NAME, as %Slot's are: a literal index is how a
+# reordering becomes a silent miscompile. val_tag is the value's reading --
+# a hash value has one of its own, as an array element does, so a read
+# need not take it from the reader's stamp. Appended, it shifts no index.
+my @_HASHENTRY_FIELDS = (
+    { name => 'key_ptr', llvm => 'i8*' },
+    { name => 'key_len', llvm => 'i64' },
+    { name => 'key_enc', llvm => 'i32' },
+    { name => 'val_def', llvm => 'i1'  },
+    { name => 'val_pay', llvm => 'i64' },
+    { name => 'val_tag', llvm => 'i8'  },
+);
+my %_HE_IDX = do { my $i = 0; map { $_->{name} => $i++ } @_HASHENTRY_FIELDS };
+sub _he_idx { my $n = $_[-1]; return $_HE_IDX{$n} // die "no %HashEntry field named '$n'" }
+sub _hashentry_type_decl {
+    return '%HashEntry  = type { ' . join(', ', map { $_->{llvm} } @_HASHENTRY_FIELDS) . ' }';
+}
+
 sub _slot_type_decl {
     return '%Slot = type { ' . join(', ', map { $_->{llvm} } @_SLOT_FIELDS) . ' }';
 }
@@ -804,7 +823,7 @@ sub render_need_flag_prologue {
     if ($self->{_need_aggregate_types}) {
         push @lines, _slot_type_decl();
         push @lines, '%Array      = type { i64, i64, %Slot* }';
-        push @lines, '%HashEntry  = type { i8*, i64, i32, i1, i64 }';
+        push @lines, _hashentry_type_decl();
         push @lines, '%Hash       = type { i64, i64, %HashEntry* }';
     }
 
@@ -1571,6 +1590,11 @@ sub lower_value {
             # from Num to Int left an Add and a NumGt built for doubles
             # reading an i64, and lli rejected the module. The callee graph
             # is shared by every call site, so it is not ours to rewrite.
+            # UNKNOWN SAYS NOTHING of the value, so the caller's value stands
+            # as it is: a `my ($h, $k) = @_` target nothing typed was refused
+            # as "a coercion between them would not keep the value". Its
+            # consumers read the caller's repr (_repr_of).
+            return $bound->{ref} if ( $node->stamp // 'Unknown' ) eq 'Unknown';
             if (defined $bound->{repr} && defined $node->stamp
                     && $node->stamp ne $bound->{repr}) {
                 die "GAP: an inlined argument is a $bound->{repr} where the "
@@ -1617,7 +1641,7 @@ sub lower_value {
     # read at any other version (a call's, a Phi's) is cached where it was
     # first lowered, and served to a block that one does not dominate, lli
     # rejected the module.
-    if (($op eq 'FieldAccess' || $op eq 'PadAccess' || $op eq 'EntryDef') && $self->{_frozen_reads}{$id}
+    if (($op eq 'FieldAccess' || $op eq 'PadAccess' || $op eq 'EntryDef' || $op eq 'PostfixDeref') && $self->{_frozen_reads}{$id}
             && exists $self->{cache}{$id}) {
         return $self->{cache}{$id};
     }
@@ -1830,6 +1854,15 @@ sub lower_value {
     }
     elsif ($op eq 'EntryWrite') {
         return $self->_lower_entry_write($node);
+    }
+    elsif ($op eq 'Ref') {
+        return $self->_lower_ref($node);
+    }
+    elsif ($op eq 'Exists') {
+        return $self->_lower_exists($node);
+    }
+    elsif ($op eq 'RefType') {
+        return $self->_lower_reftype($node);
     }
     # Statement-effect ops that carry per-call identity (they are in
     # %STATEMENT_EFFECT_OPS, so the control collectors route them here) but
@@ -2908,7 +2941,12 @@ sub _lower_coerce {
     # `_is_narrowed` alone is the whole question: has this operand COMMITTED to
     # a representation? A node that has answers for itself; one that has not
     # falls back to the wire's static claim.
-    my $from      = Chalk::IR::Analysis::_is_narrowed($operand->stamp)
+    # An inlined argument the callee left Unknown is the caller's value as
+    # it is (see lower_value's binding), so its reading is the caller's.
+    my $bound_repr = ( $operand->stamp // 'Unknown' ) eq 'Unknown' && $self->_bound_ref($operand)
+                   ? $self->_repr_of($operand) : undef;
+    my $from      = defined $bound_repr ? $bound_repr
+                  : Chalk::IR::Analysis::_is_narrowed($operand->stamp)
                   ? $operand->stamp
                   # A Scalar operand IS its Slot, which says more than an
                   # Unknown the coercion was built with: a shared lexical, and
@@ -3352,15 +3390,17 @@ sub _lower_padaccess {
     # program, the call point for an inlined sub, so a call inside a loop
     # gets a fresh one each pass, as perl's `my` does. A `my @r` re-run in a
     # loop arrives instead as an ArrayLiteral on the control chain.
-    if (!defined $node->inputs->[0] && ($node->sigil // '') eq '@'
-            && ($node->stamp // '') eq 'Array') {
+    # A `my %h;` is the same, an empty %Hash that grows as keys are stored.
+    if (!defined $node->inputs->[0]
+            && ( ( ($node->sigil // '') eq '@' && ($node->stamp // '') eq 'Array' )
+              || ( ($node->sigil // '') eq '%' && ($node->stamp // '') eq 'Hash' ) )) {
         # Once: a PadAccess is a mutable read, re-lowered at every use, and
         # each re-lowering allocated another empty array -- push filled one
         # and "@r" printed another.
         return $self->{_empty_arrays}{ $node->id } if $self->{_empty_arrays}{ $node->id };
         my ($saved, $nblocks) = ($self->{current_idx}, scalar @{ $self->{blocks} });
         $self->{current_idx} = $self->{_graph_entry_idx} // 0;
-        my $ref = $self->_lower_array_ref($node);
+        my $ref = $node->sigil eq '%' ? $self->_lower_hash_ref($node) : $self->_lower_array_ref($node);
         $self->{current_idx} = $saved;
         die "GAP: an empty array's allocation opened blocks in the entry block\n"
             if @{ $self->{blocks} } != $nblocks;
@@ -3494,7 +3534,7 @@ sub _lower_assign {
         # the SAME aggregate the array name resolves to (memory-SSA phase 2d).
         my $container = $self->_unwrap_ref_container($lhs->inputs->[0]);
         my $key_idx   = $lhs->inputs->[1];
-        my $ctr_repr  = $container->stamp // '';
+        my $ctr_repr  = $self->_repr_of($container) // '';
 
         if ($ctr_repr eq 'Array' || $ctr_repr eq 'ArrayRef') {
             # Array element store: bounds-checked (same as _lower_array_write body).
@@ -3502,7 +3542,7 @@ sub _lower_assign {
 
             # Typed pointer resolved at THIS use — see _container_ptr.
             my $arr_ref = $self->_container_ptr($container, 'Array');
-            my $idx_ref = $self->lower_value($key_idx);
+            my $idx_ref = $self->_index_i64($key_idx);
 
             # Load elems pointer and write the slot.
             my $elem_ptr = $self->_fresh;
@@ -3586,6 +3626,11 @@ sub _lower_assign {
             $self->_emit("  $count = load i64, i64* $cnt_ptr  ; Assign(Hash-lvalue): load count");
             $self->_emit("  $ents  = load %HashEntry*, %HashEntry** $ent_ptr  ; Assign(Hash-lvalue): load entries");
 
+            # THE VALUE, BOXED ONCE, before the search: its defined bit, its
+            # reading (the tag a read decodes by), its payload word. Any
+            # scalar; a Scalar is its own Slot's three fields.
+            my ($wdef, $wtag, $wpay) = $self->_slot_fields_of_value($rhs, $rhs_ref, 'Assign(Hash-lvalue)');
+            my $lbl_wins  = $self->_fresh_label('hwins');
             my $lbl_wloop = $self->_fresh_label('hwalp');
             my $lbl_wchk  = $self->_fresh_label('hwchk');
             my $lbl_wcmp  = $self->_fresh_label('hwcmp');
@@ -3601,19 +3646,17 @@ sub _lower_assign {
             $self->_emit("  $wi_phi = phi i64 [ 0, \%$lbl_wpre ], [ $wi_next, \%$lbl_wnxt ]  ; Assign(Hash-lvalue): loop counter");
             my $wcond = $self->_fresh;
             $self->_emit("  $wcond = icmp ult i64 $wi_phi, $count  ; Assign(Hash-lvalue): i < count?");
-            $self->_set_terminator("  br i1 $wcond, label \%$lbl_wchk, label \%$lbl_wend");
+            $self->_set_terminator("  br i1 $wcond, label \%$lbl_wchk, label \%$lbl_wins");
 
             $self->_new_block($lbl_wchk);
             my $went_p   = $self->_fresh;
             my $went_kpp = $self->_fresh;
             my $went_klp = $self->_fresh;
-            my $went_vpp = $self->_fresh;
             my $went_kp  = $self->_fresh;
             my $went_kl  = $self->_fresh;
             $self->_emit("  $went_p   = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $wi_phi  ; Assign(Hash-lvalue): entry ptr");
-            $self->_emit("  $went_kpp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 0  ; Assign(Hash-lvalue): key_ptr field");
-            $self->_emit("  $went_klp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 1  ; Assign(Hash-lvalue): key_len field");
-            $self->_emit("  $went_vpp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 4  ; Assign(Hash-lvalue): val_pay field");
+            $self->_emit("  $went_kpp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 " . _he_idx('key_ptr') . "  ; Assign(Hash-lvalue): key_ptr field");
+            $self->_emit("  $went_klp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 " . _he_idx('key_len') . "  ; Assign(Hash-lvalue): key_len field");
             $self->_emit("  $went_kp  = load i8*,  i8**  $went_kpp  ; Assign(Hash-lvalue): entry key ptr");
             $self->_emit("  $went_kl  = load i64,  i64*  $went_klp  ; Assign(Hash-lvalue): entry key len");
             my $wlen_eq = $self->_fresh;
@@ -3628,30 +3671,18 @@ sub _lower_assign {
             $self->_set_terminator("  br i1 $wis_match, label \%$lbl_wupd, label \%$lbl_wnxt");
 
             $self->_new_block($lbl_wupd);
-            # The rhs is boxed into the entry's one-word payload — see
-            # _box_payload for the per-repr rule. Without it a ref value would
-            # emit `store i64 i8*`, which is invalid IR. Str and Num are
-            # excluded for the same reason as the array-lvalue branch above: a
-            # type-changing store is invisible to the element-type inference,
-            # so the read would still load at the literal-derived repr.
-            my $wrhs_repr = $rhs->stamp // '';
-            my $wrhs_i64;
-            if ($wrhs_repr =~ /\A(?:Int|ArrayRef|HashRef|CodeRef|Object)\z/) {
-                $wrhs_i64 = $self->_box_payload($rhs_ref, $wrhs_repr,
-                                                'Assign(Hash-lvalue) rhs');
-            }
-            else {
-                die "GAP: Assign(Hash-lvalue) rhs repr=$wrhs_repr cannot be stored "
-                  . "in an i64 Slot payload — the container's element repr is "
-                  . "inferred from its literal initializers only, so a "
-                  . "type-changing store would read back at the old repr.";
-            }
-            $self->_emit("  store i64 $wrhs_i64, i64* $went_vpp  ; Assign(Hash-lvalue): update val_payload");
+            $self->_store_hash_value($went_p, $wdef, $wtag, $wpay, 'Assign(Hash-lvalue): update');
             $self->_set_terminator("  br label \%$lbl_wend");
 
             $self->_new_block($lbl_wnxt);
             $self->_emit("  $wi_next = add i64 $wi_phi, 1  ; Assign(Hash-lvalue): i++");
             $self->_set_terminator("  br label \%$lbl_wloop");
+
+            # A KEY NOT THERE IS ADDED. The search used to fall through to the
+            # end, and `$h->{b} = 2` on a hash without b stored nothing.
+            $self->_new_block($lbl_wins);
+            $self->_emit_hash_insert($hash_ref, $wkey_ref, $wkey_len, $wdef, $wtag, $wpay);
+            $self->_set_terminator("  br label \%$lbl_wend");
 
             $self->_new_block($lbl_wend);
 
@@ -3662,6 +3693,20 @@ sub _lower_assign {
             die "GAP: Assign(Subscript-lvalue) container has repr=$ctr_repr; "
               . "only Array/ArrayRef element stores are lowered runtime-free.";
         }
+    }
+
+    # $$r = V stores through the reference into the %Slot it names.
+    if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'PostfixDeref'
+            && ($lhs->sigil // '') eq '$') {
+        my $ptr  = $self->_scalar_ref_target($lhs->inputs->[0]);
+        my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');
+        my $boxed = $from =~ /\A(?:Scalar|Slot)\z/ ? $rhs_ref
+                  : $from =~ /\A(?:Int|Num|Str|Boolean)\z/
+                      ? $self->_emit_coercion($rhs_ref, $from, 'Scalar', 'store through $$ref')
+                  : die "GAP: a store through a scalar reference of a $from value is not lowered\n";
+        $self->_emit("  store %Slot $boxed, %Slot* $ptr  ; \$\$ref = ...");
+        $self->{cache}{ $node->id } = $rhs_ref;
+        return $rhs_ref;
     }
 
     # A LOCATION is stored to its %Slot: the value boxed into the Slot every
@@ -4362,6 +4407,54 @@ sub _emit_shortcircuit_phi {
 # LLVM cannot constant-fold without mem2reg. See U3 test for verification.
 # ---------------------------------------------------------------------------
 
+# _subscript_slot($node) -> the element read $node makes, as its whole
+# %Slot, whatever it is stamped -- its defined bit included. The node's own
+# cached value is left as it was.
+sub _subscript_slot {
+    my ($self, $node) = @_;
+    my $id  = $node->id;
+    my ($had, $c) = (exists $self->{cache}{$id}, $self->{cache}{$id});
+    my $old = $node->stamp;
+    $node->set_stamp('Slot');
+    my $slot = eval { $self->_lower_subscript($node) };
+    my $err  = $@;
+    $node->set_stamp($old);
+    if ($had) { $self->{cache}{$id} = $c } else { delete $self->{cache}{$id} }
+    die $err if $err;
+    return $slot;
+}
+
+# _lower_defined_or_by_slot($node, $slot) -> `LHS // RHS` where the LHS is
+# a %Slot: defined by its bit, read as the result's repr; the RHS, lowered
+# only on the undef path, is brought to that repr too.
+sub _lower_defined_or_by_slot {
+    my ($self, $node, $slot) = @_;
+    my $to = $node->stamp // 'Scalar';
+    $to = 'Scalar' if $to eq 'Slot';
+    my $def  = $self->_slot_defined_bit($slot);
+    my $lval = $to eq 'Scalar' ? $slot : $self->_emit_coercion($slot, 'Scalar', $to, '// lhs');
+    my $lhs_end = $self->_current_block_label;
+    my ($undef, $end) = ($self->_fresh_label('dor.undef.'), $self->_fresh_label('dor.end.'));
+    $self->_set_terminator("  br i1 $def, label %$end, label %$undef  ; //: defined?");
+    $self->_new_block($undef);
+    my $rhs  = $node->inputs->[1];
+    my $rval = $self->lower_value($rhs);
+    my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');
+    if ($from ne $to) {
+        $rval = $from eq 'Undef' && $to eq 'Scalar'
+            ? $self->_build_slot('false', '0', 'Undef', '// rhs')
+            : $self->_emit_coercion($rval, $from, $to, '// rhs');
+    }
+    my $rhs_end = $self->_current_block_label;
+    $self->_set_terminator("  br label %$end");
+    $self->_new_block($end);
+    my $res = $self->_fresh;
+    $self->_emit("  $res = phi " . _repr_to_llvm_type($to)
+        . " [ $lval, %$lhs_end ], [ $rval, %$rhs_end ]  ; //");
+    $self->{cache}{ $node->id } = $res;
+    return $res;
+}
+
 sub _lower_defined_or {
     my ($self, $node) = @_;
 
@@ -4383,7 +4476,19 @@ sub _lower_defined_or {
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
 
-    my $lhs_repr = _require_repr($lhs_node, 'DefinedOr.lhs');
+    my $lhs_repr = $self->_repr_of($lhs_node) // _require_repr($lhs_node, 'DefinedOr.lhs');
+    $lhs_repr = _require_repr($lhs_node, 'DefinedOr.lhs') if $lhs_repr eq 'Unknown';
+
+    # AN ELEMENT READ MAY MISS, whatever it is stamped (Analysis types it from
+    # what the container holds), and a Scalar into a narrower result needs
+    # unboxing: both decide by the Slot's own defined bit.
+    if ($lhs_repr ne 'Slot'
+            && ( $lhs_node->operation eq 'Subscript'
+                 || ( $lhs_repr eq 'Scalar' && ( $repr // '' ) ne 'Scalar' ) )) {
+        my $slot = $lhs_node->operation eq 'Subscript' && $lhs_repr ne 'Scalar'
+            ? $self->_subscript_slot($lhs_node) : $self->lower_value($lhs_node);
+        return $self->_lower_defined_or_by_slot($node, $slot);
+    }
 
     # Lower the LHS. For Undef-typed LHS, this produces the defined bit (i1).
     # For Int/Num/Str/Boolean-typed LHS, this produces the payload value.
@@ -4597,7 +4702,20 @@ sub _lower_defined {
 
     my $inputs  = $node->inputs;
     my $operand = $inputs->[0];
-    my $op_repr = _require_repr($operand, 'Defined.operand');
+    # A bound argument's reading is the caller's (_repr_of), not the
+    # callee node's Unknown -- "always defined" over an undef argument.
+    my $op_repr = $self->_repr_of($operand) // _require_repr($operand, 'Defined.operand');
+    $op_repr = _require_repr($operand, 'Defined.operand') if $op_repr eq 'Unknown';
+
+    # AN ELEMENT READ MAY MISS whatever it is stamped: `defined $a[$i]` past
+    # the end said yes for an Int-stamped read. Its own Slot decides.
+    # An Undef-stamped one (a static miss) too: lowered as a Slot, its Undef
+    # arm branched on the aggregate (backlog 9c217485).
+    if ($operand->operation eq 'Subscript' && $op_repr !~ /\A(?:Slot|Scalar)\z/) {
+        my $bit = $self->_slot_defined_bit($self->_subscript_slot($operand));
+        $self->{cache}{$node->id} = $bit;
+        return $bit;
+    }
 
     # Lower the operand to get its value ref (or defined bit for Undef-typed).
     my $op_ref = $self->lower_value($operand);
@@ -5434,8 +5552,13 @@ sub _freeze_memory_reads {
                 || ($c->operation eq 'PadAccess' && $c->is_location)) {
             $mem = $c->inputs->[0];
         }
+        elsif ($c->operation eq 'PostfixDeref' && ( ($c->sigil // '') eq '$' || $c->copy )) {
+            # $$r, or a copy through a reference, at its memory version: made
+            # where it is used, the copy took a later store's value.
+            $mem = $c->inputs->[1];
+        }
         else {
-            next unless $c->operation eq 'Subscript';
+            next unless $c->operation eq 'Subscript' || $c->operation eq 'Exists';
             # A memory-having read: inputs[2] is the memory version. Guard against a
             # 2-input lvalue Subscript (no memory input).
             $mem = $c->inputs->[2];
@@ -5515,7 +5638,9 @@ sub _process_if_node {
 
     # Process then-branch. var_table is mutated in place; snapshot after.
     $self->_new_block($then_label);
+    $self->{_arm_dropped} = {};
     $self->_process_branch_from_if($if_node, 0, $merge_label);
+    my $then_cache = delete $self->{_arm_dropped};
     my $then_end_label = $self->_current_block_label;
     my %then_var = %{ $self->{var_table} };
 
@@ -5524,7 +5649,9 @@ sub _process_if_node {
 
     # Process else-branch. var_table starts from pre-branch state.
     $self->_new_block($else_label);
+    $self->{_arm_dropped} = {};
     $self->_process_branch_from_if($if_node, 1, $merge_label);
+    my $else_cache = delete $self->{_arm_dropped};
     my $else_end_label = $self->_current_block_label;
     my %else_var = %{ $self->{var_table} };
 
@@ -5549,7 +5676,7 @@ sub _process_if_node {
         # Arm values are lowered with each branch's var_table snapshot so
         # variable reads are branch-correct.
         ($then_end_label, $else_end_label) = $self->_wire_region_phis_with_preblock(
-            $region, $then_end_label, $else_end_label, \%then_var, \%else_var);
+            $region, $then_end_label, $else_end_label, \%then_var, \%else_var, $then_cache, $else_cache);
 
         my $phi_key = 'if.merge.' . $region->id;
         my $phi_recs = $self->{elab_phi_by_block}{$phi_key} // [];
@@ -5608,7 +5735,7 @@ sub _process_if_node {
 # state. Returns the updated (then_label, else_label) — the caller must use
 # these for any further phi lines it emits into the same merge block.
 sub _wire_region_phis_with_preblock {
-    my ($self, $region, $then_label, $else_label, $then_vars, $else_vars) = @_;
+    my ($self, $region, $then_label, $else_label, $then_vars, $else_vars, $then_cache, $else_cache) = @_;
 
     my $consumers = $region->consumers // [];
     my @all_phis = grep {
@@ -5706,11 +5833,11 @@ sub _wire_region_phis_with_preblock {
 
         my ($then_val, $else_val);
         ($then_val, $then_label) =
-            $self->_lower_arm_in_tail($inputs->[$then_slot], $then_label, $then_vars);
+            $self->_lower_arm_in_tail($inputs->[$then_slot], $then_label, $then_vars, $then_cache);
         $then_val = $self->_coerce_arm($inputs->[$then_slot], $then_val, $phi_repr,
                                        $then_label, 'Region.Phi.then');
         ($else_val, $else_label) =
-            $self->_lower_arm_in_tail($inputs->[$else_slot], $else_label, $else_vars);
+            $self->_lower_arm_in_tail($inputs->[$else_slot], $else_label, $else_vars, $else_cache);
         $else_val = $self->_coerce_arm($inputs->[$else_slot], $else_val, $phi_repr,
                                        $else_label, 'Region.Phi.else');
         push @wired, [$phi_node, $then_val, $else_val];
@@ -5763,7 +5890,7 @@ sub _coerce_arm {
 # branch-to-merge to the new tail and report the new tail's label as the
 # phi's incoming label.
 sub _lower_arm_in_tail {
-    my ($self, $arm_node, $tail_label, $var_snapshot) = @_;
+    my ($self, $arm_node, $tail_label, $var_snapshot, $arm_cache) = @_;
 
     my $idx = $self->_find_block_idx($tail_label);
     $self->{current_idx} = $idx;
@@ -5774,7 +5901,14 @@ sub _lower_arm_in_tail {
         %merge_vars = %{ $self->{var_table} };
         %{ $self->{var_table} } = %$var_snapshot;
     }
+    # The arm's own cached values hold here, in its tail, and nowhere else:
+    # what this lowering caches is dropped again, as the arm's were.
+    my %cached_before = map { $_ => 1 } keys %{ $self->{cache} };
+    for my $id (keys %{ $arm_cache // {} }) {
+        $self->{cache}{$id} //= $arm_cache->{$id};
+    }
     my $val = $self->lower_value($arm_node);
+    delete @{ $self->{cache} }{ grep { !$cached_before{$_} } keys %{ $self->{cache} } };
     if (defined $var_snapshot) {
         %{ $self->{var_table} } = %merge_vars;
     }
@@ -5991,12 +6125,31 @@ sub _prelower_loop_store_operands {
     my ($self, $loop_node) = @_;
     my $body_proj = _find_proj_consumer($loop_node, 0);
     return unless defined $body_proj;
-    for my $node (_collect_branch_body($body_proj)) {
+    my @body = _collect_branch_body($body_proj);
+    for my $node (@body) {
         next unless $node->operation eq 'Assign';
         my ($target) = grep { blessed($_) && $_->operation eq 'Subscript' }
                             $node->inputs->@*;
         next unless defined $target;
         $self->lower_value($target->inputs->[0]);   # container only
+    }
+    # SO IS ANY LOOP-INVARIANT AGGREGATE THE BODY TOUCHES -- read, referenced,
+    # handed to a call: a `my @a = qw(a b c)` first lowered by a read in the
+    # body, then interpolated after the loop, did not dominate that use. One
+    # unpinned and built from constants alone is the same every pass.
+    my (%seen, @q) = ();
+    @q = map { $_->inputs->@* } @body;
+    while (defined(my $n = shift @q)) {
+        next unless blessed($n) && !$seen{ refaddr($n) }++;
+        my $op = $n->operation;
+        next if $op eq 'Phi' || Chalk::IR::NodeFactory::is_statement_node($op);
+        if ($op eq 'ArrayLiteral' || $op eq 'HashLiteral') {
+            $self->lower_value($n)
+                if !( $n->can('control_in') && blessed($n->control_in) )
+                && !grep { !blessed($_) || $_->operation ne 'Constant' } $n->inputs->@*;
+            next;
+        }
+        push @q, $n->inputs->@*;
     }
     return;
 }
@@ -6085,8 +6238,21 @@ sub _process_branch_from_if {
     # of the branch. Dispatch each through process_control_node so nested
     # If nodes are handled recursively via _process_if_node.
     my @body_nodes = _collect_branch_body($proj);
+    my %cached_before = map { $_ => 1 } keys %{ $self->{cache} };
     for my $body_node (@body_nodes) {
         $self->process_control_node($body_node);
+    }
+    # A VALUE LOWERED IN AN ARM IS THE ARM'S: hash-consed, the same `"$i"`
+    # served a use after the merge from inside the arm, where it did not
+    # dominate. What the arm cached is dropped when it ends -- save its own
+    # statements, which run once -- and a later use lowers it again. A value
+    # of the arm's that the merge carries reaches it through the merge's phi.
+    # The merge lowers its phi arms in the arm's tail, so the dropped values
+    # are kept aside (_arm_dropped) for _lower_arm_in_tail to put back there.
+    my %stmt = map { $_->id => 1 } @body_nodes;
+    for my $id (grep { !$cached_before{$_} && !$stmt{$_} } keys %{ $self->{cache} }) {
+        $self->{_arm_dropped}{$id} = $self->{cache}{$id};
+        delete $self->{cache}{$id};
     }
 
     # A `die` arm carries an Unwind whose control is this Proj: the arm aborts
@@ -6665,7 +6831,8 @@ sub _is_memory_phi {
                              $in->inputs->@*;
             my $lhs = $in->inputs->[0];
             return 1 if blessed($lhs) && ( $lhs->operation eq 'FieldAccess'
-                || ( $lhs->operation eq 'PadAccess' && $lhs->is_location ) );
+                || ( $lhs->operation eq 'PadAccess' && $lhs->is_location )
+                || ( $lhs->operation eq 'PostfixDeref' && ($lhs->sigil // '') eq '$' ) );
         }
         # a package scalar's store
         return 1 if $in->operation eq 'EntryWrite';
@@ -6911,9 +7078,21 @@ sub _collect_body_recursive {
 # and the safe answer for an unknown is the one that emits.
 sub _owned_by_arm {
     my ($node, $visited) = @_;
-    return 1 unless $node->can('control_in');
+    # AN UNPINNED NODE READING A MERGE THE ARM DOES NOT CONTAIN comes after
+    # that merge: `keys %h` after a loop that fills %h reads the loop exit's
+    # memory phi, and collected into the body it was emitted there, used
+    # after the loop where it did not dominate.
+    my $after_a_merge = sub {
+        grep {
+            blessed($_) && $_->operation eq 'Phi' && $_->can('region')
+                && blessed($_->region) && $_->region->operation eq 'Region'
+                && !$visited->{continues}{ $_->region->id }
+                && !$visited->{owned}{ $_->region->id }
+        } $node->inputs->@*;
+    };
+    return ($after_a_merge->() ? 0 : 1) unless $node->can('control_in');
     my $ctrl = $node->control_in;
-    return 1 unless defined $ctrl && blessed($ctrl);
+    return ($after_a_merge->() ? 0 : 1) unless defined $ctrl && blessed($ctrl);
 
     my $cop = $ctrl->can('operation') ? $ctrl->operation : '';
     # A merge is post-branch -- unless it closes a structure inside this arm,
@@ -7050,8 +7229,11 @@ sub _lower_list_append {
     # THE GATE, by stamp and only at the LAST position. A Boolean contribution
     # in the middle would be an element (`map { ($_ > 1, $_) }` is a pair whose
     # first member is a boolean), so position matters as well as type.
+    # A GREP'S LAST INPUT IS ITS TEST whatever it yields (the producer names
+    # the collector); without the name, a Boolean last input still is.
     my $gate_node;
-    if (@rest && ($rest[-1]->stamp // '') eq 'Boolean') {
+    if (@rest && ( ( $node->can('collector') && ($node->collector // '') eq 'grep' )
+                   || ($rest[-1]->stamp // '') eq 'Boolean' )) {
         $gate_node = pop @rest;
     }
 
@@ -7060,6 +7242,8 @@ sub _lower_list_append {
 
     if (defined $gate_node) {
         my $gate = $self->lower_value($gate_node);
+        my $gr   = $gate_node->operation eq 'Print' ? 'Boolean' : ($gate_node->stamp // '');
+        $gate = $self->_emit_coercion($gate, $gr, 'Boolean', 'grep test') if $gr ne 'Boolean';
         $self->_set_terminator("  br i1 $gate, label %$body_label, label %$cont_label  ; ListAppend: predicate gate");
         $self->_new_block($body_label);
     }
@@ -7284,15 +7468,6 @@ sub _lower_hash_ref {
     my $inputs = $node->inputs;
     my $npairs = scalar(@$inputs) / 2;
 
-    # ONE READING FOR EVERY VALUE. A %HashEntry stores an i64 payload and no
-    # tag; a read decodes it by its own stamp, the join of the values. Mixed,
-    # an Int 1 was decoded as the double 4.94e-324, and Int with Str crashed.
-    my %scalar_reprs = map { $_ => 1 } grep { /\A(?:Int|Num|Str|Boolean)\z/ }
-        map { $inputs->[ $_ * 2 + 1 ]->stamp // '' } 0 .. $npairs - 1;
-    die "GAP: a hash whose values are " . join(' and ', sort keys %scalar_reprs)
-      . " is not lowered -- %HashEntry carries no tag to tell them apart\n"
-        if keys %scalar_reprs > 1;
-
     # Sized by LLVM from %HashEntry: it embeds a slot's worth of value fields,
     # so a hand-written 48 goes wrong exactly when those change.
     my $entry_bytes = _sizeof_times('%HashEntry', $npairs);
@@ -7318,11 +7493,11 @@ sub _lower_hash_ref {
         my $e_ke = $self->_fresh;
         my $e_vd = $self->_fresh;
         my $e_vp = $self->_fresh;
-        $self->_emit("  $e_kp = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 0  ; HashRef: entry[$i] key_ptr ptr");
-        $self->_emit("  $e_kl = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 1  ; HashRef: entry[$i] key_len ptr");
-        $self->_emit("  $e_ke = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 2  ; HashRef: entry[$i] key_enc ptr");
-        $self->_emit("  $e_vd = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 3  ; HashRef: entry[$i] val_def ptr");
-        $self->_emit("  $e_vp = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 4  ; HashRef: entry[$i] val_pay ptr");
+        $self->_emit("  $e_kp = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 " . _he_idx('key_ptr') . "  ; HashRef: entry[$i] key_ptr ptr");
+        $self->_emit("  $e_kl = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 " . _he_idx('key_len') . "  ; HashRef: entry[$i] key_len ptr");
+        $self->_emit("  $e_ke = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 " . _he_idx('key_enc') . "  ; HashRef: entry[$i] key_enc ptr");
+        $self->_emit("  $e_vd = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 " . _he_idx('val_def') . "  ; HashRef: entry[$i] val_def ptr");
+        $self->_emit("  $e_vp = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 " . _he_idx('val_pay') . "  ; HashRef: entry[$i] val_pay ptr");
         $self->_emit("  store i8* $key_ref, i8** $e_kp  ; HashRef: key ptr");
         $self->_emit("  store i64 $key_len, i64* $e_kl  ; HashRef: key len=$key_len");
         $self->_emit("  store i32 0, i32* $e_ke          ; HashRef: enc=0 (ASCII)");
@@ -7334,6 +7509,13 @@ sub _lower_hash_ref {
         my $val_i64  = $self->_box_payload($val_ref, $val_repr,
                                            "HashRef value[$i]");
         $self->_emit("  store i64 $val_i64, i64* $e_vp   ; HashRef: value");
+        # ITS READING, stored beside it: a read decodes by this, not by its own
+        # stamp (a hash of Int and Num values read the 1 as 4.94e-324).
+        my $e_vt = $self->_fresh;
+        $self->_emit("  $e_vt = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 "
+            . _he_idx('val_tag') . "  ; HashRef: entry[$i] val_tag ptr");
+        $self->_emit("  store i8 " . _slot_tag_value(_slot_tag_for_repr($val_repr))
+            . ", i8* $e_vt  ; HashRef: entry[$i] tag=$val_repr");
     }
 
     my $hash_buf = $self->_fresh;
@@ -7423,6 +7605,214 @@ sub _lower_length {
     }
 }
 
+# _index_i64($node) -> an array index as an i64: perl reads an index as an
+# integer. A Scalar is unboxed (a callee's `$_[1]` is one, and boxed it
+# reached a GEP as a %Slot), a Num truncated.
+sub _index_i64 {
+    my ($self, $idx) = @_;
+    my $r = $self->_repr_of($idx) // '';
+    my $v = $self->lower_value($idx);   # a bound argument as $r reads it
+    return $v if $r eq 'Int';
+    return $self->_emit_coercion($v, 'Scalar', 'Int', 'array index') if $r eq 'Scalar';
+    if ($r eq 'Num' || $r eq 'Boolean') {
+        my $i = $self->_fresh;
+        $self->_emit("  $i = " . ($r eq 'Num' ? 'fptosi ' . _repr_to_llvm_type('Num') : 'zext i1')
+            . " $v to i64  ; array index as an integer");
+        return $i;
+    }
+    die "GAP: an array index with repr=$r is not lowered\n";
+}
+
+# _slot_as_reading($slot, $repr, $what) -> an element's %Slot as a read
+# stamped $repr reads it: unboxed by its tag (undef reads as perl does), its
+# defined bit for an Undef-stamped read, a pointer for a ref, or the Slot.
+sub _slot_as_reading {
+    my ($self, $slot, $repr, $what) = @_;
+    return $self->_emit_coercion($slot, 'Scalar', $repr, $what)
+        if $repr =~ /\A(?:Int|Num|Str|Boolean)\z/;
+    return $self->_slot_defined_bit($slot) if $repr eq 'Undef';
+    if ($repr =~ /\A(?:ArrayRef|HashRef|CodeRef|ScalarRef)\z/) {
+        my ($pay, $ptr) = ($self->_slot_payload_of($slot), $self->_fresh);
+        $self->_emit("  $ptr = inttoptr i64 $pay to i8*  ; $what :$repr ptr");
+        return $ptr;
+    }
+    return $slot;
+}
+
+# _lower_exists($node) -> i1. `exists $h{k}`: is the key there -- a key
+# holding undef is (which is what makes it not `defined`). `exists $a[i]`:
+# is the index inside the array, counting from the end when negative.
+sub _lower_exists {
+    my ($self, $node) = @_;
+    my ($container, $key) = $node->inputs->@[0, 1];
+    my $kind = $node->can('kind') ? ($node->kind // '') : '';
+    $self->{_need_aggregate_types} = 1;
+    my $res;
+    if ($kind eq 'hash') {
+        $self->{_need_memcmp} = 1;
+        my $hash = $self->_container_ptr($container, 'Hash');
+        my ($kp, $kl) = $self->_str_parts($self->lower_value($key));
+        defined $kl or die "GAP: exists over a hash key with no tracked length is not lowered\n";
+        $res = $self->_emit_hash_has_key($hash, $kp, $kl);
+    }
+    elsif ($kind eq 'array') {
+        my $arr = $self->_container_ptr($container, 'Array');
+        my $i   = $self->_index_i64($key);
+        my ($lp, $len, $neg, $adj, $idx, $in) = map { $self->_fresh } 1 .. 6;
+        $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0");
+        $self->_emit("  $len = load i64, i64* $lp  ; exists: len");
+        $self->_emit("  $neg = icmp slt i64 $i, 0");
+        $self->_emit("  $adj = add i64 $i, $len");
+        $self->_emit("  $idx = select i1 $neg, i64 $adj, i64 $i  ; exists: from the end");
+        $self->_emit("  $in = icmp ult i64 $idx, $len  ; exists: inside?");
+        $res = $in;
+    }
+    else {
+        die "GAP: exists over a $kind is not lowered\n";
+    }
+    $self->{cache}{ $node->id } = $res;
+    return $res;
+}
+
+# _emit_hash_has_key($hash, $key_ptr, $key_len) -> i1, found
+sub _emit_hash_has_key {
+    my ($self, $hash, $kp, $kl) = @_;
+    my ($cntp, $entp, $cnt, $ents) = map { $self->_fresh } 1 .. 4;
+    $self->_emit("  $cntp = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 0");
+    $self->_emit("  $entp = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 2");
+    $self->_emit("  $cnt = load i64, i64* $cntp  ; exists: count");
+    $self->_emit("  $ents = load %HashEntry*, %HashEntry** $entp  ; exists: entries");
+    my ($loop, $chk, $cmp, $nxt, $done) = map { $self->_fresh_label("hex.$_.") } qw(loop chk cmp nxt done);
+    my $pre = $self->_current_block_label;
+    my ($i, $i1, $more) = map { $self->_fresh } 1 .. 3;
+    $self->_set_terminator("  br label %$loop");
+    $self->_new_block($loop);
+    $self->_emit("  $i = phi i64 [ 0, %$pre ], [ $i1, %$nxt ]");
+    $self->_emit("  $more = icmp ult i64 $i, $cnt");
+    $self->_set_terminator("  br i1 $more, label %$chk, label %$done");
+    $self->_new_block($chk);
+    my ($e, $klp, $ekl, $leq) = map { $self->_fresh } 1 .. 4;
+    $self->_emit("  $e = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i");
+    $self->_emit("  $klp = getelementptr inbounds %HashEntry, %HashEntry* $e, i32 0, i32 " . _he_idx('key_len'));
+    $self->_emit("  $ekl = load i64, i64* $klp");
+    $self->_emit("  $leq = icmp eq i64 $ekl, $kl");
+    $self->_set_terminator("  br i1 $leq, label %$cmp, label %$nxt");
+    $self->_new_block($cmp);
+    my ($kpp, $ekp, $r, $m) = map { $self->_fresh } 1 .. 4;
+    $self->_emit("  $kpp = getelementptr inbounds %HashEntry, %HashEntry* $e, i32 0, i32 " . _he_idx('key_ptr'));
+    $self->_emit("  $ekp = load i8*, i8** $kpp");
+    $self->_emit("  $r = call i32 \@memcmp(i8* nocapture readonly $ekp, i8* nocapture readonly $kp, i64 $kl)");
+    $self->_emit("  $m = icmp eq i32 $r, 0  ; exists: key match?");
+    $self->_set_terminator("  br i1 $m, label %$done, label %$nxt");
+    $self->_new_block($nxt);
+    $self->_emit("  $i1 = add i64 $i, 1");
+    $self->_set_terminator("  br label %$loop");
+    $self->_new_block($done);
+    my $found = $self->_fresh;
+    $self->_emit("  $found = phi i1 [ false, %$loop ], [ true, %$cmp ]  ; exists: found");
+    return $found;
+}
+
+# _slot_fields_of_value($node, $ref, $what) -> ($def_i1, $tag_i8, $pay_i64)
+#
+# A scalar value as the three fields a %Slot or a %HashEntry holds.
+sub _slot_fields_of_value {
+    my ($self, $node, $ref, $what) = @_;
+    my $repr = $node->operation eq 'Print' ? 'Boolean' : ($node->stamp // '');
+    if ($repr eq 'Scalar' || $repr eq 'Slot') {
+        return ($self->_slot_defined_bit($ref), $self->_slot_tag_of($ref), $self->_slot_payload_of($ref));
+    }
+    return ('false', _slot_tag_value('Undef'), '0') if $repr eq 'Undef';
+    die "GAP: $what of a $repr value is not lowered\n"
+        unless $repr =~ /\A(?:Int|Num|Str|Boolean|ArrayRef|HashRef|CodeRef|ScalarRef|Object)\z/;
+    return ('true', _slot_tag_value(_slot_tag_for_repr($repr)),
+            $self->_box_payload($ref, $repr, $what));
+}
+
+# _store_hash_value($entry_ptr, $def, $tag, $pay, $what): write a value's
+# three fields into a %HashEntry.
+sub _store_hash_value {
+    my ($self, $ent, $def, $tag, $pay, $what) = @_;
+    my %f = (val_def => ['i1', $def], val_tag => ['i8', $tag], val_pay => ['i64', $pay]);
+    for my $name (qw(val_def val_tag val_pay)) {
+        my ($ty, $v) = $f{$name}->@*;
+        my $g = $self->_fresh;
+        $self->_emit("  $g = getelementptr inbounds %HashEntry, %HashEntry* $ent, i32 0, i32 "
+            . _he_idx($name) . "  ; $what: $name");
+        $self->_emit("  store $ty $v, $ty* $g  ; $what: $name");
+    }
+}
+
+# _emit_hash_insert($hash, $key_ptr, $key_len, $def, $tag, $pay): append a
+# key the hash does not have, growing its entries when full -- malloc and
+# memcpy, doubling from a floor of 4, as an array append grows.
+sub _emit_hash_insert {
+    my ($self, $hash, $kp, $kl, $def, $tag, $pay) = @_;
+    $self->{_need_malloc_memcpy} = 1;
+    my ($cntp, $capp, $entp, $cnt, $cap, $full) = map { $self->_fresh } 1 .. 6;
+    $self->_emit("  $cntp = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 0  ; insert: count ptr");
+    $self->_emit("  $capp = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 1  ; insert: cap ptr");
+    $self->_emit("  $entp = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 2  ; insert: entries ptr");
+    $self->_emit("  $cnt = load i64, i64* $cntp  ; insert: count");
+    $self->_emit("  $cap = load i64, i64* $capp  ; insert: cap");
+    $self->_emit("  $full = icmp sge i64 $cnt, $cap  ; insert: full?");
+    my ($grow, $put) = ($self->_fresh_label('hins.grow.'), $self->_fresh_label('hins.put.'));
+    $self->_set_terminator("  br i1 $full, label %$grow, label %$put");
+
+    $self->_new_block($grow);
+    my $esz = _sizeof_llvm_type('%HashEntry');
+    my ($dbl, $small, $newcap, $nb, $buf, $old, $oldraw, $ob, $new) = map { $self->_fresh } 1 .. 9;
+    $self->_emit("  $dbl = mul i64 $cap, 2  ; insert: doubled cap");
+    $self->_emit("  $small = icmp slt i64 $dbl, 4");
+    $self->_emit("  $newcap = select i1 $small, i64 4, i64 $dbl  ; insert: new cap (floor 4)");
+    $self->_emit("  $nb = mul i64 $newcap, $esz");
+    $self->_emit("  $buf = call i8* \@malloc(i64 $nb)  ; insert: grown entries");
+    $self->_emit("  $old = load %HashEntry*, %HashEntry** $entp");
+    $self->_emit("  $oldraw = bitcast %HashEntry* $old to i8*");
+    $self->_emit("  $ob = mul i64 $cnt, $esz");
+    $self->_emit("  call i8* \@memcpy(i8* $buf, i8* $oldraw, i64 $ob)  ; insert: copy live entries");
+    $self->_emit("  $new = bitcast i8* $buf to %HashEntry*");
+    $self->_emit("  store %HashEntry* $new, %HashEntry** $entp");
+    $self->_emit("  store i64 $newcap, i64* $capp");
+    $self->_set_terminator("  br label %$put");
+
+    # Re-read the entries: the grow path replaced them.
+    $self->_new_block($put);
+    my ($ents, $e, $c1) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  $ents = load %HashEntry*, %HashEntry** $entp  ; insert: entries (post-grow)");
+    $self->_emit("  $e = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $cnt  ; insert: new entry");
+    my %k = (key_ptr => ['i8*', $kp], key_len => ['i64', $kl], key_enc => ['i32', '0']);
+    for my $name (qw(key_ptr key_len key_enc)) {
+        my ($ty, $v) = $k{$name}->@*;
+        my $g = $self->_fresh;
+        $self->_emit("  $g = getelementptr inbounds %HashEntry, %HashEntry* $e, i32 0, i32 " . _he_idx($name));
+        $self->_emit("  store $ty $v, $ty* $g  ; insert: $name");
+    }
+    $self->_store_hash_value($e, $def, $tag, $pay, 'insert');
+    $self->_emit("  $c1 = add i64 $cnt, 1");
+    $self->_emit("  store i64 $c1, i64* $cntp  ; insert: count + 1");
+}
+
+# _repr_of($node) / _bound_ref($node): a node an inlined call binds to the
+# caller's value (an argument) reads as THAT value's repr. A callee's `my
+# ($h) = @_` is stamped Unknown, and the HashRef it holds was refused as a
+# container: an element store through a reference a sub is handed.
+sub _repr_of {
+    my ($self, $n) = @_;
+    my $b = $self->{_arg_bind} && blessed($n) ? $self->{_arg_bind}{ refaddr($n) } : undef;
+    # The caller's repr only where lower_value serves the caller's value as
+    # it is -- a callee node nothing typed, or one used as a container; one
+    # with a reading of its own is coerced to it (lower_value).
+    return $b && $b->{repr} && ( ($n->stamp // 'Unknown') eq 'Unknown'
+                                 || $b->{repr} =~ /Ref\z/ )
+        ? $b->{repr} : $n->stamp;
+}
+sub _bound_ref {
+    my ($self, $n) = @_;
+    my $b = $self->{_arg_bind} && blessed($n) ? $self->{_arg_bind}{ refaddr($n) } : undef;
+    return $b ? $b->{ref} : undef;
+}
+
 # _unwrap_ref_container($container) -> the aliased target of a `\` reference.
 #
 # `my $r = \@a` builds a Ref node wrapping the @a ArrayRef; in Perl \@a and @a
@@ -7450,8 +7840,8 @@ sub _unwrap_ref_container {
 sub _container_ptr {
     my ($self, $container, $kind) = @_;
     $container = $self->_unwrap_ref_container($container);
-    my $repr = $container->stamp // '';
-    my $v = $self->lower_value($container);
+    my $repr = $self->_repr_of($container) // '';
+    my $v = $self->_bound_ref($container) // $self->lower_value($container);
     return $v unless $repr eq "${kind}Ref";   # unboxed %Array*/%Hash* already
     my $typed = $self->_fresh;
     $self->_emit("  $typed = bitcast i8* $v to %${kind}*  ; ${kind}Ref -> ${kind}* (at use)");
@@ -7485,7 +7875,8 @@ sub _lower_subscript {
     # repr dispatch below would GAP on it; _lower_array_read/_lower_hash_read then
     # resolve the shared aggregate via _container_ptr (which also unwraps).
     my $container = $self->_unwrap_ref_container($node->inputs->[0]);
-    my $container_repr = _require_repr($container, 'Subscript.container');
+    my $container_repr = $self->_repr_of($container)
+        // _require_repr($container, 'Subscript.container');
 
     if ($container_repr eq 'Array' || $container_repr eq 'ArrayRef') {
         return $self->_lower_array_read($node);
@@ -7512,7 +7903,7 @@ sub _lower_array_read {
     # Typed pointer resolved at THIS use (re-lowered for mutable-read
     # containers; bitcast for Ref reprs) — see _container_ptr.
     my $arr_ref = $self->_container_ptr($container, 'Array');
-    my $idx_ref = $self->lower_value($node->inputs->[1]);
+    my $idx_ref = $self->_index_i64($node->inputs->[1]);
     my $repr    = _require_repr($node, 'ArrayRead');
 
     # Load len and elems pointer from the Array struct.
@@ -7570,74 +7961,16 @@ sub _lower_array_read {
     my $slot_oob = $self->_build_slot('false', '0', 'Undef', 'ArrayRead OOB');
     $self->_set_terminator("  br label \%$lbl_end");
 
+    # ONE Slot phi, then this read's reading of it, by the STORED tag --
+    # as a hash read does. Decoded by the read's stamp instead, an element
+    # past the end read as an Int was 0, defined; as a Str it loaded through a
+    # null %Str*; stamped Undef it was a Slot where its defined bit belonged.
     $self->_new_block($lbl_end);
-
-    if ($repr eq 'Int') {
-        # In-bounds known: phi-select the payload (OOB path unreachable for valid idx).
-        my $result = $self->_fresh;
-        $self->_emit("  $result = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :Int payload");
-        $self->{cache}{ $node->id } = $result;
-        return $result;
-    }
-    elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
-        # Pointer element: phi-select payload then inttoptr.
-        my $raw_pay = $self->_fresh;
-        $self->_emit("  $raw_pay = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :$repr raw ptr payload");
-        my $ptr = $self->_fresh;
-        $self->_emit("  $ptr = inttoptr i64 $raw_pay to i8*  ; ArrayRead :$repr ptr");
-        $self->{cache}{ $node->id } = $ptr;
-        return $ptr;
-    }
-    elsif ($repr eq 'Str' || $repr eq 'Num') {
-        # The symmetric unbox of _box_payload. A Str payload is a %Str*
-        # (a Str is a (ptr,len) pair and does not fit in one word); a Num
-        # payload is the double's bits. Without these arms both fell through to
-        # the Slot branch below and were read back as a defined-bit, which is
-        # why an array could only really hold an Int.
-        my $raw_pay = $self->_fresh;
-        $self->_emit("  $raw_pay = phi i64 [ $pay_val, \%$lbl_inb ], [ 0, \%$lbl_oob ]  ; ArrayRead :$repr raw payload");
-
-        if ($repr eq 'Num') {
-            # Reinterpretation into the representation's own machine type; see
-            # _unbox_payload_as, which does the same move for the same reason.
-            my $num_ty = _repr_to_llvm_type($repr);
-            my $d = $self->_fresh;
-            $self->_emit("  $d = bitcast i64 $raw_pay to $num_ty  ; ArrayRead :Num payload -> $num_ty");
-            $self->{cache}{ $node->id } = $d;
-            return $d;
-        }
-
-        $self->{_need_str_type} = 1;
-        my ($pair, $pp, $pl, $ptr, $len) =
-            ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
-        $self->_emit("  $pair = inttoptr i64 $raw_pay to %Str*  ; ArrayRead :Str payload -> StrPair*");
-        $self->_emit("  $pp = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 0  ; StrPair.ptr");
-        $self->_emit("  $pl = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 1  ; StrPair.len");
-        $self->_emit("  $ptr = load i8*, i8** $pp  ; ArrayRead :Str ptr");
-        $self->_emit("  $len = load i64, i64* $pl  ; ArrayRead :Str len");
-        # Re-register the length: a Str value is only usable by print/concat/
-        # return if its byte length is tracked against the pointer.
-        $ptr = $self->_set_str_len($ptr, $len);
-        $self->{cache}{ $node->id } = $ptr;
-        return $ptr;
-    }
-    else {
-        # Slot repr. ONE `phi %Slot` over whole aggregates, not a phi per
-        # field. %Slot is a first-class LLVM value exactly as %Str is, and a
-        # single phi is the only form a merge cannot desynchronize: a field
-        # added to the struct with no matching phi would be SILENTLY DROPPED
-        # here -- a wrong value, which lli does not diagnose, rather than a
-        # type error, which it does.
-        #
-        # Both arms already hold complete Slots: the in-bounds arm loaded the
-        # aggregate, the OOB arm built an explicit undef one. The tag rides
-        # through untouched, so the reading recorded at the STORE survives the
-        # merge instead of being re-derived from this node's repr.
-        my $slot = $self->_fresh;
-        $self->_emit("  $slot = phi %Slot [ $slot_all, \%$lbl_inb ], [ $slot_oob, \%$lbl_oob ]  ; ArrayRead :Slot phi");
-        $self->{cache}{ $node->id } = $slot;
-        return $slot;
-    }
+    my $slot = $self->_fresh;
+    $self->_emit("  $slot = phi %Slot [ $slot_all, \%$lbl_inb ], [ $slot_oob, \%$lbl_oob ]  ; ArrayRead :Slot phi");
+    my $result = $self->_slot_as_reading($slot, $repr, 'ArrayRead');
+    $self->{cache}{ $node->id } = $result;
+    return $result;
 }
 
 # _load_array_header($array, $tag) -> ($arr_ref, $len_ptr, $elem_ptr, $len, $elems)
@@ -8073,8 +8406,8 @@ sub _lower_builtin_keys {
     my ($e_p, $kp_p, $kl_p, $kp, $kl) =
         ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
     $self->_emit("  $e_p = getelementptr inbounds %HashEntry, %HashEntry* $entries, i64 $i_phi  ; keys: entry[i]");
-    $self->_emit("  $kp_p = getelementptr inbounds %HashEntry, %HashEntry* $e_p, i32 0, i32 0  ; keys: key_ptr field");
-    $self->_emit("  $kl_p = getelementptr inbounds %HashEntry, %HashEntry* $e_p, i32 0, i32 1  ; keys: key_len field");
+    $self->_emit("  $kp_p = getelementptr inbounds %HashEntry, %HashEntry* $e_p, i32 0, i32 " . _he_idx('key_ptr') . "  ; keys: key_ptr field");
+    $self->_emit("  $kl_p = getelementptr inbounds %HashEntry, %HashEntry* $e_p, i32 0, i32 " . _he_idx('key_len') . "  ; keys: key_len field");
     $self->_emit("  $kp = load i8*, i8** $kp_p  ; keys: key ptr");
     $self->_emit("  $kl = load i64, i64* $kl_p  ; keys: key len");
 
@@ -8219,29 +8552,61 @@ sub _lower_builtin_join {
 # is a first-class aggregate rather than two parallel values).
 # _unwritten_list_separator($sep_node) -> a Constant " " node, or undef.
 #
-# `$"` read where nothing can have written it: its EntryDef's memory version
-# leads back to MemStart through builtins that cannot assign it. The Constant
-# belongs to no graph; it is minted once.
+# `$"` read where nothing can have written it: nothing in the read's
+# backward slice -- its memory version and everything that leads to it --
+# stores `$"`, nor does a sub called there. (The walk once passed only the
+# builtins, and an element store through a reference before "@a" refused
+# the join.) The Constant belongs to no graph; it is minted once.
 sub _unwritten_list_separator {
     my ($sep) = @_;
     $sep = $sep->inputs->[0] if blessed($sep) && $sep->operation eq 'Coerce';
     return undef unless blessed($sep) && $sep->operation eq 'EntryDef'
         && ($sep->can('package') ? ($sep->package // '') : '') eq 'main'
         && ($sep->can('symbol') ? ($sep->symbol // '') : '') eq '"';
-    my $m = $sep->inputs->[0];
-    while (blessed($m) && $m->operation eq 'Call'
-            && ($m->dispatch_kind // '') eq 'builtin'
-            && ($m->name // '') =~ /\A(?:push|unshift|shift|pop|join|keys|values|sort)\z/
-            && $m->can('memory_input') && $m->memory_input) {
-        $m = $m->inputs->[-1];
-    }
-    return undef unless blessed($m) && $m->operation eq 'MemStart';
+    return undef if _writes_list_separator([ $sep->inputs->@* ], {});
     state $space = do {
         my $c = Chalk::IR::NodeFactory->new->make('Constant', value => ' ', const_type => 'string');
         $c->set_stamp('Str');
         $c;
     };
     return $space;
+}
+
+# _writes_list_separator(\@from, \%seen) -> true when anything reached from
+# @from (inputs and control, backward; into a direct call's callee) stores $".
+sub _writes_list_separator {
+    my ($q, $seen) = @_;
+    while (defined(my $n = shift @$q)) {
+        next unless blessed($n) && !$seen->{ refaddr($n) }++;
+        my $op = $n->operation;
+        if ($op =~ /\A(?:EntryWrite|Assign|LocalAlias)\z/) {
+            my $t = $n->inputs->[0];
+            return 1 if blessed($t) && $t->operation eq 'EntryDef'
+                && ($t->symbol // '') eq '"';
+        }
+        if ($op eq 'Call' && ($n->dispatch_kind // '') ne 'builtin') {
+            my $target = $n->can('target') ? $n->target : undef;
+            my $graph  = $target && $target->can('graph') ? $target->graph : undef;
+            return 1 unless $graph;   # an unknown callee may write anything
+            push @$q, grep { blessed($_) } $graph->nodes->@*, _control_chain_of($graph);
+        }
+        push @$q, grep { blessed($_) } $n->inputs->@*,
+            ($n->can('control_in') ? $n->control_in : ());
+    }
+    return 0;
+}
+
+# _control_chain_of($graph) -> the statements on its Returns' control chains.
+sub _control_chain_of {
+    my ($graph) = @_;
+    my @out;
+    for my $r (($graph->can('returns') ? $graph->returns : [])->@*) {
+        for (my $c = $r; blessed($c); $c = $c->can('control_in') ? $c->control_in : undef) {
+            push @out, $c;
+            last if @out > 100_000;
+        }
+    }
+    return @out;
 }
 
 sub _emit_join_loop {
@@ -8589,10 +8954,10 @@ sub _lower_hash_read {
     my $ent_kp  = $self->_fresh;
     my $ent_kl  = $self->_fresh;
     $self->_emit("  $ent_p   = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i_phi  ; HashRead: entry[$i_phi] ptr");
-    $self->_emit("  $ent_kpp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 0  ; HashRead: key_ptr field ptr");
-    $self->_emit("  $ent_klp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 1  ; HashRead: key_len field ptr");
-    $self->_emit("  $ent_vdp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 3  ; HashRead: val_def field ptr");
-    $self->_emit("  $ent_vpp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 4  ; HashRead: val_pay field ptr");
+    $self->_emit("  $ent_kpp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 " . _he_idx('key_ptr') . "  ; HashRead: key_ptr field ptr");
+    $self->_emit("  $ent_klp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 " . _he_idx('key_len') . "  ; HashRead: key_len field ptr");
+    $self->_emit("  $ent_vdp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 " . _he_idx('val_def') . "  ; HashRead: val_def field ptr");
+    $self->_emit("  $ent_vpp = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 " . _he_idx('val_pay') . "  ; HashRead: val_pay field ptr");
     $self->_emit("  $ent_kp  = load i8*,  i8**  $ent_kpp  ; HashRead: load entry key ptr");
     $self->_emit("  $ent_kl  = load i64,  i64*  $ent_klp  ; HashRead: load entry key len");
     my $len_eq = $self->_fresh;
@@ -8613,21 +8978,19 @@ sub _lower_hash_read {
     my $vp_val = $self->_fresh;
     $self->_emit("  $vd_val = load i1,  i1*  $ent_vdp  ; HashRead: val defined bit");
     $self->_emit("  $vp_val = load i64, i64* $ent_vpp  ; HashRead: val payload");
-    # Build the complete Slot HERE, in the arm, so the merge below can be one
-    # `phi %Slot`. %HashEntry inlines val_def/val_pay rather than embedding a
-    # %Slot and carries NO tag field, so unlike ArrayRead there is no stored
-    # tag to recover -- the reading is whatever this node's repr establishes,
-    # which for the Slot arm is un-narrowed, i.e. 'Opaque'. When %HashEntry
-    # grows a tag (see the note at %HashEntry's declaration) this reads it
-    # instead, and nothing else here changes.
-    # A HIT WITH NO READING is a value no one can read back: an Opaque cell
-    # reads as undef, so a hash written by a call (whose values no store
-    # records) printed "" for its value. Refused until the entry has a tag.
-    die "GAP: a hash element read whose type is not established (repr="
-      . ( $repr // 'NONE' ) . ") is not lowered -- %HashEntry carries no tag\n"
-        if _slot_tag_for_repr($repr) eq 'Opaque';
-    my $slot_hit = $self->_build_slot($vd_val, $vp_val,
-                                      _slot_tag_for_repr($repr), 'HashRead hit');
+    my ($vt_p, $vt_val) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $vt_p = getelementptr inbounds %HashEntry, %HashEntry* $ent_p, i32 0, i32 "
+        . _he_idx('val_tag') . "  ; HashRead: val_tag field ptr");
+    $self->_emit("  $vt_val = load i8, i8* $vt_p  ; HashRead: val tag");
+    # The complete Slot, HERE in the arm, so the merge below is one `phi
+    # %Slot`; its tag is the one stored with the value.
+    my $slot_hit = $self->_fresh;
+    {
+        my ($s0, $s1) = ($self->_fresh, $self->_fresh);
+        $self->_emit("  $s0 = insertvalue %Slot undef, i1 $vd_val, " . _slot_idx('defined') . "  ; HashRead hit: defined");
+        $self->_emit("  $s1 = insertvalue %Slot $s0, i8 $vt_val, " . _slot_idx('tag') . "  ; HashRead hit: stored tag");
+        $self->_emit("  $slot_hit = insertvalue %Slot $s1, i64 $vp_val, " . _slot_idx('payload') . "  ; HashRead hit: payload");
+    }
     $self->_set_terminator("  br label \%$lbl_end");
 
     # hnxt: i++ and back-edge to loop header.
@@ -8645,64 +9008,16 @@ sub _lower_hash_read {
     my $slot_miss = $self->_build_slot('false', '0', 'Undef', 'HashRead miss');
     $self->_set_terminator("  br label \%$lbl_end");
 
-    # hend: result phi.
+    # hend: ONE Slot phi, then this read's reading of it, by the stored tag.
+    # Decoded instead by the read's stamp, a value of another reading was
+    # garbage (an Int read as Num), and a missing key read as Str loaded
+    # through a null %Str*.
     $self->_new_block($lbl_end);
-
-    if ($repr eq 'Int') {
-        my $result = $self->_fresh;
-        $self->_emit("  $result = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :Int payload");
-        $self->{cache}{ $node->id } = $result;
-        return $result;
-    }
-    elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
-        # Pointer element: phi-select payload then inttoptr (mirrors _lower_array_read).
-        # The slot payload holds a ref (ArrayRef/HashRef) stored as i64; reading it
-        # back as a usable pointer requires inttoptr i64 -> i8*.
-        my $raw_pay = $self->_fresh;
-        $self->_emit("  $raw_pay = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :$repr raw ptr payload");
-        my $ptr = $self->_fresh;
-        $self->_emit("  $ptr = inttoptr i64 $raw_pay to i8*  ; HashRead :$repr ptr");
-        $self->{cache}{ $node->id } = $ptr;
-        return $ptr;
-    }
-    elsif ($repr eq 'Str' || $repr eq 'Num') {
-        # The symmetric unbox of _box_payload, mirroring _lower_array_read: a
-        # Str payload is a %Str* (a Str is a (ptr,len) pair, too wide for
-        # one word), a Num payload is the double's bits.
-        my $raw_pay = $self->_fresh;
-        $self->_emit("  $raw_pay = phi i64 [ $vp_val, \%$lbl_hit ], [ 0, \%$lbl_miss ]  ; HashRead :$repr raw payload");
-
-        if ($repr eq 'Num') {
-            # Reinterpretation into the representation's own machine type; see
-            # _unbox_payload_as, which does the same move for the same reason.
-            my $num_ty = _repr_to_llvm_type($repr);
-            my $d = $self->_fresh;
-            $self->_emit("  $d = bitcast i64 $raw_pay to $num_ty  ; HashRead :Num payload -> $num_ty");
-            $self->{cache}{ $node->id } = $d;
-            return $d;
-        }
-
-        $self->{_need_str_type} = 1;
-        my ($pair, $pp, $pl, $sptr, $slen) =
-            ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);
-        $self->_emit("  $pair = inttoptr i64 $raw_pay to %Str*  ; HashRead :Str payload -> StrPair*");
-        $self->_emit("  $pp = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 0  ; StrPair.ptr");
-        $self->_emit("  $pl = getelementptr inbounds %Str, %Str* $pair, i64 0, i32 1  ; StrPair.len");
-        $self->_emit("  $sptr = load i8*, i8** $pp  ; HashRead :Str ptr");
-        $self->_emit("  $slen = load i64, i64* $pl  ; HashRead :Str len");
-        $sptr = $self->_set_str_len($sptr, $slen);
-        $self->{cache}{ $node->id } = $sptr;
-        return $sptr;
-    }
-    else {
-        # Slot repr. As in ArrayRead: ONE `phi %Slot` over whole aggregates.
-        # Both arms built complete Slots above, so no field can be dropped by
-        # a merge that forgot to grow a phi alongside it.
-        my $slot = $self->_fresh;
-        $self->_emit("  $slot = phi %Slot [ $slot_hit, \%$lbl_hit ], [ $slot_miss, \%$lbl_miss ]  ; HashRead :Slot phi");
-        $self->{cache}{ $node->id } = $slot;
-        return $slot;
-    }
+    my $slot = $self->_fresh;
+    $self->_emit("  $slot = phi %Slot [ $slot_hit, \%$lbl_hit ], [ $slot_miss, \%$lbl_miss ]  ; HashRead :Slot phi");
+    my $result = $self->_slot_as_reading($slot, $repr, 'HashRead');
+    $self->{cache}{ $node->id } = $result;
+    return $result;
 }
 
 # _lower_postfix_deref: repr-dispatch on sigil to dereference a ref value.
@@ -8720,9 +9035,109 @@ sub _lower_postfix_deref {
     elsif ($sigil eq '%') {
         return $self->_lower_hash_deref($node);
     }
-    else {
-        die "GAP: PostfixDeref sigil='$sigil' is not yet lowered runtime-free (only @ and % are supported).";
+    elsif ($sigil eq '$') {
+        # $$r: the %Slot the reference points at, read as this node reads.
+        my $ptr  = $self->_scalar_ref_target($node->inputs->[0]);
+        my $slot = $self->_fresh;
+        $self->_emit("  $slot = load %Slot, %Slot* $ptr  ; \$\$ref: read");
+        my $repr = $node->stamp // 'Scalar';
+        my $ref  = $repr =~ /\A(?:Int|Num|Str|Boolean)\z/
+            ? $self->_emit_coercion($slot, 'Scalar', $repr, '$$ref') : $slot;
+        $self->{cache}{ $node->id } = $ref;
+        return $ref;
     }
+    else {
+        die "GAP: PostfixDeref sigil='$sigil' is not yet lowered runtime-free (only \$, @ and % are supported).";
+    }
+}
+
+# _scalar_ref_target($ref_node) -> the %Slot* a scalar reference names.
+sub _scalar_ref_target {
+    my ($self, $ref_node) = @_;
+    die "GAP: a scalar deref of a " . ($ref_node->stamp // 'NONE') . " is not lowered\n"
+        unless ($ref_node->stamp // '') eq 'ScalarRef';
+    my $r   = $self->lower_value($ref_node);
+    my $ptr = $self->_fresh;
+    $self->_emit("  $ptr = bitcast i8* $r to %Slot*  ; ScalarRef -> %Slot*");
+    return $ptr;
+}
+
+# _lower_ref($node) -> i8*, the reference `\X` makes.
+#
+# A REFERENCE IS ITS REFERENT'S STORAGE. An %Array or %Hash is one heap
+# object already, so `\@a` is that pointer as a ref, and writes through it
+# are writes to @a. `\$x` points at $x's %Slot -- taking a reference makes a
+# scalar a location (B::SoN keeps it in memory), so it has one. Anything
+# else (a reference to a value, to code) is refused.
+sub _lower_ref {
+    my ($self, $node) = @_;
+    my $x = $node->inputs->[0];
+    die "GAP: a reference with no referent is not lowered\n" unless blessed($x);
+    my $xs = $x->stamp // '';
+    my ($ptr, $ty);
+    if ($xs eq 'Array' || $xs eq 'Hash') {
+        $ty  = $xs eq 'Array' ? '%Array*' : '%Hash*';
+        $ptr = $self->_container_ptr($x, $xs);
+    }
+    elsif ($x->operation eq 'PadAccess' && $x->is_location) {
+        $ty  = '%Slot*';
+        $ptr = $self->_location_ptr($x);
+    }
+    else {
+        die "GAP: a reference to a " . $x->operation . " ($xs) is not lowered -- "
+          . "only to an array, a hash, or a scalar variable\n";
+    }
+    # NOT CACHED: a bitcast is free, and one made inside an arm, served to a
+    # use after the merge, did not dominate it.
+    my $ref = $self->_fresh;
+    $self->_emit("  $ref = bitcast $ty $ptr to i8*  ; \\" . ($x->can('name') ? $x->name : $xs));
+    return $ref;
+}
+
+# _lower_reftype($node) -> Str, what ref() says of its operand.
+#
+# By the operand's repr where it is known: "ARRAY", "HASH", "SCALAR",
+# "CODE", or "" for no reference. A Scalar is decided by its Slot's tag. A
+# blessed object names its class, which no tag carries: refused statically,
+# and a tag that turns out to be one at run time stops the program rather
+# than answer "".
+sub _lower_reftype {
+    my ($self, $node) = @_;
+    my $x  = $node->inputs->[0];
+    my $xs = blessed($x) ? ($x->stamp // '') : '';
+    my %name = (ArrayRef => 'ARRAY', HashRef => 'HASH', ScalarRef => 'SCALAR', CodeRef => 'CODE');
+    my $ref;
+    if (exists $name{$xs} || $xs =~ /\A(?:Int|Num|Str|Boolean|Undef)\z/) {
+        my ($p, $l) = $self->_str_const_parts($name{$xs} // '', 'ref()');
+        $ref = $self->_set_str_len($p, $l);
+    }
+    elsif ($xs eq 'Scalar') {
+        my $slot = $self->lower_value($x);
+        my $tag  = $self->_slot_tag_of($slot);
+        my ($p, $l) = $self->_str_const_parts('', 'ref(): none');
+        for my $k (sort keys %name) {
+            my ($kp, $kl) = $self->_str_const_parts($name{$k}, "ref(): $k");
+            my ($is, $np, $nl) = map { $self->_fresh } 1 .. 3;
+            $self->_emit("  $is = icmp eq i8 $tag, " . _slot_tag_value($k) . "  ; ref(): a $k?");
+            $self->_emit("  $np = select i1 $is, i8* $kp, i8* $p");
+            $self->_emit("  $nl = select i1 $is, i64 $kl, i64 $l");
+            ($p, $l) = ($np, $nl);
+        }
+        $self->{_need_exit} = 1;
+        my ($obj, $ok, $stop) = ($self->_fresh, $self->_fresh_label('reftype_ok'), $self->_fresh_label('reftype_obj'));
+        $self->_emit("  $obj = icmp eq i8 $tag, " . _slot_tag_value('Object') . "  ; ref(): an object?");
+        $self->_set_terminator("  br i1 $obj, label %$stop, label %$ok");
+        $self->_new_block($stop);
+        $self->_emit("  call void \@exit(i32 255)  ; ref() of an object names its class: not lowered");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($ok);
+        $ref = $self->_set_str_len($p, $l);
+    }
+    else {
+        die "GAP: ref() of a $xs is not lowered\n";
+    }
+    $self->{cache}{ $node->id } = $ref;
+    return $ref;
 }
 
 # _lower_array_deref: cast i8* ref back to %Array*.
@@ -8735,8 +9150,40 @@ sub _lower_array_deref {
     my $ref_val = $self->lower_value($node->inputs->[0]);
     my $arr = $self->_fresh;
     $self->_emit("  $arr = bitcast i8* $ref_val to %Array*  ; ArrayDeref: i8* ref -> Array*");
+    $arr = $self->_emit_aggregate_copy($arr, 'Array') if $node->copy;
     $self->{cache}{ $node->id } = $arr;
     return $arr;
+}
+
+# _emit_aggregate_copy($ptr, 'Array'|'Hash') -> a new %Array*/%Hash* holding
+# what $ptr does: a new header and the live slots or entries copied. Both
+# headers are { i64 count, i64 cap, buffer }, so one copy serves.
+sub _emit_aggregate_copy {
+    my ($self, $src, $kind) = @_;
+    $self->{_need_malloc_memcpy} = 1;
+    my $ty   = "%$kind";
+    my $elem = $kind eq 'Array' ? '%Slot' : '%HashEntry';
+    my ($np, $n, $bp, $buf, $bytes, $nb, $nbuf, $raw, $hdr, $new) = map { $self->_fresh } 1 .. 10;
+    $self->_emit("  $np = getelementptr inbounds $ty, $ty* $src, i32 0, i32 0  ; copy: count ptr");
+    $self->_emit("  $n = load i64, i64* $np  ; copy: count");
+    $self->_emit("  $bp = getelementptr inbounds $ty, $ty* $src, i32 0, i32 2  ; copy: buffer ptr");
+    $self->_emit("  $buf = load $elem*, $elem** $bp  ; copy: buffer");
+    $self->_emit("  $bytes = mul i64 $n, " . _sizeof_llvm_type($elem) . "  ; copy: live bytes");
+    $self->_emit("  $nb = add i64 $bytes, 1  ; copy: never malloc(0)");
+    $self->_emit("  $nbuf = call i8* \@malloc(i64 $nb)  ; copy: new buffer");
+    $self->_emit("  $raw = bitcast $elem* $buf to i8*");
+    $self->_emit("  call i8* \@memcpy(i8* $nbuf, i8* $raw, i64 $bytes)  ; copy: the elements");
+    $self->_emit("  $hdr = call i8* \@malloc(i64 " . _sizeof_llvm_type($ty) . ")  ; copy: new header");
+    $self->_emit("  $new = bitcast i8* $hdr to $ty*");
+    my ($f0, $f1, $f2, $tb) = map { $self->_fresh } 1 .. 4;
+    $self->_emit("  $f0 = getelementptr inbounds $ty, $ty* $new, i32 0, i32 0");
+    $self->_emit("  store i64 $n, i64* $f0  ; copy: count");
+    $self->_emit("  $f1 = getelementptr inbounds $ty, $ty* $new, i32 0, i32 1");
+    $self->_emit("  store i64 $n, i64* $f1  ; copy: cap");
+    $self->_emit("  $f2 = getelementptr inbounds $ty, $ty* $new, i32 0, i32 2");
+    $self->_emit("  $tb = bitcast i8* $nbuf to $elem*");
+    $self->_emit("  store $elem* $tb, $elem** $f2  ; copy: buffer");
+    return $new;
 }
 
 # _lower_hash_deref: cast i8* ref back to %Hash*.
@@ -8748,6 +9195,7 @@ sub _lower_hash_deref {
     my $ref_val = $self->lower_value($node->inputs->[0]);
     my $hash = $self->_fresh;
     $self->_emit("  $hash = bitcast i8* $ref_val to %Hash*  ; HashDeref: i8* ref -> Hash*");
+    $hash = $self->_emit_aggregate_copy($hash, 'Hash') if $node->copy;
     $self->{cache}{ $node->id } = $hash;
     return $hash;
 }
@@ -9729,7 +10177,9 @@ sub _graph_component {
         );
         # @_ IS READ BY WHAT CONSUMES IT, and a `my (...) = @_` is consumed by
         # nothing: the walk reaches it from @_, or from a target it assigns.
-        push @q, grep { blessed($_) } ($n->consumers // [])->@*
+        # Only the list assignment: an @_ hash-consed across graphs (an older
+        # wire) has every sub's reads for consumers, and they are not ours.
+        push @q, grep { blessed($_) && $_->operation eq 'Assign' } ($n->consumers // [])->@*
             if $op eq 'ArgsSource' && $n->can('consumers');
         push @q, grep {
             blessed($_) && $_->operation eq 'Assign'

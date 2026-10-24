@@ -635,6 +635,9 @@ sub _deserialize_graph ($method_data) {
                 $args{inputs} = [ $inputs[0] ];
             }
         }
+        elsif ($op eq 'ListAppend') {
+            $args{collector} = $fields->{collector} if defined $fields->{collector};
+        }
         elsif ($op eq 'Proj') {
             $args{index} = $fields->{index};
         }
@@ -672,6 +675,13 @@ sub _deserialize_graph ($method_data) {
                 $nd->{stamp} = 'Hash'  if ( $fields->{sigil} // '' ) eq '%';
             }
         }
+        elsif ($op eq 'Ref' && ( $nd->{stamp} // 'Unknown' ) eq 'Unknown'
+               && blessed($inputs[0]) && $inputs[0]->operation eq 'PadAccess') {
+            # A REFERENCE TO A SCALAR VARIABLE is a ScalarRef, whatever
+            # inference missed (`\$n` arrives Unknown).
+            my %by_sigil = ('$' => 'ScalarRef', '@' => 'ArrayRef', '%' => 'HashRef');
+            $nd->{stamp} = $by_sigil{ $inputs[0]->sigil // '' } // 'Unknown';
+        }
         elsif ($op eq 'Parameter') {
             # index is REQUIRED -- it is the node's identity. A missing one is a
             # producer/loader disagreement, not something to default away.
@@ -688,6 +698,7 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'PostfixDeref') {
             $args{sigil} = $fields->{sigil};
+            $args{copy}  = 1 if $fields->{copy};
         }
         elsif ($op eq 'EntryDef') {
             $args{package} = $fields->{package} // '';

@@ -8,12 +8,16 @@ use Chalk::IR::Value;
 
 class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
     field $sigil :param :reader;
+    # A COPY, not an alias: `my %p = %$h` is a new hash with %$h's entries,
+    # which a later store through $h does not reach (B::SoN `copy`).
+    field $copy  :param :reader = 0;
 
     method operation() { 'PostfixDeref' }
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
 
     method content_hash() {
-        return join('|', 'PostfixDeref', "sigil=$sigil", $self->_serialize_inputs());
+        return join('|', 'PostfixDeref', "sigil=$sigil", ($copy ? 'copy' : ()),
+            $self->_serialize_inputs());
     }
 }
