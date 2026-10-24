@@ -2304,6 +2304,14 @@ sub _element_repr ($container) {
                  _element_store_values($container);
     return undef unless @reprs;
     return undef if grep { !defined } @reprs;
+    # A FLATTENED element (an Array or a List in the literal) is several
+    # elements, each a scalar of its own: read by its slot's tag. Taken as the
+    # element type, `$k[1]` of `(sort(keys %h), "z")` read as a List.
+    # A CALL'S Array (sort, keys, a sub's list) flattens too. Every element an
+    # Array that is not a call is chalk's own nested array, kept as it was.
+    return 'Scalar' if grep { /\A(?:List|Hash)\z/ } @reprs
+        or grep { blessed($_) && $_->operation eq 'Call' && ( $_->stamp // '' ) eq 'Array' } @elems
+        or ( grep { $_ eq 'Array' } @reprs ) && grep { $_ ne 'Array' } @reprs;
     # A NESTED aggregate: the elements are themselves aggregates ([[1,2],[3,4]]).
     # Aggregate reprs (ArrayRef/HashRef) are not scalar-widenable, so the element
     # type is that repr only when every element shares it homogeneously; a mixed

@@ -122,6 +122,7 @@ sub new {
         _need_case_helper       => 0,
         _need_substr_helper     => 0,
         _need_lex_agg           => 0,
+        _need_array_append      => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -164,6 +165,9 @@ my @NEED_FLAGS = qw(
     _need_case_helper
     _need_substr_helper
     _need_lex_agg
+    _need_num_fmt
+    _need_snprintf
+    _need_array_append
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -736,7 +740,7 @@ sub render_need_flag_prologue {
         push @lines, '@fmt_print_int = private unnamed_addr constant [5 x i8] c"%lld\00", align 1';
     }
 
-    if ($self->{_need_num_fmt}) {
+    if ($self->{_need_num_fmt} && !$self->{_num_fmt_emitted}++) {
         # "%.15g\0" = 6 bytes = [6 x i8]. This is perl's own float
         # stringification rule, verified against perl 5.42 on the corpus floats
         # and on t/base/num.t's cases (0.1, 1e+34, 1.000001, 0.0005).
@@ -748,7 +752,7 @@ sub render_need_flag_prologue {
     # snprintf renders a Num to Str: measure with a null buffer, then render.
     # Same host-interface class as printf -- a plain C function, not libperl.
     push @lines, 'declare i32 @snprintf(i8* nocapture, i64, i8* nocapture readonly, ...)'
-        if $self->{_need_snprintf};
+        if $self->{_need_snprintf} && !$self->{_snprintf_emitted}++;
 
     # Emit string-constant globals collected during body lowering.
     # Each Constant(:Str) node emits a private global; the names are stashed in
@@ -926,6 +930,13 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_substr_helper_lines;
     # Shared aggregates: emitted once, here, after every body has named its own.
     push @lines, $self->_lex_aggregate_lines;
+    push @lines, $self->_array_append_lines;
+    # A method body that stringifies a Num needs these too; the prologue ran
+    # before any body lowered.
+    push @lines, '@fmt_num_g = private unnamed_addr constant [6 x i8] c"%.15g\00", align 1'
+        if $self->{_need_num_fmt} && !$self->{_num_fmt_emitted}++;
+    push @lines, 'declare i32 @snprintf(i8* nocapture, i64, i8* nocapture readonly, ...)'
+        if $self->{_need_snprintf} && !$self->{_snprintf_emitted}++;
     # Post-class re-emit for _need_memcmp: a method body doing Subscript(Hash)
     # sets _need_memcmp on $body_ctx (propagated to $self by G.5), but the prologue
     # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
@@ -5646,6 +5657,12 @@ sub _find_memstart {
         return $n if $n->operation eq 'MemStart';
         push @q, grep { blessed($_) } $n->inputs->@*
             if $n->can('inputs') && defined $n->inputs;
+        # INTO A STRUCTURE'S BODY: a sub whose body is a loop reaches its
+        # entry memory only through the loop's statements, which consume the
+        # control nodes; from the Return alone it was never found, and that
+        # sub's entry reads went unfrozen (a copy-deref re-made after a store).
+        push @q, grep { blessed($_) } ( $n->consumers // [] )->@*
+            if $n->operation =~ /\A(?:Loop|If|Proj|Region|Start)\z/ && $n->can('consumers');
         push @q, $n->control_in
             if $n->can('control_in') && defined $n->control_in;
     }
@@ -5671,12 +5688,41 @@ sub _is_array_mutating_call {
     return ($name eq 'shift' || $name eq 'pop' || $name eq 'push') ? 1 : 0;
 }
 
+# _reaches_an_unlowered_phi($self, $node) -> bool: does $node read, through
+# its inputs, a loop Phi not yet emitted? Such a read belongs in that loop,
+# not frozen at entry -- the Phi has no SSA ref until its loop is lowered.
+# Memory inputs are not followed (a read's own version is what freezes it).
+sub _reaches_an_unlowered_phi {
+    my ($self, $node) = @_;
+    my (%seen, @q);
+    @q = grep { blessed($_) } $node->inputs->@*;
+    while (defined(my $n = shift @q)) {
+        next if $seen{ refaddr($n) }++;
+        next if exists $self->{cache}{ $n->id };
+        my $op = $n->operation;
+        return 1 if $op eq 'Phi' && !( $n->can('memory') && $n->memory );
+        next if $op =~ /\A(?:MemStart|Phi)\z/ || ( $op eq 'Assign' );
+        push @q, grep { blessed($_) } $n->inputs->@*;
+    }
+    return 0;
+}
+
 sub _freeze_memory_reads {
     my ($self, $mem_node, $within) = @_;
     return unless $mem_node->can('consumers');
     for my $c ($mem_node->consumers->@*) {
         next unless blessed($c);
         next if $within && !$within->{ refaddr($c) };
+        # A CAPTURE CARRIES THE VERSION ON: MakeCell(var, version) is the
+        # memory a closure's capture reads at, made where that version is.
+        # Its reads are this version's too, so they freeze here as well --
+        # not at a use after later stores (`my @k = sort keys %h` beside a
+        # closure over %h read %h's last contents).
+        if ($c->operation eq 'MakeCell' && blessed($c->inputs->[1])
+                && $c->inputs->[1]->id eq $mem_node->id) {
+            $self->_freeze_memory_reads($c, $within);
+            next;
+        }
         # A FIELD READ IS ONE TOO, its memory version its only input (an
         # lvalue FieldAccess has none). Lowered at its use instead, `my $old =
         # $n; $n = 5` read the 5.
@@ -5709,7 +5755,14 @@ sub _freeze_memory_reads {
             $mem = $c->inputs->[2];
         }
         next unless defined $mem && blessed($mem) && $mem->id eq $mem_node->id;
-        next if exists $self->{cache}{ $c->id };   # already frozen
+        # Already lowered -- by a read of this version frozen before it (a
+        # sort over a copy-deref lowers the copy) -- is lowered HERE, so it is
+        # frozen too. Left unmarked, a copy re-made itself at each later use,
+        # after the stores it must not see.
+        if (exists $self->{cache}{ $c->id }) {
+            $self->{_frozen_reads}{ $c->id } = 1;
+            next;
+        }
         # A PUNCTUATION VARIABLE has no global to read (`$"`, which join
         # takes as its separator without lowering the read); a consumer that
         # does need it refuses by name when it lowers it.
@@ -5720,9 +5773,7 @@ sub _freeze_memory_reads {
         # index is the induction Phi, so it belongs in the loop body, not at
         # MemStart. Freezing it here would lower the Phi before its Loop is
         # processed (the Phi-before-loop guard). Leave it for the loop body walk.
-        next if grep {
-            blessed($_) && $_->operation eq 'Phi' && !exists $self->{cache}{ $_->id }
-        } @{ $c->inputs }[0, 1];
+        next if _reaches_an_unlowered_phi($self, $c);
         my $ref = $self->lower_value($c);
         $self->{cache}{ $c->id } = $ref;           # freeze at this memory version
         $self->{_frozen_reads}{ $c->id } = 1;
@@ -7512,6 +7563,8 @@ sub _emit_append_one {
 
 sub _emit_array_of {
     my ($self, $inputs) = @_;
+    return $self->_emit_flattened_array_of($inputs)
+        if grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @$inputs;
 
     $self->{_need_aggregate_types} = 1;
     $self->{_need_malloc_memcpy}   = 1;
@@ -8105,6 +8158,92 @@ have:
 END_HELPER
     }
     return @lines;
+}
+
+# _emit_flattened_array_of(\@inputs) -> %Array*: a list with an array in it.
+# `(0, @a, 3)` is each of @a's elements in its place, not @a as one slot:
+# built by appending, an aggregate's elements one by one, a scalar as its
+# own Slot. A reference is a scalar. A List that is not an array a builtin
+# made, or a hash in a list (its pairs), is refused by name.
+sub _emit_flattened_array_of {
+    my ($self, $inputs) = @_;
+    $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy _need_aggregate_types);
+    my $acc = $self->_emit_array_of([]);
+    for my $in (@$inputs) {
+        my $s = $in->stamp // '';
+        if ($s eq 'Array' || ( $s eq 'List' && $in->operation eq 'Call'
+                && ( $in->dispatch_kind // '' ) eq 'builtin'
+                && ( $in->name // '' ) =~ /\A(?:sort|keys|values|reverse)\z/ )) {
+            my $src = $s eq 'Array' ? $self->_container_ptr($in, 'Array') : $self->lower_value($in);
+            $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $src)  ; list: flatten");
+            next;
+        }
+        die "GAP: a list with a $s in it is not lowered -- it would flatten, and "
+          . "only an array does here\n" if $s =~ /\A(?:List|Hash)\z/;
+        my $v = $self->_slot_of_value($in, $self->lower_value($in), 'list element');
+        $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $v)  ; list: one element");
+    }
+    return $acc;
+}
+
+sub _array_append_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_array_append} && !$self->{_array_append_emitted}++;
+    my $sz = _sizeof_llvm_type('%Slot');
+    return ('', <<"END_HELPER");
+define internal void \@chalk_array_push_slot(%Array* %a, %Slot %v) {
+entry:
+  %lp = getelementptr inbounds %Array, %Array* %a, i32 0, i32 0
+  %cp = getelementptr inbounds %Array, %Array* %a, i32 0, i32 1
+  %ep = getelementptr inbounds %Array, %Array* %a, i32 0, i32 2
+  %len = load i64, i64* %lp
+  %cap = load i64, i64* %cp
+  %full = icmp sge i64 %len, %cap
+  br i1 %full, label %grow, label %store
+grow:
+  %dbl = mul i64 %cap, 2
+  %small = icmp slt i64 %dbl, 4
+  %nc = select i1 %small, i64 4, i64 %dbl
+  %nb = mul i64 %nc, $sz
+  %buf = call i8* \@malloc(i64 %nb)
+  %old = load %Slot*, %Slot** %ep
+  %oraw = bitcast %Slot* %old to i8*
+  %ob = mul i64 %len, $sz
+  %c = call i8* \@memcpy(i8* %buf, i8* %oraw, i64 %ob)
+  %ns = bitcast i8* %buf to %Slot*
+  store %Slot* %ns, %Slot** %ep
+  store i64 %nc, i64* %cp
+  br label %store
+store:
+  %el = load %Slot*, %Slot** %ep
+  %sp = getelementptr inbounds %Slot, %Slot* %el, i64 %len
+  store %Slot %v, %Slot* %sp
+  %l1 = add i64 %len, 1
+  store i64 %l1, i64* %lp
+  ret void
+}
+
+define internal void \@chalk_array_append_all(%Array* %d, %Array* %s) {
+entry:
+  %slp = getelementptr inbounds %Array, %Array* %s, i32 0, i32 0
+  %n = load i64, i64* %slp
+  %sep = getelementptr inbounds %Array, %Array* %s, i32 0, i32 2
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i1, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %el = load %Slot*, %Slot** %sep
+  %sp = getelementptr inbounds %Slot, %Slot* %el, i64 %i
+  %v = load %Slot, %Slot* %sp
+  call void \@chalk_array_push_slot(%Array* %d, %Slot %v)
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  ret void
+}
+END_HELPER
 }
 # _lower_increment($node) -> %Slot (or the node's narrower reading)
 #
@@ -9220,13 +9359,10 @@ sub _lower_builtin_join {
     # inputs[0], never inputs[-1], which is the scalar face. A LIST OF
     # SCALARS FLATTENED INTO THE CALL -- `"@a"` over a literal arrives as
     # join($", 1, 2) -- is its own static element list.
-    my $elements = @more
-        ? do {
-            die "GAP: join over a flattened operand that is not a scalar\n"
-                if grep { ( $_->stamp // '' ) !~ /\A(?:Int|Num|Str|Boolean)\z/ }
-                   $list_node, @more;
-            [ $list_node, @more ];
-          }
+    # One that holds an array (`"@{[sort keys %h]} z"`) flattens at run time.
+    my $flatten = @more && grep { ( $_->stamp // '' ) !~ /\A(?:Int|Num|Str|Boolean)\z/ } $list_node, @more;
+    my $elements = $flatten ? undef
+        : @more ? [ $list_node, @more ]
         # A LIST READ AFTER IT WAS WRITTEN has no static elements: its
         # declaration said empty, and a push since made it 2 4 6 -- read as
         # the declaration, "@r" printed "". It is walked at run time.
@@ -9250,6 +9386,8 @@ sub _lower_builtin_join {
     # program this exists for. The static path stays because it emits straight
     # -line concats with no loop when the count IS known.
     unless (defined $elements) {
+        return $self->{cache}{ $node->id } = $self->_emit_join_loop(undef, $sep_ref,
+            $self->_emit_flattened_array_of([ $list_node, @more ])) if $flatten;
         my $repr = $list_node isa Chalk::IR::Value
                  ? ($list_node->stamp // '') : '';
         die "GAP: join over an operand with repr=" . ($repr || 'NONE')
@@ -9353,10 +9491,10 @@ sub _control_chain_of {
 }
 
 sub _emit_join_loop {
-    my ($self, $list_node, $sep_ref) = @_;
+    my ($self, $list_node, $sep_ref, $arr) = @_;
     $self->{_need_aggregate_types} = 1;
 
-    my $arr = $self->_container_ptr($list_node, 'Array');
+    $arr //= $self->_container_ptr($list_node, 'Array');
 
     my ($len_p, $len, $dat_p, $slots) =
         ($self->_fresh, $self->_fresh, $self->_fresh, $self->_fresh);

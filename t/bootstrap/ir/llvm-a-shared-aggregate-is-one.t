@@ -46,6 +46,7 @@ for my $case (
     [ q{my @p = (1, 2); sub f { push @p, $_[0]; return scalar(@p) } my %h; sub g { $h{$_[0]} = 1; return scalar(keys %h) } print f(3), " @p ", g("b"), g("a"), g("b"), "\n";}, "3 1 2 3 122\n", 'an array and a hash, written by subs' ],
     [ q{my @p = (1); my $r = \@p; sub f { @p = (5, 6) } f(); print "@$r\n";}, "5 6\n", 'a whole assignment keeps a reference' ],
     [ q{my %c; sub put { $c{$_[0]} = $_[1] } sub get { $c{$_[0]} // "u" } put(a => 1); print get("a"), get("b"), "\n";}, "1u\n", 'a hash two subs share' ],
+    [ q{sub f { my %h = (a => 1); my $c = sub { $h{$_[0]} = 1 }; my @k = sort keys %h; $c->("b"); my @l = sort keys %h; %h = (); $c->("c"); return join ",", @k, "|", @l, "|", sort keys %h } print f(), "\n";}, "a,|,a,b,|,c\n", 'a read beside a closure that captures the hash (pvm)' ],
     [ q{sub f { my @p = (5); my $c = sub { push @p, $_[0] }; $c->(1); $c->(2); my $a = "@p"; @p = (); $c->(3); return "$a/@p" } print f(), "\n";}, "5 1 2/3\n", 'a read of the whole is taken where it stands (pvm)' ],
 ) {
     my ($src, $want, $name) = @$case;
