@@ -190,9 +190,14 @@ return_zero:
   ret double 0.0
 
 call_strtod:
-  ; Use ptr_after (whitespace-skipped) for strtod. strtod handles the rest.
-  ; endptr can be null (we don't need it).
-  %result = call double @strtod(i8* %ptr_after, i8** null)
+  ; strtod reads to a NUL, and a Str is counted, not terminated: parse a
+  ; terminated copy of exactly the remaining bytes, not the bytes in place.
+  %cn = add i64 %rem_after, 1
+  %cbuf = call i8* @malloc(i64 %cn)
+  %cc = call i8* @memcpy(i8* %cbuf, i8* %ptr_after, i64 %rem_after)
+  %nul = getelementptr inbounds i8, i8* %cbuf, i64 %rem_after
+  store i8 0, i8* %nul
+  %result = call double @strtod(i8* %cbuf, i8** null)
   ret double %result
 }
 END_HELPER

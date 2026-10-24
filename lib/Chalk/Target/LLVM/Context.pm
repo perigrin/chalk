@@ -3204,6 +3204,7 @@ sub _emit_coercion {
         my $len_ref = $tracked_len // 0;
         # Flag that the str-to-num helper + strtod declaration are needed.
         $self->{_need_str_to_num_helper} = 1;
+        $self->{_need_malloc_memcpy}     = 1;   # it parses a terminated copy
         $self->_emit("  $ref = call double \@chalk_str_to_num(i8* $ptr_ref, i64 $len_ref)  ; Coerce[Str->Num] leading-numeric");
     }
     # Coerce(Str->Int): perl reads the string as a NUMBER and then truncates
@@ -3917,6 +3918,7 @@ sub _coerce_ref_to_num {
         $ref = $str_ptr;
         my $len_ref = $tracked // 0;
         $self->{_need_str_to_num_helper} = 1;
+        $self->{_need_malloc_memcpy}     = 1;   # it parses a terminated copy
         my $d = $self->_fresh;
         $self->_emit("  $d = call double \@chalk_str_to_num(i8* $ref, i64 $len_ref)  ; $op: Str operand -> double (leading-numeric)");
         return $d;
@@ -8379,7 +8381,8 @@ numeric:
   ret %Slot %u2
 magic:
   %n1 = add i64 %len, 1
-  %buf = call i8* \@malloc(i64 %n1)
+  %n2 = add i64 %len, 2
+  %buf = call i8* \@malloc(i64 %n2)
   %dst = getelementptr inbounds i8, i8* %buf, i64 1
   %cpy = call i8* \@memcpy(i8* %dst, i8* %p, i64 %len)
   br label %ml
@@ -8419,6 +8422,8 @@ mprepend:
 mret:
   %rp = phi i8* [ %dst, %mstop ], [ %buf, %mprepend ]
   %rl = phi i64 [ %len, %mstop ], [ %n1, %mprepend ]
+  %term = getelementptr inbounds i8, i8* %rp, i64 %rl
+  store i8 0, i8* %term
   %sb = call i8* \@malloc(i64 ptrtoint (%Str* getelementptr (%Str, %Str* null, i64 1) to i64))
   %ns = bitcast i8* %sb to %Str*
   %np = getelementptr inbounds %Str, %Str* %ns, i64 0, i32 $sp
