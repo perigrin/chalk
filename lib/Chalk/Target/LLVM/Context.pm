@@ -3593,6 +3593,8 @@ sub _lower_assign {
             # Typed pointer resolved at THIS use — see _container_ptr.
             my $arr_ref = $self->_container_ptr($container, 'Array');
             my $idx_ref = $self->_index_i64($key_idx);
+            # Past the end the array grows; from the end, it counts back.
+            $idx_ref = $self->_emit_array_extend_to($arr_ref, $idx_ref);
 
             # Load elems pointer and write the slot.
             my $elem_ptr = $self->_fresh;
@@ -3996,15 +3998,44 @@ sub _lower_str_compare {
     return $result;
 }
 
+# _lower_ternary_by_slot($node) -> %Slot: `C ? A : B` whose join is a Scalar.
+# BRANCHED, not a select: an arm need not be safe to evaluate when not taken
+# -- a foreach over @_ reads `exists $_[$i] ? $$alias : $_[$i]`, and the
+# deref of the alias it did not make is a load through null. Each arm is
+# lowered in its own block, boxed (an element read keeping its miss), and
+# what it cached is dropped with it, as an if arm's is.
+sub _lower_ternary_by_slot {
+    my ($self, $node) = @_;
+    my ($c, $t, $f) = $node->inputs->@*;
+    my $cond = $self->_ensure_i1($self->lower_value($c), _require_repr($c, 'TernaryExpr.condition'));
+    my ($tl, $fl, $end) = map { $self->_fresh_label("tern.$_.") } qw(t f end);
+    $self->_set_terminator("  br i1 $cond, label %$tl, label %$fl  ; ?: (Scalar)");
+    my @in;
+    for my $arm ([$tl, $t], [$fl, $f]) {
+        my ($label, $n) = @$arm;
+        $self->_new_block($label);
+        my %before = map { $_ => 1 } keys %{ $self->{cache} };
+        my $ref  = $self->lower_value($n);
+        my $from = $n->operation eq 'Print' ? 'Boolean' : ($n->stamp // '');
+        ($ref, $from) = $self->_miss_kept($n, $ref, $from);
+        my $slot = $self->_slot_of_value($n, $ref, '?: arm');
+        push @in, "[ $slot, %" . $self->_current_block_label . " ]";
+        $self->_set_terminator("  br label %$end");
+        delete @{ $self->{cache} }{ grep { !$before{$_} } keys %{ $self->{cache} } };
+    }
+    $self->_new_block($end);
+    my $res = $self->_fresh;
+    $self->_emit("  $res = phi %Slot " . join(', ', @in) . "  ; ?: (Scalar)");
+    return $self->{cache}{ $node->id } = $res;
+}
+
 sub _lower_ternary {
     my ($self, $node) = @_;
 
     my $repr = $node->stamp;
     my $op   = $node->operation;
 
-    if (defined $repr && $repr eq 'Scalar') {
-        die "TernaryExpr with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
-    }
+    return $self->_lower_ternary_by_slot($node) if defined $repr && $repr eq 'Scalar';
 
     my $inputs    = $node->inputs;
     my $cond_node = $inputs->[0];
@@ -5618,6 +5649,14 @@ sub _freeze_memory_reads {
 # Reads phi records from the Elaborate pass for this Region's merge block.
 sub _process_if_node {
     my ($self, $if_node) = @_;
+
+    # AN IF REACHED AGAIN INSIDE ITS OWN ARM is a cycle in the arm walk, and
+    # recursing on it never returns (pvm chalk-found-gaps.md: a foreach over
+    # a deref nested in a foreach). Refused by name, so the compiler ends.
+    die "GAP: an if is reached again inside its own arm -- the arm walk "
+      . "cycles here, which is not lowered\n"
+        if $self->{_if_in_progress}{ refaddr($if_node) };
+    local $self->{_if_in_progress} = { ($self->{_if_in_progress} // {})->%*, refaddr($if_node) => 1 };
 
     my $cond_input = $if_node->inputs->[1];
     die "LLVM backend (elaboration): If node has no condition (inputs[1] is undef)"
@@ -7954,6 +7993,127 @@ sub _miss_kept {
     return ($self->_subscript_slot($node), 'Slot');
 }
 
+
+# _array_may_grow($ctr) -> bool: whether anything may reallocate the array's
+# buffer -- a push, unshift or splice, or an element store (through the array
+# or a reference to it) at an index not proven inside its literal length.
+# An element's reference points into that buffer, so it is refused then.
+sub _array_may_grow {
+    my ($ctr) = @_;
+    my $n = $ctr->operation eq 'ArrayLiteral' ? scalar(@{ $ctr->inputs }) : 0;
+    my @q = ($ctr);
+    my %seen;
+    while (defined(my $c = shift @q)) {
+        next if $seen{ refaddr($c) }++;
+        for my $u (($c->consumers // [])->@*) {
+            next unless blessed($u);
+            my $op = $u->operation;
+            return 1 if $op eq 'Call' && ( $u->name // '' ) =~ /\A(?:push|unshift|splice)\z/;
+            push @q, $u if $op eq 'Ref';
+            next unless $op eq 'Subscript' && refaddr($u->inputs->[0]) == refaddr($c);
+            for my $a (($u->consumers // [])->@*) {
+                next unless blessed($a) && $a->operation eq 'Assign' && refaddr($a->inputs->[0] // 0) == refaddr($u);
+                my $ix = $u->inputs->[1];
+                return 1 unless blessed($ix) && $ix->operation eq 'Constant'
+                    && ( $ix->value // '' ) =~ /\A\d+\z/ && $ix->value < $n;
+            }
+        }
+    }
+    return 0;
+}
+
+# _emit_array_extend_to($arr, $idx) -> $idx': make index $idx storable, as
+# perl's element store does. A negative index counts from the end (before
+# the start, perl dies: exit 255). Past the end, the array grows -- the
+# buffer doubled to cover it, floor 4 -- and the slots between are undef.
+# Returns the index to store at.
+sub _emit_array_extend_to {
+    my ($self, $arr, $idx) = @_;
+    $self->{_need_malloc_memcpy} = 1;
+    $self->{_need_exit}          = 1;
+    my $sz = _sizeof_llvm_type('%Slot');
+    my ($lp, $cp, $ep, $len, $neg, $fromend, $i, $bad) = map { $self->_fresh } 1 .. 8;
+    $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0  ; extend: len ptr");
+    $self->_emit("  $cp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 1  ; extend: cap ptr");
+    $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2  ; extend: elems ptr");
+    $self->_emit("  $len = load i64, i64* $lp");
+    $self->_emit("  $neg = icmp slt i64 $idx, 0");
+    $self->_emit("  $fromend = add i64 $idx, $len");
+    $self->_emit("  $i = select i1 $neg, i64 $fromend, i64 $idx  ; extend: from the end");
+    $self->_emit("  $bad = icmp slt i64 $i, 0  ; extend: before the start?");
+    my ($die, $chk, $grow, $fill, $fbody, $done, $ok) =
+        map { $self->_fresh_label("ext.$_.") } qw(die chk grow fill fbody done ok);
+    $self->_set_terminator("  br i1 $bad, label %$die, label %$chk");
+    $self->_new_block($die);
+    $self->_emit("  call void \@exit(i32 255)  ; Modification of non-creatable array value attempted");
+    $self->_set_terminator("  unreachable");
+
+    $self->_new_block($chk);
+    my ($past, $cap, $need, $full) = map { $self->_fresh } 1 .. 4;
+    $self->_emit("  $past = icmp sge i64 $i, $len  ; extend: past the end?");
+    $self->_emit("  $cap = load i64, i64* $cp");
+    $self->_emit("  $need = add i64 $i, 1");
+    $self->_emit("  $full = icmp sgt i64 $need, $cap");
+    my $sized = $self->_fresh_label('ext.sized.');
+    $self->_set_terminator("  br i1 $past, label %$sized, label %$ok");
+
+    $self->_new_block($sized);
+    $self->_set_terminator("  br i1 $full, label %$grow, label %$fill");
+
+    $self->_new_block($grow);
+    my ($dbl, $big, $c1, $small, $nc, $nb, $buf, $old, $oraw, $ob, $ns) = map { $self->_fresh } 1 .. 11;
+    $self->_emit("  $dbl = mul i64 $cap, 2");
+    $self->_emit("  $big = icmp sgt i64 $need, $dbl");
+    $self->_emit("  $c1 = select i1 $big, i64 $need, i64 $dbl");
+    $self->_emit("  $small = icmp slt i64 $c1, 4");
+    $self->_emit("  $nc = select i1 $small, i64 4, i64 $c1  ; extend: new cap");
+    $self->_emit("  $nb = mul i64 $nc, $sz");
+    $self->_emit("  $buf = call i8* \@malloc(i64 $nb)  ; extend: grow buffer");
+    $self->_emit("  $old = load %Slot*, %Slot** $ep");
+    $self->_emit("  $oraw = bitcast %Slot* $old to i8*");
+    $self->_emit("  $ob = mul i64 $len, $sz");
+    $self->_emit("  call i8* \@memcpy(i8* $buf, i8* $oraw, i64 $ob)  ; extend: copy live elements");
+    $self->_emit("  $ns = bitcast i8* $buf to %Slot*");
+    $self->_emit("  store %Slot* $ns, %Slot** $ep");
+    $self->_emit("  store i64 $nc, i64* $cp");
+    $self->_set_terminator("  br label %$fill");
+
+    # The slots from the old end up to the new element are undef.
+    $self->_new_block($fill);
+    my $el = $self->_fresh;
+    $self->_emit("  $el = load %Slot*, %Slot** $ep  ; extend: slots (post-grow)");
+    $self->_set_terminator("  br label %$fbody");
+    $self->_new_block($fbody);
+    my ($j, $more, $sp, $j1) = map { $self->_fresh } 1 .. 4;
+    my $floop = $self->_current_block_label;
+    my $fstep = $self->_fresh_label('ext.fstep.');
+    $self->_emit("  $j = phi i64 [ $len, %$fill ], [ $j1, %$fstep ]");
+    $self->_emit("  $more = icmp slt i64 $j, $need");
+    $self->_set_terminator("  br i1 $more, label %$fstep, label %$done");
+    $self->_new_block($fstep);
+    $self->_emit("  $sp = getelementptr inbounds %Slot, %Slot* $el, i64 $j");
+    $self->_emit("  store %Slot zeroinitializer, %Slot* $sp  ; extend: undef");
+    $self->_emit("  $j1 = add i64 $j, 1");
+    $self->_set_terminator("  br label %$floop");
+    $self->_new_block($done);
+    $self->_emit("  store i64 $need, i64* $lp  ; extend: new len");
+    $self->_set_terminator("  br label %$ok");
+    $self->_new_block($ok);
+    $self->{_need_aggregate_types} = 1;
+    return $i;
+}
+# _slot_of_value($node, $ref, $what) -> %Slot: any scalar value as one cell.
+sub _slot_of_value {
+    my ($self, $node, $ref, $what) = @_;
+    my ($d, $t, $p) = $self->_slot_fields_of_value($node, $ref, $what);
+    my ($s0, $s1, $s2) = map { $self->_fresh } 1 .. 3;
+    $self->{_need_aggregate_types} = 1;
+    $self->_emit("  $s0 = insertvalue %Slot undef, i1 $d, " . _slot_idx('defined') . "  ; $what");
+    $self->_emit("  $s1 = insertvalue %Slot $s0, i8 $t, " . _slot_idx('tag'));
+    $self->_emit("  $s2 = insertvalue %Slot $s1, i64 $p, " . _slot_idx('payload'));
+    return $s2;
+}
+
 # _slot_fields_of_value($node, $ref, $what) -> ($def_i1, $tag_i8, $pay_i64)
 #
 # A scalar value as the three fields a %Slot or a %HashEntry holds.
@@ -9315,6 +9475,26 @@ sub _lower_postfix_deref {
 # _scalar_ref_target($ref_node) -> the %Slot* a scalar reference names.
 sub _scalar_ref_target {
     my ($self, $ref_node) = @_;
+    # A SCALAR HOLDING A REFERENCE: its Slot's payload, when its tag says
+    # ScalarRef. Anything else is refused at run time (perl dies too: "Not a
+    # SCALAR reference").
+    if (($ref_node->stamp // '') =~ /\A(?:Scalar|Slot)\z/) {
+        my $s   = $self->lower_value($ref_node);
+        my $tag = $self->_slot_tag_of($s);
+        my $ok  = $self->_fresh;
+        $self->_emit("  $ok = icmp eq i8 $tag, " . _slot_tag_value('ScalarRef') . "  ; \$\$r: a scalar reference?");
+        my ($yes, $no) = ($self->_fresh_label('sref.ok.'), $self->_fresh_label('sref.no.'));
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $ok, label %$yes, label %$no");
+        $self->_new_block($no);
+        $self->_emit("  call void \@exit(i32 255)  ; not a SCALAR reference");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($yes);
+        my $p   = $self->_slot_payload_of($s);
+        my $ptr = $self->_fresh;
+        $self->_emit("  $ptr = inttoptr i64 $p to %Slot*  ; Scalar -> %Slot*");
+        return $ptr;
+    }
     die "GAP: a scalar deref of a " . ($ref_node->stamp // 'NONE') . " is not lowered\n"
         unless ($ref_node->stamp // '') eq 'ScalarRef';
     my $r   = $self->lower_value($ref_node);
@@ -9343,6 +9523,33 @@ sub _lower_ref {
     elsif ($x->operation eq 'PadAccess' && $x->is_location) {
         $ty  = '%Slot*';
         $ptr = $self->_location_ptr($x);
+    }
+    # AN ELEMENT'S REFERENCE IS ITS SLOT in the array's buffer -- the alias a
+    # foreach takes of each element it walks. Bounds-checked at run time (perl
+    # would extend the array; that is refused, exit 255), and refused outright
+    # for an array anything grows: a grown buffer is a new one.
+    elsif ($x->operation eq 'Subscript' && ( $self->_repr_of($x->inputs->[0]) // '' ) =~ /\A(?:Array|ArrayRef)\z/) {
+        my $ctr = $self->_unwrap_ref_container($x->inputs->[0]);
+        die "GAP: a reference to an element of an array that may grow is not lowered\n"
+            if _array_may_grow($ctr);
+        my $arr = $self->_container_ptr($ctr, 'Array');
+        my $i   = $self->_index_i64($x->inputs->[1]);
+        my ($lp, $len, $ok, $ep, $el) = map { $self->_fresh } 1 .. 5;
+        $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0  ; element ref: len ptr");
+        $self->_emit("  $len = load i64, i64* $lp");
+        $self->_emit("  $ok = icmp ult i64 $i, $len  ; element ref: in bounds?");
+        my ($in, $out) = ($self->_fresh_label('eref.in.'), $self->_fresh_label('eref.out.'));
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $ok, label %$in, label %$out");
+        $self->_new_block($out);
+        $self->_emit("  call void \@exit(i32 255)  ; a reference past the end would extend the array");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($in);
+        $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2");
+        $self->_emit("  $el = load %Slot*, %Slot** $ep");
+        $ptr = $self->_fresh;
+        $self->_emit("  $ptr = getelementptr inbounds %Slot, %Slot* $el, i64 $i  ; element ref");
+        $ty  = '%Slot*';
     }
     else {
         die "GAP: a reference to a " . $x->operation . " ($xs) is not lowered -- "
@@ -9548,7 +9755,7 @@ sub _box_payload {
         $self->_emit("  $ref = zext i1 $val_ref to i64  ; Boolean -> i64 payload for $what");
         return $ref;
     }
-    if ($repr eq 'ArrayRef' || $repr eq 'HashRef' || $repr eq 'CodeRef'
+    if ($repr eq 'ArrayRef' || $repr eq 'HashRef' || $repr eq 'CodeRef' || $repr eq 'ScalarRef'
             || $repr eq 'Object') {
         $self->_emit("  $ref = ptrtoint i8* $val_ref to i64  ; $repr ptr -> i64 payload for $what");
         return $ref;

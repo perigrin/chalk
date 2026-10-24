@@ -36,8 +36,8 @@ $boxable{$_} = 1 for $body =~ /\$repr eq '(\w+)'/g;
 
 is_deeply(
     [sort keys %boxable],
-    [qw(ArrayRef Boolean CodeRef HashRef Int Num Object Str)],
-    '_box_payload boxes the eight expected representations'
+    [qw(ArrayRef Boolean CodeRef HashRef Int Num Object ScalarRef Str)],
+    '_box_payload boxes the nine expected representations (ScalarRef: a reference held in a Slot)'
 );
 
 # --- Undef is 0 -------------------------------------------------------------
