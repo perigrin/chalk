@@ -9941,7 +9941,8 @@ sub _collect_positional_arg_reads {
             if (@other) {
                 for my $c (@other) {
                     my $cop = $c->operation;
-                    next if $cop eq 'Count';
+                    # Counted, tested, or copied into a hash: reads.
+                    next if $cop =~ /\A(?:Count|Exists|HashLiteral)\z/;
                     next if $cop eq 'Call' && ( $c->dispatch_kind // '' ) eq 'builtin'
                         && ( $c->name // '' ) =~ /\A(?:join|sort|reverse)\z/;
                     next if $cop eq 'Assign' && blessed($c->inputs->[0])
@@ -9956,15 +9957,25 @@ sub _collect_positional_arg_reads {
                 $args_array = $n;
             }
             # A WRITE THROUGH AN ELEMENT reaches the caller's variable, which
-            # a copy cannot: `$_[0] = 9` is refused whatever else reads @_.
+            # a copy cannot: `$_[0] = 9` is refused whatever else reads @_. So
+            # is one through a reference to it -- the alias a foreach takes of
+            # an iterator it hands to a call -- found by following the
+            # reference through what passes it on to a store's target.
             for my $sub (grep { blessed($_) && $_->operation eq 'Subscript' } $n->consumers->@*) {
-                for my $u (($sub->consumers // [])->@*) {
-                    next unless blessed($u);
-                    die "GAP: direct call to '$name': callee writes \$_[N] -- an "
-                      . "alias of the caller's argument, which inlining does not "
-                      . "write back.\n"
-                        if ( $u->operation eq 'Assign' && refaddr($u->inputs->[0] // 0) == refaddr($sub) )
-                        || $u->operation =~ /\A(?:Ref|LocalAlias)\z/;
+                my @q = ($sub);
+                my %seen;
+                while (defined(my $v = shift @q)) {
+                    next if $seen{ refaddr($v) }++;
+                    for my $u (($v->consumers // [])->@*) {
+                        next unless blessed($u);
+                        my $uop = $u->operation;
+                        die "GAP: direct call to '$name': callee writes \$_[N] -- an "
+                          . "alias of the caller's argument, which inlining does not "
+                          . "write back.\n"
+                            if ( $uop eq 'Assign' && refaddr($u->inputs->[0] // 0) == refaddr($v) )
+                            || $uop eq 'LocalAlias';
+                        push @q, $u if $uop =~ /\A(?:Ref|TernaryExpr|PostfixDeref)\z/;
+                    }
                 }
             }
         }

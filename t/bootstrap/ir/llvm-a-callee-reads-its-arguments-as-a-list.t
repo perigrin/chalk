@@ -59,6 +59,13 @@ for my $case (
     [ q{sub f { $_[0] = 9; return scalar(@_) } my $v = 1; f($v); print "$v\n";}, "9\n", 'a store to $_[0]' ],
     [ q{sub f { my $a = shift; return "$a:@_" } print f(1, 2, 3), "\n";}, "1:2 3\n", 'a shift, then @_' ],
     [ q{sub f { my @p = @_; push @p, 9; return "@p|@_" } print f(1, 2), "\n";}, "1 2 9|1 2\n", 'a copy of it is a copy' ],
+    # AN ITERATOR HANDED TO A CALL is aliased by reference -- `exists
+    # $_[$i] ? \$_[$i] : ...` -- which reads @_ and writes nothing; the
+    # reference itself is not lowered yet.
+    [ q{sub id { $_[0] } sub f { my $s = ""; for my $x (@_) { $s = $s . id($x) } return $s } print f("a", "b"), "\n";}, "ab\n", 'an iterator handed to a call' ],
+    # A WRITE THROUGH A REFERENCE to an element writes the caller's $v.
+    [ q{sub f { my $n = scalar(@_); my $r = \$_[0]; $$r = 5; return $n } my $v = 1; my $k = f($v); print "$v $k\n";}, "5 1\n", 'a store through a reference to $_[0]' ],
+    [ q{sub f { my %o = @_; return $o{b} } print f(a => 1, b => 2), "\n";}, "2\n", 'a hash built from @_' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };
