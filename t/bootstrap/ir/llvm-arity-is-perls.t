@@ -48,6 +48,8 @@ for my $case (
     [ q{sub f { my $a = shift; my $b = shift; return defined $b ? "d$b" : "u" } print f(1), f(1, 2), "\n";}, "ud2\n", 'a shift with nothing left' ],
     [ q{sub f { $_[0] + 1 } print f(1, 2, 3), "\n";}, "2\n", 'extras ignored' ],
     [ q{use v5.42; my $g = sub ($x, $y) { $x + $y }; print $g->(2, 1), "\n";}, "3\n", 'the signature of an anonymous sub, whose declared list is not on the wire' ],
+    [ q{sub f { my ($s, @r) = @_; return scalar(@r) . ":" . join(",", @r) . ":" . ($r[1] // "u") } print f(1), "|", f(1, 2, 3), "\n";}, "0::u|2:2,3:3\n", 'a slurpy array takes the rest' ],
+    [ q{use v5.36; package Optimizer { sub collapse ($, $phi) { return "c$phi" } } print Optimizer->collapse("x"), "\n";}, "cx\n", 'an unnamed signature parameter (pvm)' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };

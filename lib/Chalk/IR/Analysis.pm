@@ -781,6 +781,11 @@ sub _attach_call_targets ($graphs, $mop) {
                 my $cls = defined $node->class_name
                     ? $mop->for_class($node->class_name) : undef;
                 my $m = $cls ? $cls->find_method($node->name // '') : undef;
+                # A PACKAGE'S METHOD IS ITS SUB: blessed-hash OO declares no
+                # `method`, so a name the class does not know as one is the
+                # package sub of that name, if it has one (not inherited).
+                ($m) = grep { $_->name eq ( $node->name // '' ) } $cls->subs
+                    if !$m && $cls;
                 $node->set_target($m) if $m;
                 next;
             }
@@ -1873,6 +1878,7 @@ sub _replay_classes ($classes, $graphs) {
                 params      => ($sd->{params} // []),
                 uses_args   => ($sd->{uses_args} ? true : false),
                 return_type => ($sd->{return_type} // 'Unknown'),
+                ($sd->{signature} ? (signature => $sd->{signature}) : ()),
             );
         }
 

@@ -22,6 +22,10 @@ class Chalk::MOP::Sub {
     # Consumed by the calling convention -- params by default, `@_` materialised
     # only when the body actually touches it.
     field $uses_args   :param :reader = false;
+    # The wire's signature record, as declared: {kind, mandatory, optional,
+    # params}. `mandatory` counts every positional parameter, named or not --
+    # `params` above lists the named ones only.
+    field $signature   :param :reader = undef;
     field $graph       :param :reader = Chalk::IR::Graph->new;
     field $factory     :param :reader = Chalk::IR::NodeFactory->new;
     field $body        :param :reader = [];

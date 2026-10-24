@@ -10497,8 +10497,9 @@ sub _lower_call_direct {
         # a shared lexical returns a Scalar (that lexical's Slot); the call to
         # it, stamped Unknown, is that Scalar -- this call node is this call
         # site's own, so saying so is no one else's business.
-        $node->set_stamp('Scalar')
-            if ( $node->stamp // 'Unknown' ) eq 'Unknown' && $from eq 'Scalar';
+        $node->set_stamp($from)
+            if ( $node->stamp // 'Unknown' ) eq 'Unknown'
+            && $from =~ /\A(?:Scalar|Int|Num|Str|Boolean)\z/;
         # A SCALAR-CONTEXT CALL STAMPED AS A LIST reads its callee's scalar
         # reading, which is what was lowered: `sub g { return }` gives undef
         # there, and the call stamped List was "always defined" (backlog
@@ -10566,12 +10567,19 @@ sub _lower_call_direct {
     my $args_array = $self->{_args_read_as_a_list};
     my $written    = $self->{_args_written};
     my $signature  = $self->{_args_signature};
+    my $slurpy     = $self->{_args_slurpy};
     # A SIGNATURE CHECKS ITS ARITY: too many, or too few for a parameter with
     # no default, and perl dies. A parameter the body never reads is not in
     # the graph, so it cannot be shown to have a default: it counts as
     # mandatory, which refuses rather than guesses.
     if ($signature) {
         my @declared = @{ $target->params // [] };
+        # An UNNAMED parameter (`$` in `($, $phi)`) is not in `params`; the
+        # signature's count is every positional one.
+        my $sig = $target->can('signature') ? $target->signature : undef;
+        @declared = map { "\$p$_" } 1 .. $sig->{mandatory}
+            if ref $sig eq 'HASH' && ( $sig->{kind} // '' ) eq 'declared' && !$sig->{slurpy}
+                && ( $sig->{mandatory} // 0 ) > @declared;
         # AN ANONYMOUS SUB'S DECLARED LIST IS NOT ON THE WIRE (its metaobject is
         # built from the graph, with `@_` for a placeholder): only the
         # parameters it reads are known, so only those are checked.
@@ -10583,7 +10591,7 @@ sub _lower_call_direct {
         die "GAP: direct call to '$name' passes " . scalar(@args) . " argument(s) to a "
           . "signature of " . scalar(@declared) . " -- perl dies (Too many arguments).\n"
             if @args > @declared && !$unknown;
-        my %read = map { $_->index => $_ } @arg_reads;
+        my %read = map { $_->index => $_ } grep { blessed($_) } @arg_reads;
         for my $i (scalar(@args) .. $#declared) {
             die "GAP: direct call to '$name' passes " . scalar(@args) . " argument(s), too few "
               . "for its signature -- perl dies (Too few arguments).\n"
@@ -10602,7 +10610,7 @@ sub _lower_call_direct {
             die "GAP: direct call to '$name': an argument stamped "
               . ( $a->stamp // 'NONE' ) . " flattens into \@_, which inlining "
               . "does not build.\n"
-                unless ( $a->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean|Scalar)\z/;
+                unless ( $a->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean|Scalar|Undef|ArrayRef|HashRef|CodeRef|ScalarRef|Object)\z/;
         }
     }
 
@@ -10628,6 +10636,7 @@ sub _lower_call_direct {
     my @defaulted;
     for my $i (0 .. $#arg_reads) {
         my $r = $arg_reads[$i];
+        next unless blessed($r);
         if ($signature) {
             my $k = $r->index;
             if ($k < @args) { $self->{_arg_bind}{ refaddr($r) } = { ref => $arg_refs[$k], repr => $args[$k]->stamp } }
@@ -10639,6 +10648,17 @@ sub _lower_call_direct {
         else {
             $self->{_arg_bind}{ refaddr($r) } =
                 { ref => $self->_build_slot('false', '0', 'Undef', "$name: argument $i not passed"), repr => 'Scalar' };
+        }
+    }
+    # The slurpy array is the arguments past the scalars -- every read of it
+    # in the callee, whichever memory version, is that one array.
+    if ($slurpy) {
+        my @rest = @args[ scalar(@arg_reads) .. $#args ];
+        my $arr  = $self->_emit_array_of(\@rest);
+        for my $n (_graph_component($graph)) {
+            next unless blessed($n) && $n->operation eq 'PadAccess'
+                && ( $n->sigil // '' ) eq '@' && ( $n->symbol // '' ) eq ( $slurpy->symbol // '' );
+            $self->{_arg_bind}{ refaddr($n) } = { ref => $arr, repr => 'Array' };
         }
     }
     for my $r (@defaulted) {
@@ -11053,6 +11073,7 @@ sub _collect_positional_arg_reads {
     my (%written, $written_src);   # `$_[N] = ...`: N => 1, and @_
     $self->{_args_written} = undef;
     $self->{_args_signature} = 0;
+    $self->{_args_slurpy}    = undef;
     for my $n (_graph_component($graph)) {
         next unless blessed($n);
         my $op = $n->operation;
@@ -11219,16 +11240,10 @@ sub _collect_positional_arg_reads {
           . "parameters with `shift \@_` / `\$_[N]` positional reads."
             if @shifts || %subscripts;
 
-        my @idx = sort { $a <=> $b } keys %params;
-        # The indices must be DENSE from 0: a hole means a parameter the
-        # producer did not emit, and binding positionally past a hole would
-        # silently shift every later argument by one.
-        die "GAP: direct call to '$name': declared parameter indices are not "
-          . "dense from 0 (got " . join( ',', @idx ) . ") — cannot bind "
-          . "positionally without silently shifting later arguments."
-            if $idx[0] != 0 || $idx[-1] != $#idx;
-
-        return map { $params{$_} } @idx;
+        # BY INDEX, holes and all: a hole is a parameter the body never
+        # reads (`($, $phi)`), and each read one keeps its own position.
+        my ($max) = sort { $b <=> $a } keys %params;
+        return map { $params{$_} } 0 .. $max;
     }
 
     # ONE POSITIONAL STYLE PER CALLEE: shifts, `$_[N]`, or one `my (...) =
@@ -11246,6 +11261,12 @@ sub _collect_positional_arg_reads {
             if @list_assigns > 1;
         my @inputs  = $list_assigns[0]->inputs->@*;
         my @targets = @inputs[ 0 .. $#inputs - 1 ];
+        # A SLURPY ARRAY LAST takes every argument after the scalars: bound by
+        # the call to an array of them (_lower_call_direct, _args_slurpy).
+        if (@targets && blessed($targets[-1]) && $targets[-1]->operation eq 'PadAccess'
+                && ( $targets[-1]->sigil // '' ) eq '@') {
+            $self->{_args_slurpy} = pop @targets;
+        }
         for my $t (@targets) {
             die "GAP: direct call to '$name': callee's `my (...) = \@_` has a "
               . "slurpy target -- an array or hash takes every remaining "
@@ -11259,11 +11280,10 @@ sub _collect_positional_arg_reads {
     # `$_[N]`: bound by index, which must run from 0 with no hole -- a
     # positional binding past a hole would shift every later argument.
     if (%subscripts) {
-        my @idx = sort { $a <=> $b } keys %subscripts;
-        die "GAP: direct call to '$name': callee's `\$_[N]` reads are not dense "
-          . "from 0 (got " . join(',', @idx) . ") -- cannot bind positionally."
-            if $idx[0] != 0 || $idx[-1] != $#idx;
-        return map { $subscripts{$_} } @idx;
+        # BY INDEX, holes and all: a method reads `$_[1]` and never its
+        # invocant. A hole is a position nothing reads (undef here).
+        my ($max) = sort { $b <=> $a } keys %subscripts;
+        return map { $subscripts{$_} } 0 .. $max;
     }
 
     # SHIFTS ARE ORDERED BY THEIR MEMORY. Each `shift @_` takes the shift
@@ -11309,6 +11329,11 @@ sub _lower_call_method {
         // die "LLVM MOP: Call(method) '$method_name' has no class_name — "
              . "method dispatch must name its statically-known class "
              . "(019eb42a MOP-direct contract).";
+    # A PACKAGE SUB CALLED AS A METHOD (see _attach_call_targets) is a direct
+    # call with the invocant as its first argument -- inlined like any other.
+    return $self->_lower_call_direct($node)
+        if blessed($node->target) && $node->target->isa('Chalk::MOP::Sub');
+
     my $result_repr = _require_repr($node, 'Call(method)');
 
     # Verify class and method are in the registry
