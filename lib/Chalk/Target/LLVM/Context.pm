@@ -119,6 +119,8 @@ sub new {
         _need_str_to_num_helper => 0,
         _need_argv              => 0,
         _need_slot_inc          => 0,
+        _need_case_helper       => 0,
+        _need_substr_helper     => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -158,6 +160,8 @@ my @NEED_FLAGS = qw(
     _need_str_to_num_helper
     _need_argv
     _need_slot_inc
+    _need_case_helper
+    _need_substr_helper
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -867,6 +871,8 @@ sub render_need_flag_prologue {
     }
     push @lines, $self->_argv_helper_lines;
     push @lines, $self->_slot_inc_helper_lines;
+    push @lines, $self->_case_helper_lines;
+    push @lines, $self->_substr_helper_lines;
 
     return @lines;
 }
@@ -912,6 +918,8 @@ sub render_need_flag_postclass_reemit {
     }
     push @lines, $self->_argv_helper_lines;
     push @lines, $self->_slot_inc_helper_lines;
+    push @lines, $self->_case_helper_lines;
+    push @lines, $self->_substr_helper_lines;
     # Post-class re-emit for _need_memcmp: a method body doing Subscript(Hash)
     # sets _need_memcmp on $body_ctx (propagated to $self by G.5), but the prologue
     # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
@@ -1891,6 +1899,13 @@ sub lower_value {
     elsif ($op eq 'Exists') {
         return $self->_lower_exists($node);
     }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
+            && ($node->name // '') =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/) {
+        return $self->_lower_case_map($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'substr') {
+        return $self->_lower_substr($node);
+    }
     elsif ($op eq 'LocalAlias') {
         return $self->_lower_local_alias($node);
     }
@@ -2016,6 +2031,14 @@ sub _lower_constant {
         # for VarDecl names is also Str repr but should not be printed — it is
         # used only as a VarDecl name marker. We lower it to the same
         # ptr-to-global pattern; the len is tracked but unused for names.
+        # A CHARACTER PAST ASCII IS REFUSED. chalk's strings are bytes, and
+        # perl's length, substr and case mapping act on characters: `length
+        # "\x{e9}"` is 1. The emitted constant's size also disagreed with its
+        # bytes, and lli rejected the module. Until strings carry character
+        # semantics this is a GAP, not a byte-counted answer.
+        die "GAP: a string constant with a character past ASCII is not lowered -- "
+          . "chalk's strings are bytes; perl's length, substr and case act on characters\n"
+            if $val =~ /[^\x00-\x7F]/;
         my ($gname, $byte_len, $total) = $self->_module_global_name('str_const', $val);
 
         # GEP to get i8* from the global array. Emit into the ENTRY block: the
@@ -7855,6 +7878,150 @@ sub _scan_local_aliases {
         }
     }
     return sort keys %names;
+}
+
+# _lower_case_map($node) -> %Str: uc, lc, ucfirst, lcfirst. The operand as
+# its string (a number stringifies), mapped by @chalk_case into a fresh
+# buffer. ASCII only: a byte past it exits 255, since whether perl maps it
+# turns on character semantics the bytes do not carry.
+my %_CASE_MODE = (uc => 0, lc => 1, ucfirst => 2, lcfirst => 3);
+sub _lower_case_map {
+    my ($self, $node) = @_;
+    my ($in) = grep { blessed($_) } $node->inputs->@*;
+    die "GAP: " . $node->name . " with no operand (\$_) is not lowered\n" unless $in;
+    my $from = $in->operation eq 'Print' ? 'Boolean' : ($self->_repr_of($in) // $in->stamp // '');
+    my $ref  = $self->lower_value($in);
+    $from = 'Scalar' if $from eq 'Slot';
+    $ref  = $self->_emit_coercion($ref, $from, 'Str', $node->name . ' operand') unless $from eq 'Str';
+    my ($p, $l) = $self->_str_parts($ref);
+    $self->{$_} = 1 for qw(_need_case_helper _need_malloc_memcpy _need_exit _need_str_type);
+    my $out = $self->_fresh;
+    $self->_emit("  $out = call i8* \@chalk_case(i8* $p, i64 $l, i32 $_CASE_MODE{ $node->name })  ; " . $node->name);
+    my $res = $self->_set_str_len($out, $l);
+    return $self->{cache}{ $node->id } = $res;
+}
+
+sub _case_helper_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_case_helper} && !$self->{_case_helper_emitted}++;
+    return ('', <<'END_HELPER');
+define internal i8* @chalk_case(i8* %p, i64 %len, i32 %mode) {
+entry:
+  %n1 = add i64 %len, 1
+  %buf = call i8* @malloc(i64 %n1)
+  %up = icmp eq i32 %mode, 0
+  %ucf = icmp eq i32 %mode, 2
+  %toup = or i1 %up, %ucf
+  %first = icmp sge i32 %mode, 2
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i1, %store ]
+  %more = icmp ult i64 %i, %len
+  br i1 %more, label %body, label %done
+body:
+  %sp = getelementptr inbounds i8, i8* %p, i64 %i
+  %c = load i8, i8* %sp
+  %hi = icmp slt i8 %c, 0
+  br i1 %hi, label %refuse, label %ascii
+ascii:
+  %isfirst = icmp eq i64 %i, 0
+  %skip0 = xor i1 %isfirst, true
+  %skip = and i1 %first, %skip0
+  %la = sub i8 %c, 97
+  %islo = icmp ult i8 %la, 26
+  %ua = sub i8 %c, 65
+  %isup = icmp ult i8 %ua, 26
+  %mkup = and i1 %toup, %islo
+  %tolo = xor i1 %toup, true
+  %mklo = and i1 %tolo, %isup
+  %cu = sub i8 %c, 32
+  %cl = add i8 %c, 32
+  %m1 = select i1 %mkup, i8 %cu, i8 %c
+  %m2 = select i1 %mklo, i8 %cl, i8 %m1
+  %m = select i1 %skip, i8 %c, i8 %m2
+  br label %store
+store:
+  %dp = getelementptr inbounds i8, i8* %buf, i64 %i
+  store i8 %m, i8* %dp
+  %i1 = add i64 %i, 1
+  br label %loop
+refuse:
+  call void @exit(i32 255)
+  unreachable
+done:
+  %ep = getelementptr inbounds i8, i8* %buf, i64 %len
+  store i8 0, i8* %ep
+  ret i8* %buf
+}
+END_HELPER
+}
+
+# _lower_substr($node) -> %Str: `substr EXPR, OFFSET [, LENGTH]` as a value.
+# A copy, NUL-terminated (a number read from it stops at its end), by perl's
+# rules: a negative offset counts from the end, a negative length leaves
+# that many off the end, a length past the end stops there. Outside the
+# string perl answers undef, which a Str cannot hold: refused at run time.
+# The four-argument form replaces, and is refused here.
+sub _lower_substr {
+    my ($self, $node) = @_;
+    my @in = grep { blessed($_) } $node->inputs->@*;
+    die "GAP: substr with " . scalar(@in) . " arguments (a replacement) is not lowered\n"
+        unless @in == 2 || @in == 3;
+    my $s    = $in[0];
+    my $from = $self->_repr_of($s) // $s->stamp // '';
+    $from = 'Scalar' if $from eq 'Slot';
+    my $ref  = $self->lower_value($s);
+    $ref = $self->_emit_coercion($ref, $from, 'Str', 'substr string') unless $from eq 'Str';
+    my ($p, $l) = $self->_str_parts($ref);
+    my $off = $self->_index_i64($in[1]);
+    my $len = @in == 3 ? $self->_index_i64($in[2]) : '0';
+    my $has = @in == 3 ? 'true' : 'false';
+    $self->{$_} = 1 for qw(_need_substr_helper _need_malloc_memcpy _need_exit _need_str_type);
+    my $lp = $self->_fresh;
+    $self->_emit_entry("  $lp = alloca i64, align 8  ; substr length");
+    my ($out, $n) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $out = call i8* \@chalk_substr(i8* $p, i64 $l, i64 $off, i64 $len, i1 $has, i64* $lp)  ; substr");
+    $self->_emit("  $n = load i64, i64* $lp");
+    return $self->{cache}{ $node->id } = $self->_set_str_len($out, $n);
+}
+
+sub _substr_helper_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_substr_helper} && !$self->{_substr_helper_emitted}++;
+    return ('', <<'END_HELPER');
+define internal i8* @chalk_substr(i8* %p, i64 %slen, i64 %off, i64 %len, i1 %has, i64* %outlen) {
+entry:
+  %neg = icmp slt i64 %off, 0
+  %o1 = add i64 %off, %slen
+  %o = select i1 %neg, i64 %o1, i64 %off
+  %b1 = icmp slt i64 %o, 0
+  %b2 = icmp sgt i64 %o, %slen
+  %bad = or i1 %b1, %b2
+  br i1 %bad, label %refuse, label %ok
+refuse:
+  call void @exit(i32 255)
+  unreachable
+ok:
+  %rest = sub i64 %slen, %o
+  %lneg = icmp slt i64 %len, 0
+  %end = add i64 %slen, %len
+  %n1 = sub i64 %end, %o
+  %n1neg = icmp slt i64 %n1, 0
+  %n1c = select i1 %n1neg, i64 0, i64 %n1
+  %over = icmp sgt i64 %len, %rest
+  %npos = select i1 %over, i64 %rest, i64 %len
+  %nh = select i1 %lneg, i64 %n1c, i64 %npos
+  %n = select i1 %has, i64 %nh, i64 %rest
+  %n1b = add i64 %n, 1
+  %buf = call i8* @malloc(i64 %n1b)
+  %src = getelementptr inbounds i8, i8* %p, i64 %o
+  %c = call i8* @memcpy(i8* %buf, i8* %src, i64 %n)
+  %ep = getelementptr inbounds i8, i8* %buf, i64 %n
+  store i8 0, i8* %ep
+  store i64 %n, i64* %outlen
+  ret i8* %buf
+}
+END_HELPER
 }
 # _lower_increment($node) -> %Slot (or the node's narrower reading)
 #
