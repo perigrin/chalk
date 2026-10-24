@@ -46,6 +46,7 @@ for my $case (
     [ q{package O { sub new { bless {}, shift } sub m { "m$_[1]" } } my $o = O->new; print $o->m(3), O->m(4), "\n";}, "m3m4\n", 'on an object and on the class' ],
     [ q{package O { sub new { bless {}, shift } sub m { $_[1] = 9 } } sub f { my $o = O->new; my $x = 1; $o->m($x); return $x } print f(), "\n";}, "9\n", 'writing its argument (pvm)' ],
     [ q{use v5.42; package O { sub m { $_[1] } } print O->m(5), O->m(6), "\n";}, "56\n", 'a class method' ],
+    [ q{package O { sub m { $_[1] * 2 } } print O->m(5) + O->m(6), "\n";}, "22\n", 'its result typed from the sub, read by arithmetic' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };
