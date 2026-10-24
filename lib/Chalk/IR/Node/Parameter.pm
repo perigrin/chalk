@@ -40,6 +40,10 @@ class Chalk::IR::Node::Parameter :isa(Chalk::IR::Node::Access) {
     field $index :param :reader;
     field $name  :param :reader = undef;
     field $sigil :param :reader = '$';
+    # How a signature default applies: 'absent' (`$b = 3`), 'undef' (`//=`)
+    # or 'false' (`||=`); undef for a parameter with none. The default's
+    # value is inputs[0].
+    field $default_when :param :reader = undef;
 
     method operation() { 'Parameter' }
 

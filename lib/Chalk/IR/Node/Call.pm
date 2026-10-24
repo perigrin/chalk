@@ -66,6 +66,10 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # reasoning that keeps control_in out of the hash (Node.pm:42).
     field $want :param :reader = undef;
 
+    # `&name` with no parens: the callee runs on the CALLER's @_ rather than
+    # a list of its own. In the hash: `&f` and `f()` are different calls.
+    field $shares_args :param :reader = 0;
+
     # Whether the last input is the MEMORY version this call follows rather
     # than an argument (B::SoN `memory_input`). Not identity: the inputs are.
     field $memory_input :param :reader = 0;
@@ -102,6 +106,7 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
             "name=$name",
             (defined $class_name ? "class_name=$class_name" : ()),
             ($paren_form ? "paren_form=1" : ()),
+            ($shares_args ? "shares_args=1" : ()),
             $self->_serialize_inputs());
     }
 

@@ -587,6 +587,7 @@ sub _deserialize_graph ($method_data) {
             $args{param_names}   = $fields->{param_names}
                 if exists $fields->{param_names};
             $args{want}          = $fields->{want} if exists $fields->{want};
+            $args{shares_args}   = 1 if $fields->{shares_args};
             # THE LAST INPUT IS MEMORY, not an argument: a builtin that reads
             # or writes an aggregate (push, shift, ...) follows a memory
             # version. Dropped, push took its MemStart for a value to append.
@@ -694,6 +695,7 @@ sub _deserialize_graph ($method_data) {
             $args{index} = $fields->{index};
             $args{name}  = $fields->{name};
             $args{sigil} = $fields->{sigil} // '$';
+            $args{default_when} = $fields->{default_when} if defined $fields->{default_when};
         }
         elsif ($op eq 'FieldAccess') {
             $args{field_index} = $fields->{field_index};

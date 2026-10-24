@@ -10400,6 +10400,8 @@ sub _lower_call_direct {
     my ($self, $node) = @_;
 
     my $name  = $node->name;
+    die "GAP: direct call to '$name' as `&$name`, which shares its caller's \@_, is not lowered\n"
+        if $node->can('shares_args') && $node->shares_args;
 
     # Inlining is the only direct-call mechanism, so a self- or mutually-
     # recursive callee has no terminating lowering: we inline the body, which
@@ -10563,10 +10565,36 @@ sub _lower_call_direct {
     my @arg_reads = $self->_collect_positional_arg_reads($graph, $name);
     my $args_array = $self->{_args_read_as_a_list};
     my $written    = $self->{_args_written};
-    die "GAP: direct call to '$name': callee reads " . scalar(@arg_reads)
-      . " positional argument(s) via `shift \@_` but the call passes "
-      . scalar(@args) . " — arity mismatch, cannot bind."
-        if $args_array ? @arg_reads > @args : @arg_reads != @args;
+    my $signature  = $self->{_args_signature};
+    # A SIGNATURE CHECKS ITS ARITY: too many, or too few for a parameter with
+    # no default, and perl dies. A parameter the body never reads is not in
+    # the graph, so it cannot be shown to have a default: it counts as
+    # mandatory, which refuses rather than guesses.
+    if ($signature) {
+        my @declared = @{ $target->params // [] };
+        # AN ANONYMOUS SUB'S DECLARED LIST IS NOT ON THE WIRE (its metaobject is
+        # built from the graph, with `@_` for a placeholder): only the
+        # parameters it reads are known, so only those are checked.
+        my $unknown = @declared == 1 && $declared[0] eq '@_';
+        @declared = map { "\$p$_" } 0 .. ( @arg_reads ? (sort { $b <=> $a } map { $_->index } @arg_reads)[0] : -1 )
+            if $unknown;
+        die "GAP: direct call to '$name': a signature with a slurpy parameter is not lowered\n"
+            if grep { /\A[@%]/ } @declared;
+        die "GAP: direct call to '$name' passes " . scalar(@args) . " argument(s) to a "
+          . "signature of " . scalar(@declared) . " -- perl dies (Too many arguments).\n"
+            if @args > @declared && !$unknown;
+        my %read = map { $_->index => $_ } @arg_reads;
+        for my $i (scalar(@args) .. $#declared) {
+            die "GAP: direct call to '$name' passes " . scalar(@args) . " argument(s), too few "
+              . "for its signature -- perl dies (Too few arguments).\n"
+                unless $read{$i} && defined $read{$i}->default_when;
+        }
+        for my $i (0 .. $#args) {
+            die "GAP: direct call to '$name': a signature default applied when the argument is "
+              . $read{$i}->default_when . " is not lowered\n"
+                if $read{$i} && ( $read{$i}->default_when // 'absent' ) ne 'absent';
+        }
+    }
     # @_ READ AS A LIST is one argument per element: an argument that is
     # itself a list would flatten, which this does not build.
     if ($args_array) {
@@ -10594,9 +10622,29 @@ sub _lower_call_direct {
     # bare integer: "'%tmp_1' defined with type 'i64' but expected '%Slot'".
     # The repr is what every consumer uses to decide how to READ the value, so
     # rebinding one without the other is a type lie.
-    $self->{_arg_bind}{ refaddr($arg_reads[$_]) } =
-        { ref => $arg_refs[$_], repr => $args[$_]->stamp }
-        for 0 .. $#arg_reads;
+    # AN ARGUMENT NOT PASSED is undef -- or, for a signature, its default,
+    # lowered once the passed ones are bound (it may read them). Extras are
+    # passed and not read.
+    my @defaulted;
+    for my $i (0 .. $#arg_reads) {
+        my $r = $arg_reads[$i];
+        if ($signature) {
+            my $k = $r->index;
+            if ($k < @args) { $self->{_arg_bind}{ refaddr($r) } = { ref => $arg_refs[$k], repr => $args[$k]->stamp } }
+            else              { push @defaulted, $r }
+        }
+        elsif ($i < @args) {
+            $self->{_arg_bind}{ refaddr($r) } = { ref => $arg_refs[$i], repr => $args[$i]->stamp };
+        }
+        else {
+            $self->{_arg_bind}{ refaddr($r) } =
+                { ref => $self->_build_slot('false', '0', 'Undef', "$name: argument $i not passed"), repr => 'Scalar' };
+        }
+    }
+    for my $r (@defaulted) {
+        my $d = $r->inputs->[0];
+        $self->{_arg_bind}{ refaddr($r) } = { ref => $self->lower_value($d), repr => $d->stamp };
+    }
     my $args_arr = $args_array ? $self->_emit_array_of(\@args) : undef;
     $self->{_arg_bind}{ refaddr($args_array) } = { ref => $args_arr, repr => 'Array' }
         if $args_array;
@@ -11004,6 +11052,7 @@ sub _collect_positional_arg_reads {
     $self->{_args_read_as_a_list} = undef;
     my (%written, $written_src);   # `$_[N] = ...`: N => 1, and @_
     $self->{_args_written} = undef;
+    $self->{_args_signature} = 0;
     for my $n (_graph_component($graph)) {
         next unless blessed($n);
         my $op = $n->operation;
@@ -11164,6 +11213,7 @@ sub _collect_positional_arg_reads {
     # A DECLARED SIGNATURE WINS, and it is not capped at one argument. The
     # parameters are returned in index order, so the caller's positional
     # binding (arg_reads[$i] <- arg_refs[$i]) lines up by construction.
+    $self->{_args_signature} = %params ? 1 : 0;
     if (%params) {
         die "GAP: direct call to '$name': callee mixes declared signature "
           . "parameters with `shift \@_` / `\$_[N]` positional reads."
