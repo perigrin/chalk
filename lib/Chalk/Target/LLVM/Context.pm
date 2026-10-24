@@ -118,6 +118,7 @@ sub new {
         _need_malloc_memcpy   => 0,
         _need_str_to_num_helper => 0,
         _need_argv              => 0,
+        _need_slot_inc          => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -156,6 +157,7 @@ my @NEED_FLAGS = qw(
     _need_bool_str_globals
     _need_str_to_num_helper
     _need_argv
+    _need_slot_inc
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -855,6 +857,7 @@ sub render_need_flag_prologue {
         $self->{_str_to_num_helper_emitted} = 1;
     }
     push @lines, $self->_argv_helper_lines;
+    push @lines, $self->_slot_inc_helper_lines;
 
     return @lines;
 }
@@ -899,6 +902,7 @@ sub render_need_flag_postclass_reemit {
         $self->{_str_to_num_helper_emitted} = 1;
     }
     push @lines, $self->_argv_helper_lines;
+    push @lines, $self->_slot_inc_helper_lines;
     # Post-class re-emit for _need_memcmp: a method body doing Subscript(Hash)
     # sets _need_memcmp on $body_ctx (propagated to $self by G.5), but the prologue
     # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
@@ -1860,6 +1864,9 @@ sub lower_value {
     }
     elsif ($op eq 'Exists') {
         return $self->_lower_exists($node);
+    }
+    elsif ($op eq 'Increment') {
+        return $self->_lower_increment($node);
     }
     elsif ($op eq 'RefType') {
         return $self->_lower_reftype($node);
@@ -3467,9 +3474,6 @@ sub _lower_assign {
     my ($self, $node) = @_;
 
     my $repr = _require_repr($node, 'Assign');
-    if ($repr eq 'Scalar') {
-        die "Assign with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
-    }
 
     my $lhs = $node->inputs->[0];
     my $rhs = $node->inputs->[1];
@@ -3608,7 +3612,7 @@ sub _lower_assign {
 
             # Typed pointer resolved at THIS use — see _container_ptr.
             my $hash_ref = $self->_container_ptr($container, 'Hash');
-            my $wkey_ref = $self->lower_value($key_idx);
+            my $wkey_ref = $self->_hash_key_str($key_idx);
             # See HashRead: a 0-length key makes the memcmp match any entry.
             # Die loudly on an untracked length rather than default to 0.
             my ($wkey_ptr, $wkey_len) = $self->_str_parts($wkey_ref);
@@ -4488,6 +4492,14 @@ sub _lower_defined_or {
         my $slot = $lhs_node->operation eq 'Subscript' && $lhs_repr ne 'Scalar'
             ? $self->_subscript_slot($lhs_node) : $self->lower_value($lhs_node);
         return $self->_lower_defined_or_by_slot($node, $slot);
+    }
+
+    # A DEFINITE LHS IS DEFINED: an Int, Num, Str or Boolean is never undef, so
+    # the result is the LHS, boxed where the join is a Scalar. Phied unboxed
+    # against the Scalar rhs, lli rejected the module (pvm unary.md).
+    if (($repr // '') eq 'Scalar' && $lhs_repr =~ /\A(?:Int|Num|Str|Boolean)\z/) {
+        my $ref = $self->_emit_coercion($self->lower_value($lhs_node), $lhs_repr, 'Scalar', '// lhs');
+        return $self->{cache}{ $node->id } = $ref;
     }
 
     # Lower the LHS. For Undef-typed LHS, this produces the defined bit (i1).
@@ -7478,7 +7490,7 @@ sub _lower_hash_ref {
     $self->_emit("  $ents = bitcast i8* $ent_buf to %HashEntry*  ; HashRef: entry array ptr");
 
     for my $i (0 .. $npairs - 1) {
-        my $key_ref = $self->lower_value($inputs->[ $i * 2     ]);
+        my $key_ref = $self->_hash_key_str($inputs->[ $i * 2 ]);
         my $val_ref = $self->lower_value($inputs->[ $i * 2 + 1 ]);
         # The stored key length is later memcmp'd at read/update time; a 0-length
         # key would make every lookup match this entry. Die loudly on an untracked
@@ -7652,7 +7664,7 @@ sub _lower_exists {
     if ($kind eq 'hash') {
         $self->{_need_memcmp} = 1;
         my $hash = $self->_container_ptr($container, 'Hash');
-        my ($kp, $kl) = $self->_str_parts($self->lower_value($key));
+        my ($kp, $kl) = $self->_str_parts($self->_hash_key_str($key));
         defined $kl or die "GAP: exists over a hash key with no tracked length is not lowered\n";
         $res = $self->_emit_hash_has_key($hash, $kp, $kl);
     }
@@ -7673,6 +7685,197 @@ sub _lower_exists {
     }
     $self->{cache}{ $node->id } = $res;
     return $res;
+}
+
+# _lower_increment($node) -> %Slot (or the node's narrower reading)
+#
+# PERL'S ++ ON A VALUE NOT PROVEN A NUMBER. B::SoN emits Increment where the
+# operand may be a string, since "Az"++ is "Ba" and an Add would make it 1.
+# The operand's tag decides at run time (@chalk_slot_inc): undef is 1, a
+# number adds one, a string of letters then digits counts in its own
+# alphabet, any other string is its number plus one.
+sub _lower_increment {
+    my ($self, $node) = @_;
+    my $in   = $node->inputs->[0];
+    my $from = $in->operation eq 'Print' ? 'Boolean' : ($in->stamp // '');
+    my $ref  = $self->lower_value($in);
+    my $slot = $from =~ /\A(?:Scalar|Slot)\z/ ? $ref
+             : $from eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', '++ operand')
+             : $from =~ /\A(?:Int|Num|Str|Boolean)\z/
+                 ? $self->_emit_coercion($ref, $from, 'Scalar', '++ operand')
+             : die "GAP: ++ on a $from value is not lowered\n";
+    $self->{$_} = 1 for qw(_need_slot_inc _need_aggregate_types _need_malloc_memcpy
+                           _need_exit _need_str_type _need_str_to_num_helper);
+    my $r = $self->_fresh;
+    $self->_emit("  $r = call %Slot \@chalk_slot_inc(%Slot $slot)  ; ++");
+    my $to = $node->stamp // 'Scalar';
+    return $self->{cache}{ $node->id } = $to =~ /\A(?:Scalar|Slot|Unknown)\z/ ? $r
+        : $self->_emit_coercion($r, 'Scalar', $to, '++ result');
+}
+
+# _slot_inc_helper_lines() -> @chalk_slot_inc and @chalk_str_inc, once.
+sub _slot_inc_helper_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_slot_inc} && !$self->{_slot_inc_helper_emitted}++;
+    return ('', 'declare {i64, i1} @llvm.sadd.with.overflow.i64(i64, i64)',
+            _emit_slot_inc_helper());
+}
+
+# _emit_slot_inc_helper() -> the IR text of @chalk_slot_inc(%Slot) and
+# @chalk_str_inc(%Str*). What perl gives that a Slot cannot hold is refused
+# at run time (exit 255) rather than answered wrongly: ++ past the largest
+# Int (perl's answer is an unsigned integer) and ++ on a reference.
+sub _emit_slot_inc_helper {
+    my ($d, $t, $p) = (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
+    my %g = map { $_ => _slot_tag_value($_) } qw(Undef Int Num Str Boolean);
+    my ($sp, $sl, $se) = (_str_idx('ptr'), _str_idx('len'), _str_idx('enc'));
+    my $enc = _str_enc('utf8');
+    my $num = _repr_to_llvm_type('Num');
+    return <<"END_HELPER";
+define internal %Slot \@chalk_slot_inc(%Slot %v) {
+entry:
+  %def = extractvalue %Slot %v, $d
+  %tag = extractvalue %Slot %v, $t
+  %pay = extractvalue %Slot %v, $p
+  br i1 %def, label %bytag, label %one
+bytag:
+  switch i8 %tag, label %refuse [ i8 $g{Undef}, label %one
+                                  i8 $g{Int}, label %int
+                                  i8 $g{Num}, label %num
+                                  i8 $g{Boolean}, label %bool
+                                  i8 $g{Str}, label %str ]
+one:
+  %o0 = insertvalue %Slot undef, i1 true, $d
+  %o1 = insertvalue %Slot %o0, i8 $g{Int}, $t
+  %o2 = insertvalue %Slot %o1, i64 1, $p
+  ret %Slot %o2
+int:
+  %ov = call {i64, i1} \@llvm.sadd.with.overflow.i64(i64 %pay, i64 1)
+  %iv = extractvalue {i64, i1} %ov, 0
+  %io = extractvalue {i64, i1} %ov, 1
+  br i1 %io, label %refuse, label %intok
+intok:
+  %i0 = insertvalue %Slot %v, i64 %iv, $p
+  ret %Slot %i0
+num:
+  %nf = bitcast i64 %pay to $num
+  %nf1 = fadd $num %nf, 1.0
+  %nb = bitcast $num %nf1 to i64
+  %n0 = insertvalue %Slot %v, i64 %nb, $p
+  ret %Slot %n0
+bool:
+  %bo = add i64 %pay, 1
+  %c0 = insertvalue %Slot %v, i8 $g{Int}, $t
+  %c1 = insertvalue %Slot %c0, i64 %bo, $p
+  ret %Slot %c1
+str:
+  %sptr = inttoptr i64 %pay to %Str*
+  %r = call %Slot \@chalk_str_inc(%Str* %sptr)
+  ret %Slot %r
+refuse:
+  call void \@exit(i32 255)
+  unreachable
+}
+
+define internal %Slot \@chalk_str_inc(%Str* %s) {
+entry:
+  %pp = getelementptr inbounds %Str, %Str* %s, i64 0, i32 $sp
+  %p = load i8*, i8** %pp
+  %lp = getelementptr inbounds %Str, %Str* %s, i64 0, i32 $sl
+  %len = load i64, i64* %lp
+  %empty = icmp eq i64 %len, 0
+  br i1 %empty, label %one, label %scan
+one:
+  %o0 = insertvalue %Slot undef, i1 true, $d
+  %o1 = insertvalue %Slot %o0, i8 $g{Int}, $t
+  %o2 = insertvalue %Slot %o1, i64 1, $p
+  ret %Slot %o2
+scan:
+  %i = phi i64 [ 0, %entry ], [ %i1, %sstep ]
+  %dig = phi i1 [ false, %entry ], [ %dig1, %sstep ]
+  %done = icmp eq i64 %i, %len
+  br i1 %done, label %magic, label %sbody
+sbody:
+  %cp = getelementptr inbounds i8, i8* %p, i64 %i
+  %c = load i8, i8* %cp
+  %cd = sub i8 %c, 48
+  %isd = icmp ult i8 %cd, 10
+  %lc = or i8 %c, 32
+  %la = sub i8 %lc, 97
+  %isl0 = icmp ult i8 %la, 26
+  %nodig = xor i1 %dig, true
+  %isl = and i1 %isl0, %nodig
+  %ok = or i1 %isd, %isl
+  br i1 %ok, label %sstep, label %numeric
+sstep:
+  %dig1 = or i1 %dig, %isd
+  %i1 = add i64 %i, 1
+  br label %scan
+numeric:
+  %nv = call double \@chalk_str_to_num(i8* %p, i64 %len)
+  %nv1 = fadd $num %nv, 1.0
+  %nb = bitcast $num %nv1 to i64
+  %u0 = insertvalue %Slot undef, i1 true, $d
+  %u1 = insertvalue %Slot %u0, i8 $g{Num}, $t
+  %u2 = insertvalue %Slot %u1, i64 %nb, $p
+  ret %Slot %u2
+magic:
+  %n1 = add i64 %len, 1
+  %buf = call i8* \@malloc(i64 %n1)
+  %dst = getelementptr inbounds i8, i8* %buf, i64 1
+  %cpy = call i8* \@memcpy(i8* %dst, i8* %p, i64 %len)
+  br label %ml
+ml:
+  %j = phi i64 [ %len, %magic ], [ %jm, %mcarry ]
+  %more = icmp ne i64 %j, 0
+  br i1 %more, label %mbody, label %mprepend
+mbody:
+  %jm = sub i64 %j, 1
+  %q = getelementptr inbounds i8, i8* %dst, i64 %jm
+  %ch = load i8, i8* %q
+  %isz = icmp eq i8 %ch, 122
+  %isZ = icmp eq i8 %ch, 90
+  %is9 = icmp eq i8 %ch, 57
+  %wz = or i1 %isz, %isZ
+  %wrap = or i1 %wz, %is9
+  br i1 %wrap, label %mcarry, label %mstop
+mcarry:
+  %w0 = select i1 %isZ, i8 65, i8 48
+  %w = select i1 %isz, i8 97, i8 %w0
+  store i8 %w, i8* %q
+  br label %ml
+mstop:
+  %ch1 = add i8 %ch, 1
+  store i8 %ch1, i8* %q
+  br label %mret
+mprepend:
+  %f = load i8, i8* %p
+  %fd0 = sub i8 %f, 48
+  %fd = icmp ult i8 %fd0, 10
+  %fu0 = sub i8 %f, 65
+  %fu = icmp ult i8 %fu0, 26
+  %pre0 = select i1 %fu, i8 65, i8 97
+  %pre = select i1 %fd, i8 49, i8 %pre0
+  store i8 %pre, i8* %buf
+  br label %mret
+mret:
+  %rp = phi i8* [ %dst, %mstop ], [ %buf, %mprepend ]
+  %rl = phi i64 [ %len, %mstop ], [ %n1, %mprepend ]
+  %sb = call i8* \@malloc(i64 ptrtoint (%Str* getelementptr (%Str, %Str* null, i64 1) to i64))
+  %ns = bitcast i8* %sb to %Str*
+  %np = getelementptr inbounds %Str, %Str* %ns, i64 0, i32 $sp
+  store i8* %rp, i8** %np
+  %nl = getelementptr inbounds %Str, %Str* %ns, i64 0, i32 $sl
+  store i64 %rl, i64* %nl
+  %ne = getelementptr inbounds %Str, %Str* %ns, i64 0, i32 $se
+  store i32 $enc, i32* %ne
+  %spay = ptrtoint %Str* %ns to i64
+  %m0 = insertvalue %Slot undef, i1 true, $d
+  %m1 = insertvalue %Slot %m0, i8 $g{Str}, $t
+  %m2 = insertvalue %Slot %m1, i64 %spay, $p
+  ret %Slot %m2
+}
+END_HELPER
 }
 
 # _emit_hash_has_key($hash, $key_ptr, $key_len) -> i1, found
@@ -8889,6 +9092,19 @@ sub _lower_builtin_shift_pop {
 #   hnxt: i_next = i+1; br hloop  (back-edge)
 #   hmiss: br hend
 #   hend: phi result
+# _hash_key_str($key_node) -> %Str: a hash key is its string. The scan
+# compares bytes, so a number, an element (a Slot) or a Boolean is converted
+# first -- handed over as it was, it was taken apart as a %Str and lli
+# rejected the module.
+sub _hash_key_str {
+    my ($self, $key) = @_;
+    my $ref  = $self->lower_value($key);
+    my $from = $key->operation eq 'Print' ? 'Boolean' : ($self->_repr_of($key) // $key->stamp // '');
+    return $ref if $from eq 'Str';
+    $from = 'Scalar' if $from eq 'Slot';
+    return $self->_emit_coercion($ref, $from, 'Str', 'hash key');
+}
+
 sub _lower_hash_read {
     my ($self, $node) = @_;
 
@@ -8899,7 +9115,7 @@ sub _lower_hash_read {
     # Typed pointer resolved at THIS use (re-lowered for mutable-read
     # containers; bitcast for Ref reprs) — see _container_ptr.
     my $hash_ref = $self->_container_ptr($container, 'Hash');
-    my $lkey_ref = $self->lower_value($node->inputs->[1]);
+    my $lkey_ref = $self->_hash_key_str($node->inputs->[1]);
     # The key length drives the memcmp scan; a silently-zeroed length makes a
     # zero-length memcmp match ANY entry (spurious key match). If the key length
     # is untracked it is a TypeInference/length-tracking gap — die loudly (matches
