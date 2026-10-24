@@ -677,7 +677,9 @@ sub _deserialize_graph ($method_data) {
             # AN @ VARIABLE IS AN ARRAY, a % one a HASH, whatever inference
             # missed: `my @r;` arrives as a bare PadAccess stamped Unknown --
             # or Scalar, when a foreach walks it.
-            if (( $nd->{stamp} // 'Unknown' ) =~ /\A(?:Unknown|Scalar)\z/ && !$fields->{shared}) {
+            # A SHARED one too: it is its module global's aggregate.
+            if (( $nd->{stamp} // 'Unknown' ) =~ /\A(?:Unknown|Scalar)\z/
+                    && ( !$fields->{shared} || ( $fields->{sigil} // '' ) =~ /\A[@%]\z/ )) {
                 $nd->{stamp} = 'Array' if ( $fields->{sigil} // '' ) eq '@';
                 $nd->{stamp} = 'Hash'  if ( $fields->{sigil} // '' ) eq '%';
             }

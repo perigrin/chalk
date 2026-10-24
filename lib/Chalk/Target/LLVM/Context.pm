@@ -121,6 +121,7 @@ sub new {
         _need_slot_inc          => 0,
         _need_case_helper       => 0,
         _need_substr_helper     => 0,
+        _need_lex_agg           => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -162,6 +163,7 @@ my @NEED_FLAGS = qw(
     _need_slot_inc
     _need_case_helper
     _need_substr_helper
+    _need_lex_agg
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -185,6 +187,8 @@ sub absorb_need_flags_from {
         for keys %{ $src_ctx->{_lex_globals} // {} };
     $self->{_pkg_slots}{$_} = $src_ctx->{_pkg_slots}{$_}
         for keys %{ $src_ctx->{_pkg_slots} // {} };
+    $self->{_lex_agg_globals}{$_} = $src_ctx->{_lex_agg_globals}{$_}
+        for keys %{ $src_ctx->{_lex_agg_globals} // {} };
     return $self;
 }
 
@@ -920,6 +924,8 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_slot_inc_helper_lines;
     push @lines, $self->_case_helper_lines;
     push @lines, $self->_substr_helper_lines;
+    # Shared aggregates: emitted once, here, after every body has named its own.
+    push @lines, $self->_lex_aggregate_lines;
     # Post-class re-emit for _need_memcmp: a method body doing Subscript(Hash)
     # sets _need_memcmp on $body_ctx (propagated to $self by G.5), but the prologue
     # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
@@ -3392,8 +3398,7 @@ sub _lower_padaccess {
     # A LOCATION (a shared file lexical, a `my $x` kept in memory) is read
     # from its %Slot, at this read's memory version (frozen there by
     # _freeze_memory_reads), and unboxed to the reading's repr.
-    die "GAP: a shared file lexical " . $node->name . " that is not a scalar "
-      . "is not lowered\n" if $node->shared && $node->sigil ne '$';
+    return $self->_lex_aggregate_ptr($node) if $node->shared && $node->sigil =~ /\A[@%]\z/;
     if ($node->is_location) {
         my $g    = $self->_location_ptr($node);
         my $slot = $self->_fresh;
@@ -3786,6 +3791,23 @@ sub _lower_assign {
     # `@_`, reads it.
     if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'PadAccess'
             && ($lhs->shared || $lhs->is_location)) {
+        # A WHOLE SHARED AGGREGATE ASSIGNED: the new header copied over the
+        # one every graph holds, in place, so a reference taken before still
+        # names it.
+        if ($lhs->sigil =~ /\A[@%]\z/) {
+            my $ty  = $lhs->sigil eq '@' ? '%Array' : '%Hash';
+            my $rs  = $rhs->stamp // '';
+            die "GAP: a whole shared " . $lhs->name . " assigned from a $rs is not lowered\n"
+                unless $rs eq ( $ty eq '%Array' ? 'Array' : 'Hash' );
+            my $src = $rhs->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/
+                ? $rhs_ref : $self->_emit_aggregate_copy($rhs_ref, $rs);
+            my $dst = $self->_lex_aggregate_ptr($lhs);
+            my $v   = $self->_fresh;
+            $self->_emit("  $v = load $ty, $ty* $src  ; the new contents");
+            $self->_emit("  store $ty $v, $ty* $dst  ; into " . $lhs->name . ", in place");
+            $self->{cache}{ $node->id } = $rhs_ref;
+            return $rhs_ref;
+        }
         die "GAP: a store to a shared file lexical " . $lhs->name
           . " that is not a scalar is not lowered\n" unless $lhs->sigil eq '$';
         my $g    = $self->_location_ptr($lhs);
@@ -5661,6 +5683,18 @@ sub _freeze_memory_reads {
         if ($c->operation eq 'FieldAccess' || $c->operation eq 'EntryDef'
                 || ($c->operation eq 'PadAccess' && $c->is_location)) {
             $mem = $c->inputs->[0];
+        }
+        # A READ OF THE WHOLE AGGREGATE at its memory version -- its count, or
+        # a builtin that walks it without changing it. Lowered at its use, a
+        # later store to a shared aggregate (one cell every graph writes) had
+        # already changed what it read: `my $a = "@p"; @p = ()` read the ().
+        elsif ($c->operation eq 'Count') {
+            $mem = $c->inputs->[1];
+        }
+        elsif ($c->operation eq 'Call' && $c->can('memory_input') && $c->memory_input
+                && ( $c->dispatch_kind // '' ) eq 'builtin'
+                && ( $c->name // '' ) =~ /\A(?:join|sort|reverse|keys|values)\z/) {
+            $mem = $c->inputs->[-1];
         }
         elsif ($c->operation eq 'PostfixDeref' && ( ($c->sigil // '') eq '$' || $c->copy )) {
             # $$r, or a copy through a reference, at its memory version: made
@@ -8022,6 +8056,54 @@ ok:
   ret i8* %buf
 }
 END_HELPER
+}
+
+# _lex_aggregate_ptr($node) -> %Array* | %Hash*: a SHARED file-level `@x` or
+# `%x` -- one aggregate every graph reads and writes. It lives behind a
+# module global pointer (`@lexa_x` / `@lexh_x`), made empty the first time
+# any graph reaches it (@chalk_lex_array / @chalk_lex_hash), so no graph
+# needs to have run first.
+sub _lex_aggregate_ptr {
+    my ($self, $node) = @_;
+    my $array = $node->sigil eq '@';
+    my $ident = ( $array ? 'lexa_' : 'lexh_' ) . $node->symbol;
+    die "GAP: shared lexical global '\@$ident' is not a legal unquoted LLVM identifier (\\w+)\n"
+        unless $ident =~ /\A\w+\z/;
+    my $ty = $array ? '%Array' : '%Hash';
+    $self->{_lex_agg_globals}{"\@$ident"} = $ty;
+    $self->{$_} = 1 for qw(_need_lex_agg _need_aggregate_types _need_malloc_memcpy);
+    my $p = $self->_fresh;
+    $self->_emit("  $p = call $ty* \@chalk_lex_" . ( $array ? 'array' : 'hash' )
+        . "($ty** \@$ident)  ; shared " . $node->sigil . $node->symbol);
+    return $p;
+}
+
+# _lex_aggregate_lines() -> the shared aggregates' globals and their helpers.
+sub _lex_aggregate_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_lex_agg} && !$self->{_lex_agg_emitted}++;
+    my %g = %{ $self->{_lex_agg_globals} // {} };
+    my @lines = ('', map { "$_ = internal global $g{$_}* null, align 8  ; a shared file-level aggregate" } sort keys %g);
+    for my $k (['array', '%Array'], ['hash', '%Hash']) {
+        my ($n, $ty) = @$k;
+        push @lines, '', <<"END_HELPER";
+define internal $ty* \@chalk_lex_$n($ty** %g) {
+entry:
+  %p = load $ty*, $ty** %g
+  %none = icmp eq $ty* %p, null
+  br i1 %none, label %make, label %have
+make:
+  %b = call i8* \@malloc(i64 ptrtoint ($ty* getelementptr ($ty, $ty* null, i64 1) to i64))
+  %a = bitcast i8* %b to $ty*
+  store $ty zeroinitializer, $ty* %a
+  store $ty* %a, $ty** %g
+  ret $ty* %a
+have:
+  ret $ty* %p
+}
+END_HELPER
+    }
+    return @lines;
 }
 # _lower_increment($node) -> %Slot (or the node's narrower reading)
 #
