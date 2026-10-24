@@ -17,4 +17,13 @@ class Chalk::IR::Node::Unwind :isa(Chalk::IR::Node) {
     # The exception arguments (an arrayref). Control flows through the
     # control_in decoration (set via set_control_in), not through inputs.
     method value() { return $self->inputs->[0] }
+
+    # The block eval that lexically holds this die in its graph (B::SoN's
+    # eval_id, also on that eval's Region), or undef.
+    field $eval_id :reader = undef;
+
+    method set_eval_id($v) {
+        $eval_id = $v;
+        return;
+    }
 }

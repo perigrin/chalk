@@ -1448,7 +1448,12 @@ sub _pkg_slot_ptr {
 
 sub _pkg_slot_name {
     my ($self, $stash, $var) = @_;
-    my $ident = "pkg_${stash}_${var}";
+    # $@ IS THE ONE PUNCTUATION VARIABLE chalk keeps (block evals set it),
+    # spelled by its bytes' hex under its own prefix so no word-named variable
+    # can spell the same global. Any other ($^W, $^O) is perl's to set, and
+    # an empty global would read wrong: it stays refused below.
+    my $ident = "${stash}::${var}" eq 'main::@' ? "pkgp_main_" . unpack('H*', $var)
+              : "pkg_${stash}_${var}";
     die "GAP: package-scalar global '\@$ident' (from ${stash}::${var}) is not a "
       . "legal unquoted LLVM identifier (\\w+)\n"
         unless $ident =~ /\A\w+\z/;
@@ -2245,10 +2250,36 @@ sub _lower_divide {
     my $lhs_ref = $self->_lower_as_repr($inputs->[0], $repr);
     my $rhs_ref = $self->_lower_as_repr($inputs->[1], $repr);
 
+    $self->_die_on_zero($inputs->[1], $rhs_ref, $ty, 'Illegal division by zero');
     my $ref = $self->_fresh;
     $self->_emit("  $ref = fdiv $ty $lhs_ref, $rhs_ref  ; Divide(repr=$repr) -> fdiv $ty");
     $self->{cache}{$node->id} = $ref;
     return $ref;
+}
+
+# _die_on_zero($divisor, $ref, $ty, $msg) -- perl dies on a zero divisor
+# ("Illegal division by zero"): exit 255, as its die does. A literal nonzero
+# divisor cannot be zero. Inside an eval perl catches it, with " at FILE line
+# N." in $@ -- refused there.
+sub _die_on_zero {
+    my ($self, $divisor, $ref, $ty, $msg) = @_;
+    my $lit = $divisor;
+    $lit = $lit->inputs->[0] while blessed($lit) && $lit->operation eq 'Coerce';
+    return if blessed($lit) && $lit->operation eq 'Constant'
+        && ($lit->const_type // '') =~ /\A(?:integer|number)\z/ && ($lit->value // 0) != 0;
+    die "GAP: a divisor that may be zero, inside a block eval, is not lowered -- "
+      . "perl's \"$msg\" message there names the file and line\n"
+        if ($self->{_eval_frames} // [])->@*;
+    my ($z, $die, $ok) = ($self->_fresh, $self->_fresh_label('divzero'), $self->_fresh_label('divok'));
+    my $cmp = $ty eq 'i64' ? "icmp eq i64 $ref, 0" : "fcmp oeq $ty $ref, " . _repr_zero('Num');
+    $self->_emit("  $z = $cmp  ; a zero divisor?");
+    $self->{_need_exit} = 1;
+    $self->_set_terminator("  br i1 $z, label %$die, label %$ok");
+    $self->_new_block($die);
+    $self->_emit("  call void \@exit(i32 255)  ; $msg");
+    $self->_set_terminator("  unreachable");
+    $self->_new_block($ok);
+    return;
 }
 
 sub _lower_modulo {
@@ -2318,6 +2349,7 @@ sub _lower_modulo {
     my $adj  = $self->_fresh;
     my $res  = $self->_fresh;
 
+    $self->_die_on_zero($inputs->[1], $rhs_ref, 'i64', 'Illegal modulus zero');
     $self->_emit("  $t    = srem i64 $lhs_ref, $rhs_ref    ; Modulo step 1: srem (C/LLVM semantics)");
     $self->_emit("  $xorv = xor  i64 $t, $rhs_ref          ; Modulo step 2: signs-differ test");
     $self->_emit("  $nonz = icmp ne  i64 $t, 0              ; Modulo step 3: remainder nonzero?");
@@ -5469,6 +5501,18 @@ sub process_control_node {
         # an Unwind that is somehow reachable BOTH here and via an If-arm Proj
         # aborts once, not twice.
         $self->_emit_unwind_terminator($node, 'mainline die (abort)');
+        # Caught, it branched away: what the body has after it is dead.
+        $self->_new_block($self->_fresh_label('after_die'))
+            if ($self->{_eval_frames} // [])->@*;
+    }
+    elsif ($op eq 'Region' && $node->can('eval_entry') && defined $node->eval_entry) {
+        $self->close_eval($node);
+    }
+    # A READ OF $@ PINNED ON THE CHAIN is taken where it stands: an eval
+    # rewrites $@ with no store, so its memory version does not place it.
+    elsif ($op eq 'EntryDef' && ($node->symbol // '') eq '@' && ($node->package // '') eq 'main') {
+        $self->{cache}{ $node->id } = $self->lower_value($node);
+        $self->{_frozen_reads}{ $node->id } = 1;
     }
     # A PACKAGE CHANGE computes nothing: the producer has already qualified
     # every name the following statements use.
@@ -5768,7 +5812,20 @@ sub _freeze_memory_reads {
         # A PUNCTUATION VARIABLE has no global to read (`$"`, which join
         # takes as its separator without lowering the read); a consumer that
         # does need it refuses by name when it lowers it.
-        next if $c->operation eq 'EntryDef' && ($c->symbol // '') !~ /\A\w+\z/;
+        # $@ IS ONE, but an eval sets it with no store. A read at a version
+        # made inside an open eval is held to that eval's join (close_eval):
+        # it follows the eval, the version does not say how far. (A read the
+        # producer pins on the control chain is lowered where it stands.)
+        if ($c->operation eq 'EntryDef' && ($c->symbol // '') eq '@' && ($c->package // '') eq 'main') {
+            next if blessed($c->control_in);
+            if (my $f = ($self->{_eval_frames} // [])->[-1]) {
+                push $f->{held}->@*, $c;
+                next;
+            }
+        }
+        elsif ($c->operation eq 'EntryDef' && ($c->symbol // '') !~ /\A\w+\z/) {
+            next;
+        }
         # A read whose INDEX (or container) is a loop-header Phi cannot be frozen
         # at entry -- the Phi has no SSA ref until _lower_loop emits it inside the
         # header. An `arr[$i]` element read in a foreach body is exactly this: its
@@ -6623,10 +6680,167 @@ sub _emit_unwind_terminator {
     my $id = $unwind->can('id') ? $unwind->id : refaddr($unwind);
     return if $self->{_unwind_emitted}{$id}++;
 
+    # INSIDE A BLOCK EVAL A DIE IS A BRANCH: it sets $@ and goes to the
+    # eval's end. What the body calls is inlined, so every die it reaches
+    # is here.
+    my $f = ($self->{_eval_frames} // [])->[-1];
+    # A DIE INSIDE AN EVAL in its own graph belongs to that eval. One the
+    # control chain did not open (in an arm, a loop body) is not a branch here:
+    # sent to another eval's end, or out of the program, it would be wrong.
+    die "GAP: a die in a block eval that is not lowered as a branch (in an arm or a "
+      . "loop body) is not lowered\n"
+        if defined $unwind->eval_id
+        && !($f && ($f->{region}->eval_id // '') eq $unwind->eval_id);
+    if ($f) {
+        $self->_store_eval_error($self->_die_message($unwind));
+        $f->{dies}++;
+        $self->_set_terminator("  br label %$f->{catch}  ; $why: caught by its eval");
+        return;
+    }
+
     $self->{_need_exit} = 1;
     $self->_emit("  call void \@exit(i32 255)  ; $why");
     $self->_set_terminator("  unreachable  ; $why");
     return;
+}
+
+# open_eval($region) / close_eval($region): a BLOCK EVAL lowered as a branch.
+# The control chain opens it before its body's first node and closes it at
+# its join (the Region carrying eval_entry). A die in between stores $@ and
+# branches to the catch block (_emit_unwind_terminator); the join takes the
+# body's value from the end of the body and undef from the catch. $@ is
+# cleared by the producer's own store as the body begins, and here where it
+# ends without dying.
+sub open_eval {
+    my ($self, $region) = @_;
+    die "GAP: a block eval whose body makes a value that may die (a division by what "
+      . "may be zero, an element reference) is not lowered -- perl's message names the "
+      . "file and line, and an unused one is not in the graph\n"
+        if $region->eval_may_die;
+    push $self->{_eval_frames}->@*,
+        { region => $region, catch => $self->_fresh_label('eval_catch'), dies => 0, held => [] };
+    return;
+}
+
+sub close_eval {
+    my ($self, $region) = @_;
+    my $f = pop( ($self->{_eval_frames} // [])->@* );
+    die "GAP: a block eval's join was reached without its body being opened\n"
+        unless $f && $f->{region}->id eq $region->id;
+    # IN LIST CONTEXT a die gives the empty list, not undef: the one value
+    # this join carries cannot say that.
+    die "GAP: a block eval in list or caller context that can die is not lowered -- "
+      . "it yields the empty list there, not undef\n"
+        if $f->{dies} && defined $region->eval_want;
+
+    my @phis = grep {
+        blessed($_) && $_->operation eq 'Phi' && blessed($_->region) && $_->region->id eq $region->id
+    } ($region->consumers // [])->@*;
+    my %normal;
+    for my $phi (@phis) {
+        my ($v)  = $phi->inputs->[0];
+        my $to   = $f->{dies} ? 'Scalar' : ($phi->stamp // '');
+        die "GAP: a block eval's value is a " . ($phi->stamp // 'untyped')
+          . " where a die makes it undef -- only a Scalar holds both\n"
+            if $f->{dies} && ($phi->stamp // '') ne 'Scalar';
+        my $from = $v->stamp // '';
+        my $ref  = $self->lower_value($v);
+        $ref = $self->_emit_coercion($ref, $from, $to, 'eval value') if $from ne $to;
+        $normal{ $phi->id } = $ref;
+    }
+    $self->_store_eval_error($self->_set_str_len($self->_str_const_parts('', 'eval: no error')));
+
+    if (!$f->{dies}) {
+        $self->{cache}{ $_->id } = $normal{ $_->id } for @phis;
+    }
+    else {
+        my $join      = $self->_fresh_label('eval_join');
+        my $from_body = $self->_current_block_label;
+        $self->_set_terminator("  br label %$join  ; eval: the body ended");
+        $self->_new_block($f->{catch});
+        my %caught = map {
+            ( $_->id => $self->_build_slot('false', '0', 'Undef', 'eval: died') )
+        } @phis;
+        $self->_set_terminator("  br label %$join  ; eval: a die was caught");
+        $self->_new_block($join);
+        for my $phi (@phis) {
+            my $r = $self->_fresh;
+            $self->_emit("  $r = phi %Slot [ $normal{ $phi->id }, %$from_body ], "
+              . "[ $caught{ $phi->id }, %$f->{catch} ]  ; eval value");
+            $self->{cache}{ $phi->id } = $r;
+        }
+    }
+
+    # $@ as the eval left it: the reads held back while it was open.
+    for my $c (grep { !exists $self->{cache}{ $_->id } } $f->{held}->@*) {
+        next if _reaches_an_unlowered_phi($self, $c);
+        $self->{cache}{ $c->id } = $self->lower_value($c);
+        $self->{_frozen_reads}{ $c->id } = 1;
+    }
+    return;
+}
+
+# _refuse_inside_eval($what) -- a body lowered as its own function (a class
+# method, ADJUST) aborts the program on a die; inside an eval perl catches it.
+sub _refuse_inside_eval {
+    my ($self, $what) = @_;
+    die "GAP: $what inside a block eval is not lowered -- a die in its body would "
+      . "end the program, where perl catches it\n"
+        if ($self->{_eval_frames} // [])->@*;
+    return;
+}
+
+# start_eval_error_empty -- perl's $@ starts defined and empty; the global
+# starts as an undefined Slot. Stored at the top of the entry block, once
+# the graph is lowered and it is known whether $@ is used.
+# shortcut: only a $@ the program graph names; one only a class method body reads starts undef.
+sub start_eval_error_empty {
+    my ($self) = @_;
+    return unless $self->{_pkg_slots}{'main::@'};
+    my $at    = $self->{current_idx};
+    my $entry = $self->{blocks}[0]{insts};
+    my $n0    = @$entry;
+    $self->_new_block('eval_error_start');
+    $self->_store_eval_error($self->_set_str_len($self->_str_const_parts('', '$@ starts empty')));
+    my $insts = (pop $self->{blocks}->@*)->{insts};
+    # What it hoisted to the entry block (the string's address) goes first.
+    my @hoisted = splice @$entry, $n0;
+    unshift @$entry, @hoisted, @$insts;
+    $self->{current_idx} = $at;
+    return;
+}
+
+# _store_eval_error($str) -- $@ = the Str $str.
+sub _store_eval_error {
+    my ($self, $str) = @_;
+    my $slot = $self->_emit_coercion($str, 'Str', 'Scalar', 'store to $@');
+    $self->_emit("  store %Slot $slot, %Slot* " . $self->_pkg_slot_ptr('main', '@')
+        . "  ; store package scalar \$main::@");
+    return;
+}
+
+# _die_message($unwind) -> the Str a die sets $@ to. Only a message that
+# ends in a newline: perl appends " at FILE line N." to any other.
+sub _die_message {
+    my ($self, $unwind) = @_;
+    die "GAP: a caught die of " . scalar($unwind->inputs->@*) . " arguments is not lowered -- "
+      . "perl joins them into \$@\n" unless $unwind->inputs->@* == 1;
+    my $m = $unwind->inputs->[0];
+    my $ends_nl;
+    $ends_nl = sub ($n) {
+        return 0 unless blessed($n);
+        return ($n->value // '') =~ /\n\z/
+            if $n->operation eq 'Constant' && ($n->const_type // '') eq 'string';
+        return $ends_nl->($n->inputs->[-1]) if $n->operation eq 'Concat';
+        return 0;
+    };
+    die "GAP: a caught die whose message may not end in a newline is not lowered -- "
+      . "perl appends \" at FILE line N.\", which this lowering does not know\n"
+        unless $ends_nl->($m);
+    my $ref = $self->lower_value($m);
+    my $from = $m->stamp // '';
+    $ref = $self->_emit_coercion($ref, $from, 'Str', 'die message') if $from ne 'Str';
+    return $ref;
 }
 
 # _lower_builtin_exit($node) -> undef (it produces no value)
@@ -8593,6 +8807,7 @@ sub _emit_array_extend_to {
         map { $self->_fresh_label("ext.$_.") } qw(die chk grow fill fbody done ok);
     $self->_set_terminator("  br i1 $bad, label %$die, label %$chk");
     $self->_new_block($die);
+    $self->_refuse_inside_eval("a store that dies on a non-creatable element");
     $self->_emit("  call void \@exit(i32 255)  ; Modification of non-creatable array value attempted");
     $self->_set_terminator("  unreachable");
 
@@ -10016,6 +10231,7 @@ sub _scalar_ref_target {
         $self->{_need_exit} = 1;
         $self->_set_terminator("  br i1 $ok, label %$yes, label %$no");
         $self->_new_block($no);
+        $self->_refuse_inside_eval("a deref that dies on what is not a SCALAR reference");
         $self->_emit("  call void \@exit(i32 255)  ; not a SCALAR reference");
         $self->_set_terminator("  unreachable");
         $self->_new_block($yes);
@@ -10061,6 +10277,7 @@ sub _lower_ref {
         my $ctr = $self->_unwrap_ref_container($x->inputs->[0]);
         die "GAP: a reference to an element of an array that may grow is not lowered\n"
             if _array_may_grow($ctr);
+        $self->_refuse_inside_eval("a reference to an array element (it dies before the start)");
         my $arr = $self->_container_ptr($ctr, 'Array');
         my $i   = $self->_index_i64($x->inputs->[1]);
         my ($lp, $len, $ok, $ep, $el) = map { $self->_fresh } 1 .. 5;
@@ -10578,6 +10795,7 @@ sub _lower_call_new {
     # statement nodes and skipped its stores (review I6).
     my $adjusts = $reg->{adjusts} // [];
     if (grep { @{ $_->{body_nodes} // [] } } @$adjusts) {
+        $self->_refuse_inside_eval("a constructor that runs ADJUST");
         $self->_emit("  call void \@${class_name}__ADJUST(i8* $raw)  ; run ADJUST blocks");
     }
 
@@ -11612,6 +11830,7 @@ sub _lower_call_method {
     return $self->_lower_call_direct($node)
         if blessed($node->target) && $node->target->isa('Chalk::MOP::Sub');
 
+    $self->_refuse_inside_eval("a call to method '$method_name'");
     my $result_repr = _require_repr($node, 'Call(method)');
 
     # Verify class and method are in the registry

@@ -797,6 +797,20 @@ sub _deserialize_graph ($method_data) {
         if ($op eq 'Region' && defined $nd->{head}) {
             $nodes[ $nd->{head} ]->set_region($node);
         }
+        # A block eval's join names where its body begins: a control
+        # predecessor, so already constructed.
+        if ($op eq 'Region' && defined $nd->{fields} && defined $nd->{fields}{eval_entry}) {
+            $node->set_eval_entry($nodes[ $nd->{fields}{eval_entry} ]
+                // die "GAP: an eval's entry (node $nd->{fields}{eval_entry}) is not before its join\n");
+        }
+        $node->set_eval_want($nd->{fields}{eval_want})
+            if $op eq 'Region' && defined $nd->{fields} && defined $nd->{fields}{eval_want};
+        $node->set_eval_may_die(1)
+            if $op eq 'Region' && defined $nd->{fields} && $nd->{fields}{eval_may_die};
+        # A block eval's id, on its join and on each die it lexically holds.
+        $node->set_eval_id($nd->{fields}{eval_id})
+            if ($op eq 'Region' || $op eq 'Unwind') && defined $nd->{fields}
+            && defined $nd->{fields}{eval_id};
 
         # Map a B::SoN stamp to a Chalk representation so the backend can lower
         # the node runtime-free. Chalk's own serializer emits no stamp, so this
