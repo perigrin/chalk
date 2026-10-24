@@ -765,6 +765,15 @@ sub render_need_flag_prologue {
             for sort keys %$lex;
     }
 
+    # An ALIASED package scalar is read through a pointer, which starts at its
+    # own %Slot; a LocalAlias points it at an element (_lower_local_alias).
+    my @alias_lines = map {
+        my ($s, $v) = /\A(.*)::(.*)\z/;
+        my $g = $self->_pkg_slot_name($s, $v);
+        "${g}_at = internal global %Slot* $g  ; where \$$v points";
+    } sort keys %Chalk::Target::LLVM::Context::ALIASED;
+    push @lines, '', @alias_lines if @alias_lines;
+
     # Package scalars: one %Slot each, zero-init -- an undefined Slot, as an
     # unwritten package scalar is. See _pkg_slot_name.
     if (my $pkg = $self->{_pkg_slots}) {
@@ -1395,6 +1404,23 @@ sub _module_global_name {
 # one is an undefined Slot. The three families (i64, (ptr, len), double)
 # were perl's SV union rebuilt by hand, and a store in one was invisible to
 # a read of another. The name must be a legal unquoted LLVM identifier.
+# %ALIASED: the package scalars a LocalAlias in this module points at an
+# element (`$_` for a foreach that calls subs reading it). Set for one
+# module's lowering by lower_with_elaboration, before any graph lowers: a
+# read of an aliased scalar goes through its pointer from the first one on.
+our %ALIASED;
+
+# _pkg_slot_ptr($stash, $var) -> a %Slot* to read or store a package scalar
+# through: its global, or -- aliased -- wherever its pointer points now.
+sub _pkg_slot_ptr {
+    my ($self, $stash, $var) = @_;
+    my $g = $self->_pkg_slot_name($stash, $var);
+    return $g unless $ALIASED{"${stash}::${var}"};
+    my $p = $self->_fresh;
+    $self->_emit("  $p = load %Slot*, %Slot** ${g}_at  ; where \$${var} points now");
+    return $p;
+}
+
 sub _pkg_slot_name {
     my ($self, $stash, $var) = @_;
     my $ident = "pkg_${stash}_${var}";
@@ -1864,6 +1890,9 @@ sub lower_value {
     }
     elsif ($op eq 'Exists') {
         return $self->_lower_exists($node);
+    }
+    elsif ($op eq 'LocalAlias') {
+        return $self->_lower_local_alias($node);
     }
     elsif ($op eq 'Increment') {
         return $self->_lower_increment($node);
@@ -6643,7 +6672,7 @@ sub _process_loop_node {
     my $exit_region_id = defined $exit_region ? $exit_region->id : undef;
     push @{ $self->{_loop_ctx_stack} //= [] },
         { exit_label => $exit_label, exit_region_id => $exit_region_id,
-          exit_region => $exit_region };
+          exit_region => $exit_region, preheader_label => $preheader_label };
 
     # Process the body: VarDecl/Assign nodes reachable from the body Proj.
     $self->_process_loop_body($loop_node, $header_label);
@@ -6693,6 +6722,14 @@ sub _process_loop_node {
 
     # ---- Exit block ----
     $self->_new_block($exit_label);
+    # A LOCALALIAS IS UNDONE WHERE THE PASS ENDS: the pointer it moved
+    # points again where it did before the loop.
+    for my $a (sort keys %{ $loop_ctx->{alias_saves} // {} }) {
+        my ($save, $g) = $loop_ctx->{alias_saves}{$a}->@*;
+        my $o = $self->_fresh;
+        $self->_emit("  $o = load %Slot*, %Slot** $save  ; \$$a as before the loop");
+        $self->_emit("  store %Slot* $o, %Slot** ${g}_at");
+    }
 
     # A single-exit loop's exit block has ONE predecessor (the header's
     # false-condition branch), so loop-carried values flow through the HEADER
@@ -7455,6 +7492,13 @@ sub _emit_array_of {
         $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_pay  ; ArrayRef: slot[$i] payload ptr");
         my $elem_repr = $inputs->[$i]->stamp // '';
         ($elem_ref, $elem_repr) = $self->_miss_kept($inputs->[$i], $elem_ref, $elem_repr);
+        # AN UNDEF IS A SLOT WITH ITS DEFINED BIT CLEAR: it needs no payload.
+        if ($elem_repr eq 'Undef') {
+            $self->_emit("  store i1 false, i1* $slot_def  ; ArrayRef: slot[$i] undef");
+            $self->_emit("  store i8 " . _slot_tag_value('Undef') . ", i8* $slot_tag");
+            $self->_emit("  store i64 0, i64* $slot_pay");
+            next;
+        }
         # A SCALAR IS ALREADY A SLOT: its own defined bit, tag and payload are
         # the element's (an argument kept in memory, handed to @_).
         if ($elem_repr =~ /\A(?:Scalar|Slot)\z/) {
@@ -7753,6 +7797,65 @@ sub _lower_exists {
     return $res;
 }
 
+
+# _lower_local_alias($node): `local *_ = \$a[$i]`, the alias a foreach
+# takes of its element when what it calls reads `$_`. `$_` is read through
+# a pointer (%ALIASED), so pointing it at the element's slot makes every
+# read and write of `$_` -- here or in a callee -- the element's. Saved in
+# the loop's preheader, restored in its exit block. An alias outside a loop,
+# or of anything but `$_`, is refused.
+sub _lower_local_alias {
+    my ($self, $node) = @_;
+    my $name = $node->name // '';
+    die "GAP: a foreach aliasing \$$name (not \$_) is not lowered\n" unless $name eq '_';
+    die "GAP: a LocalAlias the module pre-scan did not see is not lowered\n"
+        unless $ALIASED{'main::_'};
+    my $ctx = ( $self->{_loop_ctx_stack} // [] )->[-1]
+        // die "GAP: a LocalAlias outside a loop (no pass to end it) is not lowered\n";
+    my $g = $self->_pkg_slot_name('main', '_');
+    unless ($ctx->{alias_saves}{_}) {
+        my $save = $self->_fresh;
+        $self->_emit_entry("  $save = alloca %Slot*, align 8  ; \$_ before a foreach");
+        my $o = $self->_fresh;
+        my $pre = $self->{blocks}[ $self->_find_block_idx($ctx->{preheader_label}) ];
+        push $pre->{insts}->@*, "  $o = load %Slot*, %Slot** ${g}_at  ; \$_ before the loop",
+                                "  store %Slot* $o, %Slot** $save";
+        $ctx->{alias_saves}{_} = [ $save, $g ];
+    }
+    # Over a VALUE (`for 1 .. 2`) rather than an element, each pass aliases a
+    # fresh scalar holding it, as perl's does.
+    my $in  = $node->inputs->[0];
+    my $ptr;
+    if (($in->stamp // '') =~ /\A(?:ScalarRef|Scalar|Slot)\z/) {
+        $ptr = $self->_scalar_ref_target($in);
+    }
+    else {
+        $ptr = $self->_fresh;
+        $self->_emit_entry("  $ptr = alloca %Slot, align 8  ; a foreach pass's \$_");
+        $self->_emit("  store %Slot " . $self->_slot_of_value($in, $self->lower_value($in), 'foreach value') . ", %Slot* $ptr");
+    }
+    $self->_emit("  store %Slot* $ptr, %Slot** ${g}_at  ; \$_ is the element");
+    $self->{cache}{ $node->id } = '0';
+    return '0';
+}
+
+# _scan_local_aliases($return) -> names: every LocalAlias reachable from a
+# graph, through the callees its calls name.
+sub _scan_local_aliases {
+    my ($return) = @_;
+    my (%seen, %names);
+    my @q = ($return);
+    while (defined(my $n = shift @q)) {
+        next unless blessed($n) && !$seen{ refaddr($n) }++;
+        $names{ $n->name // '_' } = 1 if $n->operation eq 'LocalAlias';
+        push @q, grep { blessed($_) } $n->inputs->@*, ($n->can('control_in') ? $n->control_in : ()),
+            ($n->consumers // [])->@*;
+        if ($n->operation eq 'Call' && $n->can('target') && blessed(my $t = $n->target)) {
+            push @q, $t->graph->returns->@* if $t->can('graph') && $t->graph;
+        }
+    }
+    return sort keys %names;
+}
 # _lower_increment($node) -> %Slot (or the node's narrower reading)
 #
 # PERL'S ++ ON A VALUE NOT PROVEN A NUMBER. B::SoN emits Increment where the
@@ -12137,7 +12240,7 @@ sub _lower_stash_access {
     my $repr = _require_repr($node, 'EntryDef');
     die "GAP: a package variable " . ($node->sigil // '?') . $node->symbol
       . " that is not a scalar is not lowered\n" unless ($node->sigil // '$') eq '$';
-    my $g    = $self->_pkg_slot_name($node->package, $node->symbol);
+    my $g    = $self->_pkg_slot_ptr($node->package, $node->symbol);
     my $slot = $self->_fresh;
     $self->_emit("  $slot = load %Slot, %Slot* $g  ; read package scalar \$"
         . $node->package . '::' . $node->symbol);
@@ -12243,7 +12346,7 @@ sub _store_package_scalar {
                   ? $self->_emit_coercion($ref, $from, 'Scalar', 'store to $' . $target->symbol)
               : die "GAP: a store to package scalar \$" . $target->symbol
                   . " of a $from value is not lowered\n";
-    $self->_emit("  store %Slot $boxed, %Slot* " . $self->_pkg_slot_name($target->package, $target->symbol)
+    $self->_emit("  store %Slot $boxed, %Slot* " . $self->_pkg_slot_ptr($target->package, $target->symbol)
         . "  ; store package scalar \$" . $target->package . '::' . $target->symbol);
     return $ref;
 }

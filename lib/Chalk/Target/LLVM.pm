@@ -1601,6 +1601,11 @@ sub lower_with_elaboration {
     # Set these flags early so the prologue emits them even before body lowering.
     $ctx->require_class_support if defined $class_registry && %$class_registry;
 
+    # Which package scalars a LocalAlias moves, before any graph lowers.
+    local %Chalk::Target::LLVM::Context::ALIASED =
+        map { ("main::$_" => 1) } grep { $_ eq '_' }
+            Chalk::Target::LLVM::Context::_scan_local_aliases($return_node);
+
     # Process the control chain — VarDecl/Assign/If/Loop.
     _process_control_chain($ctx, $return_node);
 
