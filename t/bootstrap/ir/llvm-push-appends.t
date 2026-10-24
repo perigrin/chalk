@@ -63,6 +63,9 @@ for my $case (
     # nor the stores once memory had moved; a %HashEntry has no tag, so the
     # read was tagged Opaque and printed nothing for perl's 3 (b019b022).
     [ q{my %h = (a => 1); my $n = 1; $n = $n + 0; if ($n) { $h{a} = $h{a} + 2 } print "$h{a}\n";}, "3\n", 'a hash element stored in an arm, read after it' ],
+    # AN @ VARIABLE IS AN ARRAY: a sub's `my @a` walked by a foreach arrives
+    # stamped Scalar, and push refused it ("push onto a Scalar", 8 cases).
+    [ q{sub f { my @a; push @a, 1, 2; my $s = ""; for my $x (@a) { $s .= $x } return $s } print f(), "\n";}, "12\n", "a sub's empty array pushed and walked" ],
     # The same hole held shift before push existed (red at e1a15d3a).
     [ q{my $n = 1; $n = $n + 0; my @a = (1, 2); if ($n) { shift @a } print scalar(@a), "\n";}, "1\n", 'a shift in an arm, read after the merge' ],
 ) {

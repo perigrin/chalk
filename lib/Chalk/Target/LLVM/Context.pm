@@ -1474,7 +1474,8 @@ sub _as_phi_reading {
     my ($from, $to) = ( $value_node->stamp // '', $phi->stamp // '' );
     return $self->_build_slot($ref, '0', 'Undef', $what)
         if $to eq 'Scalar' && $from eq 'Undef';
-    return $ref if $from eq $to || $to eq '' || $from eq '';
+    # An untyped side is left to the machine-type refusal that names it TOP.
+    return $ref if $from eq $to || grep { $_ eq '' || $_ eq 'Unknown' } $from, $to;
     # An integer stringified is exact, and numified back is the same integer.
     return $self->_emit_coercion($ref, $from, $to, $what)
         if $from =~ /\A(?:Int|Num|Str|Boolean)\z/

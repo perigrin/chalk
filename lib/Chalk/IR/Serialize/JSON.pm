@@ -665,8 +665,9 @@ sub _deserialize_graph ($method_data) {
             $nd->{stamp} = 'Scalar'
                 if $location && ( $nd->{stamp} // 'Unknown' ) eq 'Unknown';
             # AN @ VARIABLE IS AN ARRAY, a % one a HASH, whatever inference
-            # missed: `my @r;` arrives as a bare PadAccess stamped Unknown.
-            if (( $nd->{stamp} // 'Unknown' ) eq 'Unknown' && !$fields->{shared}) {
+            # missed: `my @r;` arrives as a bare PadAccess stamped Unknown --
+            # or Scalar, when a foreach walks it.
+            if (( $nd->{stamp} // 'Unknown' ) =~ /\A(?:Unknown|Scalar)\z/ && !$fields->{shared}) {
                 $nd->{stamp} = 'Array' if ( $fields->{sigil} // '' ) eq '@';
                 $nd->{stamp} = 'Hash'  if ( $fields->{sigil} // '' ) eq '%';
             }
