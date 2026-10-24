@@ -6360,6 +6360,19 @@ sub _prelower_loop_store_operands {
     return;
 }
 
+# _reads_at_its_memory_version($node) -> bool: a read of an aggregate that
+# carries the memory version it reads at -- an element read, a count, a
+# builtin with memory_input -- which _freeze_memory_reads pins there.
+sub _reads_at_its_memory_version {
+    my ($u) = @_;
+    my $op = $u->operation;
+    return blessed($u->inputs->[2]) ? 1 : 0 if $op eq 'Subscript' || $op eq 'Exists';
+    return blessed($u->inputs->[1]) ? 1 : 0 if $op eq 'Count';
+    return 1 if $op eq 'Call' && $u->can('memory_input') && $u->memory_input
+        && ( $u->name // '' ) =~ /\A(?:join|sort|reverse|keys|values)\z/;
+    return 0;
+}
+
 # _prelower_loop_drain_operands($loop_node): a shift/pop that drains an array in
 # the loop condition or body carries the ARRAY as a loop-invariant operand (the
 # literal `@q` is built once, pre-loop; the shift mutates its header in place
@@ -6402,6 +6415,10 @@ sub _prelower_loop_drain_operands {
             for my $u (($array->consumers // [])->@*) {
                 next unless blessed($u);
                 next if $self->_is_array_mutating_call($u);   # a drain Call: fine
+                # A READ AT ITS OWN MEMORY VERSION is frozen there
+                # (_freeze_memory_reads), so it sees the array as it stood --
+                # before the loop, or after it -- not half-mutated.
+                next if _reads_at_its_memory_version($u);
                 die "GAP: a drained array is also read/mutated elsewhere "
                   . "(op=@{[$u->operation]}) — the in-place drain would corrupt "
                   . "that use (pre-loop scalar/element read, push re-fill, or a "
