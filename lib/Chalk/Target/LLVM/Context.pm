@@ -126,6 +126,7 @@ sub new {
         _need_bless             => 0,
         _need_memchr            => 0,
         _need_select            => 0,
+        _need_hash_delete       => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -174,6 +175,7 @@ my @NEED_FLAGS = qw(
     _need_bless
     _need_memchr
     _need_select
+    _need_hash_delete
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -940,6 +942,7 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_lex_aggregate_lines;
     push @lines, $self->_array_append_lines;
     push @lines, $self->_bless_lines;
+    push @lines, $self->_hash_delete_lines;
     push @lines, '@chalk_selected = internal global i8* null  ; the handle a bare print writes to (null: STDOUT)'
         if $self->{_need_select} && !$self->{_select_emitted}++;
     # A method body that stringifies a Num needs these too; the prologue ran
@@ -1877,7 +1880,7 @@ sub lower_value {
     }
     # Call(builtin, keys): the hash's keys as an %Array of %Slot.
     elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
-            && defined $node->name && $node->name eq 'keys') {
+            && defined $node->name && $node->name =~ /\A(?:keys|values)\z/) {
         return $self->_lower_builtin_keys($node);
     }
     # Call(builtin, join): the separator plus the list's elements, in order.
@@ -1969,6 +1972,9 @@ sub lower_value {
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'reverse') {
         return $self->_lower_reverse($node);
+    }
+    elsif ($op eq 'Delete') {
+        return $self->_lower_delete($node);
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'indirect') {
         return $self->_lower_call_indirect($node);
@@ -5612,7 +5618,7 @@ sub process_control_node {
         # shared lexical, and a read at that call's version must be taken
         # there, not at its use after a later store.
         $self->_freeze_memory_reads($node)
-            if $op eq 'Assign' || $op eq 'RegexSubst' || $op eq 'EntryWrite'
+            if $op eq 'Assign' || $op eq 'RegexSubst' || $op eq 'EntryWrite' || $op eq 'Delete'
             || $self->_is_array_mutating_call($node)
             || ($op eq 'Call' && ($node->dispatch_kind // '') eq 'direct');
     }
@@ -9398,6 +9404,88 @@ sub _bless_class {
     return ($is, $p, $l);
 }
 
+# _lower_delete($node) -> %Slot: `delete $h{k}` takes the key out of the
+# hash and is its value, undef for a key that is not there
+# (@chalk_hash_delete). An array element's delete is refused.
+sub _lower_delete {
+    my ($self, $node) = @_;
+    my $kind = $node->can('kind') ? ( $node->kind // '' ) : '';
+    die "GAP: delete of an array element is not lowered\n" unless $kind eq 'hash';
+    my ($c, $k) = $node->inputs->@[0, 1];
+    my $hash = $self->_container_ptr($c, 'Hash');
+    my ($kp, $kl) = $self->_str_parts($self->_hash_key_str($k));
+    $self->{$_} = 1 for qw(_need_hash_delete _need_memcmp _need_aggregate_types);
+    my $r = $self->_fresh;
+    $self->_emit("  $r = call %Slot \@chalk_hash_delete(%Hash* $hash, i8* $kp, i64 $kl)  ; delete");
+    return $self->{cache}{ $node->id } = $r;
+}
+
+# _hash_delete_lines -> @chalk_hash_delete: find the key; its value as a
+# Slot; the entries after it shifted down one, so the rest keep their order.
+sub _hash_delete_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_hash_delete} && !$self->{_hash_delete_emitted}++;
+    my ($KP, $KL, $VD, $VP, $VT) = map { _he_idx($_) } qw(key_ptr key_len val_def val_pay val_tag);
+    my ($SD, $ST, $SP) = map { _slot_idx($_) } qw(defined tag payload);
+    return ('', <<"END_HELPER");
+define internal %Slot \@chalk_hash_delete(%Hash* %h, i8* %k, i64 %kl) {
+entry:
+  %cp = getelementptr inbounds %Hash, %Hash* %h, i32 0, i32 0
+  %n  = load i64, i64* %cp
+  %ep = getelementptr inbounds %Hash, %Hash* %h, i32 0, i32 2
+  %e  = load %HashEntry*, %HashEntry** %ep
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i1, %next ]
+  %more = icmp ult i64 %i, %n
+  br i1 %more, label %chk, label %miss
+chk:
+  %p   = getelementptr inbounds %HashEntry, %HashEntry* %e, i64 %i
+  %klp = getelementptr inbounds %HashEntry, %HashEntry* %p, i32 0, i32 $KL
+  %el  = load i64, i64* %klp
+  %leq = icmp eq i64 %el, %kl
+  br i1 %leq, label %cmp, label %next
+cmp:
+  %kpp = getelementptr inbounds %HashEntry, %HashEntry* %p, i32 0, i32 $KP
+  %ek  = load i8*, i8** %kpp
+  %c   = call i32 \@memcmp(i8* %ek, i8* %k, i64 %kl)
+  %hit = icmp eq i32 %c, 0
+  br i1 %hit, label %found, label %next
+next:
+  %i1 = add i64 %i, 1
+  br label %loop
+found:
+  %vdp = getelementptr inbounds %HashEntry, %HashEntry* %p, i32 0, i32 $VD
+  %vtp = getelementptr inbounds %HashEntry, %HashEntry* %p, i32 0, i32 $VT
+  %vpp = getelementptr inbounds %HashEntry, %HashEntry* %p, i32 0, i32 $VP
+  %vd = load i1, i1* %vdp
+  %vt = load i8, i8* %vtp
+  %vp = load i64, i64* %vpp
+  %s0 = insertvalue %Slot zeroinitializer, i1 %vd, $SD
+  %s1 = insertvalue %Slot %s0, i8 %vt, $ST
+  %s2 = insertvalue %Slot %s1, i64 %vp, $SP
+  %last = sub i64 %n, 1
+  br label %shift
+shift:
+  %j = phi i64 [ %i, %found ], [ %j1, %move ]
+  %sm = icmp ult i64 %j, %last
+  br i1 %sm, label %move, label %done
+move:
+  %j1  = add i64 %j, 1
+  %dst = getelementptr inbounds %HashEntry, %HashEntry* %e, i64 %j
+  %src = getelementptr inbounds %HashEntry, %HashEntry* %e, i64 %j1
+  %ent = load %HashEntry, %HashEntry* %src
+  store %HashEntry %ent, %HashEntry* %dst
+  br label %shift
+done:
+  store i64 %last, i64* %cp
+  ret %Slot %s2
+miss:
+  ret %Slot zeroinitializer
+}
+END_HELPER
+}
+
 sub _bless_lines {
     my ($self) = @_;
     return () unless $self->{_need_bless} && !$self->{_bless_emitted}++;
@@ -10704,6 +10792,14 @@ sub _emit_slot_out_of_order {
 # %Hash is { i64 count, i64 cap, %HashEntry* entries } and a %HashEntry opens
 # with { i8* key_ptr, i64 key_len, ... }, so the key list is a structural read
 # at known offsets rather than a typed one.
+# _slot_field_ptr($slot_ptr, $field) -> a pointer to that field of a %Slot.
+sub _slot_field_ptr {
+    my ($self, $sp, $f) = @_;
+    my $p = $self->_fresh;
+    $self->_emit("  $p = getelementptr inbounds %Slot, %Slot* $sp, i32 0, i32 " . _slot_idx($f));
+    return $p;
+}
+
 sub _lower_builtin_keys {
     my ($self, $node) = @_;
     $self->{_need_aggregate_types} = 1;
@@ -10794,6 +10890,26 @@ sub _lower_builtin_keys {
 
     # The key is a Str; a Str in a %Slot payload is a boxed %Str*, which
     # is what _box_payload emits for every other Str write.
+    # VALUES ARE THE SAME WALK: each entry's value, as its slot, in the
+    # order keys gives the keys.
+    if (( $node->name // '' ) eq 'values') {
+        my ($vdp, $vtp, $vpp, $vd, $vt, $vp, $sp) = map { $self->_fresh } 1 .. 7;
+        $self->_emit("  $vdp = getelementptr inbounds %HashEntry, %HashEntry* $e_p, i32 0, i32 " . _he_idx('val_def'));
+        $self->_emit("  $vtp = getelementptr inbounds %HashEntry, %HashEntry* $e_p, i32 0, i32 " . _he_idx('val_tag'));
+        $self->_emit("  $vpp = getelementptr inbounds %HashEntry, %HashEntry* $e_p, i32 0, i32 " . _he_idx('val_pay'));
+        $self->_emit("  $vd = load i1, i1* $vdp  ; values: defined");
+        $self->_emit("  $vt = load i8, i8* $vtp  ; values: tag");
+        $self->_emit("  $vp = load i64, i64* $vpp  ; values: payload");
+        $self->_emit("  $sp = getelementptr inbounds %Slot, %Slot* $slots, i64 $i_phi  ; values: slot[i]");
+        $self->_emit("  store i1 $vd, i1* " . $self->_slot_field_ptr($sp, 'defined'));
+        $self->_emit("  store i8 $vt, i8* " . $self->_slot_field_ptr($sp, 'tag'));
+        $self->_emit("  store i64 $vp, i64* " . $self->_slot_field_ptr($sp, 'payload'));
+        $self->_emit("  $i_next = add i64 $i_phi, 1  ; values: i++");
+        $self->_set_terminator("  br label \%$lhdr");
+        $self->_new_block($lend);
+        $self->{cache}{$node->id} = $arr;
+        return $arr;
+    }
     my $key_str = $self->_set_str_len($kp, $kl);
     my $payload = $self->_box_payload($key_str, 'Str', 'keys: key');
 
