@@ -96,6 +96,18 @@ for my $case (
     like($@, qr/GAP: /, "$name is refused");
 }
 
+# SO IS A CALL IN SUCH AN EVAL: the sub's die names no eval (it is in the
+# sub's own graph), so with no eval open it ended the program where perl's
+# try or eval catches it (pvm 173).
+for my $case (
+    [ q{use v5.42; no warnings; sub g { die "no\n" if $_[0] == 3; return $_[0] * 2 } sub f { my @out; for my $s (@_) { my $c; try { $c = g($s) } catch ($e) { return "R@out" } push @out, $c } return "@out" } print f(1, 2, 3, 4), " ", f(1, 2), "\n";}, 'a try in a loop, calling a sub that dies' ],
+    [ q{sub g { die "no\n" if $_[0] == 2; $_[0] } my $n = 0; for my $k (1 .. 3) { my $r = eval { g($k) }; $n++ if defined $r } print "$n\n";}, 'an eval in a loop, calling a sub that dies' ],
+) {
+    my ($src, $name) = @$case;
+    eval { through_llvm($src) };
+    like($@, qr/GAP: /, "$name is refused");
+}
+
 # A DIE OF A LIST joins it: only a one-argument die is lowered.
 {
     eval { through_llvm(q{my $r = eval { die "a\n", "b\n" }; print "[$@]";}) };

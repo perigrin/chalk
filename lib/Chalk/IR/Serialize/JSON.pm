@@ -809,7 +809,7 @@ sub _deserialize_graph ($method_data) {
             if $op eq 'Region' && defined $nd->{fields} && $nd->{fields}{eval_may_die};
         # A block eval's id, on its join and on each die it lexically holds.
         $node->set_eval_id($nd->{fields}{eval_id})
-            if ($op eq 'Region' || $op eq 'Unwind') && defined $nd->{fields}
+            if ($op eq 'Region' || $op eq 'Unwind' || $op eq 'Call') && defined $nd->{fields}
             && defined $nd->{fields}{eval_id};
 
         # Map a B::SoN stamp to a Chalk representation so the backend can lower

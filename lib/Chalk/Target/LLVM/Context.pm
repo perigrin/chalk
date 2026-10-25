@@ -7158,6 +7158,10 @@ sub _process_loop_node {
 
     # ---- Loop body ----
     $self->_new_block($body_label);
+    # What the body lowers is the body's: it need not run, so it does not
+    # dominate the exit, and a use after the loop lowers its own (dropped
+    # below, after the back-edge -- as an if arm's is when the arm ends).
+    my %cached_before_body = map { $_ => 1 } keys %{ $self->{cache} };
 
     # Save pre-body var_table for collecting backedge updates.
     my %pre_body_vars = %{ $self->{var_table} };
@@ -7234,6 +7238,9 @@ sub _process_loop_node {
 
     # Back-edge branch back to header.
     $self->_set_terminator("  br label %$header_label  ; Loop: back-edge");
+    # A read frozen at a version the body made stays: it is that version's.
+    delete $self->{cache}{$_}
+        for grep { !$cached_before_body{$_} && !$self->{_frozen_reads}{$_} } keys %{ $self->{cache} };
 
     # ---- NOW emit the phi instructions at the TOP of the header block ----
     # We insert them at index 0 of the header block's insts.
@@ -10134,6 +10141,14 @@ sub _lower_builtin_push {
     _seed_container_repr($array);
     my $acc = $self->_container_ptr($array, 'Array');
     for my $v (@values) {
+        # A VALUE READ BY ITS TAG (an element of an array handed in), or
+        # undef, is appended as its Slot, tag and all.
+        if (( $self->_repr_of($v) // '' ) =~ /\A(?:Scalar|Slot|Undef)\z/) {
+            $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy);
+            my $slot = $self->_slot_of_value($v, $self->lower_value($v), 'push');
+            $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $slot)  ; push: a value by its tag");
+            next;
+        }
         die "GAP: push of a " . ($v->stamp // 'NONE') . " value is not lowered\n"
             unless ( $v->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/;
         $self->_emit_append_one($acc, $v);
@@ -11143,6 +11158,16 @@ sub _lower_call_direct {
     my $name  = $node->name;
     die "GAP: direct call to '$name' as `&$name`, which shares its caller's \@_, is not lowered\n"
         if $node->can('shares_args') && $node->shares_args;
+    # A CALL IN AN EVAL'S BODY is caught by that eval: inlined with it not
+    # open as a branch (in an arm, a loop body), the callee's die would leave
+    # the program -- or reach another eval's end.
+    {
+        my $f = ($self->{_eval_frames} // [])->[-1];
+        die "GAP: a call in a block eval that is not lowered as a branch (in an arm or "
+          . "a loop body) is not lowered -- the callee's die would not be caught\n"
+            if $node->can('eval_id') && defined $node->eval_id
+            && !($f && ($f->{region}->eval_id // '') eq $node->eval_id);
+    }
 
     # Inlining is the only direct-call mechanism, so a self- or mutually-
     # recursive callee has no terminating lowering: we inline the body, which
@@ -11614,9 +11639,12 @@ sub _lower_inlined_structure {
         next unless blessed($n) && !$seen{ refaddr($n) . "/$in_arm" }++;
         if ($n->operation eq 'Phi') {
             my $r = $n->can('region') ? $n->region : undef;
+            # In an arm, an if's merge -- or a loop's exit, the loop being in
+            # that arm too -- is lowered there, before the value that reads it.
             die $arm_value
                 unless blessed($r) && ( $on_chain{ refaddr($r) } || $r->operation eq 'Loop'
-                    || ( $in_arm && $r->can('head') && blessed($r->head) && $r->head->operation eq 'If' ) );
+                    || ( $in_arm && $r->can('head') && blessed($r->head)
+                         && $r->head->operation =~ /\A(?:If|Loop)\z/ ) );
             # A LOOP ON THE MAIN CHAIN carries its phi in its header, which
             # dominates what follows the loop; its back-edge is the body's,
             # lowered with it, ifs and all. Only the first value comes from

@@ -117,4 +117,13 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
         return;
     }
 
+
+    # The block eval whose body this call is in (B::SoN's eval_id), or
+    # undef: the callee's own die names no eval.
+    field $eval_id :reader = undef;
+
+    method set_eval_id($v) {
+        $eval_id = $v;
+        return;
+    }
 }
