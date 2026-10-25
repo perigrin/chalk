@@ -87,7 +87,6 @@ for my $case (
 # not lowered as a branch: its die is refused by name, rather than sent to an
 # enclosing eval's end (perl's inner eval catches it) or ending the program.
 for my $case (
-    [ q{my $c = $ENV{NO_SUCH_VAR} // 1; my $o = eval { if ($c) { my $i = eval { die "in arm\n"; 1 }; print defined $i ? "i\n" : "arm caught $@"; } 3 }; print defined $o ? "o=$o\n" : "outer died: $@";}, 'an eval in an arm of an eval' ],
     [ q{for my $k (1 .. 3) { my $r = eval { die "k$k\n" if $k == 2; $k }; print defined $r ? "r$r\n" : "caught $@"; }}, 'an eval in a loop' ],
     [ q{for my $k (1 .. 3) { eval { die "k\n" if $k == 2 }; print "$k\n"; }}, 'a void eval in a loop' ],
 ) {

@@ -5623,9 +5623,22 @@ sub _repr_convert_op {
 # side-effect node in forward order. Processes VarDecl, Assign, CompoundAssign,
 # If (with its Region pair), and Loop (with its exit Region).
 # ---------------------------------------------------------------------------
+# _open_evals_entered($node): AN EVAL'S BODY BEGINS at a node that follows
+# its entry -- in an arm or a loop body as on the main chain (which opens its
+# own first, so one already open is left).
+sub _open_evals_entered {
+    my ($self, $node) = @_;
+    return unless $node->can('control_in') && blessed($node->control_in);
+    for my $r (( $Chalk::Target::LLVM::Context::EVAL_BY_ENTRY{ refaddr($node->control_in) } // [] )->@*) {
+        $self->open_eval($r) unless $self->{_eval_open_now}{ refaddr($r) };
+    }
+    return;
+}
+
 sub process_control_node {
     my ($self, $node) = @_;
     my $op = $node->operation;
+    $self->_open_evals_entered($node);
     if ($op eq 'If') {
         $self->_process_if_node($node);
     }
@@ -5678,6 +5691,8 @@ sub process_control_node {
             if ($self->{_eval_frames} // [])->@*;
     }
     elsif ($op eq 'Region' && $node->can('eval_entry') && defined $node->eval_entry) {
+        # an empty body: nothing followed the entry to open it
+        $self->open_eval($node) unless $self->{_eval_open_now}{ refaddr($node) };
         $self->close_eval($node);
     }
     elsif ($op eq 'Region' && (my $j = ($self->{_jump_merges} // {})->{ $node->id })) {
@@ -6980,15 +6995,33 @@ sub _latch_paths {
 # cannot pass through the merge without terminating first.
 sub _find_unwind_consumer {
     my ($node) = @_;
-    my %visited;
+    my (%visited, %walked);
     my @queue = ($node);
     while (my $cur = shift @queue) {
         my $id = $cur->id;
         next if $visited{$id}++;
+        $walked{ refaddr($cur) } = 1;
         for my $c (($cur->consumers // [])->@*) {
             next unless defined $c && $c->can('operation');
+            # AN EVAL'S JOIN this arm opened is reached by its input, not by
+            # control_in; the arm goes on past it -- a die after it ends the
+            # arm (stopped here, an outer eval's die was dropped).
+            if ($c->operation eq 'Region' && $c->can('eval_entry') && blessed($c->eval_entry)
+                    && $walked{ refaddr($c->eval_entry) }
+                    && grep { blessed($_) && refaddr($_) == refaddr($cur) } $c->inputs->@*) {
+                push @queue, $c;
+                next;
+            }
             next unless $c->can('control_in') && defined $c->control_in
                 && $c->control_in->id eq $id;
+            # A DIE AN EVAL IN THIS ARM CATCHES does not end the arm: the
+            # eval's entry is on the walk, and its join goes on.
+            if ($c->operation eq 'Unwind' && defined $c->eval_id
+                    && grep { ( $_->eval_id // '' ) eq $c->eval_id && $walked{ refaddr($_->eval_entry) } }
+                       map { @$_ } values %Chalk::Target::LLVM::Context::EVAL_BY_ENTRY) {
+                push @queue, $c;
+                next;
+            }
             return $c if $c->operation eq 'Unwind';
             next if $c->operation eq 'Region';
             push @queue, $c;
@@ -7013,6 +7046,7 @@ sub _emit_unwind_terminator {
     # would put two `call @exit` in one block, so guard rather than rely on that.
     my $id = $unwind->can('id') ? $unwind->id : refaddr($unwind);
     return if $self->{_unwind_emitted}{$id}++;
+    $self->_open_evals_entered($unwind);
 
     # INSIDE A BLOCK EVAL A DIE IS A BRANCH: it sets $@ and goes to the
     # eval's end. What the body calls is inlined, so every die it reaches
@@ -7053,6 +7087,7 @@ sub open_eval {
         if $region->eval_may_die;
     push $self->{_eval_frames}->@*,
         { region => $region, catch => $self->_fresh_label('eval_catch'), dies => 0, held => [] };
+    $self->{_eval_open_now}{ refaddr($region) } = 1;
     return;
 }
 
@@ -7061,6 +7096,7 @@ sub close_eval {
     my $f = pop( ($self->{_eval_frames} // [])->@* );
     die "GAP: a block eval's join was reached without its body being opened\n"
         unless $f && $f->{region}->id eq $region->id;
+    delete $self->{_eval_open_now}{ refaddr($region) };
     # IN LIST CONTEXT a die gives the empty list, not undef: the one value
     # this join carries cannot say that.
     die "GAP: a block eval in list or caller context that can die is not lowered -- "
@@ -7921,6 +7957,16 @@ sub _collect_body_recursive {
     # e.g. `$c->inc if $x>3; $c->inc;`) is NOT swept into the then-arm body and
     # dropped when the guard is false (zhi 019f2df7). The Region itself and its
     # post-merge consumers are handled by the outer control chain.
+    # AN EVAL'S JOIN IN THIS ARM is a statement of it -- it closes the eval
+    # its entry opened here -- and the arm goes on past it.
+    if ($op eq 'Region' && $node->can('eval_entry') && blessed($node->eval_entry)
+            && $visited->{owned}{ $node->eval_entry->id }) {
+        $visited->{owned}{$id} = 1;
+        $visited->{continues}{$id} = 1;
+        push @$body, $node;
+        _collect_body_recursive($_, $visited, $body) for grep { defined } ($node->consumers // [])->@*;
+        return;
+    }
     return if $op eq 'Region';
 
     # ON THE ARM'S CONTROL CHAIN is any node pinned to it -- a statement, or
@@ -7966,7 +8012,12 @@ sub _collect_body_recursive {
     # the data edge but had no rule for who owns the result, so nothing emitted
     # the Print at all.
     if ($op eq 'If' || $op eq 'Loop'
-        || Chalk::IR::NodeFactory::is_statement_node($op)) {
+        || Chalk::IR::NodeFactory::is_statement_node($op)
+        # a die an eval opened in this arm catches is one of its statements
+        # (one caught by an eval outside the arm ends the arm, as before)
+        || ( $op eq 'Unwind' && defined $node->eval_id
+             && grep { ( $_->eval_id // '' ) eq $node->eval_id && $visited->{owned}{ $_->eval_entry->id } }
+                map { @$_ } values %Chalk::Target::LLVM::Context::EVAL_BY_ENTRY )) {
         my $owned = _owned_by_arm($node, $visited);
         push @$body, $node if $owned;
         $visited->{owned}{$id} = 1 if $owned;
@@ -8746,6 +8797,11 @@ our %ANON_SUBS;
 
 # @PROGRAM: every node of the program (_program_nodes of its Return).
 our @PROGRAM;
+
+# %EVAL_BY_ENTRY: each block eval's join (a Region with eval_entry), by the
+# refaddr of its entry -- the node its body follows. An eval in an arm or a
+# loop body is opened where that body's first node is lowered.
+our %EVAL_BY_ENTRY;
 
 # $SELECTS: does the program select a handle? Then every bare print asks
 # which handle is selected (@chalk_selected, null for STDOUT).
