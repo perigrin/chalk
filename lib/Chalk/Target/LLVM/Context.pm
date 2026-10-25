@@ -1979,6 +1979,9 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'sprintf') {
         return $self->_lower_sprintf($node);
     }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'split') {
+        return $self->_lower_split($node);
+    }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'indirect') {
         return $self->_lower_call_indirect($node);
     }
@@ -9403,6 +9406,147 @@ sub _lower_sprintf {
         $append->($self->_set_str_len($buf, $n64));
     }
     die "GAP: sprintf with arguments its format does not use is not lowered\n" if @args;
+    return $self->{cache}{ $node->id } = $acc;
+}
+
+# _lower_split($node) -> %Array*: split in a list, its fields as views of
+# the string. Three separators are lowered: a literal (a pattern with no
+# regex metacharacter), " " (awk mode: runs of whitespace, leading ones
+# skipped) and // (each character). Trailing empty fields are dropped, as
+# with no limit. A regex, a limit, or split in scalar context is refused.
+sub _lower_split {
+    my ($self, $node) = @_;
+    my ($pat, $str, $lim) = grep { blessed($_) } $node->inputs->@*;
+    die "GAP: split whose result is a " . ( $node->stamp // 'Unknown' ) . " (scalar context) is not lowered\n"
+        unless ( $node->stamp // '' ) =~ /\A(?:List|Array)\z/;
+    die "GAP: split with no string (of \$_) is not lowered\n" unless blessed($str);
+    die "GAP: split with a limit is not lowered\n"
+        if blessed($lim) && !( $lim->operation eq 'Constant' && ( $lim->value // '' ) eq '0' );
+    die "GAP: split by a pattern known only at run time is not lowered\n"
+        unless blessed($pat) && $pat->operation eq 'Constant';
+    my $pv = $pat->value // '';
+    my $mode = ( $pat->const_type // '' ) eq 'string' && $pv eq ' ' ? 'awk'
+             : ( $pat->const_type // '' ) eq 'regex' && $pv eq ''  ? 'chars'
+             : ( $pat->const_type // '' ) eq 'regex' && $pv !~ /[\\^\$.|?*+()\[\]{}]/ ? 'literal'
+             : die "GAP: split by the regex /$pv/ is not lowered -- only a literal separator, \" \" or //\n";
+    my $from = $self->_repr_of($str) // $str->stamp // '';
+    my $sv = $self->lower_value($str);
+    $sv = $self->_emit_coercion($sv, $from, 'Str', 'split: the string') if $from ne 'Str';
+    my ($sp, $sl) = $self->_str_parts($sv);
+    $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy _need_aggregate_types _need_memcmp);
+    my $acc = $self->_emit_array_of([]);
+    my ($ia, $sa, $ka, $wa) = map { $self->_fresh } 1 .. 4;
+    $self->_emit_entry("  $_ = alloca i64  ; split: state") for $ia, $sa, $ka, $wa;
+    $self->_emit("  store i64 0, i64* $_") for $ia, $sa, $ka, $wa;
+    # push the field [a, b); keep counts the fields up to the last non-empty
+    my $push = sub ($a, $b) {
+        my ($l, $p, $alp, $al, $ne, $k, $k1) = map { $self->_fresh } 1 .. 7;
+        $self->_emit("  $l = sub i64 $b, $a");
+        $self->_emit("  $p = getelementptr inbounds i8, i8* $sp, i64 $a");
+        my $slot = $self->_emit_coercion($self->_set_str_len($p, $l), 'Str', 'Scalar', 'split: a field');
+        $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $slot)  ; split: a field");
+        $self->_emit("  $alp = getelementptr inbounds %Array, %Array* $acc, i32 0, i32 0");
+        $self->_emit("  $al = load i64, i64* $alp");
+        $self->_emit("  $ne = icmp ne i64 $l, 0");
+        $self->_emit("  $k = load i64, i64* $ka");
+        $self->_emit("  $k1 = select i1 $ne, i64 $al, i64 $k  ; split: up to the last non-empty");
+        $self->_emit("  store i64 $k1, i64* $ka");
+    };
+    my ($head, $body, $tail, $done) = map { $self->_fresh_label("split.$_.") } qw(head body tail done);
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($head);
+    my $i = $self->_fresh;
+    $self->_emit("  $i = load i64, i64* $ia");
+    if ($mode eq 'literal') {
+        my ($seq, $seql) = $self->_str_const_parts($pv, 'split: the separator');
+        my ($end, $fits, $at, $m, $hit, $i1, $st, $in) = map { $self->_fresh } 1 .. 8;
+        my ($hitl, $adv) = map { $self->_fresh_label("split.$_.") } qw(hit adv);
+        $self->_emit("  $end = add i64 $i, $seql");
+        $self->_emit("  $fits = icmp ule i64 $end, $sl");
+        $self->_set_terminator("  br i1 $fits, label %$body, label %$tail");
+        $self->_new_block($body);
+        $self->_emit("  $at = getelementptr inbounds i8, i8* $sp, i64 $i");
+        $self->_emit("  $m = call i32 \@memcmp(i8* $at, i8* $seq, i64 $seql)  ; split: the separator here?");
+        $self->_emit("  $hit = icmp eq i32 $m, 0");
+        $self->_set_terminator("  br i1 $hit, label %$hitl, label %$adv");
+        $self->_new_block($adv);
+        $self->_emit("  $i1 = add i64 $i, 1");
+        $self->_emit("  store i64 $i1, i64* $ia");
+        $self->_set_terminator("  br label %$head");
+        $self->_new_block($hitl);
+        $self->_emit("  $st = load i64, i64* $sa");
+        $push->($st, $i);
+        $self->_emit("  store i64 $end, i64* $ia");
+        $self->_emit("  store i64 $end, i64* $sa");
+        $self->_set_terminator("  br label %$head");
+        $self->_new_block($tail);
+        my $st2 = $self->_fresh;
+        $self->_emit("  $st2 = load i64, i64* $sa");
+        $push->($st2, $sl);
+    }
+    elsif ($mode eq 'chars') {
+        my ($more, $i1) = map { $self->_fresh } 1 .. 2;
+        $self->_emit("  $more = icmp ult i64 $i, $sl");
+        $self->_set_terminator("  br i1 $more, label %$body, label %$tail");
+        $self->_new_block($body);
+        $self->_emit("  $i1 = add i64 $i, 1");
+        $push->($i, $i1);
+        $self->_emit("  store i64 $i1, i64* $ia");
+        $self->_set_terminator("  br label %$head");
+        $self->_new_block($tail);
+    }
+    else {   # awk: fields are the runs of non-whitespace
+        my ($more, $cp, $c, $i1, $inw, $was) = map { $self->_fresh } 1 .. 6;
+        my ($wsl, $endw, $nonws, $startw, $next) = map { $self->_fresh_label("split.$_.") } qw(ws endw nonws startw next);
+        $self->_emit("  $more = icmp ult i64 $i, $sl");
+        $self->_set_terminator("  br i1 $more, label %$body, label %$tail");
+        $self->_new_block($body);
+        $self->_emit("  $cp = getelementptr inbounds i8, i8* $sp, i64 $i");
+        $self->_emit("  $c = load i8, i8* $cp");
+        my @ws = map { my $t = $self->_fresh; $self->_emit("  $t = icmp eq i8 $c, $_"); $t } 32, 9, 10, 11, 12, 13;
+        my $any = shift @ws;
+        for my $w (@ws) { my $t = $self->_fresh; $self->_emit("  $t = or i1 $any, $w"); $any = $t }
+        $self->_emit("  $inw = load i64, i64* $wa");
+        $self->_emit("  $was = icmp ne i64 $inw, 0  ; split: in a field?");
+        $self->_set_terminator("  br i1 $any, label %$wsl, label %$nonws");
+        $self->_new_block($wsl);
+        $self->_set_terminator("  br i1 $was, label %$endw, label %$next");
+        $self->_new_block($endw);
+        my $st = $self->_fresh;
+        $self->_emit("  $st = load i64, i64* $sa");
+        $push->($st, $i);
+        $self->_emit("  store i64 0, i64* $wa");
+        $self->_set_terminator("  br label %$next");
+        $self->_new_block($nonws);
+        $self->_set_terminator("  br i1 $was, label %$next, label %$startw");
+        $self->_new_block($startw);
+        $self->_emit("  store i64 $i, i64* $sa");
+        $self->_emit("  store i64 1, i64* $wa");
+        $self->_set_terminator("  br label %$next");
+        $self->_new_block($next);
+        $self->_emit("  $i1 = add i64 $i, 1");
+        $self->_emit("  store i64 $i1, i64* $ia");
+        $self->_set_terminator("  br label %$head");
+        $self->_new_block($tail);
+        my ($w2, $was2) = map { $self->_fresh } 1 .. 2;
+        my ($last, $after) = map { $self->_fresh_label("split.$_.") } qw(last after);
+        $self->_emit("  $w2 = load i64, i64* $wa");
+        $self->_emit("  $was2 = icmp ne i64 $w2, 0");
+        $self->_set_terminator("  br i1 $was2, label %$last, label %$after");
+        $self->_new_block($last);
+        my $st3 = $self->_fresh;
+        $self->_emit("  $st3 = load i64, i64* $sa");
+        $push->($st3, $sl);
+        $self->_set_terminator("  br label %$after");
+        $self->_new_block($after);
+    }
+    # TRAILING EMPTY FIELDS ARE DROPPED: the array ends at the last non-empty.
+    my ($k, $lp) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $k = load i64, i64* $ka");
+    $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $acc, i32 0, i32 0");
+    $self->_emit("  store i64 $k, i64* $lp  ; split: trailing empty fields dropped");
+    $self->_set_terminator("  br label %$done");
+    $self->_new_block($done);
     return $self->{cache}{ $node->id } = $acc;
 }
 
