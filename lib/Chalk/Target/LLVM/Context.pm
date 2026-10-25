@@ -5868,7 +5868,8 @@ sub _process_if_node {
 
     my $cond_ref = $self->lower_value($cond_input);
 
-    my $cond_repr = $cond_input->stamp // 'Boolean';
+    # A parameter nothing typed, inlined, is the caller's value: its truth.
+    my $cond_repr = $self->_repr_of($cond_input) // 'Boolean';
     if ($cond_repr eq 'Int') {
         my $bool_ref = $self->_fresh;
         $self->_emit("  $bool_ref = icmp ne i64 $cond_ref, 0  ; If (elab): coerce Int to i1");
@@ -10590,9 +10591,43 @@ sub _lower_array_deref {
 
     $self->{_need_aggregate_types} = 1;
 
-    my $ref_val = $self->lower_value($node->inputs->[0]);
-    my $arr = $self->_fresh;
-    $self->_emit("  $arr = bitcast i8* $ref_val to %Array*  ; ArrayDeref: i8* ref -> Array*");
+    my $in = $node->inputs->[0];
+    my $arr;
+    # A VALUE READ BY ITS TAG (`$h{k} // []` merges a Scalar and an ArrayRef
+    # into a Slot): an ArrayRef is its payload, undef an empty array (perl's
+    # rvalue `@{ undef }`); anything else dies in perl (exit 255).
+    if (( $self->_repr_of($in) // '' ) =~ /\A(?:Scalar|Slot)\z/) {
+        my $s   = $self->lower_value($in);
+        my $tag = $self->_slot_tag_of($s);
+        my ($isref, $isundef, $p, $yesp) = map { $self->_fresh } 1 .. 4;
+        my ($yes, $notref, $undef, $no, $join) = map { $self->_fresh_label("aderef.$_.") } qw(ref notref undef no join);
+        $self->_emit("  $isref = icmp eq i8 $tag, " . _slot_tag_value('ArrayRef') . "  ; \@{}: an array reference?");
+        $self->_set_terminator("  br i1 $isref, label %$yes, label %$notref");
+        $self->_new_block($yes);
+        my $pl = $self->_slot_payload_of($s);
+        $self->_emit("  $yesp = inttoptr i64 $pl to %Array*  ; Scalar -> %Array*");
+        $self->_set_terminator("  br label %$join");
+        $self->_new_block($notref);
+        $self->_emit("  $isundef = icmp eq i8 $tag, " . _slot_tag_value('Undef') . "  ; \@{}: undef?");
+        $self->_set_terminator("  br i1 $isundef, label %$undef, label %$no");
+        $self->_new_block($no);
+        $self->{_need_exit} = 1;
+        $self->_refuse_inside_eval("a deref that dies on what is not an ARRAY reference");
+        $self->_emit("  call void \@exit(i32 255)  ; not an ARRAY reference");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($undef);
+        my $empty = $self->_emit_array_of([]);
+        my $from_undef = $self->_current_block_label;
+        $self->_set_terminator("  br label %$join");
+        $self->_new_block($join);
+        $arr = $self->_fresh;
+        $self->_emit("  $arr = phi %Array* [ $yesp, %$yes ], [ $empty, %$from_undef ]  ; \@{}: the array");
+    }
+    else {
+        my $ref_val = $self->lower_value($in);
+        $arr = $self->_fresh;
+        $self->_emit("  $arr = bitcast i8* $ref_val to %Array*  ; ArrayDeref: i8* ref -> Array*");
+    }
     $arr = $self->_emit_aggregate_copy($arr, 'Array') if $node->copy;
     $self->{cache}{ $node->id } = $arr;
     return $arr;

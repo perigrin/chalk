@@ -2309,8 +2309,11 @@ sub _element_repr ($container) {
     # element type, `$k[1]` of `(sort(keys %h), "z")` read as a List.
     # A CALL'S Array (sort, keys, a sub's list) flattens too. Every element an
     # Array that is not a call is chalk's own nested array, kept as it was.
+    # SO DOES A MERGE'S: `$e ? @{ $r->{s} // [] } : ()` is a Phi of an array
+    # and a list, which flattens -- read as a nested array, its element was
+    # an Array and lli rejected the module (pvm 211).
     return 'Scalar' if grep { /\A(?:List|Hash)\z/ } @reprs
-        or grep { blessed($_) && $_->operation eq 'Call' && ( $_->stamp // '' ) eq 'Array' } @elems
+        or grep { blessed($_) && $_->operation =~ /\A(?:Call|Phi|TernaryExpr)\z/ && ( $_->stamp // '' ) eq 'Array' } @elems
         or ( grep { $_ eq 'Array' } @reprs ) && grep { $_ ne 'Array' } @reprs;
     # A NESTED aggregate: the elements are themselves aggregates ([[1,2],[3,4]]).
     # Aggregate reprs (ArrayRef/HashRef) are not scalar-widenable, so the element
