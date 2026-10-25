@@ -1976,6 +1976,9 @@ sub lower_value {
     elsif ($op eq 'Delete') {
         return $self->_lower_delete($node);
     }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'sprintf') {
+        return $self->_lower_sprintf($node);
+    }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'indirect') {
         return $self->_lower_call_indirect($node);
     }
@@ -4725,6 +4728,10 @@ sub _emit_shortcircuit_phi {
 sub _subscript_slot {
     my ($self, $node) = @_;
     my $id  = $node->id;
+    # A READ FROZEN AT ITS MEMORY VERSION is read as its Slot there too
+    # (_freeze_memory_reads): read again here, where its user is lowered, it
+    # saw a later store (`$c ? $h{a} : 8` after `g($h{a})` wrote 5).
+    return $self->{cache}{"slot:$id"} if exists $self->{cache}{"slot:$id"};
     my ($had, $c) = (exists $self->{cache}{$id}, $self->{cache}{$id});
     my $old = $node->stamp;
     $node->set_stamp('Slot');
@@ -5990,6 +5997,11 @@ sub _freeze_memory_reads {
         my $ref = $self->lower_value($c);
         $self->{cache}{ $c->id } = $ref;           # freeze at this memory version
         $self->{_frozen_reads}{ $c->id } = 1;
+        # ...and as its whole Slot, for a user that keeps a miss its narrowed
+        # reading drops (_miss_kept, _subscript_slot).
+        $self->{cache}{ 'slot:' . $c->id } = $self->_subscript_slot($c)
+            if $c->operation eq 'Subscript' && ( $c->stamp // '' ) !~ /\A(?:Scalar|Slot)\z/
+            && !( $self->{_arg_bind} && $self->{_arg_bind}{ refaddr($c) } );   # a bound read is the caller's value
     }
 }
 
@@ -9293,6 +9305,104 @@ sub _lower_reverse {
     $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $sv)  ; reverse: from the end");
     $self->_set_terminator("  br label %$head");
     $self->_new_block($done);
+    return $self->{cache}{ $node->id } = $acc;
+}
+
+# _lower_sprintf($node) -> %Str: a CONSTANT format, read here: each literal
+# run as it is, each conversion rendered by C's snprintf with a format of its
+# own -- %d %i %u %x %X %o as 64-bit integers, %f %F %e %E %g %G as doubles,
+# %s by its length -- flags, widths and precisions (a `*` taken from the
+# arguments) as written. perl's conversions agree with C's for these. Any
+# other (%v, %c, %n$, a format known only at run time) is refused by name.
+sub _lower_sprintf {
+    my ($self, $node) = @_;
+    my ($fmt, @args) = grep { blessed($_) } $node->inputs->@*;
+    pop @args if $node->can('memory_input') && $node->memory_input;
+    die "GAP: sprintf whose format is not a constant string is not lowered\n"
+        unless blessed($fmt) && $fmt->operation eq 'Constant' && ( $fmt->const_type // '' ) eq 'string';
+    die "GAP: sprintf of a list that flattens is not lowered\n"
+        if grep { ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @args;
+    my $text = $fmt->value // '';
+    $self->{$_} = 1 for qw(_need_snprintf _need_malloc_memcpy);
+    my $acc = $self->_empty_str_ref('sprintf: so far');
+    my $append = sub ($str) { $acc = $self->_emit_str_append($acc, $str, 'sprintf') };
+    my $literal = sub ($t) {
+        return unless length $t;
+        $append->($self->_set_str_len($self->_str_const_parts($t, 'sprintf: literal')));
+    };
+    my $take = sub ($what) {
+        die "GAP: sprintf with too few arguments for its format is not lowered\n" unless @args;
+        return shift @args;
+    };
+    my $as = sub ($arg, $to) {
+        my $from = $arg->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($arg) // $arg->stamp // '' );
+        my $v = $self->lower_value($arg);
+        return $from eq $to ? $v : $self->_emit_coercion($v, $from, $to, "sprintf %-arg");
+    };
+    my $i32 = sub ($arg) {
+        my $v = $as->($arg, 'Int');
+        my $t = $self->_fresh;
+        $self->_emit("  $t = trunc i64 $v to i32  ; sprintf: a * argument");
+        return "i32 $t";
+    };
+    pos($text) = 0;
+    while (pos($text) < length $text) {
+        if ($text =~ /\G([^%]+)/gc) { $literal->($1); next }
+        if ($text =~ /\G%%/gc)     { $literal->('%'); next }
+        $text =~ /\G%([-+ 0#]*)(\*|\d+)?(?:\.(\*|\d*))?([sdiuxXofFeEgG])/gc
+            or die "GAP: sprintf conversion '" . substr($text, pos($text), 6) . "' is not lowered\n";
+        my ($flags, $w, $p, $conv) = ($1, $2, $3, $4);
+        my @va;
+        push @va, $i32->($take->('width')) if defined $w && $w eq '*';
+        push @va, $i32->($take->('precision')) if defined $p && $p eq '*';
+        my $arg = $take->('value');
+        my $cfmt = '%' . $flags . ( $w // '' );
+        if ($conv eq 's') {
+            my ($sp, $sl) = $self->_str_parts($as->($arg, 'Str'));
+            # A STRING BY ITS LENGTH: it need not end in a NUL. A precision
+            # given shortens it, never lengthens it.
+            my $l32 = $self->_fresh;
+            $self->_emit("  $l32 = trunc i64 $sl to i32  ; sprintf %s: its length");
+            my $lim = $l32;
+            if (defined $p && $p ne '*') {
+                my ($lt, $m) = map { $self->_fresh } 1 .. 2;
+                my $pn = 0 + ( $p eq '' ? 0 : $p );
+                $self->_emit("  $lt = icmp slt i32 $pn, $l32");
+                $self->_emit("  $m = select i1 $lt, i32 $pn, i32 $l32");
+                $lim = $m;
+            }
+            elsif (defined $p) {   # .* -- the argument taken above, capped at the length
+                my $given = pop(@va) =~ s/\Ai32 //r;
+                my ($lt, $m) = map { $self->_fresh } 1 .. 2;
+                $self->_emit("  $lt = icmp slt i32 $given, $l32");
+                $self->_emit("  $m = select i1 $lt, i32 $given, i32 $l32");
+                $lim = $m;
+            }
+            $cfmt .= '.*s';
+            push @va, "i32 $lim", "i8* $sp";
+        }
+        else {
+            $cfmt .= '.' . $p if defined $p;
+            if ($conv =~ /[diuxXo]/) {
+                $cfmt .= 'll' . $conv;
+                push @va, 'i64 ' . $as->($arg, 'Int');
+            }
+            else {
+                $cfmt .= $conv;
+                push @va, _repr_to_llvm_type('Num') . ' ' . $as->($arg, 'Num');
+            }
+        }
+        my ($fp) = $self->_str_const_parts($cfmt, 'sprintf: a conversion');
+        my $vargs = join(', ', @va);
+        my ($need, $n64, $size, $buf, $wrote) = map { $self->_fresh } 1 .. 5;
+        $self->_emit("  $need = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* null, i64 0, i8* $fp, $vargs)  ; sprintf: measure");
+        $self->_emit("  $n64 = sext i32 $need to i64");
+        $self->_emit("  $size = add i64 $n64, 1");
+        $self->_emit("  $buf = call i8* \@malloc(i64 $size)");
+        $self->_emit("  $wrote = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* $buf, i64 $size, i8* $fp, $vargs)  ; sprintf: render");
+        $append->($self->_set_str_len($buf, $n64));
+    }
+    die "GAP: sprintf with arguments its format does not use is not lowered\n" if @args;
     return $self->{cache}{ $node->id } = $acc;
 }
 
