@@ -1657,6 +1657,8 @@ sub lower_value {
     if ($self->{_arg_bind}) {
         my $bound = $self->{_arg_bind}{ refaddr($node) };
         if (defined $bound) {
+            die "GAP: a code reference used other than by a call is not lowered\n"
+                unless defined $bound->{ref};
             # THE CALLER'S VALUE IS COERCED TO THE CALLEE'S READING, never the
             # callee node restamped to the caller's. Analysis typed the
             # callee's consumers from that node's own stamp: restamping `$a`
@@ -1941,6 +1943,26 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
             && ($node->name // '') =~ /\A(?:open|close|readline|eof)\z/) {
         return $self->_lower_handle_op($node);
+    }
+    elsif ($op eq 'CellWrite') {
+        my ($cell, $v) = $node->inputs->@[0, 1];
+        my $ptr = $self->_cell_storage($cell);
+        my $from = $self->_repr_of($v) // $v->stamp // '';
+        my $val = $self->lower_value($v);
+        $val = $self->_emit_coercion($val, $from, 'Scalar', 'store to a captured variable') if $from ne 'Scalar';
+        $self->_emit("  store %Slot $val, %Slot* $ptr  ; store to a captured variable");
+        return $self->{cache}{ $node->id } = $val;
+    }
+    elsif ($op eq 'CellRead' && blessed($node->inputs->[0]) && $node->inputs->[0]->operation eq 'MakeCell') {
+        my $slot = $self->_fresh;
+        $self->_emit("  $slot = load %Slot, %Slot* " . $self->_cell_storage($node->inputs->[0]) . "  ; read a captured variable");
+        return $slot;
+    }
+    elsif ($op eq 'AnonSub') {
+        die "GAP: a code reference used as a value -- not called where it is made -- is not lowered\n";
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'indirect') {
+        return $self->_lower_call_indirect($node);
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'select') {
         return $self->_lower_select($node);
@@ -4640,7 +4662,9 @@ sub _lower_defined_or_by_slot {
     $self->_set_terminator("  br i1 $def, label %$end, label %$undef  ; //: defined?");
     $self->_new_block($undef);
     my $rhs  = $node->inputs->[1];
-    my $rval = $self->lower_value($rhs);
+    # WHAT THE ARM MAKES STAYS IN THE ARM: cached past it, a second `//` over
+    # the same node took a value its own arm does not dominate (pvm 213).
+    my $rval = do { local $self->{cache} = { $self->{cache}->%* }; $self->lower_value($rhs) };
     my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');
     if ($from ne $to) {
         $rval = $from eq 'Undef' && $to eq 'Scalar'
@@ -5553,6 +5577,12 @@ sub process_control_node {
     # A PACKAGE CHANGE computes nothing: the producer has already qualified
     # every name the following statements use.
     elsif ($op eq 'PackageMark') {
+    }
+    # A STORE TO A CAPTURED VARIABLE goes to its cell -- its location.
+    # Dropped here before, unseen: CellWrite is neither a statement node nor
+    # fixed, so `$k = 4` after a closure over $k was lost.
+    elsif ($op eq 'CellWrite') {
+        $self->lower_value($node);
     }
     # A WRITE NOTHING ABOVE LOWERS IS REFUSED, not dropped: an EntryWrite
     # reached this branch before it was a statement node, and `our $g = 1;
@@ -8112,6 +8142,17 @@ sub _emit_append_one {
     my $elem_ref  = $self->lower_value($elem_node);
     my $elem_repr = $elem_node->stamp // '';
 
+    # AN ELEMENT THAT IS A SCALAR is its Slot, tag and defined bit as they
+    # are -- an undef a map yields stays undef.
+    if (( $self->_repr_of($elem_node) // $elem_repr ) eq 'Scalar') {
+        my ($sp, $newlen) = map { $self->_fresh } 1 .. 2;
+        $self->_emit("  $sp = getelementptr inbounds %Slot, %Slot* $slots, i64 $len  ; ListAppend: slot[len]");
+        $self->_emit("  store %Slot $elem_ref, %Slot* $sp  ; ListAppend: a Scalar, as it is");
+        $self->_emit("  $newlen = add i64 $len, 1  ; ListAppend: len+1");
+        $self->_emit("  store i64 $newlen, i64* $len_ptr  ; ListAppend: install new len");
+        return;
+    }
+
     my $d_gep = $self->_fresh;
     my $t_gep = $self->_fresh;
     my $p_gep = $self->_fresh;
@@ -8561,6 +8602,10 @@ sub _program_nodes {
 # cannot spell (perl's names the file and line) is lowered only where it is
 # never seen.
 our $READS_ERROR;
+
+# %ANON_SUBS: the AnonSub node of each anonymous sub's name, for a closure
+# B::SoN calls directly (its Call names the sub, not the node with its cells).
+our %ANON_SUBS;
 
 # $SELECTS: does the program select a handle? Then every bare print asks
 # which handle is selected (@chalk_selected, null for STDOUT).
@@ -9811,12 +9856,106 @@ sub _emit_hash_insert {
     $self->_emit("  store i64 $c1, i64* $cntp  ; insert: count + 1");
 }
 
+# _lower_call_indirect($node): `$cb->(...)` where $cb is, through the
+# arguments inlining bound, a code reference made in this program (an
+# AnonSub): a direct call of its sub. Anything else is refused by name.
+sub _lower_call_indirect {
+    my ($self, $node) = @_;
+    my ($callee, @args) = $node->inputs->@*;
+    pop @args if $node->can('memory_input') && $node->memory_input;
+    my $anon = $self->_static_code_of($callee);
+    die "GAP: an indirect call whose code is not a sub this program makes and passes down "
+      . "is not lowered\n" unless $anon && $anon->sub;
+    $self->{_call_via} = { name => $anon->name, target => $anon->sub, args => \@args, anon => $anon };
+    return $self->_lower_call_direct($node);
+}
+
+# _static_code_of($node) -> the AnonSub a value is, through the arguments
+# inlining bound, or undef.
+sub _static_code_of {
+    my ($self, $n) = @_;
+    for (1 .. 32) {
+        return undef unless blessed($n);
+        return $n if $n->operation eq 'AnonSub';
+        my $b = $self->{_arg_bind} ? $self->{_arg_bind}{ refaddr($n) } : undef;
+        return undef unless $b && blessed($b->{node});
+        $n = $b->{node};
+    }
+    return undef;
+}
+
+# _bind_captures($graph, $name, $anon): bind each CellRead in a closure's
+# graph to a load of the variable its cell holds -- the location of that
+# name in the frame that made it, found through the cell's memory version.
+# A closure that writes a capture, or one whose cells are not known, is
+# refused.
+sub _bind_captures {
+    my ($self, $graph, $name, $anon) = @_;
+    my @reads = grep { blessed($_) && $_->operation eq 'CellRead' } _graph_component($graph);
+    my @writes = grep { blessed($_) && $_->operation eq 'CellWrite' } _graph_component($graph);
+    return unless @reads || @writes;
+    die "GAP: a closure ('$name') that writes what it captured is not lowered\n" if @writes;
+    my $via_anon = defined $anon;
+    $anon //= $ANON_SUBS{$name};
+    die "GAP: a closure ('$name') whose cells are not known here is not lowered\n" unless blessed($anon);
+    my @cells = grep { blessed($_) } $anon->inputs->@*;
+    for my $r (@reads) {
+        my $param = $r->inputs->[0];
+        my $cell  = blessed($param) && $param->can('index') ? $cells[ $param->index ] : undef;
+        my $var   = $cell ? _cell_variable($cell) : undef;
+        die "GAP: a closure ('$name') capture whose variable is not a location here is not lowered\n"
+            unless $var;
+        # PASSED DOWN, its cells are where the frame that made it said
+        # (_arg_binding); called directly by B::SoN, it is called in that frame.
+        my $ptr = $via_anon ? $self->{_cell_slots}{ refaddr($cell) } : $self->_location_ptr($var);
+        die "GAP: a closure ('$name') passed down whose cells were not found where it was made\n"
+            unless defined $ptr;
+        my $slot = $self->_fresh;
+        $self->_emit("  $slot = load %Slot, %Slot* $ptr  ; closure: " . $var->name);
+        $self->{_arg_bind}{ refaddr($r) } = { ref => $slot, repr => 'Scalar', node => $var };
+    }
+    return;
+}
+
+# _cell_storage($cell) -> the %Slot* a MakeCell's variable lives in: its
+# location. Refused when it is not one.
+sub _cell_storage {
+    my ($self, $cell) = @_;
+    my $var = blessed($cell) && $cell->operation eq 'MakeCell' ? _cell_variable($cell) : undef;
+    die "GAP: a captured variable that is not a location here is not lowered\n" unless $var;
+    return $self->_location_ptr($var);   # this frame's: each inline of the maker has its own
+}
+
+# _cell_variable($cell) -> the location a MakeCell holds: the variable of its
+# name stored at the memory version it was made at.
+sub _cell_variable {
+    my ($cell) = @_;
+    my $want = $cell->can('cell_name') ? ( $cell->cell_name // '' ) : '';
+    my $mem = $cell->inputs->[1];
+    for (1 .. 64) {
+        return undef unless blessed($mem);
+        my $v = $mem->inputs->[0];
+        return $v if blessed($v) && $v->operation eq 'PadAccess' && $v->is_location && $v->name eq $want;
+        return undef unless $mem->operation =~ /\A(?:Assign|EntryWrite|Call)\z/;
+        ($mem) = grep { blessed($_) && $_->operation ne 'Constant' } reverse $mem->inputs->@*;
+    }
+    return undef;
+}
+
 # _arg_binding($arg, $ref) -> what a callee's argument read is bound to. An
 # argument that is itself an inlined parameter holding a reference (an
 # object handed on: `sub f { my ($n) = @_; $n->val }`) passes the reference
 # on as it is -- its own lowering boxed it to the parameter's Scalar.
 sub _arg_binding {
     my ($self, $arg, $ref) = @_;
+    if ($arg->operation eq 'AnonSub') {
+        # ITS CELLS ARE FOUND HERE, in the frame that made it: the callee's
+        # frame has its own `my` locations, and a capture read there found a
+        # fresh, empty one.
+        $self->{_cell_slots}{ refaddr($_) } = $self->_cell_storage($_)
+            for grep { blessed($_) && $_->operation eq 'MakeCell' } $arg->inputs->@*;
+        return { ref => undef, repr => 'CodeRef', node => $arg };
+    }
     my $rep = $self->_repr_of($arg) // '';
     my $raw = $self->_bound_ref($arg);
     return { ref => $raw, repr => $rep, node => $arg } if $rep =~ /Ref\z/ && defined $raw;
@@ -11922,7 +12061,11 @@ sub _copy_out_written_args {
 sub _lower_call_direct {
     my ($self, $node) = @_;
 
-    my $name  = $node->name;
+    # AN INDIRECT CALL RESOLVED to a sub (_lower_call_indirect) is lowered as
+    # a direct one of it: its name, metaobject and arguments ride here, taken
+    # at once so a call inside the inlined body does not see them.
+    my $via = delete $self->{_call_via};
+    my $name  = $via ? $via->{name} : $node->name;
     die "GAP: direct call to '$name' as `&$name`, which shares its caller's \@_, is not lowered\n"
         if $node->can('shares_args') && $node->shares_args;
     # A CALL IN AN EVAL'S BODY is caught by that eval: inlined with it not
@@ -11959,7 +12102,7 @@ sub _lower_call_direct {
     # so the callee's graph AND its metadata (params, uses_args, return type)
     # are reachable from one place -- which is the whole point of Chalk keeping
     # a MOP alongside the graph rather than dissolving declarations into it.
-    my $target = $node->can('target') ? $node->target : undef;
+    my $target = $via ? $via->{target} : $node->can('target') ? $node->target : undef;
     my $graph  = $target && $target->can('graph') ? $target->graph : undef;
     die "GAP: direct call to '$name' has no resolved callee — the loader could "
       . "not resolve the sub name to a metaobject (an unknown or builtin sub)."
@@ -12074,7 +12217,14 @@ sub _lower_call_direct {
       . "does not yet thread in program order."
         if @trailing_effects;
 
-    my @args = $node->inputs->@*;
+    my @args = $via ? $via->{args}->@* : $node->inputs->@*;
+
+    # A CLOSURE READS WHAT IT CAPTURED as it is when it runs: each CellRead of
+    # its graph is the load of the variable it names, in the frame that made
+    # it -- inlined here, as the call is made while that frame runs. One that
+    # writes a capture is refused.
+    local $self->{_arg_bind} = { ($self->{_arg_bind} // {})->%* };
+    $self->_bind_captures($graph, $name, $via ? $via->{anon} : undef);
 
     # No-argument callee: thread its straight-line effect chain (if any), then
     # inline the result subgraph. Memoize under the CALLER Call node's id
@@ -12150,7 +12300,11 @@ sub _lower_call_direct {
         }
     }
 
-    my @arg_refs = map { $self->lower_value($_) } @args;
+    # A CODE REFERENCE PASSED is not lowered as a value: bound to its
+    # AnonSub, it is what an indirect call in the callee runs.
+    die "GAP: direct call to '$name': a code reference in an \@_ read as a list is not lowered\n"
+        if $args_array && grep { blessed($_) && $_->operation eq 'AnonSub' } @args;
+    my @arg_refs = map { $_->operation eq 'AnonSub' ? undef : $self->lower_value($_) } @args;
 
     # Push the arg-binding frame (refaddr-keyed; see lower_value), inline the
     # callee's effect chain + result subgraph, then tear the frame down. Nested

@@ -927,6 +927,23 @@ sub _deserialize_graph ($method_data) {
         push @nodes, $node;
     }
 
+    # A READ OF A CAPTURED VARIABLE (CellRead) is typed by its use, as
+    # B::SoN types a read of an address-taken `my` (`$k * 2` reads $k as
+    # Num): a number where only numeric operators read it, a string where
+    # only string ones do, else its Slot, read by its tag. Left Unknown, a
+    # closure's `$_[0] * $k` reached the backend as arithmetic over nothing.
+    {
+        state %num = map { $_ => 1 } qw(Add Subtract Multiply Divide Modulo Power NumEq NumNe NumLt NumLe NumGt NumGe NumCmp Negate);
+        state %str = map { $_ => 1 } qw(Concat StrEq StrNe StrLt StrLe StrGt StrGe StrCmp);
+        for my $n (grep { $_->operation eq 'CellRead' && ( $_->stamp // 'Unknown' ) eq 'Unknown' } @nodes) {
+            my %uses = map { $num{ $_->operation } ? ( Num => 1 ) : $str{ $_->operation } ? ( Str => 1 ) : ( Scalar => 1 ) }
+                grep { blessed($_) && grep { blessed($_) && refaddr($_) == refaddr($n) } $_->inputs->@* }
+                ( $n->consumers // [] )->@*;
+            my @k = keys %uses;
+            $n->set_stamp(@k == 1 ? $k[0] : 'Scalar');
+        }
+    }
+
     # Wire the deferred loop-Phi backedges now that every node exists.
     for my $patch (@backedge_patches) {
         my ($phi_idx, $val_idx) = @$patch;

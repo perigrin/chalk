@@ -36,6 +36,12 @@ class Chalk::IR::Node::AnonSub :isa(Chalk::IR::Value) {
         $anon_id = $anon_counter++;
     }
 
+    # The sub's metaobject (Chalk::MOP::Sub over its graph), attached by
+    # Analysis as a direct Call naming it gets one: what a call of this code
+    # reference runs.
+    field $sub :reader = undef;
+    method set_sub($s) { $sub = $s; return }
+
     method operation() { 'AnonSub' }
     method staleness_kind() { 'opaque' }
 

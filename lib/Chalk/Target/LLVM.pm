@@ -1676,6 +1676,10 @@ sub lower_with_elaboration {
         shift @in if $n->operation eq 'EntryWrite';
         grep { blessed($_) && $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq '@' } @in
     } Chalk::Target::LLVM::Context::_program_nodes($return_node);
+    # Each anonymous sub's node, by name: a closure called directly finds
+    # its cells there.
+    local %Chalk::Target::LLVM::Context::ANON_SUBS = map { ( $_->name // '' ) => $_ }
+        grep { $_->operation eq 'AnonSub' } Chalk::Target::LLVM::Context::_program_nodes($return_node);
     # Whether the program selects a handle, before any print lowers.
     local $Chalk::Target::LLVM::Context::SELECTS = grep {
         $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'select'

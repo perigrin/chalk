@@ -765,6 +765,16 @@ sub _attach_call_targets ($graphs, $mop) {
     my %anon;   # one metaobject per anonymous body, however many calls name it
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
+            # A CODE REFERENCE KNOWS ITS SUB: an indirect call that reaches it
+            # runs that sub -- the same metaobject a direct Call naming it has.
+            if ($node->operation eq 'AnonSub' && !defined $node->sub) {
+                my $cname = $node->name // '';
+                $node->set_sub($anon{$cname} //= Chalk::MOP::Sub->new(
+                    name => $cname, class => $mop->for_class('main'),
+                    graph => $graphs->{$cname}, params => ['@_'], uses_args => true))
+                    if $graphs->{$cname};
+                next;
+            }
             next unless $node->operation eq 'Call'
                 && $node->can('dispatch_kind')
                 && $node->can('set_target')
@@ -2251,6 +2261,13 @@ sub _propagate_computed_reprs ($graphs) {
                 # below cannot stop -- termination would then be luck of which
                 # moves happen to be reachable rather than a proof.
                 my $widest = _join_repr($node->stamp, @reprs);
+                # ARMS WITH NO JOIN THAT ARE ALL SCALARS -- a number and undef
+                # -- box to a Scalar: each arm a Slot, nothing unboxed on an
+                # unproven type (the safe direction the note above asks for).
+                $widest = 'Scalar'
+                    if $op eq 'TernaryExpr' && ( $widest // 'Unknown' ) eq 'Unknown'
+                    && !( grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @reprs )
+                    && ( $node->stamp // 'Unknown' ) =~ /\A(?:Unknown|Int|Num|Str|Boolean|Undef|Scalar)\z/;
                 next unless defined $widest;
                 my $prev = $node->stamp;
                     next if defined $prev && $prev eq $widest;
