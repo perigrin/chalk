@@ -8445,6 +8445,38 @@ sub _emit_flattened_array_of {
                 next;
             }
         }
+        # A RANGE OF INTEGERS is its numbers, low to high: none if it runs
+        # backwards. One of strings counts by string increment -- refused below.
+        # PERL COUNTS NUMBERS only when a bound IS one (pp_flop's
+        # RANGE_IS_NUMERIC); two strings count by string increment even when
+        # B::SoN coerced both to Int ("aa" .. "ad" counted 0 .. 0 here).
+        my $is_number = sub ($b) {
+            $b = $b->inputs->[0] while $b->operation eq 'Coerce';
+            ( $b->stamp // '' ) =~ /\A(?:Int|Num|Boolean)\z/;
+        };
+        if ($in->operation eq 'Range'
+                && !grep { ( $_->stamp // '' ) ne 'Int' } $in->inputs->@[0, 1]
+                and grep { $is_number->($_) } $in->inputs->@[0, 1]) {
+            my ($lo, $hi) = map { $self->lower_value($_) } $in->inputs->@[0, 1];
+            my ($head, $body, $done) = map { $self->_fresh_label("range.$_.") } qw(head body done);
+            my ($i, $more, $i1) = map { $self->_fresh } 1 .. 3;
+            my $from = $self->_current_block_label;
+            $self->_set_terminator("  br label %$head");
+            $self->_new_block($head);
+            my $head_idx = $self->{current_idx};
+            $self->_emit("  $more = icmp sle i64 $i, $hi  ; range: another?");
+            $self->_set_terminator("  br i1 $more, label %$body, label %$done");
+            $self->_new_block($body);
+            my $v = $self->_emit_coercion($i, 'Int', 'Scalar', 'range element');
+            $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $v)  ; list: a range's number");
+            $self->_emit("  $i1 = add i64 $i, 1");
+            my $back = $self->_current_block_label;
+            $self->_set_terminator("  br label %$head");
+            unshift $self->{blocks}[$head_idx]{insts}->@*,
+                "  $i = phi i64 [ $lo, %$from ], [ $i1, %$back ]  ; range: the number";
+            $self->_new_block($done);
+            next;
+        }
         die "GAP: a list with a $s in it is not lowered -- it would flatten, and "
           . "only an array does here\n" if $s =~ /\A(?:List|Hash)\z/;
         my $v = $self->_slot_of_value($in, $self->lower_value($in), 'list element');
@@ -9632,6 +9664,10 @@ sub _lower_builtin_join {
     # join($", 1, 2) -- is its own static element list.
     # One that holds an array (`"@{[sort keys %h]} z"`) flattens at run time.
     my $flatten = @more && grep { ( $_->stamp // '' ) !~ /\A(?:Int|Num|Str|Boolean)\z/ } $list_node, @more;
+    # So does a range whose bounds the program computes (`"@c"` over
+    # `my @c = (1 .. $n)` is a join over the Range itself).
+    $flatten ||= blessed($list_node) && $list_node->operation eq 'Range'
+        && grep { $_->operation ne 'Constant' } $list_node->inputs->@[0, 1];
     my $elements = $flatten ? undef
         : @more ? [ $list_node, @more ]
         # A LIST READ AFTER IT WAS WRITTEN has no static elements: its
