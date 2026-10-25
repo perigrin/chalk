@@ -611,6 +611,10 @@ sub _deserialize_graph ($method_data) {
                 if exists $fields->{sort_cmp};
             $args{sort_order}    = $fields->{sort_order}
                 if exists $fields->{sort_order};
+            # One it does not fold names its comparator's graph, and the
+            # package whose $a and $b the comparator reads.
+            $args{sort_cmp_body} = $fields->{sort_cmp_body} if exists $fields->{sort_cmp_body};
+            $args{sort_package}  = $fields->{sort_package}  if exists $fields->{sort_package};
         }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];

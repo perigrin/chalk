@@ -1764,6 +1764,12 @@ sub lower_value {
     elsif ($op eq 'StrEq' || $op eq 'StrNe') {
         return $self->_lower_str_compare($node, $op eq 'StrEq');
     }
+    elsif ($op eq 'NumCmp') {
+        return $self->_lower_num_cmp($node);
+    }
+    elsif ($op eq 'StrCmp') {
+        return $self->_lower_str_cmp($node);
+    }
     elsif ($op eq 'Not') {
         return $self->_lower_not($node);
     }
@@ -1960,6 +1966,9 @@ sub lower_value {
     }
     elsif ($op eq 'AnonSub') {
         die "GAP: a code reference used as a value -- not called where it is made -- is not lowered\n";
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'reverse') {
+        return $self->_lower_reverse($node);
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'indirect') {
         return $self->_lower_call_indirect($node);
@@ -4013,6 +4022,70 @@ sub _coerce_ref_to_num {
     die "GAP: $op numeric comparison over a $repr operand is not lowered "
       . "runtime-free (only Int, Num, and Str operands numify). Coerce the "
       . "operand or fix TypeInference.";
+}
+
+# _lower_num_cmp($node) -> i64: `<=>`, -1, 0 or 1. Two Ints compare exactly;
+# otherwise as doubles. A NaN, where perl's answer is undef, stops the
+# program (exit 255).
+sub _lower_num_cmp {
+    my ($self, $node) = @_;
+    my ($l, $r) = $node->inputs->@[0, 1];
+    my ($lr, $rr) = map { $_->stamp // '' } $l, $r;
+    my ($lv, $rv) = map { $self->lower_value($_) } $l, $r;
+    my ($gt, $lt) = map { $self->_fresh } 1 .. 2;
+    if ($lr eq 'Int' && $rr eq 'Int') {
+        $self->_emit("  $gt = icmp sgt i64 $lv, $rv  ; <=>");
+        $self->_emit("  $lt = icmp slt i64 $lv, $rv");
+    }
+    else {
+        my $ld = $self->_coerce_ref_to_num($lv, $lr, 'NumCmp');
+        my $rd = $self->_coerce_ref_to_num($rv, $rr, 'NumCmp');
+        my ($uno, $nan, $ok) = ($self->_fresh, $self->_fresh_label('cmp.nan.'), $self->_fresh_label('cmp.ok.'));
+        my $nty = _repr_to_llvm_type('Num');
+        $self->_emit("  $uno = fcmp uno $nty $ld, $rd  ; <=>: a NaN?");
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $uno, label %$nan, label %$ok");
+        $self->_new_block($nan);
+        $self->_emit("  call void \@exit(i32 255)  ; <=> of a NaN is undef, not lowered");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($ok);
+        $self->_emit("  $gt = fcmp ogt $nty $ld, $rd  ; <=>");
+        $self->_emit("  $lt = fcmp olt $nty $ld, $rd");
+    }
+    my ($g, $s, $res) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  $g = zext i1 $gt to i64");
+    $self->_emit("  $s = zext i1 $lt to i64");
+    $self->_emit("  $res = sub i64 $g, $s  ; <=>: -1, 0 or 1");
+    return $self->{cache}{ $node->id } = $res;
+}
+
+# _lower_str_cmp($node) -> i64: `cmp`, -1, 0 or 1 -- bytes compared over the
+# shorter length, then the shorter first.
+sub _lower_str_cmp {
+    my ($self, $node) = @_;
+    my $lhs = $self->_str_compare_operand($node->inputs->[0], 'StrCmp', 'lhs');
+    my $rhs = $self->_str_compare_operand($node->inputs->[1], 'StrCmp', 'rhs');
+    my ($lp, $ll) = $self->_str_parts($lhs);
+    my ($rp, $rl) = $self->_str_parts($rhs);
+    $self->{_need_memcmp} = 1;
+    my ($shorter, $min, $m, $mgt, $mlt, $lgt, $llt, $meq, $gt, $lt, $g, $s, $res) = map { $self->_fresh } 1 .. 13;
+    $self->_emit("  $shorter = icmp ult i64 $ll, $rl");
+    $self->_emit("  $min = select i1 $shorter, i64 $ll, i64 $rl");
+    $self->_emit("  $m = call i32 \@memcmp(i8* $lp, i8* $rp, i64 $min)  ; cmp: the common bytes");
+    $self->_emit("  $mgt = icmp sgt i32 $m, 0");
+    $self->_emit("  $mlt = icmp slt i32 $m, 0");
+    $self->_emit("  $meq = icmp eq i32 $m, 0");
+    $self->_emit("  $lgt = icmp ugt i64 $ll, $rl");
+    $self->_emit("  $llt = icmp ult i64 $ll, $rl");
+    my ($eg, $el) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $eg = and i1 $meq, $lgt");
+    $self->_emit("  $el = and i1 $meq, $llt");
+    $self->_emit("  $gt = or i1 $mgt, $eg  ; cmp: after");
+    $self->_emit("  $lt = or i1 $mlt, $el  ; cmp: before");
+    $self->_emit("  $g = zext i1 $gt to i64");
+    $self->_emit("  $s = zext i1 $lt to i64");
+    $self->_emit("  $res = sub i64 $g, $s  ; cmp: -1, 0 or 1");
+    return $self->{cache}{ $node->id } = $res;
 }
 
 sub _lower_icmp_int {
@@ -9132,6 +9205,82 @@ sub _emit_lines_left_into {
     return;
 }
 
+# _lower_reverse($node): in a list, its arguments flattened and backwards
+# (an %Array*); in scalar context (stamp Str), its arguments joined with
+# nothing and that string reversed. perl reverses characters: a byte past
+# ASCII stops the program (exit 255) rather than split one.
+sub _lower_reverse {
+    my ($self, $node) = @_;
+    my @in = grep { blessed($_) } $node->inputs->@*;
+    pop @in if $node->can('memory_input') && $node->memory_input;
+    # None in a list is an empty list; none in scalar context reverses $_.
+    die "GAP: scalar reverse with no arguments (of \$_) is not lowered\n"
+        unless @in || ( $node->stamp // '' ) ne 'Str';
+    $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy _need_aggregate_types);
+    my $src = $self->_emit_flattened_array_of(\@in);
+    my ($lp, $len, $ep, $el) = map { $self->_fresh } 1 .. 4;
+    $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $src, i32 0, i32 0  ; reverse: len ptr");
+    $self->_emit("  $len = load i64, i64* $lp");
+    if (( $node->stamp // '' ) eq 'Str') {
+        my $str = $self->_emit_join_loop(undef, $self->_empty_str_ref('reverse: no separator'), $src);
+        my ($p, $l) = $self->_str_parts($str);
+        my ($buf, $nul, $i, $more, $j, $from_p, $c, $hi, $to_p, $i1) = map { $self->_fresh } 1 .. 10;
+        my ($head, $body, $ok, $bad, $done) = map { $self->_fresh_label("strrev.$_.") } qw(head body ok bad done);
+        my $l1 = $self->_fresh;
+        $self->_emit("  $l1 = add i64 $l, 1");
+        $self->_emit("  $buf = call i8* \@malloc(i64 $l1)  ; reverse: the string backwards");
+        $self->_emit("  $nul = getelementptr inbounds i8, i8* $buf, i64 $l");
+        $self->_emit("  store i8 0, i8* $nul");
+        my $from = $self->_current_block_label;
+        $self->_set_terminator("  br label %$head");
+        $self->_new_block($head);
+        my $head_idx = $self->{current_idx};
+        $self->_emit("  $more = icmp slt i64 $i, $l");
+        $self->_set_terminator("  br i1 $more, label %$body, label %$done");
+        $self->_new_block($body);
+        $self->_emit("  $from_p = getelementptr inbounds i8, i8* $p, i64 $i");
+        $self->_emit("  $c = load i8, i8* $from_p");
+        $self->_emit("  $hi = icmp slt i8 $c, 0  ; reverse: a byte past ASCII?");
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $hi, label %$bad, label %$ok");
+        $self->_new_block($bad);
+        $self->_emit("  call void \@exit(i32 255)  ; reverse of a string past ASCII is not lowered");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($ok);
+        my $jj = $self->_fresh;
+        $self->_emit("  $j = sub i64 $l, $i");
+        $self->_emit("  $jj = sub i64 $j, 1");
+        $self->_emit("  $to_p = getelementptr inbounds i8, i8* $buf, i64 $jj");
+        $self->_emit("  store i8 $c, i8* $to_p");
+        $self->_emit("  $i1 = add i64 $i, 1");
+        $self->_set_terminator("  br label %$head");
+        unshift $self->{blocks}[$head_idx]{insts}->@*, "  $i = phi i64 [ 0, %$from ], [ $i1, %$ok ]  ; reverse: which byte";
+        $self->_new_block($done);
+        return $self->{cache}{ $node->id } = $self->_set_str_len($buf, $l);
+    }
+    die "GAP: reverse whose result is a " . ( $node->stamp // 'Unknown' ) . " is not lowered\n"
+        unless ( $node->stamp // '' ) =~ /\A(?:List|Array)\z/;
+    $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $src, i32 0, i32 2");
+    $self->_emit("  $el = load %Slot*, %Slot** $ep  ; reverse: the elements");
+    my $acc = $self->_emit_array_of([]);
+    my ($head, $body, $done) = map { $self->_fresh_label("reverse.$_.") } qw(head body done);
+    my ($k, $more, $k1, $sp, $sv) = map { $self->_fresh } 1 .. 5;
+    my $from = $self->_current_block_label;
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($head);
+    $self->_emit("  $k = phi i64 [ $len, %$from ], [ $k1, %$body ]  ; reverse: past the next one");
+    $self->_emit("  $more = icmp sgt i64 $k, 0");
+    $self->_set_terminator("  br i1 $more, label %$body, label %$done");
+    $self->_new_block($body);
+    $self->_emit("  $k1 = sub i64 $k, 1");
+    $self->_emit("  $sp = getelementptr inbounds %Slot, %Slot* $el, i64 $k1");
+    $self->_emit("  $sv = load %Slot, %Slot* $sp");
+    $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $sv)  ; reverse: from the end");
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($done);
+    return $self->{cache}{ $node->id } = $acc;
+}
+
 # _is_array_slice($node) -- an `@a[...]`.
 sub _is_array_slice ($n) {
     return blessed($n) && $n->operation eq 'Slice' && ( $n->kind // '' ) eq 'array';
@@ -10296,14 +10445,16 @@ sub _lower_builtin_sort {
 
     my $cmp   = $node->can('sort_cmp')   ? $node->sort_cmp   : undef;
     my $order = $node->can('sort_order') ? $node->sort_order : undef;
+    my $custom = !defined $cmp && $node->can('sort_cmp_sub') && blessed($node->sort_cmp_sub)
+        ? $node->sort_cmp_sub : undef;
     die "GAP: sort with no folded comparator — the producer states sort_cmp "
       . "(numeric|string) and sort_order (ascending|descending); without them "
       . "`sort {\$a<=>\$b}`, `sort {\$b<=>\$a}` and a bare string `sort` are "
       . "one node and lowering would have to guess which."
-        unless defined $cmp && defined $order;
+        unless $custom || ( defined $cmp && defined $order );
     die "GAP: sort with a custom comparator block is not lowered (only perl's "
       . "FOLDED numeric/string comparators are); got sort_cmp='$cmp'."
-        unless $cmp eq 'numeric' || $cmp eq 'string';
+        unless $custom || $cmp eq 'numeric' || $cmp eq 'string';
 
     my $op_repr = $operand isa Chalk::IR::Node ? ($operand->stamp // '') : '';
 
@@ -10399,7 +10550,8 @@ sub _lower_builtin_sort {
     $self->_emit("  $pa = getelementptr inbounds %Slot, %Slot* $slots, i64 $jm1  ; sort: slot[j-1]");
     $self->_emit("  $pb = getelementptr inbounds %Slot, %Slot* $slots, i64 $j_phi  ; sort: slot[j]");
 
-    my $out_of_order = $self->_emit_slot_out_of_order($pa, $pb, $cmp, $order);
+    my $out_of_order = $custom ? $self->_emit_sort_block_out_of_order($node, $custom, $pa, $pb)
+                     : $self->_emit_slot_out_of_order($pa, $pb, $cmp, $order);
     $self->_set_terminator("  br i1 $out_of_order, label \%$l_swap, label \%$l_onext");
 
     # swap slot[j-1] and slot[j] as whole aggregates -- a field-wise swap that
@@ -10421,6 +10573,38 @@ sub _lower_builtin_sort {
 
     $self->{cache}{$node->id} = $arr;
     return $arr;
+}
+
+# _emit_sort_block_out_of_order($node, $sub, $pa, $pb) -> i1: the sort's
+# comparator block, inlined with its $a and $b the two slots; out of order
+# when it says greater than 0 (equal ones stay, as perl's merge sort keeps
+# them). A block that writes $a or $b is refused.
+sub _emit_sort_block_out_of_order {
+    my ($self, $node, $sub, $pa, $pb) = @_;
+    my $pkg = $node->sort_package // 'main';
+    my @nodes = _graph_component($sub->graph);
+    die "GAP: a sort block that writes \$a or \$b is not lowered\n"
+        if grep { blessed($_) && $_->operation eq 'EntryWrite' && blessed($_->inputs->[0])
+                  && ( $_->inputs->[0]->symbol // '' ) =~ /\A[ab]\z/ } @nodes;
+    my ($va, $vb) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $va = load %Slot, %Slot* $pa  ; sort block: \$a");
+    $self->_emit("  $vb = load %Slot, %Slot* $pb  ; sort block: \$b");
+    local $self->{_arg_bind} = { ($self->{_arg_bind} // {})->%* };
+    for my $n (grep { blessed($_) && $_->operation eq 'EntryDef' && ( $_->package // '' ) eq $pkg } @nodes) {
+        my $sym = $n->symbol // '';
+        $self->{_arg_bind}{ refaddr($n) } = { ref => $sym eq 'a' ? $va : $vb, repr => 'Scalar' }
+            if $sym eq 'a' || $sym eq 'b';
+    }
+    $self->{_call_via} = { name => $sub->name, target => $sub, args => [] };
+    my $r = $self->_lower_call_direct($node);
+    delete $self->{cache}{ $node->id };   # the block's value, not the sort's
+    my $from = $self->{_inline_value_repr}{ $node->id } // '';
+    die "GAP: a sort block whose value is a " . ( $from || 'NONE' ) . " is not lowered\n"
+        unless $from =~ /\A(?:Int|Num|Boolean|Scalar|Str)\z/;
+    my $num = $from eq 'Num' ? $r : $self->_emit_coercion($r, $from, 'Num', 'sort block: its answer');
+    my $gt = $self->_fresh;
+    $self->_emit("  $gt = fcmp ogt " . _repr_to_llvm_type('Num') . " $num, " . _repr_zero('Num') . "  ; sort block: out of order?");
+    return $gt;
 }
 
 # _emit_slot_out_of_order($pa, $pb, $cmp, $order) -> i1

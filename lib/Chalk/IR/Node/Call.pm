@@ -92,6 +92,12 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # Only a folded `sort` carries them; every other Call leaves them undef.
     field $sort_cmp   :param :reader = undef;   # 'numeric' | 'string'
     field $sort_order :param :reader = undef;   # 'ascending' | 'descending'
+    # A comparator perl does not fold: its graph's name, the package of the
+    # $a/$b it reads, and (Analysis) the metaobject over that graph.
+    field $sort_cmp_body :param :reader = undef;
+    field $sort_package  :param :reader = undef;
+    field $sort_cmp_sub  :reader = undef;
+    method set_sort_cmp_sub($s) { $sort_cmp_sub = $s; return }
 
 
     method operation() { 'Call' }

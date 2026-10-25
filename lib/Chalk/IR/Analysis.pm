@@ -765,6 +765,14 @@ sub _attach_call_targets ($graphs, $mop) {
     my %anon;   # one metaobject per anonymous body, however many calls name it
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
+            # A SORT'S COMPARATOR is a body like an anonymous sub's.
+            if ($node->operation eq 'Call' && $node->can('sort_cmp_body') && defined $node->sort_cmp_body
+                    && !defined $node->sort_cmp_sub && $graphs->{ $node->sort_cmp_body }) {
+                my $cname = $node->sort_cmp_body;
+                $node->set_sort_cmp_sub($anon{$cname} //= Chalk::MOP::Sub->new(
+                    name => $cname, class => $mop->for_class('main'),
+                    graph => $graphs->{$cname}, params => ['@_'], uses_args => true));
+            }
             # A CODE REFERENCE KNOWS ITS SUB: an indirect call that reaches it
             # runs that sub -- the same metaobject a direct Call naming it has.
             if ($node->operation eq 'AnonSub' && !defined $node->sub) {
