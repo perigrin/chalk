@@ -411,6 +411,11 @@ sub infer ($class, $graphs) {
     while (_stamp_method_call_reprs(\%graphs, $mop) > 0) {
         _seed_and_propagate_reprs(\%graphs);
     }
+    # A PACKAGE SUB CALLED AS A METHOD is typed by its body's return, as a
+    # direct call is: once here, where its target is attached, before the
+    # argument fixpoint (which may not run at all).
+    _resolve_direct_calls(\%graphs, 'package methods only');
+    _seed_and_propagate_reprs(\%graphs);
 
     # Direct-call argument binding (F5): a callee's `shift @_` arg-read is typed
     # from the caller's argument repr, then the callee body (and the Call result)
@@ -934,12 +939,19 @@ sub _stamp_is_absent ($node) {
     return !defined $node->stamp;
 }
 
-sub _resolve_direct_calls ($graphs) {
+sub _resolve_direct_calls ($graphs, $pkg_methods_only = 0) {
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
+            # A PACKAGE SUB CALLED AS A METHOD is a direct call too (its
+            # target a Chalk::MOP::Sub): typed by what its body returns.
+            my $pkg_method = $node->operation eq 'Call' && $node->can('dispatch_kind')
+                && ($node->dispatch_kind // '') eq 'method'
+                && $node->can('target') && blessed($node->target)
+                && $node->target->isa('Chalk::MOP::Sub');
             next unless $node->operation eq 'Call'
                 && $node->can('dispatch_kind')
-                && ($node->dispatch_kind // '') eq 'direct';
+                && (($node->dispatch_kind // '') eq 'direct' || $pkg_method);
+            next if $pkg_methods_only && !$pkg_method;
             # THE EDGE FIRST. `target` is the callee metaobject and it holds
             # the callee graph -- the same object the name lookup returns
             # (asserted by refaddr in ir/resolve-direct-calls-reads-the-edge.t),
@@ -994,10 +1006,13 @@ sub _resolve_direct_calls ($graphs) {
             if ($val && _is_narrowed($val->stamp)) {
                 my $have = $node->stamp;
                 my $want = $val->stamp;
+                # B::SoN stamps any `->new` Object, a class's instance; a
+                # package's `new` returns what its body does (a blessed ref).
                 $node->set_stamp($want)
                     if !_is_narrowed($have)
                     || ($have ne $want
-                        && Chalk::Grammar::Perl::TypeLibrary::is_subtype($want, $have));
+                        && Chalk::Grammar::Perl::TypeLibrary::is_subtype($want, $have))
+                    || ($pkg_method && $have eq 'Object' && $want =~ /\A(?:Array|Hash|Scalar)Ref\z/);
             }
             elsif ( _stamp_is_absent($node)
                     && refaddr($callee) == refaddr($graphs->{$gname}) ) {
@@ -2159,6 +2174,19 @@ sub _propagate_computed_reprs ($graphs) {
                     next if defined $prev && $prev eq $repr;
                     $node->set_stamp($repr);
                     $changed = 1;
+                    next;
+                }
+
+                # BLESS RETURNS ITS REFERENCE: the same pointer, whose class
+                # only ref() and dispatch can see (the backend's bless table).
+                if ($op eq 'Call' && ( $node->dispatch_kind // '' ) eq 'builtin'
+                        && ( $node->name // '' ) eq 'bless') {
+                    my $r  = $node->inputs->[0];
+                    my $st = blessed($r) ? $r->stamp // '' : '';
+                    if ($st =~ /\A(?:Array|Hash|Scalar)Ref\z/ && ( $node->stamp // '' ) ne $st) {
+                        $node->set_stamp($st);
+                        $changed = 1;
+                    }
                     next;
                 }
 

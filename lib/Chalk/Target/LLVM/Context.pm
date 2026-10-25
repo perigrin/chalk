@@ -123,6 +123,7 @@ sub new {
         _need_substr_helper     => 0,
         _need_lex_agg           => 0,
         _need_array_append      => 0,
+        _need_bless             => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -168,6 +169,7 @@ my @NEED_FLAGS = qw(
     _need_num_fmt
     _need_snprintf
     _need_array_append
+    _need_bless
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -931,6 +933,7 @@ sub render_need_flag_postclass_reemit {
     # Shared aggregates: emitted once, here, after every body has named its own.
     push @lines, $self->_lex_aggregate_lines;
     push @lines, $self->_array_append_lines;
+    push @lines, $self->_bless_lines;
     # A method body that stringifies a Num needs these too; the prologue ran
     # before any body lowered.
     push @lines, '@fmt_num_g = private unnamed_addr constant [6 x i8] c"%.15g\00", align 1'
@@ -1924,6 +1927,9 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
             && ($node->name // '') =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/) {
         return $self->_lower_case_map($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'bless') {
+        return $self->_lower_bless($node);
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'substr') {
         return $self->_lower_substr($node);
@@ -8136,6 +8142,17 @@ sub _lower_hash_ref {
     $self->{_need_memcmp}          = 1;
 
     my $inputs = $node->inputs;
+    # A HASH SPREAD IN IT (`{ %a }`) is a copy of that hash; one among other
+    # pairs is refused. Counted as pairs, `{ %a }` was half a pair.
+    if (grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Hash|Array|List)\z/ } @$inputs) {
+        die "GAP: a hash literal that flattens a list among its pairs is not lowered\n"
+            unless @$inputs == 1 && ( $inputs->[0]->stamp // '' ) eq 'Hash';
+        my $copy = $self->_emit_aggregate_copy($self->_container_ptr($inputs->[0], 'Hash'), 'Hash');
+        return $self->{cache}{ $node->id } = $copy if ( $node->stamp // '' ) eq 'Hash';
+        my $ref = $self->_fresh;
+        $self->_emit("  $ref = bitcast %Hash* $copy to i8*  ; { %h }: a copy, as a reference");
+        return $self->{cache}{ $node->id } = $ref;
+    }
     my $npairs = scalar(@$inputs) / 2;
 
     # Sized by LLVM from %HashEntry: it embeds a slot's worth of value fields,
@@ -8171,21 +8188,19 @@ sub _lower_hash_ref {
         $self->_emit("  store i8* $key_ref, i8** $e_kp  ; HashRef: key ptr");
         $self->_emit("  store i64 $key_len, i64* $e_kl  ; HashRef: key len=$key_len");
         $self->_emit("  store i32 0, i32* $e_ke          ; HashRef: enc=0 (ASCII)");
-        $self->_emit("  store i1 true, i1* $e_vd         ; HashRef: defined=true");
-        # A %HashEntry's value is the same {defined, i64 payload} cell a %Slot
-        # is, so the value is boxed by the same rule — see _box_payload.
+        # A %HashEntry's value is the same {defined, tag, i64 payload} cell a
+        # %Slot is: a value read by its tag (an argument `$_[1]`) is stored
+        # as it is, an undef as undef, any other boxed by its reading.
         my $val_node = $inputs->[ $i * 2 + 1 ];
-        my $val_repr = $val_node->stamp // '';
-        my $val_i64  = $self->_box_payload($val_ref, $val_repr,
-                                           "HashRef value[$i]");
-        $self->_emit("  store i64 $val_i64, i64* $e_vp   ; HashRef: value");
+        my ($v_def, $v_tag, $v_pay) = $self->_slot_fields_of_value($val_node, $val_ref, "HashRef value[$i]");
+        $self->_emit("  store i1 $v_def, i1* $e_vd         ; HashRef: defined");
+        $self->_emit("  store i64 $v_pay, i64* $e_vp   ; HashRef: value");
         # ITS READING, stored beside it: a read decodes by this, not by its own
         # stamp (a hash of Int and Num values read the 1 as 4.94e-324).
         my $e_vt = $self->_fresh;
         $self->_emit("  $e_vt = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i, i32 "
             . _he_idx('val_tag') . "  ; HashRef: entry[$i] val_tag ptr");
-        $self->_emit("  store i8 " . _slot_tag_value(_slot_tag_for_repr($val_repr))
-            . ", i8* $e_vt  ; HashRef: entry[$i] tag=$val_repr");
+        $self->_emit("  store i8 $v_tag, i8* $e_vt  ; HashRef: entry[$i] tag");
     }
 
     my $hash_buf = $self->_fresh;
@@ -8686,6 +8701,140 @@ sub _emit_flattened_array_of {
     return $acc;
 }
 
+# _lower_bless($node) -> the reference, now of a class. THE CLASS IS KEPT
+# BESIDE THE REFERENCE, in a table keyed by its address (@chalk_bless_set):
+# the pointer and its contents are unchanged, so every copy of it sees the
+# class, and only ref() and dispatch ask. A reblessed reference, or one
+# whose ref() is read where a bless elsewhere changes it, is refused by
+# _lower_reftype.
+sub _lower_bless {
+    my ($self, $node) = @_;
+    my @in = grep { blessed($_) } $node->inputs->@*;
+    pop @in if $node->can('memory_input') && $node->memory_input;
+    die "GAP: a one-argument bless (into the current package) is not lowered\n" unless @in == 2;
+    my ($r, $c) = @in;
+    my $rs = $self->_repr_of($r) // '';
+    die "GAP: bless of a $rs is not lowered -- only an array, hash or scalar reference\n"
+        unless $rs =~ /\A(?:Array|Hash|Scalar)Ref\z/;
+    my $ref = $self->lower_value($r);
+    my $cr  = $self->lower_value($c);
+    my $cs  = $self->_repr_of($c) // '';
+    $cr = $self->_emit_coercion($cr, $cs, 'Str', 'bless class') if $cs ne 'Str';
+    my ($p, $l) = $self->_str_parts($cr);
+    $self->{$_} = 1 for qw(_need_bless _need_malloc_memcpy);
+    $self->_emit("  call void \@chalk_bless_set(i8* $ref, i8* $p, i64 $l)  ; bless: the class");
+    $self->{cache}{ $node->id } = $ref;
+    return $ref;
+}
+
+# _bless_class($ref) -> ($is_blessed_i1, $str): the class bless recorded for
+# an i8* reference, as a %Str (empty when not blessed).
+sub _bless_class {
+    my ($self, $ref) = @_;
+    $self->{$_} = 1 for qw(_need_bless _need_malloc_memcpy);
+    my ($lp, $p, $l, $is) = map { $self->_fresh } 1 .. 4;
+    $self->_emit_entry("  $lp = alloca i64  ; ref(): the class's length");
+    $self->_emit("  $p = call i8* \@chalk_bless_get(i8* $ref, i64* $lp)  ; ref(): blessed into?");
+    $self->_emit("  $l = load i64, i64* $lp");
+    $self->_emit("  $is = icmp ne i8* $p, null");
+    return ($is, $p, $l);
+}
+
+sub _bless_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_bless} && !$self->{_bless_emitted}++;
+    return ('', <<'END_HELPER');
+%BlessEntry = type { i8*, i8*, i64 }
+@chalk_bless_tab = internal global %BlessEntry* null
+@chalk_bless_n   = internal global i64 0
+@chalk_bless_cap = internal global i64 0
+
+define internal void @chalk_bless_set(i8* %r, i8* %p, i64 %l) {
+entry:
+  %n   = load i64, i64* @chalk_bless_n
+  %tab = load %BlessEntry*, %BlessEntry** @chalk_bless_tab
+  br label %find
+find:
+  %i    = phi i64 [ 0, %entry ], [ %i1, %next ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %look, label %add
+look:
+  %ep = getelementptr inbounds %BlessEntry, %BlessEntry* %tab, i64 %i, i32 0
+  %er = load i8*, i8** %ep
+  %hit = icmp eq i8* %er, %r
+  br i1 %hit, label %put, label %next
+next:
+  %i1 = add i64 %i, 1
+  br label %find
+put:
+  %pp = getelementptr inbounds %BlessEntry, %BlessEntry* %tab, i64 %i, i32 1
+  store i8* %p, i8** %pp
+  %lp = getelementptr inbounds %BlessEntry, %BlessEntry* %tab, i64 %i, i32 2
+  store i64 %l, i64* %lp
+  ret void
+add:
+  %cap  = load i64, i64* @chalk_bless_cap
+  %full = icmp sge i64 %n, %cap
+  br i1 %full, label %grow, label %store
+grow:
+  %dbl   = mul i64 %cap, 2
+  %small = icmp slt i64 %dbl, 8
+  %nc    = select i1 %small, i64 8, i64 %dbl
+  %e1    = getelementptr %BlessEntry, %BlessEntry* null, i64 1
+  %esz   = ptrtoint %BlessEntry* %e1 to i64
+  %nb    = mul i64 %nc, %esz
+  %buf   = call i8* @malloc(i64 %nb)
+  %ob    = mul i64 %n, %esz
+  %old   = bitcast %BlessEntry* %tab to i8*
+  %cp    = call i8* @memcpy(i8* %buf, i8* %old, i64 %ob)
+  %nt    = bitcast i8* %buf to %BlessEntry*
+  store %BlessEntry* %nt, %BlessEntry** @chalk_bless_tab
+  store i64 %nc, i64* @chalk_bless_cap
+  br label %store
+store:
+  %t2  = load %BlessEntry*, %BlessEntry** @chalk_bless_tab
+  %sr  = getelementptr inbounds %BlessEntry, %BlessEntry* %t2, i64 %n, i32 0
+  store i8* %r, i8** %sr
+  %sp  = getelementptr inbounds %BlessEntry, %BlessEntry* %t2, i64 %n, i32 1
+  store i8* %p, i8** %sp
+  %sl  = getelementptr inbounds %BlessEntry, %BlessEntry* %t2, i64 %n, i32 2
+  store i64 %l, i64* %sl
+  %n1  = add i64 %n, 1
+  store i64 %n1, i64* @chalk_bless_n
+  ret void
+}
+
+define internal i8* @chalk_bless_get(i8* %r, i64* %outl) {
+entry:
+  %n   = load i64, i64* @chalk_bless_n
+  %tab = load %BlessEntry*, %BlessEntry** @chalk_bless_tab
+  br label %find
+find:
+  %i    = phi i64 [ 0, %entry ], [ %i1, %next ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %look, label %none
+look:
+  %ep  = getelementptr inbounds %BlessEntry, %BlessEntry* %tab, i64 %i, i32 0
+  %er  = load i8*, i8** %ep
+  %hit = icmp eq i8* %er, %r
+  br i1 %hit, label %found, label %next
+next:
+  %i1 = add i64 %i, 1
+  br label %find
+found:
+  %pp = getelementptr inbounds %BlessEntry, %BlessEntry* %tab, i64 %i, i32 1
+  %p  = load i8*, i8** %pp
+  %lp = getelementptr inbounds %BlessEntry, %BlessEntry* %tab, i64 %i, i32 2
+  %l  = load i64, i64* %lp
+  store i64 %l, i64* %outl
+  ret i8* %p
+none:
+  store i64 0, i64* %outl
+  ret i8* null
+}
+END_HELPER
+}
+
 sub _array_append_lines {
     my ($self) = @_;
     return () unless $self->{_need_array_append} && !$self->{_array_append_emitted}++;
@@ -9115,11 +9264,12 @@ sub _slot_of_value {
 # A scalar value as the three fields a %Slot or a %HashEntry holds.
 sub _slot_fields_of_value {
     my ($self, $node, $ref, $what) = @_;
-    my $repr = $node->operation eq 'Print' ? 'Boolean' : ($node->stamp // '');
+    my $repr = $node->operation eq 'Print' ? 'Boolean' : ($self->_repr_of($node) // '');
     # AN ELEMENT READ MAY MISS, whatever its stamp: stored as its narrowed
     # reading, a missing key read as Str was a defined "". Its own Slot
-    # carries the miss.
-    if ($node->operation eq 'Subscript' && $repr !~ /\A(?:Scalar|Slot)\z/) {
+    # carries the miss. (An inlined argument `$_[0]` is the caller's value.)
+    if ($node->operation eq 'Subscript' && $repr !~ /\A(?:Scalar|Slot)\z/
+            && !defined $self->_bound_ref($node)) {
         $ref  = $self->_subscript_slot($node);
         $repr = 'Slot';
     }
@@ -10563,10 +10713,30 @@ sub _lower_ref {
 sub _lower_reftype {
     my ($self, $node) = @_;
     my $x  = $node->inputs->[0];
-    my $xs = blessed($x) ? ($x->stamp // '') : '';
+    my $xs = blessed($x) ? ($self->_repr_of($x) // '') : '';
     my %name = (ArrayRef => 'ARRAY', HashRef => 'HASH', ScalarRef => 'SCALAR', CodeRef => 'CODE');
+    # ITS CLASS IS READ WHERE ref() IS LOWERED, not where it stands: a bless
+    # elsewhere of this same reference (a rebless, or a bless after an
+    # unblessed ref() of it) would be seen or missed by position. Refused.
+    die "GAP: ref() of a reference that a bless elsewhere changes is not lowered -- "
+      . "which class it reads would depend on where it is lowered\n"
+        if blessed($x) && grep {
+            blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
+                && ( $_->name // '' ) eq 'bless' && blessed($_->inputs->[0])
+                && refaddr($_->inputs->[0]) == refaddr($x)
+        } ($x->consumers // [])->@*;
     my $ref;
-    if (exists $name{$xs} || $xs =~ /\A(?:Int|Num|Str|Boolean|Undef)\z/) {
+    # A REFERENCE MAY BE BLESSED: its class, if bless recorded one.
+    if ($xs =~ /\A(?:Array|Hash|Scalar)Ref\z/) {
+        my $r = $self->lower_value($x);
+        my ($is, $cp, $cl) = $self->_bless_class($r);
+        my ($p, $l) = $self->_str_const_parts($name{$xs}, 'ref()');
+        my ($np, $nl) = map { $self->_fresh } 1 .. 2;
+        $self->_emit("  $np = select i1 $is, i8* $cp, i8* $p  ; ref(): its class, or what it is");
+        $self->_emit("  $nl = select i1 $is, i64 $cl, i64 $l");
+        $ref = $self->_set_str_len($np, $nl);
+    }
+    elsif (exists $name{$xs} || $xs =~ /\A(?:Int|Num|Str|Boolean|Undef)\z/) {
         my ($p, $l) = $self->_str_const_parts($name{$xs} // '', 'ref()');
         $ref = $self->_set_str_len($p, $l);
     }
@@ -10580,6 +10750,24 @@ sub _lower_reftype {
             $self->_emit("  $is = icmp eq i8 $tag, " . _slot_tag_value($k) . "  ; ref(): a $k?");
             $self->_emit("  $np = select i1 $is, i8* $kp, i8* $p");
             $self->_emit("  $nl = select i1 $is, i64 $kl, i64 $l");
+            ($p, $l) = ($np, $nl);
+        }
+        # An array, hash or scalar reference held by tag may be blessed too:
+        # its payload is the pointer bless recorded.
+        {
+            my ($ia, $ih, $isr, $any, $any2, $ptr, $bp, $bl) = map { $self->_fresh } 1 .. 8;
+            $self->_emit("  $ia = icmp eq i8 $tag, " . _slot_tag_value('ArrayRef'));
+            $self->_emit("  $ih = icmp eq i8 $tag, " . _slot_tag_value('HashRef'));
+            $self->_emit("  $isr = icmp eq i8 $tag, " . _slot_tag_value('ScalarRef'));
+            $self->_emit("  $any = or i1 $ia, $ih");
+            $self->_emit("  $any2 = or i1 $any, $isr  ; ref(): a reference that may be blessed?");
+            my $pl = $self->_slot_payload_of($slot);
+            $self->_emit("  $ptr = inttoptr i64 $pl to i8*");
+            my ($is, $cp, $cl) = $self->_bless_class($ptr);
+            my ($both, $np, $nl) = map { $self->_fresh } 1 .. 3;
+            $self->_emit("  $both = and i1 $any2, $is");
+            $self->_emit("  $np = select i1 $both, i8* $cp, i8* $p  ; ref(): its class");
+            $self->_emit("  $nl = select i1 $both, i64 $cl, i64 $l");
             ($p, $l) = ($np, $nl);
         }
         $self->{_need_exit} = 1;
@@ -12107,6 +12295,12 @@ sub _lower_call_method {
     my ($self, $node) = @_;
 
     my $method_name = $node->name;
+
+    # A PACKAGE'S `new` IS ITS SUB, which blesses what it builds: a `class`
+    # constructor's object struct was allocated in its place, and the sub
+    # (and its bless) never ran.
+    return $self->_lower_call_direct($node)
+        if blessed($node->target) && $node->target->isa('Chalk::MOP::Sub');
 
     # Route constructor calls to the construction lowering.
     if ($method_name eq 'new') {
