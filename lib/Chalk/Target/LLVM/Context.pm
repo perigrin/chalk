@@ -4187,9 +4187,12 @@ sub _lower_icmp_int {
 # any other repr (Num, aggregate) is a loud GAP.
 sub _str_compare_operand {
     my ($self, $input, $op, $side) = @_;
-    my $repr = $input->stamp // '';
+    my $repr = $self->_repr_of($input) // $input->stamp // '';
     my $ref  = $self->lower_value($input);
     return $ref if $repr eq 'Str';
+    # A SCALAR IS STRINGIFIED BY ITS TAG -- the Coerce the producer would
+    # have inserted had it known the operand's type (a method's value).
+    return $self->_emit_coercion($ref, 'Scalar', 'Str', "$op $side") if $repr eq 'Scalar';
     # StrEq/StrNe's signature is (Str, Str). A non-Str operand arrives through
     # an explicit Stringify inserted by the producer, exactly as Print's
     # arguments do -- `eq` does not know how to render any representation.
@@ -7752,7 +7755,9 @@ sub _is_memory_phi {
         # a package scalar's store
         return 1 if $in->operation eq 'EntryWrite';
         # a direct call: an inlined sub may store any of those
-        return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') eq 'direct'
+        # ...or a method call, which runs one (taking the producer's flag
+        # wholesale instead let an arm walk that cycles through, pvm 124)
+        return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') =~ /\A(?:direct|method)\z/
             && !( defined $phi->memory && !$phi->memory );
         # a memory phi of a nested structure
         return 1 if $in->operation eq 'Phi' && _is_memory_phi($in, $seen);
@@ -8559,6 +8564,21 @@ sub _lower_length {
         $self->{cache}{ $node->id } = $len;
         return $len;
     }
+    # A SCALAR's length is its string's -- unless it is undef, where perl's
+    # length is undef, which an Int cannot say: that stops the program.
+    elsif ($op_repr eq 'Scalar') {
+        my $slot = $self->lower_value($operand);
+        my $def = $self->_slot_defined_bit($slot);
+        my ($no, $yes) = map { $self->_fresh_label("length.$_.") } qw(undef def);
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $def, label %$yes, label %$no");
+        $self->_new_block($no);
+        $self->_emit("  call void \@exit(i32 255)  ; length of undef is undef, not lowered");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($yes);
+        my (undef, $l) = $self->_str_parts($self->_emit_coercion($slot, 'Scalar', 'Str', 'Length(Scalar)'));
+        return $self->{cache}{ $node->id } = $l;
+    }
     else {
         die "GAP: Length operand has repr=$op_repr; only Array and Str are lowered runtime-free.";
     }
@@ -8709,6 +8729,9 @@ our $READS_ERROR;
 # %ANON_SUBS: the AnonSub node of each anonymous sub's name, for a closure
 # B::SoN calls directly (its Call names the sub, not the node with its cells).
 our %ANON_SUBS;
+
+# @PROGRAM: every node of the program (_program_nodes of its Return).
+our @PROGRAM;
 
 # $SELECTS: does the program select a handle? Then every bare print asks
 # which handle is selected (@chalk_selected, null for STDOUT).
@@ -12314,6 +12337,134 @@ sub _store_field_payload {
     return $pay_i64;
 }
 
+# _lower_runtime_dispatch($node, $obj) -> %Slot, or undef where it does not
+# apply: a method on a blessed reference whose class is known only at run
+# time. The candidates are the packages whose sub of that name the program
+# declares; the class the bless table holds for the invocant picks one, and
+# that sub is inlined in its arm, the invocant its first argument. No match
+# stops the program (exit 255). Refused where a class could inherit or
+# AUTOLOAD (another sub would run), or a `class` declares the method.
+sub _lower_runtime_dispatch {
+    my ($self, $node, $obj) = @_;
+    my $mop = $self->{mop} or return undef;
+    my $name = $node->name // return undef;
+    my @classes = $mop->classes;
+    my @cands = map { my $c = $_; map { [ $c->name, $_ ] } grep { $_->name eq $name } $c->subs } @classes;
+    return undef unless @cands;
+    die "GAP: a method ('$name') on a run-time class where a class inherits or has AUTOLOAD is not lowered\n"
+        if grep { defined $_->superclass || defined $_->parent_name || grep { $_->name eq 'AUTOLOAD' } $_->subs } @classes;
+    die "GAP: a method ('$name') on a run-time class that a `class` also declares is not lowered\n"
+        if grep { $_->find_method($name) } @classes;
+    # EVERY CLASS THE PROGRAM BLESSES INTO HAS IT, or an object of one would
+    # reach no arm -- where perl dies naming the file and line, which nothing
+    # here knows. A bless into a run-time class is into a class some `->new`
+    # names.
+    {
+        my %has = map { $_->[0] => 1 } @cands;
+        my (%into, $runtime);
+        for my $n (@PROGRAM) {
+            if ($n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) eq 'bless') {
+                my $c = $n->inputs->[1];
+                if (blessed($c) && $c->operation eq 'Constant' && ( $c->const_type // '' ) eq 'string') { $into{ $c->value } = 1 }
+                else { $runtime = 1 }
+            }
+        }
+        if ($runtime) {
+            $into{ $_->class_name } = 1 for grep {
+                $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method'
+                && ( $_->name // '' ) eq 'new' && defined $_->class_name
+            } @PROGRAM;
+        }
+        my @lacking = grep { !$has{$_} } sort keys %into;
+        die "GAP: a method ('$name') on a run-time class that a class this program blesses into "
+          . "(@lacking) does not have is not lowered -- perl's death there names the file and line\n"
+            if @lacking;
+    }
+    my $rs = $self->_repr_of($obj) // $obj->stamp // '';
+    # AN INLINED ARGUMENT is the caller's value: its element read is the
+    # caller's, read there (the callee's `$_[0]` has no array of its own).
+    my $root = $obj;
+    for (1 .. 32) {
+        my $b = $self->{_arg_bind} ? $self->{_arg_bind}{ refaddr($root) } : undef;
+        last unless $b && blessed($b->{node});
+        $root = $b->{node};
+    }
+    my $ref;
+    if ($rs =~ /\A(?:Hash|Array|Scalar)Ref\z/) { $ref = $self->lower_value($obj) }
+    elsif ($rs eq 'Scalar' || ( $rs eq 'Object' && $root->operation eq 'Subscript' )) {
+        # An element stamped Object is read as its Slot, by its tag.
+        my $slot = $rs eq 'Scalar' ? $self->lower_value($obj) : $self->_subscript_slot($root);
+        my ($tag, $ok) = ($self->_slot_tag_of($slot), $self->_fresh);
+        my $pl = $self->_slot_payload_of($slot);
+        my @is = map { my $t = $self->_fresh; $self->_emit("  $t = icmp eq i8 $tag, " . _slot_tag_value($_)); $t } qw(HashRef ArrayRef ScalarRef);
+        $self->_emit("  $ok = or i1 $is[0], $is[1]");
+        my $ok2 = $self->_fresh;
+        $self->_emit("  $ok2 = or i1 $ok, $is[2]  ; dispatch: a reference?");
+        my ($no, $yes) = map { $self->_fresh_label("dispatch.$_.") } qw(notref ref);
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $ok2, label %$yes, label %$no");
+        $self->_new_block($no);
+        $self->_emit("  call void \@exit(i32 255)  ; a method on what is not a blessed reference");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($yes);
+        $ref = $self->_fresh;
+        $self->_emit("  $ref = inttoptr i64 $pl to i8*  ; dispatch: the invocant");
+    }
+    else { return undef }
+    my ($is, $cp, $cl) = $self->_bless_class($ref);
+    my @args = grep { blessed($_) } $node->inputs->@*;
+    pop @args if $node->can('memory_input') && $node->memory_input;
+    my $end = $self->_fresh_label('dispatch.end.');
+    my @in;
+    for my $cand (@cands) {
+        my ($cname, $sub) = @$cand;
+        my ($p, $l) = $self->_str_const_parts($cname, 'dispatch: a class');
+        my ($leq, $m, $meq, $both, $hit) = map { $self->_fresh } 1 .. 5;
+        my ($arm, $next) = map { $self->_fresh_label("dispatch.$_.") } qw(arm next);
+        $self->{_need_memcmp} = 1;
+        $self->_emit("  $leq = icmp eq i64 $cl, $l");
+        my ($cmpl) = $self->_fresh_label('dispatch.cmp.');
+        $self->_set_terminator("  br i1 $leq, label %$cmpl, label %$next");
+        $self->_new_block($cmpl);
+        $self->_emit("  $m = call i32 \@memcmp(i8* $cp, i8* $p, i64 $l)  ; dispatch: is it $cname?");
+        $self->_emit("  $meq = icmp eq i32 $m, 0");
+        $self->_emit("  $hit = and i1 $meq, $is");
+        $self->_set_terminator("  br i1 $hit, label %$arm, label %$next");
+        $self->_new_block($arm);
+        my $v = do {
+            local $self->{cache} = { $self->{cache}->%* };
+            $self->{_call_via} = { name => "${cname}::$name", target => $sub, args => [@args] };
+            my $r = $self->_lower_call_direct($node);
+            my $from = $self->{_inline_value_repr}{ $node->id } // '';
+            die "GAP: a method ('$name') on a run-time class whose ${cname}::$name returns a list is not lowered\n"
+                if $from =~ /\A(?:Array|List|Hash)\z/;
+            $from eq 'Scalar' ? $r
+              : $from eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', 'dispatch: undef')
+              : $self->_emit_coercion($r, $from, 'Scalar', "dispatch: ${cname}::$name");
+        };
+        push @in, "[ $v, %" . $self->_current_block_label . " ]";
+        $self->_set_terminator("  br label %$end");
+        $self->_new_block($next);
+    }
+    $self->{_need_exit} = 1;
+    $self->_emit("  call void \@exit(i32 255)  ; dispatch: no package of this program has the method");
+    $self->_set_terminator("  unreachable");
+    $self->_new_block($end);
+    my $res = $self->_fresh;
+    $self->_emit("  $res = phi %Slot " . join(', ', @in) . "  ; dispatch: its value");
+    # READ AS THE CALL IS TYPED: Analysis may have typed it from a sub's
+    # return (a Str), and its consumers read that.
+    my $st = $node->stamp // 'Unknown';
+    if ($st eq 'Unknown') { $node->set_stamp('Scalar'); $st = 'Scalar' }
+    if ($st ne 'Scalar') {
+        die "GAP: a method ('$name') on a run-time class read as a $st is not lowered\n"
+            unless _keeps_value('Scalar', $st);
+        $res = $self->_emit_coercion($res, 'Scalar', $st, "dispatch: read as $st");
+    }
+    $self->{_inline_value_repr}{ $node->id } = $st;
+    return $self->{cache}{ $node->id } = $res;
+}
+
 # _lower_method_on_non_object($node, $obj) -> the call's value, or undef when
 # its invocant may be an object. perl dies on a method called on undef or a
 # plain value. Statically so, it always dies; a Scalar is read by its tag at
@@ -13627,6 +13778,8 @@ sub _lower_call_method {
     # `$n->state`).
     if (!defined $node->class_name) {
         my $r = $self->_lower_method_on_non_object($node, $obj_node);
+        return $r if defined $r;
+        $r = $self->_lower_runtime_dispatch($node, $obj_node);
         return $r if defined $r;
     }
     # MOP-direct shape: the class rides as the class_name attribute.

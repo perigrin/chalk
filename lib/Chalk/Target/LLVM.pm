@@ -1676,6 +1676,7 @@ sub lower_with_elaboration {
         shift @in if $n->operation eq 'EntryWrite';
         grep { blessed($_) && $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq '@' } @in
     } Chalk::Target::LLVM::Context::_program_nodes($return_node);
+    local @Chalk::Target::LLVM::Context::PROGRAM = Chalk::Target::LLVM::Context::_program_nodes($return_node);
     # Each anonymous sub's node, by name: a closure called directly finds
     # its cells there.
     local %Chalk::Target::LLVM::Context::ANON_SUBS = map { ( $_->name // '' ) => $_ }

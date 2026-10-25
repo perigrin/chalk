@@ -58,10 +58,10 @@ for my $case (
 }
 
 # AN OBJECT WHOSE CLASS IS NOT STATIC -- read back out of a container --
-# still names none, and is refused by name.
+# is dispatched by the class its bless names (run-time dispatch).
 {
-    eval { through_llvm(q{package A { sub new { bless {}, $_[0] } sub who { "a" } } my @o = (A->new); sub f { $_[0]->who } print f($o[0]), "\n";}) };
-    like($@, qr/GAP: .*class/, 'an object out of a container is refused');
+    my $got = eval { through_llvm(q{package A { sub new { bless {}, $_[0] } sub who { "a" } } my @o = (A->new); sub f { $_[0]->who } print f($o[0]), "\n";}) };
+    is($got, "a\n", 'an object out of a container: perl\'s answer') or diag $@;
 }
 
 done_testing;
