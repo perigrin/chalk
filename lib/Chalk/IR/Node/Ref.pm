@@ -11,4 +11,12 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
     method op_str()    { '\\' }
+
+    # `\(@a)`: a reference to each element of its operand. Identity-bearing:
+    # `\@a` beside it must not hash-cons with it.
+    field $each :param :reader = 0;
+
+    method content_hash() {
+        return join('|', 'Ref', ($each ? 'each' : ()), $self->_serialize_inputs());
+    }
 }

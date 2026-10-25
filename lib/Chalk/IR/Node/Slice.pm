@@ -10,4 +10,12 @@ class Chalk::IR::Node::Slice :isa(Chalk::IR::Node::Aggregate) {
     method operation() { 'Slice' }
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
+
+    # 'array' or 'hash' (B::SoN's kind): which aggregate the slice indexes.
+    field $kind :reader = undef;
+
+    method set_kind($k) {
+        $kind = $k;
+        return;
+    }
 }

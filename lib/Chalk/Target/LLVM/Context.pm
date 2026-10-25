@@ -8801,12 +8801,134 @@ sub _emit_flattened_array_of {
             $self->_new_block($done);
             next;
         }
+        if (_is_array_slice($in)) {
+            $self->_emit_array_slice_into($acc, $in);
+            next;
+        }
+        if ($in->operation eq 'Ref' && $in->each) {
+            $self->_emit_each_element_ref_into($acc, $in);
+            next;
+        }
         die "GAP: a list with a $s in it is not lowered -- it would flatten, and "
           . "only an array does here\n" if $s =~ /\A(?:List|Hash)\z/;
         my $v = $self->_slot_of_value($in, $self->lower_value($in), 'list element');
         $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $v)  ; list: one element");
     }
     return $acc;
+}
+
+# _emit_each_element_ref_into($acc, $ref): `\(@a)` pushes a reference to
+# each element of the array -- its slot in the buffer, as `\$a[$i]` is --
+# refused, as that is, for an array anything grows: a grown buffer is a new one.
+sub _emit_each_element_ref_into {
+    my ($self, $acc, $ref) = @_;
+    my $x = $ref->inputs->[0];
+    die "GAP: \\(...) of a " . ( blessed($x) ? $x->operation : 'nothing' )
+      . " is not lowered -- only of an array\n"
+        unless blessed($x) && ( $self->_repr_of($x) // '' ) eq 'Array';
+    die "GAP: a reference to an element of an array that may grow is not lowered\n"
+        if _array_may_grow($x);
+    my $arr = $self->_container_ptr($x, 'Array');
+    my ($lp, $len, $ep, $el) = map { $self->_fresh } 1 .. 4;
+    $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0  ; \\(\@a): len ptr");
+    $self->_emit("  $len = load i64, i64* $lp");
+    $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2");
+    $self->_emit("  $el = load %Slot*, %Slot** $ep  ; \\(\@a): the elements");
+    my ($head, $body, $done) = map { $self->_fresh_label("eachref.$_.") } qw(head body done);
+    my ($k, $more, $k1, $p, $pi) = map { $self->_fresh } 1 .. 5;
+    my $from = $self->_current_block_label;
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($head);
+    $self->_emit("  $k = phi i64 [ 0, %$from ], [ $k1, %$body ]  ; \\(\@a): which element");
+    $self->_emit("  $more = icmp slt i64 $k, $len");
+    $self->_set_terminator("  br i1 $more, label %$body, label %$done");
+    $self->_new_block($body);
+    $self->_emit("  $p = getelementptr inbounds %Slot, %Slot* $el, i64 $k  ; \\(\@a): its slot");
+    $self->_emit("  $pi = ptrtoint %Slot* $p to i64");
+    my $v = $self->_build_slot('true', $pi, 'ScalarRef', '\\(@a) element');
+    $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $v)  ; list: a reference to an element");
+    $self->_emit("  $k1 = add i64 $k, 1");
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($done);
+    return;
+}
+
+# _is_array_slice($node) -- an `@a[...]`.
+sub _is_array_slice ($n) {
+    return blessed($n) && $n->operation eq 'Slice' && ( $n->kind // '' ) eq 'array';
+}
+
+# _emit_array_slice_into($acc, $slice): push onto $acc a copy of each element
+# of the slice's array (its last input) its indices (the rest) name, in order: from the end when
+# negative, undef past either end -- as perl's aslice.
+#
+# A SLICE PERL WOULD ALIAS is refused. B::SoN walks `for (@a[1 .. 2])` as a
+# fresh array of the slice, so an element passed to a sub or referenced (the
+# loop's `$_`) would be a copy where perl's is the array's own (pvm 192).
+sub _emit_array_slice_into {
+    my ($self, $acc, $slice) = @_;
+    for my $tmp (grep { blessed($_) && $_->operation eq 'ArrayLiteral' } ($slice->consumers // [])->@*) {
+        for my $el (grep { blessed($_) && $_->operation eq 'Subscript' } ($tmp->consumers // [])->@*) {
+            die "GAP: a loop over an array slice whose element is passed or referenced is not "
+              . "lowered -- perl aliases the array's element, and the walk here is of a copy\n"
+                if grep { blessed($_) && ( $_->operation eq 'Ref'
+                    || ( $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) ne 'builtin' ) ) }
+                    ($el->consumers // [])->@*;
+        }
+    }
+    my @ix  = grep { blessed($_) } $slice->inputs->@*;   # the indices, then the array
+    my $src = pop @ix;
+    my $idx = $self->_emit_flattened_array_of(\@ix);
+    my $arr = $self->_container_ptr($src, 'Array');
+    my ($n, $ie, $len, $elems) = map { $self->_fresh } 1 .. 4;
+    my ($np, $iep, $lp, $ep) = map { $self->_fresh } 1 .. 4;
+    $self->_emit("  $np = getelementptr inbounds %Array, %Array* $idx, i32 0, i32 0  ; slice: index count ptr");
+    $self->_emit("  $n = load i64, i64* $np");
+    $self->_emit("  $iep = getelementptr inbounds %Array, %Array* $idx, i32 0, i32 2");
+    $self->_emit("  $ie = load %Slot*, %Slot** $iep  ; slice: the indices");
+    $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0  ; slice: array len ptr");
+    $self->_emit("  $len = load i64, i64* $lp");
+    $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2");
+    $self->_emit("  $elems = load %Slot*, %Slot** $ep  ; slice: the array's elements");
+    my ($head, $body, $inb, $oob, $join, $done) = map { $self->_fresh_label("slice.$_.") } qw(head body inb oob join done);
+    my ($k, $more, $k1) = map { $self->_fresh } 1 .. 3;
+    my $from = $self->_current_block_label;
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($head);
+    my $head_idx = $self->{current_idx};
+    $self->_emit("  $more = icmp slt i64 $k, $n  ; slice: another index?");
+    $self->_set_terminator("  br i1 $more, label %$body, label %$done");
+    $self->_new_block($body);
+    my ($isp, $is) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $isp = getelementptr inbounds %Slot, %Slot* $ie, i64 $k");
+    $self->_emit("  $is = load %Slot, %Slot* $isp  ; slice: this index");
+    my $i0 = $self->_slot_as_reading($is, 'Int', 'slice index');
+    my ($neg, $adj, $i, $ok) = map { $self->_fresh } 1 .. 4;
+    $self->_emit("  $neg = icmp slt i64 $i0, 0");
+    $self->_emit("  $adj = add i64 $i0, $len  ; slice: from the end");
+    $self->_emit("  $i = select i1 $neg, i64 $adj, i64 $i0");
+    $self->_emit("  $ok = icmp ult i64 $i, $len  ; slice: inside the array?");
+    $self->_set_terminator("  br i1 $ok, label %$inb, label %$oob");
+    $self->_new_block($inb);
+    my ($sp, $sv) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $sp = getelementptr inbounds %Slot, %Slot* $elems, i64 $i");
+    $self->_emit("  $sv = load %Slot, %Slot* $sp  ; slice: the element");
+    $self->_set_terminator("  br label %$join");
+    $self->_new_block($oob);
+    my $undef = $self->_build_slot('false', '0', 'Undef', 'slice: past the end');
+    my $oob_end = $self->_current_block_label;
+    $self->_set_terminator("  br label %$join");
+    $self->_new_block($join);
+    my $v = $self->_fresh;
+    $self->_emit("  $v = phi %Slot [ $sv, %$inb ], [ $undef, %$oob_end ]");
+    $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $v)  ; list: a slice's element");
+    $self->_emit("  $k1 = add i64 $k, 1");
+    my $back = $self->_current_block_label;
+    $self->_set_terminator("  br label %$head");
+    unshift $self->{blocks}[$head_idx]{insts}->@*,
+        "  $k = phi i64 [ 0, %$from ], [ $k1, %$back ]  ; slice: which index";
+    $self->_new_block($done);
+    return;
 }
 
 # _lower_bless($node) -> the reference, now of a class. THE CLASS IS KEPT
@@ -10185,6 +10307,7 @@ sub _lower_builtin_join {
     # `my @c = (1 .. $n)` is a join over the Range itself).
     $flatten ||= blessed($list_node) && $list_node->operation eq 'Range'
         && grep { $_->operation ne 'Constant' } $list_node->inputs->@[0, 1];
+    $flatten ||= _is_array_slice($list_node);
     my $elements = $flatten ? undef
         : @more ? [ $list_node, @more ]
         # A LIST READ AFTER IT WAS WRITTEN has no static elements: its

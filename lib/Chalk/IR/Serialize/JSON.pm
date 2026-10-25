@@ -687,12 +687,16 @@ sub _deserialize_graph ($method_data) {
                 $nd->{stamp} = 'Hash'  if ( $fields->{sigil} // '' ) eq '%';
             }
         }
-        elsif ($op eq 'Ref' && ( $nd->{stamp} // 'Unknown' ) eq 'Unknown'
-               && blessed($inputs[0]) && $inputs[0]->operation eq 'PadAccess') {
+        elsif ($op eq 'Ref') {
+            # `\(@a)`: a reference to each element, not to the array.
+            $args{each} = 1 if $fields->{each};
             # A REFERENCE TO A SCALAR VARIABLE is a ScalarRef, whatever
             # inference missed (`\$n` arrives Unknown).
-            my %by_sigil = ('$' => 'ScalarRef', '@' => 'ArrayRef', '%' => 'HashRef');
-            $nd->{stamp} = $by_sigil{ $inputs[0]->sigil // '' } // 'Unknown';
+            if (( $nd->{stamp} // 'Unknown' ) eq 'Unknown'
+                    && blessed($inputs[0]) && $inputs[0]->operation eq 'PadAccess') {
+                my %by_sigil = ('$' => 'ScalarRef', '@' => 'ArrayRef', '%' => 'HashRef');
+                $nd->{stamp} = $by_sigil{ $inputs[0]->sigil // '' } // 'Unknown';
+            }
         }
         elsif ($op eq 'Parameter') {
             # index is REQUIRED -- it is the node's identity. A missing one is a
@@ -808,7 +812,7 @@ sub _deserialize_graph ($method_data) {
         $node->set_eval_may_die(1)
             if $op eq 'Region' && defined $nd->{fields} && $nd->{fields}{eval_may_die};
         $node->set_kind($nd->{fields}{kind})
-            if $op eq 'Subscript' && defined $nd->{fields} && defined $nd->{fields}{kind};
+            if ($op eq 'Subscript' || $op eq 'Slice') && defined $nd->{fields} && defined $nd->{fields}{kind};
         # A block eval's id, on its join and on each die it lexically holds.
         $node->set_eval_id($nd->{fields}{eval_id})
             if ($op eq 'Region' || $op eq 'Unwind' || $op eq 'Call') && defined $nd->{fields}
