@@ -1434,6 +1434,35 @@ sub _emit_class_registry_ir {
     return @lines;
 }
 
+# _jump_merge_way_in($region) -> ($way_in, {arm_proj_id => input}): the one
+# input of a headless Region that is its ordinary way in, when every other
+# input is the end of an If arm (walked back to the arm's Proj) whose If is
+# not on that way's own control chain -- it jumps in from inside it. Else ().
+sub _jump_merge_way_in {
+    my ($r) = @_;
+    my $addr = \&Scalar::Util::refaddr;
+    my $back = sub ($c) {
+        $c->operation eq 'Region' && $c->can('head') && blessed($c->head) ? $c->head
+      : $c->operation eq 'Proj' ? $c->inputs->[0]
+      : $c->can('control_in') ? $c->control_in : undef;
+    };
+    my (%arm_of, @normal);
+    for my $in (grep { blessed($_) } $r->inputs->@*) {
+        my ($c, %seen) = ($in);
+        $c = $back->($c) while blessed($c) && !$seen{ $addr->($c) }++
+            && !( $c->operation eq 'Proj' && blessed($c->inputs->[0]) && $c->inputs->[0]->operation eq 'If' );
+        if (blessed($c) && $c->operation eq 'Proj') { $arm_of{ $c->id } = [ $c, $in ] }
+        else                                        { push @normal, $in }
+    }
+    return () unless %arm_of && @normal == 1;
+    my %behind;
+    for (my $c = $normal[0]; blessed($c); $c = $back->($c)) {
+        last if $behind{ $addr->($c) }++;
+    }
+    return () if grep { $behind{ $addr->($_->[0]->inputs->[0]) } } values %arm_of;
+    return ($normal[0], { map { $_ => $arm_of{$_}[1] } keys %arm_of });
+}
+
 # _process_control_chain($ctx, $return_node) -> void
 #
 # Walk the control chain from $return_node and drive each control node through
@@ -1485,6 +1514,16 @@ sub _process_control_chain {
                     push @chain, $ctrl;
                     push @eval_pending, $ctrl;
                     $ctrl = $ctrl->inputs->[0];
+                }
+                # A JUMP MERGE: one ordinary way in, and arms that jump to it
+                # from inside it -- a `return` in a loop. The arms' Ifs are
+                # not on the ordinary way's own chain (a try/catch merge's
+                # are). The merge is lowered where it stands; its arms branch
+                # to it as they are lowered (Context::register_jump_merge).
+                elsif (my ($normal, $arms) = _jump_merge_way_in($ctrl)) {
+                    push @chain, $ctrl;
+                    $ctx->register_jump_merge($ctrl, $normal, $arms);
+                    $ctrl = $normal;
                 }
                 else {
                     # A HEADLESS REGION IS A MERGE WITH NO RUNTIME TEST, and

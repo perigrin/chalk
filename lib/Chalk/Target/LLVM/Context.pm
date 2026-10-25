@@ -5508,6 +5508,9 @@ sub process_control_node {
     elsif ($op eq 'Region' && $node->can('eval_entry') && defined $node->eval_entry) {
         $self->close_eval($node);
     }
+    elsif ($op eq 'Region' && (my $j = ($self->{_jump_merges} // {})->{ $node->id })) {
+        $self->_close_jump_merge($j);
+    }
     # A READ OF $@ PINNED ON THE CHAIN is taken where it stands: an eval
     # rewrites $@ with no store, so its memory version does not place it.
     elsif ($op eq 'EntryDef' && ($node->symbol // '') eq '@' && ($node->package // '') eq 'main') {
@@ -6563,6 +6566,10 @@ sub _process_branch_from_if {
 # Region consumer whose id matches the top-of-stack loop context is the exit.
 sub _arm_loop_exit_label {
     my ($self, $proj) = @_;
+    # An arm into a jump merge (a `return` from inside a loop) goes there.
+    for my $j (values %{ $self->{_jump_merges} // {} }) {
+        return $j->{label} if exists $j->{arms}{ $proj->id };
+    }
     my $stack = $self->{_loop_ctx_stack};
     return undef unless $stack && @$stack;
     my $ctx = $stack->[-1];
@@ -6626,6 +6633,23 @@ sub _arm_loop_exit_label {
 # the matching loop-ctx-stack entry so the exit-block emission can build the Phi.
 sub _record_break_block {
     my ($self, $exit_label, $proj) = @_;
+    # INTO A JUMP MERGE: what this arm brings to the merge's Phis, lowered
+    # here; the block that branches is the one after it.
+    if (my ($j) = grep { $_->{label} eq $exit_label } values %{ $self->{_jump_merges} // {} }) {
+        my %cached_before = map { $_ => 1 } keys %{ $self->{cache} };
+        my %vals;
+        for my $phi (_merge_phis($j->{region})) {
+            # The Phi names the arm by its Proj, or by its last statement.
+            my $i = _phi_input_along($phi, $j->{region}, $proj)
+                // _phi_input_along($phi, $j->{region}, $j->{arms}{ $proj->id })
+                // die "GAP: a merge Phi with no input along a jump into it is not lowered\n";
+            $vals{ $phi->id } = $self->_as_phi_reading($self->lower_value($phi->inputs->[$i]),
+                $phi->inputs->[$i], $phi, 'a jump: its value');
+        }
+        delete $self->{cache}{$_} for grep { !$cached_before{$_} } keys %{ $self->{cache} };
+        push $j->{preds}->@*, { label => $self->_current_block_label, vals => \%vals };
+        return;
+    }
     my $stack = $self->{_loop_ctx_stack} // return;
     # A `next` arm: what it brings to each latch Phi is lowered here, in the
     # arm, before it branches.
@@ -6663,6 +6687,59 @@ sub _record_break_block {
         # The block that branches, after what the values opened.
         push @{ $ctx->{break_blocks} //= [] }, $self->_current_block_label;
         return;
+    }
+    return;
+}
+
+# register_jump_merge($region, $way_in) / the merge's Phis / the input along
+# a predecessor. A JUMP MERGE is a headless Region one ordinary path reaches
+# and If arms jump into from inside it (a `return` in a loop): the arms
+# branch to its label as they are lowered, and the chain lowers it where it
+# stands (_close_jump_merge).
+sub register_jump_merge {
+    my ($self, $region, $way_in, $arms) = @_;
+    $self->{_jump_merges}{ $region->id } = { region => $region, way_in => $way_in,
+        arms => $arms, label => $self->_fresh_label('merge.'), preds => [] };
+    return;
+}
+
+sub _merge_phis {
+    my ($region) = @_;
+    return grep {
+        blessed($_) && $_->operation eq 'Phi' && blessed($_->region)
+            && $_->region->id eq $region->id && !_is_memory_phi($_)
+    } ($region->consumers // [])->@*;
+}
+
+sub _phi_input_along {
+    my ($phi, $region, $pred) = @_;
+    my @p = $phi->can('predecessors') && $phi->predecessors ? $phi->predecessors->@* : $region->inputs->@*;
+    my ($i) = grep { blessed($p[$_]) && $p[$_]->id eq $pred->id } 0 .. $#p;
+    return $i;
+}
+
+sub _close_jump_merge {
+    my ($self, $j) = @_;
+    my @preds = $j->{preds}->@*;
+    if (!defined $self->{blocks}[ $self->{current_idx} ]{terminator}) {
+        my %cached_before = map { $_ => 1 } keys %{ $self->{cache} };
+        my %vals;
+        for my $phi (_merge_phis($j->{region})) {
+            my $i = _phi_input_along($phi, $j->{region}, $j->{way_in})
+                // die "GAP: a merge Phi with no input along its ordinary way in is not lowered\n";
+            $vals{ $phi->id } = $self->_as_phi_reading($self->lower_value($phi->inputs->[$i]),
+                $phi->inputs->[$i], $phi, 'the way in: its value');
+        }
+        push @preds, { label => $self->_current_block_label, vals => \%vals };
+        $self->_set_terminator("  br label %$j->{label}  ; to the merge");
+    }
+    $self->_new_block($j->{label});
+    for my $phi (_merge_phis($j->{region})) {
+        my $r = $self->_fresh;
+        $self->_emit("  $r = phi " . _repr_to_llvm_type(_require_repr($phi, 'jump merge Phi')) . " "
+            . join(', ', map { "[ $_->{vals}{ $phi->id }, %$_->{label} ]" } @preds)
+            . "  ; the merge of a jump and the way in");
+        $self->{cache}{ $phi->id } = $r;
     }
     return;
 }
@@ -11535,6 +11612,7 @@ sub _lower_inlined_structure {
     local $self->{_graph_entry_idx}      = $self->{current_idx};
     local $self->{_branch_guarded_store} = 0;
     local $self->{_loop_ctx_stack}       = [];
+    local $self->{_jump_merges}          = {};
     Chalk::Target::LLVM::_process_control_chain($self, $return);
     return defined $value ? $self->lower_value($value) : undef;
 }
