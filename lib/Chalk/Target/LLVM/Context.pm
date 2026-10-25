@@ -6549,8 +6549,8 @@ sub _process_branch_from_if {
     # Mid-body `last` break arm (Proj feeds the enclosing loop's exit Region):
     # branch to the loop exit instead of the merge (see the early-return note).
     if (defined $break_exit) {
-        $self->_record_break_block($break_exit);
-        $self->_set_terminator("  br label %$break_exit  ; if branch $branch_idx: mid-body last -> loop exit");
+        $self->_record_break_block($break_exit, $proj);
+        $self->_set_terminator("  br label %$break_exit  ; if branch $branch_idx: mid-body last or next");
         return;
     }
 
@@ -6579,11 +6579,17 @@ sub _arm_loop_exit_label {
     # what the body carries, which is not built -- so it is refused.
     my $loop = $ctx->{exit_region} && $ctx->{exit_region}->can('head')
         ? $ctx->{exit_region}->head : undef;
-    die "GAP: a `next` that skips the rest of a loop body from an if arm is "
-      . "not lowered -- it needs a branch to the loop's latch\n"
-        if blessed($loop) && grep {
+    # It goes to the loop's LATCH, where every path that ends a pass meets
+    # (_process_loop_node builds it and merges what the pass carries there).
+    if (blessed($loop)) {
+        my ($latch) = grep {
             $_->can('head') && blessed($_->head) && refaddr($_->head) == refaddr($loop)
         } @regions;
+        if ($latch) {
+            $ctx->{latch_loop} = $loop;
+            return $ctx->{latch_label} //= $self->_fresh_label('loop.latch.');
+        }
+    }
     # A JUMP TO AN ENCLOSING LOOP (`next OUTER`, `last OUTER`): the arm joins a
     # Region that control reaches only by leaving this loop -- past its exit.
     # Placed inside this loop's body it ran as this loop's own `next` (`acacac`
@@ -6619,14 +6625,81 @@ sub _arm_loop_exit_label {
 # is current when the break terminator is emitted (an If-arm block). Recorded in
 # the matching loop-ctx-stack entry so the exit-block emission can build the Phi.
 sub _record_break_block {
-    my ($self, $exit_label) = @_;
+    my ($self, $exit_label, $proj) = @_;
     my $stack = $self->{_loop_ctx_stack} // return;
+    # A `next` arm: what it brings to each latch Phi is lowered here, in the
+    # arm, before it branches.
+    if (@$stack && ($stack->[-1]{latch_label} // '') eq $exit_label) {
+        my $ctx = $stack->[-1];
+        my %vals;
+        # What is lowered for it belongs to this arm: not served to another.
+        my %cached_before = map { $_ => 1 } keys %{ $self->{cache} };
+        for my $phi (_latch_phis($ctx->{latch_loop})) {
+            my @v = map { $_->[1] } grep { blessed($_->[0]) && $_->[0]->id eq $proj->id }
+                _latch_paths($phi, $phi->region);
+            die "GAP: a latch Phi without one input from a `next` arm is not lowered\n" unless @v == 1;
+            $vals{ $phi->id } = $self->_as_phi_reading($self->lower_value($v[0]),
+                $v[0], $phi, 'next: what the pass carries');
+        }
+        push @{ $ctx->{latch_preds} //= [] },
+            { label => $self->_current_block_label, proj => $proj, vals => \%vals };
+        delete $self->{cache}{$_} for grep { !$cached_before{$_} } keys %{ $self->{cache} };
+        return;
+    }
     for my $ctx (reverse @$stack) {
         next unless ($ctx->{exit_label} // '') eq $exit_label;
+        # WHAT THIS BREAK BRINGS TO EACH LIVE EXIT Phi is lowered here, in the
+        # arm: its input after the header's, in break order. Lowered in the
+        # exit block instead, it came after the Phi (and did not dominate it).
+        my $i = 1 + scalar(($ctx->{break_blocks} // [])->@*);
+        my %cached_before = map { $_ => 1 } keys %{ $self->{cache} };
+        for my $phi (grep {
+            blessed($_) && $_->operation eq 'Phi' && !_is_memory_phi($_) && _phi_has_live_consumer($_)
+                && $_->inputs->@* > $i
+        } ( blessed($ctx->{exit_region}) ? $ctx->{exit_region}->consumers // [] : [] )->@*) {
+            $ctx->{break_vals}[$i]{ $phi->id } = $self->lower_value($phi->inputs->[$i]);
+        }
+        delete $self->{cache}{$_} for grep { !$cached_before{$_} } keys %{ $self->{cache} };
+        # The block that branches, after what the values opened.
         push @{ $ctx->{break_blocks} //= [] }, $self->_current_block_label;
         return;
     }
     return;
+}
+
+# _latch_phis($loop) -> the value Phis a loop's latch merges: the back-edges
+# of its value Phis that are Phis of a Region the Loop heads (not its exit).
+# B::SoN builds one such Region per `next`, each merging the one before it.
+sub _latch_phis {
+    my ($loop) = @_;
+    my $exit = $loop->can('region') ? $loop->region : undef;
+    my %seen;
+    return grep { !$seen{ $_->id }++ } grep {
+        blessed($_) && $_->operation eq 'Phi' && blessed($_->region)
+            && _is_latch_region($_->region, $loop)
+    } map { $_->inputs->[1] } _collect_loop_phis($loop);
+}
+
+sub _is_latch_region {
+    my ($r, $loop) = @_;
+    return blessed($r) && $r->operation eq 'Region' && $r->can('head') && blessed($r->head)
+        && refaddr($r->head) == refaddr($loop)
+        && !grep { blessed($_) && $_->operation eq 'Proj' && ($_->index // -1) == 1
+                   && blessed($_->inputs->[0]) && refaddr($_->inputs->[0]) == refaddr($loop) } $r->inputs->@*;
+}
+
+# _latch_paths($value, $region) -> ([pred, value_node], ...): what reaches
+# $region along each of its paths, a nested latch Region opened into its own.
+# pred is the Proj the value comes along (a `next` arm's, or the body end's).
+sub _latch_paths {
+    my ($v, $r) = @_;
+    my $loop = $r->head;
+    my $of_r = blessed($v) && $v->operation eq 'Phi' && blessed($v->region) && $v->region->id eq $r->id;
+    my @p = $of_r && $v->can('predecessors') && $v->predecessors ? $v->predecessors->@* : $r->inputs->@*;
+    return map {
+        my $in = $of_r ? $v->inputs->[$_] : $v;
+        _is_latch_region($p[$_], $loop) ? _latch_paths($in, $p[$_]) : [ $p[$_], $in ];
+    } 0 .. $#p;
 }
 
 # _find_unwind_consumer($proj) -> the Unwind node reachable by walking the
@@ -7023,6 +7096,42 @@ sub _process_loop_node {
     # recorded) before popping it -- the exit-block Phi emission below needs them.
     my $loop_ctx = pop @{ $self->{_loop_ctx_stack} };
 
+    # THE LATCH, if a `next` arm branched to it: the body's end comes here
+    # too, and each value the pass carries is merged from every path.
+    if (defined $loop_ctx->{latch_label}) {
+        my @preds = ($loop_ctx->{latch_preds} // [])->@*;
+        my %arm   = map { $_->{proj}->id => 1 } @preds;
+        my $open  = !defined $self->{blocks}[ $self->{current_idx} ]{terminator};
+        # EVERY PATH AN ARM (the last if's arms both go to the latch): the block
+        # after it has no predecessor, and brings nothing to the latch.
+        if ($open && _latch_phis($loop_node) && !grep {
+                !( blessed($_->[0]) && $arm{ $_->[0]->id } )
+            } map { _latch_paths($_, $_->region) } _latch_phis($loop_node)) {
+            $self->_set_terminator("  unreachable  ; every path of the pass left by a next");
+            $open = 0;
+        }
+        my %fall;
+        for my $phi (_latch_phis($loop_node)) {
+            my @paths = _latch_paths($phi, $phi->region);
+            my @rest  = grep { !( blessed($_->[0]) && $arm{ $_->[0]->id } ) } @paths;
+            die "GAP: a latch Phi whose inputs do not pair with its `next` arms and the "
+              . "body's end is not lowered\n"
+                unless @rest == ($open ? 1 : 0) && @paths == @preds + @rest;
+            $fall{ $phi->id } = $self->_as_phi_reading($self->lower_value($rest[0][1]),
+                $rest[0][1], $phi, 'latch: the body ran to its end') if $open;
+        }
+        push @preds, { label => $self->_current_block_label, vals => \%fall } if $open;
+        $self->_set_terminator("  br label %$loop_ctx->{latch_label}  ; Loop: the body ends") if $open;
+        $self->_new_block($loop_ctx->{latch_label});
+        for my $phi (_latch_phis($loop_node)) {
+            my $r = $self->_fresh;
+            $self->_emit("  $r = phi " . _repr_to_llvm_type(_require_repr($phi, 'Loop.latch.Phi')) . " "
+                . join(', ', map { "[ $_->{vals}{ $phi->id }, %$_->{label} ]" } @preds)
+                . "  ; latch: what the pass carries");
+            $self->{cache}{ $phi->id } = $r;
+        }
+    }
+
     # Collect the backedge values for each phi.
     my %body_vars = %{ $self->{var_table} };
 
@@ -7116,7 +7225,7 @@ sub _process_loop_node {
             # both the header Phi and the loop-body Add), so lower_value returns a
             # dominating SSA ref.
             my @arms = map {
-                my $v = $self->lower_value($inputs->[$_]);
+                my $v = $loop_ctx->{break_vals}[$_]{ $phi->id } // $self->lower_value($inputs->[$_]);
                 "[ $v, %$pred_labels[$_] ]"
             } 0 .. $#pred_labels;
             my $phi_ref = $self->_fresh;
