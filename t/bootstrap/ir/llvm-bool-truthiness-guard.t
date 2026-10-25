@@ -132,14 +132,16 @@ for my $op (qw(And Or)) {
             'the GAP names the repr mismatch');
     };
 
-    subtest "$op(Num, Num) GAPs: Num is not an i1 branch condition" => sub {
+    # A Num IS a branch condition now, by perl's truth (not 0.0), as an if
+    # takes it; the merge is the Num both arms are. End to end:
+    # llvm-and-or-test-any-scalar-for-truth.t.
+    subtest "$op(Num, Num) lowers: a Num's truth is perl's" => sub {
         my $f = Chalk::IR::NodeFactory->new;
         my ($ll, $err) = lower_binop($f, $op,
             make_const($f, 'Num', 1.5), make_const($f, 'Num', 2.5), 'Num');
-        ok(defined $err && length $err, "$op(Num,Num) dies loudly")
-            or diag('no error; ir: ' . substr($ll // '', 0, 200));
-        like($err // '', qr/only Int and Boolean truthiness/,
-            'the GAP names the truthiness restriction');
+        ok(!$err, "$op(Num,Num) lowers") or diag($err);
+        like($ll // '', qr/fcmp une double/, 'the truth test is not-equal-to-zero');
+        like($ll // '', qr/phi double /, 'the merge phi is double');
     };
 }
 

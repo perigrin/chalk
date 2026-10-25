@@ -1973,6 +1973,16 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'reverse') {
         return $self->_lower_reverse($node);
     }
+    # `xor`: true when exactly one side is, by perl's truth for each.
+    elsif ($op eq 'Xor') {
+        my ($l, $r) = map {
+            my $v = $self->lower_value($_);
+            $self->_ensure_i1($v, $_->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($_) // _require_repr($_, 'Xor operand') ));
+        } $node->inputs->@[0, 1];
+        my $x = $self->_fresh;
+        $self->_emit("  $x = xor i1 $l, $r  ; xor");
+        return $self->{cache}{ $node->id } = $x;
+    }
     elsif ($op eq 'Delete') {
         return $self->_lower_delete($node);
     }
@@ -4435,6 +4445,10 @@ sub _shortcircuit_i1_cond {
         # Already an i1 — the value IS the branch condition.
         return $ref;
     }
+    # ANY OTHER SCALAR by perl's truth for it -- the same test an if takes
+    # (_ensure_i1). Not an aggregate: `@a && X` yields the COUNT when false
+    # (scalar context), which merging the array would not (pvm 089).
+    return $self->_ensure_i1($ref, $repr) if $repr =~ /\A(?:Str|Num|Scalar)\z/;
     die "GAP: $op_tag ($sym) $side operand has repr=$repr; only Int and Boolean truthiness are "
       . "lowered runtime-free (G.7/F8). Insert an explicit Coerce(*->Boolean) node before the "
       . "$op_tag, or fix TypeInference.";
