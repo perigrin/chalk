@@ -3296,6 +3296,15 @@ sub _emit_coercion {
     # that returns 0.0 for any string starting with "0x" or "0X" (the one known
     # divergence between strtod and perl's rule). strtod matches perl for all other
     # leading-numeric forms. See G3 implementation notes.
+    # AN ARRAY OR HASH AS A CONDITION is true when it holds anything: its
+    # count (field 0 of both) is not zero.
+    elsif (($from eq 'Array' || $from eq 'Hash') && $to eq 'Boolean') {
+        my $cp = $self->_fresh;
+        my $cnt = $self->_fresh;
+        $self->_emit("  $cp = getelementptr inbounds %$from, %$from* $input_ref, i32 0, i32 0  ; $what: count ptr");
+        $self->_emit("  $cnt = load i64, i64* $cp");
+        $self->_emit("  $ref = icmp ne i64 $cnt, 0  ; $what: holds anything?");
+    }
     elsif ($from eq 'Str' && $to eq 'Num') {
         my ($ptr_ref, $tracked_len) = $self->_str_parts($input_ref);
         my $len_ref = $tracked_len // 0;
@@ -3414,7 +3423,7 @@ sub _ensure_i1 {
     # A string, or a value read by its tag, is true by perl's rule: the
     # coercion's truthiness arms ("" and "0" false; undef false).
     return $self->_emit_coercion($ref, $repr, 'Boolean', '_ensure_i1')
-        if $repr eq 'Str' || $repr eq 'Scalar';
+        if $repr =~ /\A(?:Str|Scalar|Array|Hash)\z/;
 
     die "LLVM backend: _ensure_i1 cannot convert repr=$repr to i1"
         unless $repr eq 'Int' || $repr eq 'Num';
