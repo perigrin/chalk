@@ -1667,6 +1667,10 @@ sub lower_with_elaboration {
     # Set these flags early so the prologue emits them even before body lowering.
     $ctx->require_class_support if defined $class_registry && %$class_registry;
 
+    # Whether the program selects a handle, before any print lowers.
+    local $Chalk::Target::LLVM::Context::SELECTS = grep {
+        $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'select'
+    } Chalk::Target::LLVM::Context::_program_nodes($return_node);
     # Which package scalars a LocalAlias moves, before any graph lowers.
     local %Chalk::Target::LLVM::Context::ALIASED =
         map { ("main::$_" => 1) } grep { $_ eq '_' }

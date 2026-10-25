@@ -11,7 +11,15 @@ class Chalk::IR::Node::Print :isa(Chalk::IR::Node) {
     # FIXED: writes to stdout -- a statement effect in ANY context
     method is_fixed() { return true }
 
+    # `print $fh LIST`: the first input is the handle, not a value printed.
+    field $has_filehandle :reader = 0;
+
+    method set_has_filehandle($b) {
+        $has_filehandle = $b ? 1 : 0;
+        return;
+    }
+
     method content_hash() {
-        return join('|', 'Print', $self->_serialize_inputs());
+        return join('|', 'Print', ($has_filehandle ? 'fh' : ()), $self->_serialize_inputs());
     }
 }

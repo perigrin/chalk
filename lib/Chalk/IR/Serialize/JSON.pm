@@ -582,6 +582,12 @@ sub _deserialize_graph ($method_data) {
             $args{name}  = $fields->{name}  if exists $fields->{name};
         }
         elsif ($op eq 'Call') {
+            # eof() is true or false, and four-argument select a count of
+            # ready handles; B::SoN leaves both untyped.
+            my %typed = (eof => 'Boolean', sselect => 'Int');
+            $nd->{stamp} = $typed{ $fields->{name} // '' }
+                if ( $fields->{dispatch_kind} // '' ) eq 'builtin' && $typed{ $fields->{name} // '' }
+                && ( $nd->{stamp} // 'Unknown' ) eq 'Unknown';
             $args{dispatch_kind} = $fields->{dispatch_kind};
             $args{name}          = $fields->{name};
             $args{param_names}   = $fields->{param_names}
@@ -915,6 +921,7 @@ sub _deserialize_graph ($method_data) {
         # so the return epilogue tags it correctly.
         if ($op eq 'Print') {
             $node->set_stamp('Boolean');
+            $node->set_has_filehandle(1) if $fields->{has_filehandle};
         }
 
         push @nodes, $node;

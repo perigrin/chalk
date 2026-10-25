@@ -124,6 +124,8 @@ sub new {
         _need_lex_agg           => 0,
         _need_array_append      => 0,
         _need_bless             => 0,
+        _need_memchr            => 0,
+        _need_select            => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -170,6 +172,8 @@ my @NEED_FLAGS = qw(
     _need_snprintf
     _need_array_append
     _need_bless
+    _need_memchr
+    _need_select
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -755,6 +759,8 @@ sub render_need_flag_prologue {
     # Same host-interface class as printf -- a plain C function, not libperl.
     push @lines, 'declare i32 @snprintf(i8* nocapture, i64, i8* nocapture readonly, ...)'
         if $self->{_need_snprintf} && !$self->{_snprintf_emitted}++;
+    push @lines, 'declare i8* @memchr(i8*, i32, i64)'
+        if $self->{_need_memchr} && !$self->{_memchr_emitted}++;
 
     # Emit string-constant globals collected during body lowering.
     # Each Constant(:Str) node emits a private global; the names are stashed in
@@ -934,12 +940,16 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_lex_aggregate_lines;
     push @lines, $self->_array_append_lines;
     push @lines, $self->_bless_lines;
+    push @lines, '@chalk_selected = internal global i8* null  ; the handle a bare print writes to (null: STDOUT)'
+        if $self->{_need_select} && !$self->{_select_emitted}++;
     # A method body that stringifies a Num needs these too; the prologue ran
     # before any body lowered.
     push @lines, '@fmt_num_g = private unnamed_addr constant [6 x i8] c"%.15g\00", align 1'
         if $self->{_need_num_fmt} && !$self->{_num_fmt_emitted}++;
     push @lines, 'declare i32 @snprintf(i8* nocapture, i64, i8* nocapture readonly, ...)'
         if $self->{_need_snprintf} && !$self->{_snprintf_emitted}++;
+    push @lines, 'declare i8* @memchr(i8*, i32, i64)'
+        if $self->{_need_memchr} && !$self->{_memchr_emitted}++;
     # Post-class re-emit for _need_memcmp: a method body doing Subscript(Hash)
     # sets _need_memcmp on $body_ctx (propagated to $self by G.5), but the prologue
     # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
@@ -1928,6 +1938,16 @@ sub lower_value {
             && ($node->name // '') =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/) {
         return $self->_lower_case_map($node);
     }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
+            && ($node->name // '') =~ /\A(?:open|close|readline|eof)\z/) {
+        return $self->_lower_handle_op($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'select') {
+        return $self->_lower_select($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'sselect') {
+        return $self->_lower_sselect($node);
+    }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'bless') {
         return $self->_lower_bless($node);
     }
@@ -2468,7 +2488,9 @@ sub _str_const_parts {
     my ($self, $text, $label) = @_;
     my ($glob, undef, $total) = $self->_module_global_name('str_const', $text);
     my $ptr = $self->_fresh;
-    $self->_emit_entry("  $ptr = getelementptr inbounds [$total x i8], [$total x i8]* $glob, i64 0, i64 0  ; $label: \"$text\"");
+    # A comment ends at a newline: the text shown in it is escaped.
+    (my $shown = $text) =~ s/([^\x20-\x7e])/sprintf('\\%02X', ord $1)/ge;
+    $self->_emit_entry("  $ptr = getelementptr inbounds [$total x i8], [$total x i8]* $glob, i64 0, i64 0  ; $label: \"$shown\"");
     return ($ptr, $total - 1);
 }
 
@@ -8513,19 +8535,31 @@ sub _lower_local_alias {
 # graph, through the callees its calls name.
 sub _scan_local_aliases {
     my ($return) = @_;
-    my (%seen, %names);
+    my %names = map { ( $_->name // '_' ) => 1 } grep { $_->operation eq 'LocalAlias' } _program_nodes($return);
+    return sort keys %names;
+}
+
+# _program_nodes($return) -> every node of the program: this graph and the
+# graph of every sub it calls.
+sub _program_nodes {
+    my ($return) = @_;
+    my (%seen, @all);
     my @q = ($return);
     while (defined(my $n = shift @q)) {
         next unless blessed($n) && !$seen{ refaddr($n) }++;
-        $names{ $n->name // '_' } = 1 if $n->operation eq 'LocalAlias';
+        push @all, $n;
         push @q, grep { blessed($_) } $n->inputs->@*, ($n->can('control_in') ? $n->control_in : ()),
             ($n->consumers // [])->@*;
         if ($n->operation eq 'Call' && $n->can('target') && blessed(my $t = $n->target)) {
             push @q, $t->graph->returns->@* if $t->can('graph') && $t->graph;
         }
     }
-    return sort keys %names;
+    return @all;
 }
+
+# $SELECTS: does the program select a handle? Then every bare print asks
+# which handle is selected (@chalk_selected, null for STDOUT).
+our $SELECTS;
 
 # _lower_case_map($node) -> %Str: uc, lc, ucfirst, lcfirst. The operand as
 # its string (a number stringifies), mapped by @chalk_case into a fresh
@@ -8801,6 +8835,13 @@ sub _emit_flattened_array_of {
             $self->_new_block($done);
             next;
         }
+        if ($in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'builtin'
+                && ( $in->name // '' ) eq 'readline') {
+            # lowered once, where it stands: read again here it would be empty
+            my $lines = $self->lower_value($in);
+            $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $lines)  ; list: the lines read");
+            next;
+        }
         if (_is_array_slice($in)) {
             $self->_emit_array_slice_into($acc, $in);
             next;
@@ -8848,6 +8889,194 @@ sub _emit_each_element_ref_into {
     my $v = $self->_build_slot('true', $pi, 'ScalarRef', '\\(@a) element');
     $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $v)  ; list: a reference to an element");
     $self->_emit("  $k1 = add i64 $k, 1");
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($done);
+    return;
+}
+
+# IN-MEMORY HANDLES. `open(my $fh, "<", \"one\ntwo\n")` reads the string as
+# a file; `open(my $out, ">", \my $buf)` writes into $buf. The handle is
+# { i8* data, i64 len, i64 pos, i8* target } (malloc'd): what a read handle
+# reads, or the %Slot a write handle appends to (null on a read handle). The
+# variable holding it is an entry-block i8* cell, null until an open and
+# again after a close -- so a read of an unopened or closed handle is undef,
+# and a print to one writes nothing, as perl's do. Only a constant string is
+# read and only a scalar variable written; a file on disk, or any other
+# target, is refused by name.
+my $HANDLE = '{ i8*, i64, i64, i8* }';
+
+# _handle_cell($fh) -> the i8** cell the handle variable lives in.
+sub _handle_cell {
+    my ($self, $fh) = @_;
+    die "GAP: a filehandle that is not a lexical `my \$fh` is not lowered\n"
+        unless blessed($fh) && $fh->operation eq 'PadAccess' && ( $fh->stamp // '' ) eq 'GlobRef';
+    # ONE PER SUB: inlined subs share this function, and each sub's `my $fh`
+    # is its own. The subs being inlined name the one this is (recursion is
+    # refused, so the set is the stack).
+    my $key = join(',', sort keys %{ $self->{_inlining} // {} }) . '|' . ( $fh->targ // '' ) . $fh->name;
+    return $self->{_handle_cells}{$key} //= do {
+        my $c = $self->_fresh;
+        $self->_emit_entry("  $c = alloca i8*  ; handle " . $fh->name);
+        $self->_emit_entry("  store i8* null, i8** $c");
+        $c;
+    };
+}
+
+# _handle_field($h, $i) -> a pointer to field $i (0 data, 1 len, 2 pos, 3 target).
+sub _handle_field {
+    my ($self, $h, $i) = @_;
+    my ($t, $f) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $t = bitcast i8* $h to $HANDLE*");
+    $self->_emit("  $f = getelementptr inbounds $HANDLE, $HANDLE* $t, i32 0, i32 $i");
+    return $f;
+}
+
+sub _lower_handle_op {
+    my ($self, $node) = @_;
+    my $name = $node->name;
+    my @in   = grep { blessed($_) } $node->inputs->@*;
+    pop @in if $node->can('memory_input') && $node->memory_input;
+    my $cell = $self->_handle_cell($in[0]);
+    if ($name eq 'open') {
+        die "GAP: open with " . scalar(@in) . " arguments is not lowered -- only open(\$fh, MODE, \\\"...\")\n"
+            unless @in == 3;
+        my ($mode, $to) = @in[1, 2];
+        my $m = $mode->operation eq 'Constant' ? ( $mode->value // '' ) : '';
+        die "GAP: open in a mode other than \"<\", \">\" or \">>\" (or one known only at run time) is not lowered\n"
+            unless $m =~ /\A(?:<|>|>>)\z/;
+        my ($p, $l, $target) = ('null', 0, 'null');
+        if ($m eq '<') {
+            die "GAP: open of a file (or of anything but a reference to a string) is not lowered\n"
+                unless $to->operation eq 'Constant' && ( $to->const_type // '' ) eq 'ref';
+            ($p, $l) = $self->_str_const_parts($to->value, 'open: the string read');
+        }
+        else {
+            my $var = $to->operation eq 'Ref' ? $to->inputs->[0] : undef;
+            die "GAP: open for writing to a file (or to anything but a scalar variable) is not lowered\n"
+                unless blessed($var) && $var->operation eq 'PadAccess' && ( $var->sigil // '' ) eq '$'
+                && $var->is_location;
+            my $slot = $self->_location_ptr($var);
+            if ($m eq '>') {
+                my $empty = $self->_emit_coercion($self->_str_value(( $self->_str_const_parts('', 'open: emptied') )[0], len => 0),
+                    'Str', 'Scalar', 'open ">": empty');
+                $self->_emit("  store %Slot $empty, %Slot* $slot  ; open \">\": the scalar is emptied");
+            }
+            $target = $self->_fresh;
+            $self->_emit("  $target = bitcast %Slot* $slot to i8*  ; open: the scalar written");
+        }
+        $self->{_need_malloc_memcpy} = 1;
+        my $h = $self->_fresh;
+        $self->_emit("  $h = call i8* \@malloc(i64 32)  ; open: a handle in memory");
+        $self->_emit("  store i8* $p, i8** " . $self->_handle_field($h, 0));
+        $self->_emit("  store i64 $l, i64* " . $self->_handle_field($h, 1));
+        $self->_emit("  store i64 0, i64* " . $self->_handle_field($h, 2));
+        $self->_emit("  store i8* $target, i8** " . $self->_handle_field($h, 3));
+        $self->_emit("  store i8* $h, i8** $cell  ; open: the handle");
+        return $self->{cache}{ $node->id } = $self->_build_slot('true', '1', 'Int', 'open: true');
+    }
+    my $h = $self->_fresh;
+    $self->_emit("  $h = load i8*, i8** $cell  ; $name: the handle");
+    if ($name eq 'close') {
+        # THE HANDLE ITSELF IS CLOSED, not only the variable: select may hold
+        # it. Nothing left to read, nowhere to write.
+        my $was = $self->_fresh;
+        my ($shut, $done) = map { $self->_fresh_label("close.$_.") } qw(shut done);
+        $self->_emit("  $was = icmp ne i8* $h, null  ; close: was it open?");
+        $self->_set_terminator("  br i1 $was, label %$shut, label %$done");
+        $self->_new_block($shut);
+        $self->_emit("  store i64 0, i64* " . $self->_handle_field($h, 1) . "  ; close: nothing to read");
+        $self->_emit("  store i8* null, i8** " . $self->_handle_field($h, 3) . "  ; close: nowhere to write");
+        $self->_set_terminator("  br label %$done");
+        $self->_new_block($done);
+        $self->_emit("  store i8* null, i8** $cell  ; close");
+        return $self->{cache}{ $node->id } = $was;
+    }
+    if ($name eq 'eof') {
+        my ($open, $pos, $len, $at, $r) = map { $self->_fresh } 1 .. 5;
+        my ($chk, $join) = map { $self->_fresh_label("eof.$_.") } qw(chk join);
+        my $from = $self->_current_block_label;
+        $self->_emit("  $open = icmp ne i8* $h, null");
+        $self->_set_terminator("  br i1 $open, label %$chk, label %$join");
+        $self->_new_block($chk);
+        $self->_emit("  $pos = load i64, i64* " . $self->_handle_field($h, 2));
+        $self->_emit("  $len = load i64, i64* " . $self->_handle_field($h, 1));
+        $self->_emit("  $at = icmp sge i64 $pos, $len  ; eof: read it all?");
+        my $chk_end = $self->_current_block_label;
+        $self->_set_terminator("  br label %$join");
+        $self->_new_block($join);
+        $self->_emit("  $r = phi i1 [ 1, %$from ], [ $at, %$chk_end ]");
+        return $r;
+    }
+    # readline in a list: every line left, as an array.
+    if (( $node->stamp // '' ) =~ /\A(?:List|Array)\z/) {
+        $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy _need_aggregate_types);
+        my $acc = $self->_emit_array_of([]);
+        $self->_emit_lines_left_into($acc, $cell);
+        return $self->{cache}{ $node->id } = $acc;
+    }
+    # In scalar context: the next line, or undef.
+    die "GAP: readline whose result is a " . ( $node->stamp // 'Unknown' ) . " is not lowered\n"
+        unless ( $node->stamp // '' ) eq 'Scalar';
+    my ($slot) = $self->_emit_next_line($h);
+    return $self->{cache}{ $node->id } = $slot;
+}
+
+# _emit_next_line($h) -> ($slot, $got_i1): the handle's next line -- up to
+# and including a "\n", or the rest -- as a Str slot, and its position moved
+# past it; undef (and false) when it is closed or read to the end.
+sub _emit_next_line {
+    my ($self, $h) = @_;
+    $self->{_need_memchr} = 1;
+    my ($open, $pos, $len, $more, $data, $rest, $rl, $nl, $found, $ni, $ri, $off, $off1, $ll, $np) = map { $self->_fresh } 1 .. 15;
+    my ($chk, $read, $none, $join) = map { $self->_fresh_label("readline.$_.") } qw(chk read none join);
+    $self->_emit("  $open = icmp ne i8* $h, null  ; readline: open?");
+    $self->_set_terminator("  br i1 $open, label %$chk, label %$none");
+    $self->_new_block($chk);
+    my ($pp, $lp, $dp) = map { $self->_handle_field($h, $_) } 2, 1, 0;
+    $self->_emit("  $pos = load i64, i64* $pp");
+    $self->_emit("  $len = load i64, i64* $lp");
+    $self->_emit("  $more = icmp slt i64 $pos, $len  ; readline: any left?");
+    $self->_set_terminator("  br i1 $more, label %$read, label %$none");
+    $self->_new_block($read);
+    $self->_emit("  $data = load i8*, i8** $dp");
+    $self->_emit("  $rest = getelementptr inbounds i8, i8* $data, i64 $pos");
+    $self->_emit("  $rl = sub i64 $len, $pos");
+    $self->_emit("  $nl = call i8* \@memchr(i8* $rest, i32 10, i64 $rl)  ; readline: the next newline");
+    $self->_emit("  $found = icmp ne i8* $nl, null");
+    $self->_emit("  $ni = ptrtoint i8* $nl to i64");
+    $self->_emit("  $ri = ptrtoint i8* $rest to i64");
+    $self->_emit("  $off = sub i64 $ni, $ri");
+    $self->_emit("  $off1 = add i64 $off, 1");
+    $self->_emit("  $ll = select i1 $found, i64 $off1, i64 $rl  ; readline: the line's length");
+    $self->_emit("  $np = add i64 $pos, $ll");
+    $self->_emit("  store i64 $np, i64* $pp  ; readline: past it");
+    my $line = $self->_emit_coercion($self->_str_value($rest, len => $ll), 'Str', 'Scalar', 'readline: the line');
+    my $read_end = $self->_current_block_label;
+    $self->_set_terminator("  br label %$join");
+    $self->_new_block($none);
+    my $undef = $self->_build_slot('false', '0', 'Undef', 'readline: no more');
+    my $none_end = $self->_current_block_label;
+    $self->_set_terminator("  br label %$join");
+    $self->_new_block($join);
+    my ($slot, $got) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $slot = phi %Slot [ $line, %$read_end ], [ $undef, %$none_end ]  ; readline: the line, or undef");
+    $self->_emit("  $got = phi i1 [ 1, %$read_end ], [ 0, %$none_end ]");
+    return ($slot, $got);
+}
+
+# _emit_lines_left_into($acc, $cell): every line left on the handle in
+# $cell, in order.
+sub _emit_lines_left_into {
+    my ($self, $acc, $cell) = @_;
+    my ($head, $body, $done) = map { $self->_fresh_label("readlines.$_.") } qw(head body done);
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($head);
+    my $h = $self->_fresh;
+    $self->_emit("  $h = load i8*, i8** $cell  ; readline: the handle");
+    my ($slot, $got) = $self->_emit_next_line($h);
+    $self->_set_terminator("  br i1 $got, label %$body, label %$done");
+    $self->_new_block($body);
+    $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $slot)  ; list: a line");
     $self->_set_terminator("  br label %$head");
     $self->_new_block($done);
     return;
@@ -14110,7 +14339,35 @@ sub _lower_regex_subst {
 sub _lower_print {
     my ($self, $node) = @_;
 
-    for my $arg ($node->inputs->@*) {
+    my @args = $node->inputs->@*;
+    if ($node->can('has_filehandle') && $node->has_filehandle) {
+        my $fh = shift @args;
+        unless (blessed($fh) && $fh->operation eq 'Constant' && ( $fh->value // '' ) eq 'STDOUT') {
+            return $self->_lower_print_to_handle($node, $fh, @args)
+                if blessed($fh) && $fh->operation eq 'PadAccess';
+            die "GAP: print to the handle "
+              . ( blessed($fh) && $fh->can('value') ? ( $fh->value // '?' ) : '?' ) . " is not lowered\n";
+        }
+    }
+    # A PROGRAM THAT SELECTS A HANDLE prints where it says: to STDOUT when
+    # none is selected, else into the selected handle.
+    my ($sel_join, $sel_r, $sel_from);
+    if ($SELECTS && !( $node->can('has_filehandle') && $node->has_filehandle )) {
+        $self->{_need_select} = 1;
+        my @strs = $self->_print_strs(@args);
+        my ($sel, $none) = map { $self->_fresh } 1 .. 2;
+        my ($out, $tofh) = map { $self->_fresh_label("print.$_.") } qw(stdout tofh);
+        $sel_join = $self->_fresh_label('print.join.');
+        $self->_emit("  $sel = load i8*, i8** \@chalk_selected  ; print: the selected handle");
+        $self->_emit("  $none = icmp eq i8* $sel, null");
+        $self->_set_terminator("  br i1 $none, label %$out, label %$tofh");
+        $self->_new_block($tofh);
+        $sel_r = $self->_emit_handle_write($sel, @strs);
+        $sel_from = $self->_current_block_label;
+        $self->_set_terminator("  br label %$sel_join");
+        $self->_new_block($out);
+    }
+    for my $arg (@args) {
         next unless defined $arg;
         my $repr = $arg->stamp;
         my $ref  = $self->lower_value($arg);
@@ -14159,8 +14416,111 @@ sub _lower_print {
     $self->_emit("  store i1 1, i1* $slot  ; Print: yields boolean 1");
     my $ref = $self->_fresh;
     $self->_emit("  $ref = load i1, i1* $slot  ; Print: read boolean 1");
+    if ($sel_join) {
+        my $out_end = $self->_current_block_label;
+        $self->_set_terminator("  br label %$sel_join");
+        $self->_new_block($sel_join);
+        my $r = $self->_fresh;
+        $self->_emit("  $r = phi i1 [ $ref, %$out_end ], [ $sel_r, %$sel_from ]  ; print: wrote?");
+        $ref = $r;
+    }
     $self->{cache}{ $node->id } = $ref;
     return $ref;
+}
+
+# _lower_print_to_handle($node, $fh, @args) -> i1: `print $out LIST` onto
+# an in-memory write handle appends each value to its scalar; true. A closed
+# or read handle writes nothing; false.
+sub _lower_print_to_handle {
+    my ($self, $node, $fh, @args) = @_;
+    my @strs = $self->_print_strs(@args);
+    my $cell = $self->_handle_cell($fh);
+    my $h = $self->_fresh;
+    $self->_emit("  $h = load i8*, i8** $cell  ; print: the handle");
+    return $self->{cache}{ $node->id } = $self->_emit_handle_write($h, @strs);
+}
+
+# _print_strs(@args) -> each printed value, lowered: Print takes Str.
+sub _print_strs {
+    my ($self, @args) = @_;
+    return map {
+        my $r = ( $_->stamp // '' );
+        die "GAP: Print of a $r arg to a handle -- Print takes Str\n" unless $r eq 'Str';
+        $self->lower_value($_);
+    } grep { blessed($_) } @args;
+}
+
+# _lower_select($node) -> i8*: `select(FH)` makes FH the handle a bare print
+# writes to and is the one it replaces -- a handle a later select can take
+# back (null for STDOUT). Its value has no other use here.
+sub _lower_select {
+    my ($self, $node) = @_;
+    die "GAP: select in a program with classes is not lowered -- a method body would not see it\n"
+        if grep { $_ ne 'main' } keys %{ $self->{class_registry} // {} };
+    die "GAP: select whose result is used other than by another select is not lowered\n"
+        if grep { my $c = $_; blessed($c) && !( $c->operation eq 'Call' && ( $c->name // '' ) eq 'select' )
+                  && grep { blessed($_) && refaddr($_) == refaddr($node) } $c->inputs->@* }
+            ($node->consumers // [])->@*;
+    my ($fh) = grep { blessed($_) } $node->inputs->@*;
+    die "GAP: select() with no handle is not lowered\n" unless $fh;
+    my $h;
+    if ($fh->operation eq 'Constant' && ( $fh->value // '' ) eq 'STDOUT') { $h = 'null' }
+    elsif ($fh->operation eq 'Call' && ( $fh->name // '' ) eq 'select') { $h = $self->lower_value($fh) }
+    elsif ($fh->operation eq 'PadAccess') {
+        $h = $self->_fresh;
+        $self->_emit("  $h = load i8*, i8** " . $self->_handle_cell($fh) . "  ; select: the handle");
+    }
+    else { die "GAP: select of a " . $fh->operation . " is not lowered -- only of a `my \$fh`, STDOUT, or what a select returned\n" }
+    $self->{_need_select} = 1;
+    my $prev = $self->_fresh;
+    $self->_emit("  $prev = load i8*, i8** \@chalk_selected  ; select: the one it replaces");
+    $self->_emit("  store i8* $h, i8** \@chalk_selected  ; select");
+    return $self->{cache}{ $node->id } = $prev;
+}
+
+# _lower_sselect($node): four-argument select with no handles and no wait
+# finds none ready: 0.
+sub _lower_sselect {
+    my ($self, $node) = @_;
+    my @in = $node->inputs->@*;
+    die "GAP: four-argument select on handles, or with a wait, is not lowered\n"
+        unless @in == 4 && !grep { !blessed($_) || $_->operation ne 'Constant' || ( $_->const_type // '' ) ne 'undef' } @in[0 .. 2]
+        and blessed($in[3]) && $in[3]->operation eq 'Constant' && ( $in[3]->value // '' ) eq '0';
+    return $self->{cache}{ $node->id } = '0';
+}
+
+# _emit_handle_write($h, @strs) -> i1: append each Str to the scalar the
+# handle at $h writes; false, writing nothing, when it is closed or a read
+# handle.
+sub _emit_handle_write {
+    my ($self, $h, @strs) = @_;
+    my ($open, $t, $ok) = map { $self->_fresh } 1 .. 3;
+    my ($chk, $write, $join) = map { $self->_fresh_label("printfh.$_.") } qw(chk write join);
+    my $from = $self->_current_block_label;
+    $self->_emit("  $open = icmp ne i8* $h, null");
+    $self->_set_terminator("  br i1 $open, label %$chk, label %$join");
+    $self->_new_block($chk);
+    $self->_emit("  $t = load i8*, i8** " . $self->_handle_field($h, 3) . "  ; print: the scalar it writes");
+    $self->_emit("  $ok = icmp ne i8* $t, null");
+    my $chk_end = $self->_current_block_label;
+    $self->_set_terminator("  br i1 $ok, label %$write, label %$join");
+    $self->_new_block($write);
+    my $tp = $self->_fresh;
+    $self->_emit("  $tp = bitcast i8* $t to %Slot*");
+    for my $str (@strs) {
+        my $old = $self->_fresh;
+        $self->_emit("  $old = load %Slot, %Slot* $tp  ; print: what it holds");
+        my $cat = $self->_emit_str_append($self->_emit_coercion($old, 'Scalar', 'Str', 'print: its string'),
+            $str, 'print to a handle');
+        my $boxed = $self->_emit_coercion($cat, 'Str', 'Scalar', 'print: appended');
+        $self->_emit("  store %Slot $boxed, %Slot* $tp  ; print: appended");
+    }
+    my $write_end = $self->_current_block_label;
+    $self->_set_terminator("  br label %$join");
+    $self->_new_block($join);
+    my $r = $self->_fresh;
+    $self->_emit("  $r = phi i1 [ 0, %$from ], [ 0, %$chk_end ], [ 1, %$write_end ]  ; print: wrote?");
+    return $r;
 }
 
 # _lower_field_access_in_method($node) -> $llvm_ref
