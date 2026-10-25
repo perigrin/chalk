@@ -9,4 +9,14 @@ use Chalk::IR::Node::Access;
 class Chalk::IR::Node::Subscript :isa(Chalk::IR::Node::Access) {
     method operation() { 'Subscript' }
     sub identity_kind { q(hash_consed) }
+
+    # 'array' or 'hash' (B::SoN's kind): which aggregate the read indexes,
+    # said even where the container's own type does not (a value read by
+    # its tag that holds the reference).
+    field $kind :reader = undef;
+
+    method set_kind($k) {
+        $kind = $k;
+        return;
+    }
 }

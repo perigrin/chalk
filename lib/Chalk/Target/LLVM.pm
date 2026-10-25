@@ -1660,6 +1660,8 @@ sub lower_with_elaboration {
     # Build a context that knows the elaboration phi plan.
     my $ctx = Chalk::Target::LLVM::ElaboratedContext->new(elab => $elab,
         class_registry => $class_registry);
+    # The MOP itself, for a method whose class only an inlined call site knows.
+    $ctx->{mop} = $opts{mop};
 
     # Classes require %Slot (for fields) and malloc (for New).
     # Set these flags early so the prologue emits them even before body lowering.

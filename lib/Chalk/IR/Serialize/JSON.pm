@@ -807,6 +807,8 @@ sub _deserialize_graph ($method_data) {
             if $op eq 'Region' && defined $nd->{fields} && defined $nd->{fields}{eval_want};
         $node->set_eval_may_die(1)
             if $op eq 'Region' && defined $nd->{fields} && $nd->{fields}{eval_may_die};
+        $node->set_kind($nd->{fields}{kind})
+            if $op eq 'Subscript' && defined $nd->{fields} && defined $nd->{fields}{kind};
         # A block eval's id, on its join and on each die it lexically holds.
         $node->set_eval_id($nd->{fields}{eval_id})
             if ($op eq 'Region' || $op eq 'Unwind' || $op eq 'Call') && defined $nd->{fields}

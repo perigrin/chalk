@@ -3868,7 +3868,8 @@ sub _lower_assign {
         my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');
         ($rhs_ref, $from) = $self->_miss_kept($rhs, $rhs_ref, $from);
         die "GAP: a store to shared lexical " . $lhs->name . " of a $from value "
-          . "is not lowered\n" unless $from =~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot)\z/;
+          . "is not lowered\n" unless $from =~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot|ArrayRef|HashRef|ScalarRef|CodeRef)\z/;
+        # A reference is boxed by its tag, as any other reading is.
         my $boxed = $from =~ /\A(?:Scalar|Slot)\z/
             ? $rhs_ref
             : $self->_emit_coercion($rhs_ref, $from, 'Scalar', 'store to ' . $lhs->name);
@@ -7168,6 +7169,7 @@ sub _process_loop_node {
     # dominate the exit, and a use after the loop lowers its own (dropped
     # below, after the back-edge -- as an if arm's is when the arm ends).
     my %cached_before_body = map { $_ => 1 } keys %{ $self->{cache} };
+    $self->_lower_pass_elements($loop_node);
 
     # Save pre-body var_table for collecting backedge updates.
     my %pre_body_vars = %{ $self->{var_table} };
@@ -7427,6 +7429,112 @@ sub _process_loop_body {
         }
     }
 }
+
+# _lower_pass_elements($loop) -- at the top of the body, each element read
+# indexed by one of this loop's value Phis at this loop's own memory version
+# (a foreach's `$x`): that is where its version says it is read.
+#
+# A LOOP WHOSE BODY CALLS A SUB THAT CAN REACH THE ARRAY IT WALKS is refused:
+# perl's loop variable aliases the element, and a shift or splice in the call
+# moves it out from under the index B::SoN reads it by (pvm 185 printed
+# "bb;dd;" for perl's "aa;cc;").
+sub _lower_pass_elements {
+    my ($self, $loop) = @_;
+    my (@walked, @reads);
+    for my $p (_collect_loop_phis($loop)) {
+        for my $s (grep { blessed($_) && $_->operation eq 'Subscript' && blessed($_->inputs->[1])
+                          && refaddr($_->inputs->[1]) == refaddr($p) } ($p->consumers // [])->@*) {
+            push @walked, $s->inputs->[0];
+            my $mem = $s->inputs->[2];
+            push @reads, $s if blessed($mem) && $mem->operation eq 'Phi' && blessed($mem->region)
+                && refaddr($mem->region) == refaddr($loop);
+        }
+    }
+    return unless @walked;
+    for my $call (_calls_in_body($loop)) {
+        die "GAP: a loop whose body calls a sub that can reach the array it walks is not "
+          . "lowered -- perl's loop variable aliases the element, which the call may move\n"
+            if _callee_moves_elements($call) && grep { _call_reaches($call, $_) } @walked;
+    }
+    for my $s (@reads) {
+        next if exists $self->{cache}{ $s->id };
+        $self->{cache}{ $s->id } = $self->lower_value($s);
+    }
+    return;
+}
+
+# _calls_in_body($loop) -> the non-builtin Calls downstream of the Loop whose
+# control chain leads back to its body Proj (nested arms and loops too).
+sub _calls_in_body {
+    my ($loop) = @_;
+    my $body = _find_proj_consumer($loop, 0) // return ();
+    my (%seen, @calls);
+    my @q = ($loop);
+    while (defined(my $n = shift @q)) {
+        next if $seen{ refaddr($n) }++;
+        push @q, grep { blessed($_) } ($n->consumers // [])->@*;
+        next unless $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) ne 'builtin';
+        my %been;
+        for (my $c = $n->control_in; blessed($c); ) {
+            last if $been{ refaddr($c) }++;
+            if (refaddr($c) == refaddr($body)) { push @calls, $n; last }
+            last if refaddr($c) == refaddr($loop);
+            $c = $c->operation eq 'Proj' ? $c->inputs->[0]
+               : $c->can('control_in') ? $c->control_in : undef;
+        }
+    }
+    return @calls;
+}
+
+# _callee_moves_elements($call) -- can the sub this call runs (or any sub it
+# calls) move an element of an array: shift, unshift, splice, pop, or assign
+# the whole array? A push or an element store moves none. A callee with no
+# graph to look at is assumed to.
+sub _callee_moves_elements {
+    my ($call, $seen) = @_;
+    $seen //= {};
+    my $t = $call->can('target') ? $call->target : undef;
+    my $g = blessed($t) && $t->can('graph') ? $t->graph : undef;
+    return 1 unless blessed($g);
+    return 0 if $seen->{ refaddr($g) }++;
+    for my $n (grep { blessed($_) } $g->nodes->@*) {
+        my $op = $n->operation;
+        if ($op eq 'Call') {
+            if (( $n->dispatch_kind // '' ) eq 'builtin') {
+                return 1 if ( $n->name // '' ) =~ /\A(?:shift|unshift|splice|pop)\z/;
+            }
+            elsif (_callee_moves_elements($n, $seen)) { return 1 }
+        }
+        return 1 if $op eq 'Assign' && grep {
+            blessed($_) && $_->can('stamp') && ( $_->stamp // '' ) eq 'Array'
+        } $n->inputs->@*;
+    }
+    return 0;
+}
+
+# _call_reaches($call, $container) -- can the call see this array? It is
+# passed the array, its reference, or the variable holding either (matched by
+# name: each read of it is its own node), or the array lives where a callee
+# can name it (a shared lexical, a package variable).
+sub _call_reaches {
+    my ($call, $c) = @_;
+    my $root = $c;
+    $root = $root->inputs->[0] while blessed($root) && $root->operation eq 'PostfixDeref';
+    return 1 unless blessed($root);
+    return 1 if $root->operation =~ /\A(?:EntryDef|CellRead)\z/
+        || ( $root->operation eq 'PadAccess' && $root->can('shared') && $root->shared );
+    my $name = $root->operation eq 'PadAccess' ? ($root->sigil // '') . ($root->symbol // '') : undef;
+    for my $a (grep { blessed($_) } $call->inputs->@*) {
+        my $x = $a;
+        $x = $x->inputs->[0] while blessed($x) && $x->operation =~ /\A(?:PostfixDeref|Ref)\z/;
+        next unless blessed($x);
+        return 1 if refaddr($x) == refaddr($root) || refaddr($a) == refaddr($c);
+        return 1 if defined $name && $x->operation eq 'PadAccess'
+            && ($x->sigil // '') . ($x->symbol // '') eq $name;
+    }
+    return 0;
+}
+
 
 # _collect_loop_phis: find all VALUE Phi nodes whose region is this Loop node.
 # A memory-Phi (its inputs are memory versions: MemStart or an element-store
@@ -9347,6 +9455,41 @@ sub _emit_hash_insert {
     $self->_emit("  store i64 $c1, i64* $cntp  ; insert: count + 1");
 }
 
+# _arg_binding($arg, $ref) -> what a callee's argument read is bound to. An
+# argument that is itself an inlined parameter holding a reference (an
+# object handed on: `sub f { my ($n) = @_; $n->val }`) passes the reference
+# on as it is -- its own lowering boxed it to the parameter's Scalar.
+sub _arg_binding {
+    my ($self, $arg, $ref) = @_;
+    my $rep = $self->_repr_of($arg) // '';
+    my $raw = $self->_bound_ref($arg);
+    return { ref => $raw, repr => $rep, node => $arg } if $rep =~ /Ref\z/ && defined $raw;
+    return { ref => $ref, repr => $arg->stamp, node => $arg };
+}
+
+# _static_class_of($node) -> the class a value is an object of, where that is
+# static: a `C->new(...)` of a package (whose sub blesses it), a bless into
+# a literal class, or an inlined argument bound to one of those. Else undef.
+sub _static_class_of {
+    my ($self, $n) = @_;
+    for (1 .. 32) {
+        return undef unless blessed($n);
+        my $b = $self->{_arg_bind} ? $self->{_arg_bind}{ refaddr($n) } : undef;
+        if ($b && blessed($b->{node})) { $n = $b->{node}; next }
+        last;
+    }
+    return undef unless blessed($n) && $n->operation eq 'Call';
+    my $kind = $n->dispatch_kind // '';
+    return $n->class_name
+        if $kind eq 'method' && ($n->name // '') eq 'new' && defined $n->class_name
+        && blessed($n->target) && $n->target->isa('Chalk::MOP::Sub');
+    if ($kind eq 'builtin' && ($n->name // '') eq 'bless') {
+        my $c = $n->inputs->[1];
+        return $c->value if blessed($c) && $c->operation eq 'Constant' && ($c->const_type // '') eq 'string';
+    }
+    return undef;
+}
+
 # _repr_of($node) / _bound_ref($node): a node an inlined call binds to the
 # caller's value (an argument) reads as THAT value's repr. A callee's `my
 # ($h) = @_` is stamped Unknown, and the HashRef it holds was refused as a
@@ -9396,6 +9539,25 @@ sub _container_ptr {
     $container = $self->_unwrap_ref_container($container);
     my $repr = $self->_repr_of($container) // '';
     my $v = $self->_bound_ref($container) // $self->lower_value($container);
+    # A VALUE READ BY ITS TAG holding the reference (a shared lexical, a
+    # merge): its payload, when the tag says so. Anything else -- undef,
+    # which perl would autovivify, or another kind -- exits 255.
+    if ($repr =~ /\A(?:Scalar|Slot)\z/ && defined $kind && $kind =~ /\A(?:Array|Hash)\z/) {
+        my $tag = $self->_slot_tag_of($v);
+        my ($ok, $typed) = ($self->_fresh, $self->_fresh);
+        my ($yes, $no) = ($self->_fresh_label('cref.ok.'), $self->_fresh_label('cref.no.'));
+        $self->_emit("  $ok = icmp eq i8 $tag, " . _slot_tag_value("${kind}Ref") . "  ; a ${kind} reference?");
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $ok, label %$yes, label %$no");
+        $self->_new_block($no);
+        $self->_refuse_inside_eval("an element read through what is not a ${kind} reference");
+        $self->_emit("  call void \@exit(i32 255)  ; not a ${kind} reference");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($yes);
+        my $pl = $self->_slot_payload_of($v);
+        $self->_emit("  $typed = inttoptr i64 $pl to %${kind}*  ; Scalar -> %${kind}*");
+        return $typed;
+    }
     return $v unless $repr eq "${kind}Ref";   # unboxed %Array*/%Hash* already
     my $typed = $self->_fresh;
     $self->_emit("  $typed = bitcast i8* $v to %${kind}*  ; ${kind}Ref -> ${kind}* (at use)");
@@ -9431,6 +9593,10 @@ sub _lower_subscript {
     my $container = $self->_unwrap_ref_container($node->inputs->[0]);
     my $container_repr = $self->_repr_of($container)
         // _require_repr($container, 'Subscript.container');
+    # A container read by its tag: the read says which kind it is.
+    if ($container_repr =~ /\A(?:Scalar|Slot)\z/ && ($node->can('kind') ? $node->kind // '' : '') =~ /\A(array|hash)\z/) {
+        $container_repr = $1 eq 'array' ? 'ArrayRef' : 'HashRef';
+    }
 
     if ($container_repr eq 'Array' || $container_repr eq 'ArrayRef') {
         return $self->_lower_array_read($node);
@@ -11596,11 +11762,11 @@ sub _lower_call_direct {
         next unless blessed($r);
         if ($signature) {
             my $k = $r->index;
-            if ($k < @args) { $self->{_arg_bind}{ refaddr($r) } = { ref => $arg_refs[$k], repr => $args[$k]->stamp } }
+            if ($k < @args) { $self->{_arg_bind}{ refaddr($r) } = $self->_arg_binding($args[$k], $arg_refs[$k]) }
             else              { push @defaulted, $r }
         }
         elsif ($i < @args) {
-            $self->{_arg_bind}{ refaddr($r) } = { ref => $arg_refs[$i], repr => $args[$i]->stamp };
+            $self->{_arg_bind}{ refaddr($r) } = $self->_arg_binding($args[$i], $arg_refs[$i]);
         }
         else {
             $self->{_arg_bind}{ refaddr($r) } =
@@ -11737,6 +11903,8 @@ my %KEEPS = (
     Num     => { map { $_ => 1 } qw(Scalar Slot) },
     Str     => { map { $_ => 1 } qw(Num Scalar Slot) },
     Undef   => { map { $_ => 1 } qw(Scalar Slot) },
+    # A reference boxes by its tag into a value read by its tag.
+    ( map { $_ => { Scalar => 1, Slot => 1 } } qw(ArrayRef HashRef ScalarRef CodeRef) ),
     Scalar  => { map { $_ => 1 } qw(Int Num Str Boolean Slot) },
     Slot    => { map { $_ => 1 } qw(Int Num Str Boolean Scalar) },
 );
@@ -12307,9 +12475,27 @@ sub _lower_call_method {
         return $self->_lower_call_new($node);
     }
     my $obj_node    = $node->inputs->[0];
+    # AN INVOCANT THE CALL SITE MADE: a sub's parameter, inlined, is the
+    # caller's argument -- a `C->new(...)` or a bless into a literal class --
+    # whose class is static there. The method is that class's sub, for this
+    # lowering only: the Call is shared by every site that inlines the sub.
+    if (!defined $node->class_name && defined(my $cls = $self->_static_class_of($obj_node))) {
+        my $mop = $self->{mop};
+        my $c   = $mop ? $mop->for_class($cls) : undef;
+        my ($sub) = $c ? grep { $_->name eq $method_name } $c->subs : ();
+        die "GAP: method '$method_name' of class $cls (passed in) is not a package sub of "
+          . "it -- inherited or a `class` method, not lowered\n" unless $sub;
+        my $was = $node->target;
+        $node->set_target($sub);
+        my $ref = eval { $self->_lower_call_direct($node) };
+        my $err = $@;
+        $node->set_target($was);
+        die $err if $err;
+        return $ref;
+    }
     # MOP-direct shape: the class rides as the class_name attribute.
     my $class_name  = $node->class_name
-        // die "LLVM MOP: Call(method) '$method_name' has no class_name — "
+        // die "GAP: LLVM MOP: Call(method) '$method_name' has no class_name — "
              . "method dispatch must name its statically-known class "
              . "(019eb42a MOP-direct contract).";
     # A PACKAGE SUB CALLED AS A METHOD (see _attach_call_targets) is a direct

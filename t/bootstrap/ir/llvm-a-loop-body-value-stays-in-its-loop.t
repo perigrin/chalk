@@ -48,4 +48,21 @@ for my $case (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
+# A PASS'S ELEMENT IS READ WHERE THE PASS BEGINS. Lowered at its first use,
+# `$x` was read after a call in the body that changed the array. And a
+# RE-READ of it after such a call is refused: perl's `$x` aliases the
+# element, which a shift in the call moves out from under the index (pvm
+# 185 printed "bb;dd;" for perl's "aa;cc;" once a reference could be stored
+# in a shared lexical). Only a callee that can move an element -- a
+# shift, unshift, splice, pop or reassignment -- is refused.
+{
+    eval { through_llvm(q{sub g { shift @{$_[0]} } sub f { my $l = [qw(a b c d)]; my $s = ""; for my $x (@$l) { $s .= $x; g($l); $s .= $x . ";" } "$s|@$l" } print f(), "\n";}) };
+    like($@, qr/GAP: a loop whose body calls a sub that can reach the array it walks/, 'a re-read after a call that changes the array is refused');
+    my $got = eval { through_llvm(q{sub h { 1 } my @a = (1, 2); my $s = ""; for my $x (@a) { $s .= $x; h(); $s .= "-" } print "$s\n";}) };
+    is($got, "1-2-\n", 'an element read before a call: perl\'s answer') or diag $@;
+    # a push moves no element: the loop sees what it adds (pvm 132)
+    $got = eval { through_llvm(q{sub f { my @p = (1); my $add = sub { push @p, $_[0] + 1 if $_[0] < 4 }; my $out = ""; for my $x (@p) { $add->($x); $out .= $x } return $out } print f(), "\n";}) };
+    is($got, "1234\n", 'a call that only pushes onto the array: perl\'s answer') or diag $@;
+}
+
 done_testing;
