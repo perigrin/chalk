@@ -3346,6 +3346,10 @@ sub _ensure_i1 {
         unless defined $repr;
 
     return $ref if $repr eq 'Boolean';
+    # A string, or a value read by its tag, is true by perl's rule: the
+    # coercion's truthiness arms ("" and "0" false; undef false).
+    return $self->_emit_coercion($ref, $repr, 'Boolean', '_ensure_i1')
+        if $repr eq 'Str' || $repr eq 'Scalar';
 
     die "LLVM backend: _ensure_i1 cannot convert repr=$repr to i1"
         unless $repr eq 'Int' || $repr eq 'Num';
@@ -7353,9 +7357,12 @@ sub _lower_loop_condition {
     my $loop_consumers = $loop_node->consumers // [];
     for my $c (@$loop_consumers) {
         next unless defined $c && $c->can('operation');
-        next unless exists $ICMP_PREDICATE{ $c->operation };
-        # This comparison has the loop as its control predecessor — it is the
-        # header branch condition, not a body comparison.
+        # A comparison, or any truth test (`while (my $n = $h{$k})` is
+        # Not(Not(...)), `while (defined $x)` a Defined), the producer pins to
+        # the loop: the header's condition, not a body comparison.
+        next unless exists $ICMP_PREDICATE{ $c->operation }
+            || ( blessed($c->control_in) && refaddr($c->control_in) == refaddr($loop_node)
+                 && ( $c->stamp // '' ) eq 'Boolean' );
         return $self->lower_value($c);
     }
 
