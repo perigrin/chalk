@@ -8557,6 +8557,11 @@ sub _program_nodes {
     return @all;
 }
 
+# $READS_ERROR: does the program read $@? A die whose message this backend
+# cannot spell (perl's names the file and line) is lowered only where it is
+# never seen.
+our $READS_ERROR;
+
 # $SELECTS: does the program select a handle? Then every bare print asks
 # which handle is selected (@chalk_selected, null for STDOUT).
 our $SELECTS;
@@ -11607,6 +11612,62 @@ sub _store_field_payload {
     return $pay_i64;
 }
 
+# _lower_method_on_non_object($node, $obj) -> the call's value, or undef when
+# its invocant may be an object. perl dies on a method called on undef or a
+# plain value. Statically so, it always dies; a Scalar is read by its tag at
+# run time, and one holding a reference -- an object would dispatch on its
+# run-time class -- stops the program (exit 255). The die is a branch to its
+# eval, and only where nothing reads $@: perl's message names the file and
+# line, which nothing here knows.
+sub _lower_method_on_non_object {
+    my ($self, $node, $obj) = @_;
+    return undef unless blessed($obj);
+    my $rs = $obj->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($obj) // $obj->stamp // '' );
+    my $location = $obj->operation eq 'PadAccess' && $obj->is_location;
+    my $plain = $rs =~ /\A(?:Int|Num|Str|Boolean|Undef)\z/;
+    return undef unless $plain || $rs eq 'Scalar' || ( $rs eq 'Unknown' && $location );
+    my $name = $node->name;
+    my $f = ($self->{_eval_frames} // [])->[-1];
+    if (!$f || $READS_ERROR
+            || ( defined $node->eval_id && ( $f->{region}->eval_id // '' ) ne $node->eval_id )) {
+        # Possibly an object, it is the dispatch that is refused.
+        return undef unless $plain;
+        die "GAP: a method ('$name') called on a plain value dies, and its message "
+          . "(naming the file and line) would be seen -- not lowered\n";
+    }
+    my $die = sub {
+        $self->_store_eval_error($self->_set_str_len($self->_str_const_parts(
+            "Can't call method \"$name\" on what is not an object\n", 'method on a non-object')));
+        $f->{dies}++;
+        $self->_set_terminator("  br label %$f->{catch}  ; a method on a non-object: caught by its eval");
+    };
+    if ($plain) {
+        $self->lower_value($obj);
+        $die->();
+    }
+    else {
+        my $slot;
+        if ($rs eq 'Scalar') { $slot = $self->lower_value($obj) }
+        else {
+            $slot = $self->_fresh;
+            $self->_emit("  $slot = load %Slot, %Slot* " . $self->_location_ptr($obj) . "  ; the invocant");
+        }
+        my $tag = $self->_slot_tag_of($slot);
+        my ($is_plain) = $self->_fresh;
+        my ($dies, $obj_l) = map { $self->_fresh_label("nonobj.$_.") } qw(dies object);
+        $self->_emit("  $is_plain = icmp ule i8 $tag, " . _slot_tag_value('Boolean') . "  ; not a reference?");
+        $self->_set_terminator("  br i1 $is_plain, label %$dies, label %$obj_l");
+        $self->_new_block($obj_l);
+        $self->{_need_exit} = 1;
+        $self->_emit("  call void \@exit(i32 255)  ; a method on an object of a run-time class is not lowered");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($dies);
+        $die->();
+    }
+    $self->_new_block($self->_fresh_label('nonobj.after.'));
+    return $self->{cache}{ $node->id } = $self->_build_slot('false', '0', 'Undef', 'after a die: unreached');
+}
+
 # Lowers a Call(dispatch_kind='method', name='new') node.
 # This is the canonical form of the New node: malloc + vtable bind + :param binding.
 # Inputs are the :param values; the class rides as the class_name attribute.
@@ -12844,6 +12905,12 @@ sub _lower_call_method {
         $node->set_target($was);
         die $err if $err;
         return $ref;
+    }
+    # A METHOD ON WHAT IS NOT AN OBJECT dies (`state $n` with no feature is
+    # `$n->state`).
+    if (!defined $node->class_name) {
+        my $r = $self->_lower_method_on_non_object($node, $obj_node);
+        return $r if defined $r;
     }
     # MOP-direct shape: the class rides as the class_name attribute.
     my $class_name  = $node->class_name

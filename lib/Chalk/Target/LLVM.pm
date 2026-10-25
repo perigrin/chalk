@@ -1667,6 +1667,15 @@ sub lower_with_elaboration {
     # Set these flags early so the prologue emits them even before body lowering.
     $ctx->require_class_support if defined $class_registry && %$class_registry;
 
+    # Whether the program reads $@ -- an input anywhere, but the slot of the
+    # store that clears it. (By inputs: a node's consumers need not list
+    # every value use.)
+    local $Chalk::Target::LLVM::Context::READS_ERROR = grep {
+        my $n = $_;
+        my @in = $n->inputs->@*;
+        shift @in if $n->operation eq 'EntryWrite';
+        grep { blessed($_) && $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq '@' } @in
+    } Chalk::Target::LLVM::Context::_program_nodes($return_node);
     # Whether the program selects a handle, before any print lowers.
     local $Chalk::Target::LLVM::Context::SELECTS = grep {
         $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'select'
