@@ -57,11 +57,19 @@ for my $case (
 # program is refused further on (a value nothing typed).
 for my $case (
     [ q{my @a; $a[1] = 1; my $s = ""; for my $x (@a) { $a[0] = 5; $s .= $x // "u" } print $s, "\n"}, qr/GAP: a reference to an element of an array that may grow/, 'an alias into an array a store may grow' ],
-    [ q{my %in = (a => [[1, 2], 3], b => [4]); my @dead; push @dead, qw(a b); my @seen; for my $d (@dead) { for my $i ($in{$d}->@*) { if (ref $i) { for my $e ($i->@*) { push @seen, "$d$e" } } else { push @seen, "$d$i" } } } print "@seen\n";}, qr/lattice TOP/, 'nested loops over an alias and a deref: refused, not cycling' ],
 ) {
     my ($src, $re, $name) = @$case;
     my $err = do { local $@; eval { through_llvm($src) }; $@ };
     like($err, $re, "$name: refused by name");
+}
+
+# THE NESTED LOOPS once refused as an untyped value: the innermost loop's
+# memory merge took a builtin (push) as its memory and was read as a value.
+# It is perl's answer.
+{
+    my $src = q{my %in = (a => [[1, 2], 3], b => [4]); my @dead; push @dead, qw(a b); my @seen; for my $d (@dead) { for my $i ($in{$d}->@*) { if (ref $i) { for my $e ($i->@*) { push @seen, "$d$e" } } else { push @seen, "$d$i" } } } print "@seen\n";};
+    my $want = qx($^X -e '$src');
+    is(eval { through_llvm($src) }, $want, "nested loops over an alias and a deref: perl's answer") or diag $@;
 }
 
 done_testing;

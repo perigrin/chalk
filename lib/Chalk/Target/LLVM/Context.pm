@@ -8153,6 +8153,11 @@ sub _is_memory_phi {
         # wholesale instead let an arm walk that cycles through, pvm 124)
         return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') =~ /\A(?:direct|method)\z/
             && !( defined $phi->memory && !$phi->memory );
+        # ...or a builtin that versions memory (a push, a sort that runs code),
+        # on a phi the producer says is memory (a value phi may merge a
+        # sort's result).
+        return 1 if $in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'builtin'
+            && $phi->can('memory') && $phi->memory;
         # a memory phi of a nested structure
         return 1 if $in->operation eq 'Phi' && _is_memory_phi($in, $seen);
     }
