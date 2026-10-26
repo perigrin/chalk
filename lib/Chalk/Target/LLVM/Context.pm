@@ -13653,7 +13653,10 @@ sub _lower_call_direct {
     # statement via process_control_node, once as the Return's value via
     # lower_value, both the SAME node — inlines the callee once instead of
     # re-running the effect chain and result subgraph a second time.
-    unless (@args) {
+    # A SIGNATURE CALLED WITH NOTHING takes its defaults: the binding below
+    # does that, and here its parameters stayed unbound (pvm 102).
+    my @no_arg_reads = @args ? () : eval { $self->_collect_positional_arg_reads($graph, $name) };
+    unless (@args || ( !$@ && $self->{_args_signature} && @no_arg_reads )) {
         # @_ READ AS A LIST with nothing passed is an empty list: `"c[@_]"`
         # called as `c()` reached ArgsSource unbound and refused.
         my @reads = eval { $self->_collect_positional_arg_reads($graph, $name) };
@@ -13702,7 +13705,13 @@ sub _lower_call_direct {
         for my $i (scalar(@args) .. $#declared) {
             die "GAP: direct call to '$name' passes " . scalar(@args) . " argument(s), too few "
               . "for its signature -- perl dies (Too few arguments).\n"
-                unless $read{$i} && defined $read{$i}->default_when;
+                unless $read{$i} && defined $read{$i}->default_when
+                    # A DEFAULT THAT RUNS CODE (`$x = g()`) is the body's: an if on
+                    # how many arguments @_ holds. The declared signature says the
+                    # position is optional.
+                    or ref $sig eq 'HASH' && ( $sig->{kind} // '' ) eq 'declared'
+                        && defined $sig->{mandatory}   # every scalar; the last `optional` default
+                        && $i >= $sig->{mandatory} - ( $sig->{optional} // 0 );
         }
         for my $i (0 .. $#args) {
             die "GAP: direct call to '$name': a signature default applied when the argument is "
@@ -13772,8 +13781,18 @@ sub _lower_call_direct {
             $self->{_arg_bind}{ refaddr($n) } = { ref => $arr, repr => 'Array' };
         }
     }
+    # A DEFAULT IS THE CALLEE'S, lowered in this frame: taken after the
+    # snapshot below, `$x * 3` made for one call served the next (f() then
+    # f(4) gave 4/6 for 4/12).
+    my %cache_before = $self->{cache}->%*;
     for my $r (@defaulted) {
         my $d = $r->inputs->[0];
+        # No default of its own: the body tests @_ and runs it (see the arity
+        # check); the parameter is not read when it is not passed.
+        unless (blessed($d)) {
+            $self->{_arg_bind}{ refaddr($r) } = { ref => $self->_build_slot('false', '0', 'Undef', "$name: not passed"), repr => 'Scalar' };
+            next;
+        }
         $self->{_arg_bind}{ refaddr($r) } = { ref => $self->lower_value($d), repr => $d->stamp };
     }
     my $args_arr = $args_array ? $self->_emit_array_of(\@args) : undef;
@@ -13801,7 +13820,6 @@ sub _lower_call_direct {
     # `f(3)+f(3)` passed before this fix by coincidence -- one cached
     # computation happens to be right for both sites -- which is why the corpus
     # case insists the arguments DIFFER.
-    my %cache_before = $self->{cache}->%*;
     my $ref = $inline->();
     $self->{cache}->%* = %cache_before;
     $self->_copy_out_written_args($name, $written, \@args, $args_arr) if $written;
