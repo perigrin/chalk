@@ -6843,13 +6843,33 @@ sub _prelower_loop_store_operands {
     my ($self, $loop_node) = @_;
     my $body_proj = _find_proj_consumer($loop_node, 0);
     return unless defined $body_proj;
-    my @body = _collect_branch_body($body_proj);
+    # THE WHOLE BODY: a store in a loop in it, or in an arm, is the body's too
+    # -- its aggregate made inside was made again after (older: "0 0;0 0").
+    my (@body, %in);
+    my @todo = _collect_branch_body($body_proj);
+    while (defined(my $n = shift @todo)) {
+        next if $in{ refaddr($n) }++;
+        push @body, $n;
+        next unless $n->operation =~ /\A(?:Loop|If)\z/;
+        push @todo, map { _collect_branch_body($_) }
+            grep { blessed($_) && $_->operation eq 'Proj' && !( $n->operation eq 'Loop' && $_->index != 0 ) }
+            ($n->consumers // [])->@*;
+    }
     for my $node (@body) {
         next unless $node->operation eq 'Assign';
         my ($target) = grep { blessed($_) && $_->operation eq 'Subscript' }
                             $node->inputs->@*;
         next unless defined $target;
-        $self->lower_value($target->inputs->[0]);   # container only
+        # ONE THE PASS MAKES (an element read at the loop key) is not the same
+        # every pass: it reaches the loop's phi, which is not made yet. Its
+        # aggregate is (`$r[$i]`'s @r): made in the body, it was made again
+        # after the loop, and the stores went to the one the body made.
+        my $c = $target->inputs->[0];
+        $c = $c->inputs->[0]
+            while blessed($c) && $c->operation =~ /\A(?:Subscript|PostfixDeref)\z/
+                && _reaches_an_unlowered_phi($self, $c);
+        next if !blessed($c) || _reaches_an_unlowered_phi($self, $c);
+        $self->lower_value($c);   # container only
     }
     # SO IS ANY LOOP-INVARIANT AGGREGATE THE BODY TOUCHES -- read, referenced,
     # handed to a call: a `my @a = qw(a b c)` first lowered by a read in the
