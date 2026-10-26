@@ -1711,6 +1711,9 @@ sub lower_value {
     # program point, so it is NOT program-point-ambiguous and must NOT re-read
     # (re-reading at the consumer would observe a LATER memory state). This is the
     # opposite of a bare mutable read (no memory input), which still re-reads.
+    die "GAP: a value a block eval's body made, read after the eval -- where a die "
+      . "leaves what it stored as it was, and nothing merges the two -- is not lowered" . ($ENV{DBG} ? " [$id]" : "") . "\n"
+        if $self->{_past_a_died_eval}{$id} && exists $self->{cache}{$id};
     if ($op eq 'Subscript' && exists $self->{cache}{$id}
             && defined $node->inputs->[2]) {
         return $self->{cache}{$id};
@@ -6409,11 +6412,11 @@ sub _wire_region_phis_with_preblock {
         my ($then_val, $else_val);
         ($then_val, $then_label) =
             $self->_lower_arm_in_tail($inputs->[$then_slot], $then_label, $then_vars, $then_cache);
-        $then_val = $self->_coerce_arm($inputs->[$then_slot], $then_val, $phi_repr,
+        ($then_val, $then_label) = $self->_coerce_arm($inputs->[$then_slot], $then_val, $phi_repr,
                                        $then_label, 'Region.Phi.then');
         ($else_val, $else_label) =
             $self->_lower_arm_in_tail($inputs->[$else_slot], $else_label, $else_vars, $else_cache);
-        $else_val = $self->_coerce_arm($inputs->[$else_slot], $else_val, $phi_repr,
+        ($else_val, $else_label) = $self->_coerce_arm($inputs->[$else_slot], $else_val, $phi_repr,
                                        $else_label, 'Region.Phi.else');
         push @wired, [$phi_node, $then_val, $else_val];
     }
@@ -6440,22 +6443,32 @@ sub _wire_region_phis_with_preblock {
 sub _coerce_arm {
     my ($self, $arm_node, $arm_val, $phi_repr, $arm_label, $what) = @_;
 
-    return $arm_val unless defined $phi_repr && defined $arm_val;
-    return $arm_val unless ref($arm_node) && $arm_node isa Chalk::IR::Node;
+    return wantarray ? ($arm_val, $arm_label) : $arm_val unless defined $phi_repr && defined $arm_val;
+    return wantarray ? ($arm_val, $arm_label) : $arm_val unless ref($arm_node) && $arm_node isa Chalk::IR::Node;
     # A PRINT IS ITS i1, whatever its stamp says: B::SoN stamps it Scalar,
     # and an if/else ending a sub merged two prints' i1s in a %Slot phi --
     # lli rejected the module (review of 4e1e9969).
     my $arm_repr = $arm_node->operation eq 'Print' ? 'Boolean' : $self->_repr_of($arm_node);
-    return $arm_val unless defined $arm_repr && $arm_repr ne $phi_repr;
+    return wantarray ? ($arm_val, $arm_label) : $arm_val unless defined $arm_repr && $arm_repr ne $phi_repr;
 
     my $idx = $self->_find_block_idx($arm_label);
-    return $arm_val unless defined $idx;
+    return wantarray ? ($arm_val, $arm_label) : $arm_val unless defined $idx;
     my $saved = $self->{current_idx};
     $self->{current_idx} = $idx;
+    # A COERCION THAT OPENS BLOCKS (an Int stringified loops over its digits)
+    # leaves the arm in its last one: the arm's own branch to the merge moves
+    # there, and the phi names it -- left in the first, the merge named the
+    # wrong predecessor and the last block had no terminator (invalid IR).
+    my $arm_term = $self->{blocks}[$idx]{terminator};
     my $ref = Chalk::Target::LLVM::Context::_emit_coercion(
         $self, $arm_val, $arm_repr, $phi_repr, $what);
+    my $end_label = $arm_label;
+    if ($self->{current_idx} != $idx) {
+        $self->_set_terminator($arm_term);
+        $end_label = $self->_current_block_label;
+    }
     $self->{current_idx} = $saved;
-    return $ref;
+    return wantarray ? ($ref, $end_label) : $ref;
 }
 
 # _lower_arm_in_tail($arm_node, $tail_label, $var_snapshot) -> ($val, $end_label)
@@ -7222,6 +7235,9 @@ sub _emit_unwind_terminator {
         && !($f && ($f->{region}->eval_id // '') eq $unwind->eval_id);
     if ($f) {
         $self->_store_eval_error($self->_die_message($unwind));
+        # What was made before the first die dominates the join: only what
+        # comes after it may not.
+        $f->{cached_at_first_die} //= { map { $_ => 1 } keys %{ $self->{cache} } };
         $f->{dies}++;
         $self->_set_terminator("  br label %$f->{catch}  ; $why: caught by its eval");
         return;
@@ -7247,7 +7263,8 @@ sub open_eval {
       . "file and line, and an unused one is not in the graph\n"
         if $region->eval_may_die;
     push $self->{_eval_frames}->@*,
-        { region => $region, catch => $self->_fresh_label('eval_catch'), dies => 0, held => [] };
+        { region => $region, catch => $self->_fresh_label('eval_catch'), dies => 0, held => [],
+          cached_before => { map { $_ => 1 } keys %{ $self->{cache} } } };
     $self->{_eval_open_now}{ refaddr($region) } = 1;
     return;
 }
@@ -7299,6 +7316,38 @@ sub close_eval {
             $self->_emit("  $r = phi %Slot [ $normal{ $phi->id }, %$from_body ], "
               . "[ $caught{ $phi->id }, %$f->{catch} ]  ; eval value");
             $self->{cache}{ $phi->id } = $r;
+        }
+        # A VALUE THE BODY MADE, READ PAST THE JOIN by a later merge (`try {
+        # $c = g() } catch { $c = "x" }` reads g's value on the no-error arm):
+        # made in the body, it does not dominate the join. It reaches past it
+        # through a phi -- undef along a die, where no path reads it.
+        my %made_here = map { $_ => 1 } grep { !$f->{cached_before}{$_} } keys %{ $self->{cache} };
+        my %done;
+        for my $later (grep { blessed($_) && $_->operation eq 'Phi' && !_is_memory_phi($_) } @Chalk::Target::LLVM::Context::PROGRAM) {
+            for my $v (grep { blessed($_) && $made_here{ $_->id } } $later->inputs->@*) {
+                next if $done{ $v->id }++ || $v->operation eq 'Phi';
+                my $repr = $self->_repr_of($v) // next;
+                my $ty   = eval { _repr_to_llvm_type($repr) } // next;
+                my $r = $self->_fresh;
+                $self->_emit("  $r = phi $ty [ $self->{cache}{ $v->id }, %$from_body ], [ undef, %$f->{catch} ]"
+                  . "  ; eval: a body value past the join");
+                $self->{cache}{ $v->id } = $r;
+            }
+        }
+        # ANYTHING ELSE THE BODY MADE does not dominate the join either. A
+        # constant is made again where it is next used; any other value read
+        # past the join is refused: a variable the body stored keeps its old
+        # value on a die, and nothing here merges the two (`eval { $c = g() };
+        # print $c` read the body's value straight: invalid IR).
+        my %node_of = map { $_->id => $_ } grep { blessed($_) } @Chalk::Target::LLVM::Context::PROGRAM;
+        for my $id (grep { !$done{$_} && exists $self->{cache}{$_}
+                           && !( $f->{cached_at_first_die} // {} )->{$_} } keys %made_here) {
+            my $n = $node_of{$id};
+            next if $n && $n->operation eq 'Phi' && blessed($n->region) && $n->region->id eq $region->id;
+            if ($n && $n->operation eq 'Constant') { delete $self->{cache}{$id}; next }
+            # A `my @a` / `my %h` is made at its graph's entry: it dominates.
+            next if $n && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) =~ /\A[\@%]\z/;
+            $self->{_past_a_died_eval}{$id} = 1;
         }
     }
 
@@ -7848,18 +7897,12 @@ sub _process_loop_body {
     return unless defined $body_proj;
 
     my @body_nodes = _collect_branch_body($body_proj);
+    # EVERY STATEMENT through process_control_node, as an if arm's are: an
+    # eval in the body opens there (and its join closes it), a die in it is
+    # a branch to that eval's end. Lowered by lower_value, a block eval in a
+    # loop body was never opened (pvm 171-173).
     for my $body_node (@body_nodes) {
-        my $op = $body_node->can('operation') ? $body_node->operation : '';
-        if ($op eq 'If' || $op eq 'Loop') {
-            # Dispatch control-flow nodes through process_control_node so that
-            # nested If/Loop structures are handled by _process_if_node /
-            # _process_loop_node, which emit basic blocks and phi instructions.
-            # lower_value(If) only returns undef without processing branches.
-            $self->process_control_node($body_node);
-        }
-        else {
-            $self->lower_value($body_node);
-        }
+        $self->process_control_node($body_node);
     }
 }
 
@@ -12913,6 +12956,9 @@ sub _lower_method_on_non_object {
     my $die = sub {
         $self->_store_eval_error($self->_set_str_len($self->_str_const_parts(
             "Can't call method \"$name\" on what is not an object\n", 'method on a non-object')));
+        # What was made before the first die dominates the join: only what
+        # comes after it may not.
+        $f->{cached_at_first_die} //= { map { $_ => 1 } keys %{ $self->{cache} } };
         $f->{dies}++;
         $self->_set_terminator("  br label %$f->{catch}  ; a method on a non-object: caught by its eval");
     };
@@ -13732,6 +13778,7 @@ sub _lower_inlined_structure {
     local $self->{elab}                  = $elab;
     local $self->{elab_phi_by_block}     = _index_elab_phis($elab);
     local $self->{cache}                 = {};
+    local $self->{_past_a_died_eval}     = {};   # keyed by id, as {cache} is
     local $self->{var_table}             = {};
     local $self->{_mut_read_memo}        = {};
     local $self->{_frozen_reads}         = {};
@@ -13825,6 +13872,7 @@ sub _lower_inlined_effects_then_value {
     # second time: `print "x"` printed twice (review of 4e1e9969). This is the
     # invariant the PRECONDITION above asked to be re-established.
     local $self->{cache}         = {};
+    local $self->{_past_a_died_eval} = {};   # keyed by id, as {cache} is
     local $self->{_frozen_reads} = {};   # keyed by id, as {cache} is
     local $self->{_empty_arrays} = {};   # the callee's `my @a`, fresh per call
     local $self->{_local_slots}  = {};   # and its `my $x` kept in memory
