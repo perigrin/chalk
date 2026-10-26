@@ -6845,10 +6845,22 @@ sub _process_branch_from_if {
     # The merge lowers its phi arms in the arm's tail, so the dropped values
     # are kept aside (_arm_dropped) for _lower_arm_in_tail to put back there.
     my %stmt = map { $_->id => 1 } @body_nodes;
-    for my $id (grep { !$cached_before{$_} && !$stmt{$_} } keys %{ $self->{cache} }) {
-        $self->{_arm_dropped}{$id} = $self->{cache}{$id};
-        delete $self->{cache}{$id};
+    my $drop_arm = sub {
+        for my $id (grep { !$cached_before{$_} && !$stmt{$_} } keys %{ $self->{cache} }) {
+            $self->{_arm_dropped}{$id} = $self->{cache}{$id};
+            delete $self->{cache}{$id};
+        }
+    };
+    # A `next` or `last` arm takes what the pass carries FROM the arm -- a
+    # loop in it made its phis here -- so that is read before the arm's
+    # values are dropped.
+    if (defined $break_exit && !defined _find_unwind_consumer($proj)) {
+        $self->_record_break_block($break_exit, $proj);
+        $drop_arm->();
+        $self->_set_terminator("  br label %$break_exit  ; if branch $branch_idx: mid-body last or next");
+        return;
     }
+    $drop_arm->();
 
     # A `die` arm carries an Unwind whose control is this Proj: the arm aborts
     # (exit + unreachable) and does NOT rejoin the merge. Emit the abort as this
@@ -6899,9 +6911,12 @@ sub _arm_loop_exit_label {
         my @c = grep { blessed($_) } ($n->consumers // [])->@*;
         push @arm_regions, grep { $_->operation eq 'Region' } @c;
         my ($next) = grep {
-            $_->operation !~ /\A(?:Region|If|Loop|Proj|Phi)\z/
+            $_->operation !~ /\A(?:Region|Proj|Phi)\z/
                 && $_->can('control_in') && blessed($_->control_in) && refaddr($_->control_in) == refaddr($n)
         } @c;
+        # A loop or an if in the arm: the arm goes on past its merge.
+        $next = $next->region
+            if blessed($next) && $next->operation =~ /\A(?:If|Loop)\z/ && $next->can('region');
         $n = $next;
     }
     for my $c (@arm_regions) {

@@ -50,6 +50,10 @@ for my $c (
     [ q{my @o; for my $x (qw(a b c)) { if ($x eq "b") { push @o, "B"; last } push @o, $x } print "@o\n";} ],
     [ q{my $s = ""; my $i = 0; while ($i < 9) { $i++; if ($i == 4) { $s .= "!"; last } $s .= $i } print "$s\n";} ],
     [ q{my @o; for my $x (qw(a b c d)) { if ($x eq "b") { push @o, "B"; next } if ($x eq "c") { push @o, "C"; last } push @o, $x } print "@o\n";} ],
+    # A loop, or an if, inside the arm before its `next`: the arm's end is
+    # past that structure's merge (pvm 155).
+    [ q{my $o = ""; for my $p (0 .. 3) { if ($p == 2) { for my $k (1 .. 2) { $o .= "<$k>" } next } $o .= $p } print "$o\n";} ],
+    [ q{my $p = 0; my $o = ""; while ($p < 6) { if ($p == 2) { if (length($o) < 5) { $o .= "!" } $p += 2; next } $o .= $p; $p++ } print "$o\n";} ],
 ) {
     my ($src) = @$c;
     my $want = qx($^X -e '$src');
