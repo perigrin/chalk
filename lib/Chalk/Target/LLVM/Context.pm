@@ -15519,16 +15519,20 @@ sub _lower_regex_subst {
     my $subj_node = $node->inputs->[0];
     my $repr      = _require_repr($node, 'RegexSubst');
 
+    # A COMPUTED REPLACEMENT arrives as an operand between the subject and
+    # the memory version, the `replacement` field then "": B::SoN computes it
+    # in the arm of the match (captures, or the /e expression) and merges it
+    # with undef. In the matched block it is that arm's value, spliced in.
+    my @rest = grep { blessed($_) } @{ $node->inputs }[ 1 .. $#{ $node->inputs } ];
+    my $repl_node = ( @rest && !_is_memory_version($rest[0]) ) ? shift @rest : undef;
+    die "GAP: s/// with more than one computed replacement operand is not lowered\n"
+        if @rest > 1 || ( @rest == 1 && !_is_memory_version($rest[0]) );
+
+    # /e is the producer's to compute; with the value here, it is spent.
     my $flags = $node->flags // '';
+    $flags =~ s/e//g if $repl_node;
     die "GAP: s///$flags flags not yet supported by the G6 sub-compiler "
       . "(/g is a tracked follow-up)" if length $flags;
-
-    # A COMPUTED REPLACEMENT arrives as an operand between the subject and
-    # the memory version, the `replacement` field then "". Lowered from the
-    # field, `s/(\d)/<$1>/` deleted the digit.
-    my @rest = grep { blessed($_) } @{ $node->inputs }[ 1 .. $#{ $node->inputs } ];
-    die "GAP: s/// with a computed replacement is not lowered -- only a literal one\n"
-        if @rest > 1 || ( @rest == 1 && !_is_memory_version($rest[0]) );
 
     # s/// READS ITS SUBJECT AS A STRING: a Scalar (a location's Slot) is
     # read as one, by its tag. Taken apart as a %Str, lli rejected it.
@@ -15541,8 +15545,8 @@ sub _lower_regex_subst {
              . "the matcher needs the subject's byte length.";
 
     my $compiled = _compile_regex_pattern($node->pattern, $node->flags);
-    my $segs     = _parse_subst_replacement($node->replacement // '',
-                                            $compiled->{ngroups} // 0);
+    my $segs     = $repl_node ? [ { kind => 'val' } ]
+                 : _parse_subst_replacement($node->replacement // '', $compiled->{ngroups} // 0);
 
     my $match = $self->_emit_regex_matcher($subj_ptr, $subj_len, $compiled, 'RegexSubst');
 
@@ -15562,6 +15566,18 @@ sub _lower_regex_subst {
     my $lit_total = 0;
     $lit_total += length($_->{text}) for grep { $_->{kind} eq 'lit' } @$segs;
     my $repl_len = $lit_total;   # SSA ref or constant
+    for my $seg (grep { $_->{kind} eq 'val' } @$segs) {
+        # Defined here: the match took the arm that computed it.
+        my $v    = $self->lower_value($repl_node);
+        my $from = $self->_repr_of($repl_node) // '';
+        $v = $self->_emit_coercion($v, $from, 'Str', 's/// computed replacement') if $from ne 'Str';
+        my ($vp, $vl) = $self->_str_parts($v);
+        die "GAP: s/// computed replacement has no tracked length\n" unless defined $vl;
+        @$seg{qw(ptr len_ref)} = ($vp, $vl);
+        my $acc = $self->_fresh;
+        $self->_emit("  $acc = add i64 $repl_len, $vl  ; RegexSubst: + computed replacement");
+        $repl_len = $acc;
+    }
     for my $seg (grep { $_->{kind} eq 'cap' } @$segs) {
         my $n = $seg->{n};
         my $clen = $self->_fresh;
@@ -15601,6 +15617,12 @@ sub _lower_regex_subst {
             $self->_emit("  $next = add i64 $cursor, $blen  ; RegexSubst: advance cursor");
             $cursor = $next;
         }
+        elsif ($seg->{kind} eq 'val') {
+            $self->_emit("  call i8* \@memcpy(i8* $dest, i8* $seg->{ptr}, i64 $seg->{len_ref})  ; RegexSubst: copy computed replacement");
+            my $next = $self->_fresh;
+            $self->_emit("  $next = add i64 $cursor, $seg->{len_ref}  ; RegexSubst: advance cursor");
+            $cursor = $next;
+        }
         else {
             my $n = $seg->{n};
             my $src = $self->_fresh;
@@ -15623,14 +15645,17 @@ sub _lower_regex_subst {
     my $nul_ptr = $self->_fresh;
     $self->_emit("  $nul_ptr = getelementptr inbounds i8, i8* $buf, i64 $new_len  ; RegexSubst: NUL slot");
     $self->_emit("  store i8 0, i8* $nul_ptr  ; RegexSubst: NUL-terminate");
+    # The matched path ends in the block current NOW: reading a computed
+    # replacement by its tag opens blocks of its own.
+    my $lbl_do_end = $self->_current_block_label;
     $self->_set_terminator("  br label \%$lbl_done");
 
     # Merge: spliced buffer on match, the original subject otherwise.
     $self->_new_block($lbl_done);
     my $res = $self->_fresh;
-    $self->_emit("  $res = phi i8* [ $buf, \%$lbl_do ], [ $subj_ptr, \%$lbl_pre ]  ; RegexSubst: result");
+    $self->_emit("  $res = phi i8* [ $buf, \%$lbl_do_end ], [ $subj_ptr, \%$lbl_pre ]  ; RegexSubst: result");
     my $res_len = $self->_fresh;
-    $self->_emit("  $res_len = phi i64 [ $new_len, \%$lbl_do ], [ $subj_len, \%$lbl_pre ]  ; RegexSubst: result length");
+    $self->_emit("  $res_len = phi i64 [ $new_len, \%$lbl_do_end ], [ $subj_len, \%$lbl_pre ]  ; RegexSubst: result length");
 
     $res = $self->_set_str_len($res, $res_len);
     # A LOCATION'S s/// IS STORED BACK: the RegexSubst is its next memory
