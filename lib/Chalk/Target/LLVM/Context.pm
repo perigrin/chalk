@@ -3359,6 +3359,13 @@ sub _emit_coercion {
         $self->_emit("  $cnt = load i64, i64* $cp");
         $self->_emit("  $ref = icmp ne i64 $cnt, 0  ; $what: holds anything?");
     }
+    # AN ARRAY OR HASH AS A NUMBER is its count (`$i < @_`, `@ARGV + 3`).
+    elsif (($from eq 'Array' || $from eq 'Hash') && ($to eq 'Int' || $to eq 'Num')) {
+        my ($cp, $cnt) = ($self->_fresh, $self->_fresh);
+        $self->_emit("  $cp = getelementptr inbounds %$from, %$from* $input_ref, i32 0, i32 0  ; $what: count ptr");
+        $self->_emit("  " . ( $to eq 'Int' ? $ref : $cnt ) . " = load i64, i64* $cp  ; $what: scalar context = element count");
+        $self->_emit("  $ref = sitofp i64 $cnt to " . _repr_to_llvm_type('Num') . "  ; $what: the count as a Num") if $to eq 'Num';
+    }
     elsif ($from eq 'Str' && $to eq 'Num') {
         my ($ptr_ref, $tracked_len) = $self->_str_parts($input_ref);
         my $len_ref = $tracked_len // 0;
@@ -6775,7 +6782,9 @@ sub _prelower_loop_drain_operands {
             # observe the drained/corrupted array, not the value it expects. GAP
             # loudly on that shape rather than mislower. A bare ArrayRef literal
             # drained-only has exactly its drain Calls as consumers.
-            for my $u (($array->consumers // [])->@*) {
+            # A FILL (push) is no drain: the array grows, and what reads it at
+            # its own version reads it. Only a shift/pop empties it in place.
+            for my $u ( ( ( $n->name // '' ) =~ /\A(?:shift|pop)\z/ ? ($array->consumers // []) : [] )->@*) {
                 next unless blessed($u);
                 next if $self->_is_array_mutating_call($u);   # a drain Call: fine
                 # A READ AT ITS OWN MEMORY VERSION is frozen there
@@ -13966,6 +13975,8 @@ sub _collect_positional_arg_reads {
                     my $cop = $c->operation;
                     # Counted, tested, or copied into a hash: reads.
                     next if $cop =~ /\A(?:Count|Exists|HashLiteral)\z/;
+                    # Read as a number or a truth: its count.
+                    next if $cop eq 'Coerce' && ( $c->to_repr // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/;
                     next if $cop eq 'Call' && ( $c->dispatch_kind // '' ) eq 'builtin'
                         && ( $c->name // '' ) =~ /\A(?:join|sort|reverse)\z/;
                     next if $cop eq 'Assign' && blessed($c->inputs->[0])

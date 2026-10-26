@@ -46,6 +46,9 @@ for my $c (
     [ q{my @o = (0); for my $x (qw(a b c)) { if ($x eq "b") { $o[0] += 10 } else { $o[0] += 1 } } print $o[0], "\n";} ],
     [ q{my @o = (0); my $i = 0; while ($i < 3) { $i++; next if $i == 2; $o[0] += 1 } print $o[0], "\n";} ],
     [ q{sub f { my @o = (0); for my $x (@_) { next if $x eq "b"; $o[0] += 1 } $o[0] } print f(qw(a b c)), f(qw(b)), "\n";} ],
+    # A loop that FILLS an array (push) carries memory now; the array walked
+    # after it is no drained one (pvm 123 went GAP when the producer added it).
+    [ q{package F { sub new { bless { n => { a => 1, b => 2, c => 3 } }, shift } sub get { $_[0]{n}{$_[1]} } sub drop { delete $_[0]{n}{$_[1]} } } my $f = F->new; my @dead; for my $k (sort keys $f->{n}->%*) { push @dead, $k unless $k eq "b" } my @got; for my $d (@dead) { push @got, $f->get($d); $f->drop($d) } print "@got ", join(",", sort keys $f->{n}->%*), "\n";} ],
     # Not hoisted: the empty list a grep collects into is new each pass (pvm 159).
     [ q{my $out = ""; for my $k (qw(x y)) { my @p = grep { $_ ne "b" } qw(a b c); next unless @p; $out .= "$k@p " } print "$out\n";} ],
     [ q{my $n = length("ab"); my @o = ($n); for my $x (qw(a b c)) { next if $x eq "b"; $o[0] += 1 } print $o[0], "\n";} ],
