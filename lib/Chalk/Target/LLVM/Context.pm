@@ -3977,74 +3977,10 @@ sub _lower_assign {
                 or die "GAP: Assign(Hash-lvalue) key (ref=$wkey_ref) has no tracked "
                      . "length — would emit a 0-length memcmp matching any entry.";
 
-            my $cnt_ptr = $self->_fresh;
-            my $ent_ptr = $self->_fresh;
-            my $count   = $self->_fresh;
-            my $ents    = $self->_fresh;
-            $self->_emit("  $cnt_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 0  ; Assign(Hash-lvalue): count ptr");
-            $self->_emit("  $ent_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 2  ; Assign(Hash-lvalue): entries ptr");
-            $self->_emit("  $count = load i64, i64* $cnt_ptr  ; Assign(Hash-lvalue): load count");
-            $self->_emit("  $ents  = load %HashEntry*, %HashEntry** $ent_ptr  ; Assign(Hash-lvalue): load entries");
-
             # THE VALUE, BOXED ONCE, before the search: its defined bit, its
-            # reading (the tag a read decodes by), its payload word. Any
-            # scalar; a Scalar is its own Slot's three fields.
+            # reading (the tag a read decodes by), its payload word.
             my ($wdef, $wtag, $wpay) = $self->_slot_fields_of_value($rhs, $rhs_ref, 'Assign(Hash-lvalue)');
-            my $lbl_wins  = $self->_fresh_label('hwins');
-            my $lbl_wloop = $self->_fresh_label('hwalp');
-            my $lbl_wchk  = $self->_fresh_label('hwchk');
-            my $lbl_wcmp  = $self->_fresh_label('hwcmp');
-            my $lbl_wupd  = $self->_fresh_label('hwupd');
-            my $lbl_wnxt  = $self->_fresh_label('hwnxt');
-            my $lbl_wend  = $self->_fresh_label('hwend');
-            my $lbl_wpre  = $self->_current_block_label;
-            my $wi_next   = $self->_fresh;
-
-            $self->_set_terminator("  br label \%$lbl_wloop");
-            $self->_new_block($lbl_wloop);
-            my $wi_phi = $self->_fresh;
-            $self->_emit("  $wi_phi = phi i64 [ 0, \%$lbl_wpre ], [ $wi_next, \%$lbl_wnxt ]  ; Assign(Hash-lvalue): loop counter");
-            my $wcond = $self->_fresh;
-            $self->_emit("  $wcond = icmp ult i64 $wi_phi, $count  ; Assign(Hash-lvalue): i < count?");
-            $self->_set_terminator("  br i1 $wcond, label \%$lbl_wchk, label \%$lbl_wins");
-
-            $self->_new_block($lbl_wchk);
-            my $went_p   = $self->_fresh;
-            my $went_kpp = $self->_fresh;
-            my $went_klp = $self->_fresh;
-            my $went_kp  = $self->_fresh;
-            my $went_kl  = $self->_fresh;
-            $self->_emit("  $went_p   = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $wi_phi  ; Assign(Hash-lvalue): entry ptr");
-            $self->_emit("  $went_kpp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 " . _he_idx('key_ptr') . "  ; Assign(Hash-lvalue): key_ptr field");
-            $self->_emit("  $went_klp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 " . _he_idx('key_len') . "  ; Assign(Hash-lvalue): key_len field");
-            $self->_emit("  $went_kp  = load i8*,  i8**  $went_kpp  ; Assign(Hash-lvalue): entry key ptr");
-            $self->_emit("  $went_kl  = load i64,  i64*  $went_klp  ; Assign(Hash-lvalue): entry key len");
-            my $wlen_eq = $self->_fresh;
-            $self->_emit("  $wlen_eq = icmp eq i64 $went_kl, $wkey_len  ; Assign(Hash-lvalue): len eq");
-            $self->_set_terminator("  br i1 $wlen_eq, label \%$lbl_wcmp, label \%$lbl_wnxt");
-
-            $self->_new_block($lbl_wcmp);
-            my $wcmp_res  = $self->_fresh;
-            my $wis_match = $self->_fresh;
-            $self->_emit("  $wcmp_res  = call i32 \@memcmp(i8* nocapture readonly $went_kp, i8* nocapture readonly $wkey_ref, i64 $wkey_len)  ; Assign(Hash-lvalue): key memcmp");
-            $self->_emit("  $wis_match = icmp eq i32 $wcmp_res, 0  ; Assign(Hash-lvalue): key match?");
-            $self->_set_terminator("  br i1 $wis_match, label \%$lbl_wupd, label \%$lbl_wnxt");
-
-            $self->_new_block($lbl_wupd);
-            $self->_store_hash_value($went_p, $wdef, $wtag, $wpay, 'Assign(Hash-lvalue): update');
-            $self->_set_terminator("  br label \%$lbl_wend");
-
-            $self->_new_block($lbl_wnxt);
-            $self->_emit("  $wi_next = add i64 $wi_phi, 1  ; Assign(Hash-lvalue): i++");
-            $self->_set_terminator("  br label \%$lbl_wloop");
-
-            # A KEY NOT THERE IS ADDED. The search used to fall through to the
-            # end, and `$h->{b} = 2` on a hash without b stored nothing.
-            $self->_new_block($lbl_wins);
-            $self->_emit_hash_insert($hash_ref, $wkey_ref, $wkey_len, $wdef, $wtag, $wpay);
-            $self->_set_terminator("  br label \%$lbl_wend");
-
-            $self->_new_block($lbl_wend);
+            $self->_emit_hash_upsert($hash_ref, $wkey_ref, $wkey_len, $wdef, $wtag, $wpay);
 
             $self->{cache}{ $node->id } = $rhs_ref;
             return $rhs_ref;
@@ -8856,6 +8792,69 @@ sub _lower_array_ref {
     return $ref;
 }
 
+# _lower_hash_from_pairs($node) -> a hash built pair by pair, a key seen again
+# replacing its value, a key with no value after it undef: from its pairs as
+# written, or -- a list among them (`@_`, an array, a map) -- from them all
+# flattened, walked two at a time at run time.
+sub _lower_hash_from_pairs {
+    my ($self, $node) = @_;
+    my @in = $node->inputs->@*;
+    my ($hb, $hash) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $hb = call i8* \@malloc(i64 " . _sizeof_llvm_type('%Hash') . ")  ; hash from pairs: header");
+    $self->_emit("  $hash = bitcast i8* $hb to %Hash*");
+    $self->_emit("  store %Hash zeroinitializer, %Hash* $hash  ; empty: no entries, grown on insert");
+    my $undef_tag = _slot_tag_value('Undef');
+    if (!grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Hash|Array|List)\z/ } @in) {
+        for (my $i = 0; $i < @in; $i += 2) {
+            my ($kp, $kl) = $self->_str_parts($self->_hash_key_str($in[$i]));
+            my @v = $i + 1 < @in
+                ? $self->_slot_fields_of_value($in[$i + 1], $self->lower_value($in[$i + 1]), "hash value [$i]")
+                : ('false', $undef_tag, '0');
+            $self->_emit_hash_upsert($hash, $kp, $kl, @v);
+        }
+    }
+    else {
+        my $flat = $self->_emit_flattened_array_of(\@in);
+        my ($lp, $len, $ep, $els, $ip) = map { $self->_fresh } 1 .. 5;
+        $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $flat, i32 0, i32 0");
+        $self->_emit("  $len = load i64, i64* $lp  ; hash from a list: its length");
+        $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $flat, i32 0, i32 2");
+        $self->_emit("  $els = load %Slot*, %Slot** $ep");
+        $self->_emit_entry("  $ip = alloca i64  ; hash from a list: index");
+        $self->_emit("  store i64 0, i64* $ip");
+        my ($head, $body, $done) = map { $self->_fresh_label("hlist.$_.") } qw(head body done);
+        $self->_set_terminator("  br label %$head");
+        $self->_new_block($head);
+        my ($i, $more) = ($self->_fresh, $self->_fresh);
+        $self->_emit("  $i = load i64, i64* $ip");
+        $self->_emit("  $more = icmp ult i64 $i, $len  ; hash from a list: another pair?");
+        $self->_set_terminator("  br i1 $more, label %$body, label %$done");
+        $self->_new_block($body);
+        my ($kptr, $kslot, $i1, $has, $vi, $vptr, $vslot, $def, $tag, $pay, $i2) = map { $self->_fresh } 1 .. 11;
+        $self->_emit("  $kptr = getelementptr inbounds %Slot, %Slot* $els, i64 $i");
+        $self->_emit("  $kslot = load %Slot, %Slot* $kptr  ; hash from a list: key");
+        my ($kp, $kl) = $self->_str_parts($self->_emit_read_slot_as($kslot, 'Str', 'hash from a list: key'));
+        $self->_emit("  $i1 = add i64 $i, 1");
+        $self->_emit("  $has = icmp ult i64 $i1, $len  ; hash from a list: a value after the key?");
+        $self->_emit("  $vi = select i1 $has, i64 $i1, i64 $i");
+        $self->_emit("  $vptr = getelementptr inbounds %Slot, %Slot* $els, i64 $vi");
+        $self->_emit("  $vslot = load %Slot, %Slot* $vptr  ; hash from a list: value");
+        my ($d0, $t0, $p0) = ($self->_slot_defined_bit($vslot), $self->_slot_tag_of($vslot), $self->_slot_payload_of($vslot));
+        $self->_emit("  $def = and i1 $has, $d0  ; none: undef");
+        $self->_emit("  $tag = select i1 $has, i8 $t0, i8 $undef_tag");
+        $self->_emit("  $pay = select i1 $has, i64 $p0, i64 0");
+        $self->_emit_hash_upsert($hash, $kp, $kl, $def, $tag, $pay);
+        $self->_emit("  $i2 = add i64 $i, 2");
+        $self->_emit("  store i64 $i2, i64* $ip");
+        $self->_set_terminator("  br label %$head");
+        $self->_new_block($done);
+    }
+    return $self->{cache}{ $node->id } = $hash if ( $node->stamp // 'HashRef' ) eq 'Hash';
+    my $ref = $self->_fresh;
+    $self->_emit("  $ref = bitcast %Hash* $hash to i8*  ; hash from pairs, as a reference");
+    return $self->{cache}{ $node->id } = $ref;
+}
+
 # _lower_hash_ref: canonical ref-producing hash constructor.
 # inputs = [key0, val0, key1, val1, ...]. Returns i8* (HashRef repr).
 # Consumers resolve the typed %Hash* at their own use via _container_ptr.
@@ -8867,17 +8866,25 @@ sub _lower_hash_ref {
     $self->{_need_memcmp}          = 1;
 
     my $inputs = $node->inputs;
-    # A HASH SPREAD IN IT (`{ %a }`) is a copy of that hash; one among other
-    # pairs is refused. Counted as pairs, `{ %a }` was half a pair.
-    if (grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Hash|Array|List)\z/ } @$inputs) {
-        die "GAP: a hash literal that flattens a list among its pairs is not lowered\n"
-            unless @$inputs == 1 && ( $inputs->[0]->stamp // '' ) eq 'Hash';
+    # A HASH SPREAD IN IT (`{ %a }`) is a copy of that hash. Counted as pairs,
+    # `{ %a }` was half a pair.
+    my $flattens = grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Hash|Array|List)\z/ } @$inputs;
+    if ($flattens && @$inputs == 1 && ( $inputs->[0]->stamp // '' ) eq 'Hash') {
         my $copy = $self->_emit_aggregate_copy($self->_container_ptr($inputs->[0], 'Hash'), 'Hash');
         return $self->{cache}{ $node->id } = $copy if ( $node->stamp // '' ) eq 'Hash';
         my $ref = $self->_fresh;
         $self->_emit("  $ref = bitcast %Hash* $copy to i8*  ; { %h }: a copy, as a reference");
         return $self->{cache}{ $node->id } = $ref;
     }
+    # EACH ENTRY ITS OWN KEY only when every key is a distinct constant, the
+    # pairs whole, and nothing flattens: then the literal is its entries. Any
+    # other is built pair by pair, a key seen again replacing its value --
+    # entry by entry, `(a => 1, a => 3)` kept both and read 1.
+    my %seen;
+    my @keys = @$inputs[ grep { !( $_ % 2 ) } 0 .. $#$inputs ];
+    return $self->_lower_hash_from_pairs($node)
+        if $flattens || @$inputs % 2
+        || grep { !( blessed($_) && $_->operation eq 'Constant' && defined $_->value ) || $seen{ $_->value }++ } @keys;
     my $npairs = scalar(@$inputs) / 2;
 
     # Sized by LLVM from %HashEntry: it embeds a slot's worth of value fields,
@@ -9482,8 +9489,50 @@ sub _emit_flattened_array_of {
             $self->_emit_each_element_ref_into($acc, $in);
             next;
         }
+        # A HASH IN A LIST is its pairs, key then value, in its entries' order
+        # (pvm 176: `{ %$c, $n => 1 }`).
+        if ($s eq 'Hash') {
+            my $h = $self->_container_ptr($in, 'Hash');
+            my ($cp, $cnt, $ep, $ents, $ip) = map { $self->_fresh } 1 .. 5;
+            $self->_emit("  $cp = getelementptr inbounds %Hash, %Hash* $h, i32 0, i32 0");
+            $self->_emit("  $cnt = load i64, i64* $cp  ; list: a hash's pairs");
+            $self->_emit("  $ep = getelementptr inbounds %Hash, %Hash* $h, i32 0, i32 2");
+            $self->_emit("  $ents = load %HashEntry*, %HashEntry** $ep");
+            $self->_emit_entry("  $ip = alloca i64  ; list: a hash's entry index");
+            $self->_emit("  store i64 0, i64* $ip");
+            my ($head, $body, $done) = map { $self->_fresh_label("hflat.$_.") } qw(head body done);
+            $self->_set_terminator("  br label %$head");
+            $self->_new_block($head);
+            my ($i, $more) = ($self->_fresh, $self->_fresh);
+            $self->_emit("  $i = load i64, i64* $ip");
+            $self->_emit("  $more = icmp ult i64 $i, $cnt");
+            $self->_set_terminator("  br i1 $more, label %$body, label %$done");
+            $self->_new_block($body);
+            my $e = $self->_fresh;
+            $self->_emit("  $e = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $i");
+            my %f;
+            for my $name (qw(key_ptr key_len val_def val_tag val_pay)) {
+                my ($g, $v) = ($self->_fresh, $self->_fresh);
+                my $ty = { key_ptr => 'i8*', key_len => 'i64', val_def => 'i1', val_tag => 'i8', val_pay => 'i64' }->{$name};
+                $self->_emit("  $g = getelementptr inbounds %HashEntry, %HashEntry* $e, i32 0, i32 " . _he_idx($name));
+                $self->_emit("  $v = load $ty, $ty* $g  ; list: the entry's $name");
+                $f{$name} = $v;
+            }
+            my $k = $self->_emit_coercion($self->_set_str_len($f{key_ptr}, $f{key_len}), 'Str', 'Scalar', 'list: a key');
+            $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $k)  ; list: the key");
+            my ($s0, $s1, $s2, $i1) = map { $self->_fresh } 1 .. 4;
+            $self->_emit("  $s0 = insertvalue %Slot undef, i1 $f{val_def}, " . _slot_idx('defined'));
+            $self->_emit("  $s1 = insertvalue %Slot $s0, i8 $f{val_tag}, " . _slot_idx('tag'));
+            $self->_emit("  $s2 = insertvalue %Slot $s1, i64 $f{val_pay}, " . _slot_idx('payload'));
+            $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $s2)  ; list: its value");
+            $self->_emit("  $i1 = add i64 $i, 1");
+            $self->_emit("  store i64 $i1, i64* $ip");
+            $self->_set_terminator("  br label %$head");
+            $self->_new_block($done);
+            next;
+        }
         die "GAP: a list with a $s in it is not lowered -- it would flatten, and "
-          . "only an array does here\n" if $s =~ /\A(?:List|Hash)\z/;
+          . "only an array does here\n" if $s eq 'List';
         my $v = $self->_slot_of_value($in, $self->lower_value($in), 'list element');
         $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $v)  ; list: one element");
     }
@@ -10929,6 +10978,78 @@ sub _store_hash_value {
             . _he_idx($name) . "  ; $what: $name");
         $self->_emit("  store $ty $v, $ty* $g  ; $what: $name");
     }
+}
+
+# _emit_hash_upsert($hash, $key_ptr, $key_len, $def, $tag, $pay): store a
+# value at a key -- the entry with that key updated, or one added -- by a
+# linear scan of the entries (an element store, and a hash built from pairs).
+sub _emit_hash_upsert {
+    my ($self, $hash_ref, $wkey_ref, $wkey_len, $wdef, $wtag, $wpay) = @_;
+    my $cnt_ptr = $self->_fresh;
+    my $ent_ptr = $self->_fresh;
+    my $count   = $self->_fresh;
+    my $ents    = $self->_fresh;
+    $self->_emit("  $cnt_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 0  ; Assign(Hash-lvalue): count ptr");
+    $self->_emit("  $ent_ptr = getelementptr inbounds %Hash, %Hash* $hash_ref, i32 0, i32 2  ; Assign(Hash-lvalue): entries ptr");
+    $self->_emit("  $count = load i64, i64* $cnt_ptr  ; Assign(Hash-lvalue): load count");
+    $self->_emit("  $ents  = load %HashEntry*, %HashEntry** $ent_ptr  ; Assign(Hash-lvalue): load entries");
+
+    my $lbl_wins  = $self->_fresh_label('hwins');
+    my $lbl_wloop = $self->_fresh_label('hwalp');
+    my $lbl_wchk  = $self->_fresh_label('hwchk');
+    my $lbl_wcmp  = $self->_fresh_label('hwcmp');
+    my $lbl_wupd  = $self->_fresh_label('hwupd');
+    my $lbl_wnxt  = $self->_fresh_label('hwnxt');
+    my $lbl_wend  = $self->_fresh_label('hwend');
+    my $lbl_wpre  = $self->_current_block_label;
+    my $wi_next   = $self->_fresh;
+
+    $self->_set_terminator("  br label \%$lbl_wloop");
+    $self->_new_block($lbl_wloop);
+    my $wi_phi = $self->_fresh;
+    $self->_emit("  $wi_phi = phi i64 [ 0, \%$lbl_wpre ], [ $wi_next, \%$lbl_wnxt ]  ; Assign(Hash-lvalue): loop counter");
+    my $wcond = $self->_fresh;
+    $self->_emit("  $wcond = icmp ult i64 $wi_phi, $count  ; Assign(Hash-lvalue): i < count?");
+    $self->_set_terminator("  br i1 $wcond, label \%$lbl_wchk, label \%$lbl_wins");
+
+    $self->_new_block($lbl_wchk);
+    my $went_p   = $self->_fresh;
+    my $went_kpp = $self->_fresh;
+    my $went_klp = $self->_fresh;
+    my $went_kp  = $self->_fresh;
+    my $went_kl  = $self->_fresh;
+    $self->_emit("  $went_p   = getelementptr inbounds %HashEntry, %HashEntry* $ents, i64 $wi_phi  ; Assign(Hash-lvalue): entry ptr");
+    $self->_emit("  $went_kpp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 " . _he_idx('key_ptr') . "  ; Assign(Hash-lvalue): key_ptr field");
+    $self->_emit("  $went_klp = getelementptr inbounds %HashEntry, %HashEntry* $went_p, i32 0, i32 " . _he_idx('key_len') . "  ; Assign(Hash-lvalue): key_len field");
+    $self->_emit("  $went_kp  = load i8*,  i8**  $went_kpp  ; Assign(Hash-lvalue): entry key ptr");
+    $self->_emit("  $went_kl  = load i64,  i64*  $went_klp  ; Assign(Hash-lvalue): entry key len");
+    my $wlen_eq = $self->_fresh;
+    $self->_emit("  $wlen_eq = icmp eq i64 $went_kl, $wkey_len  ; Assign(Hash-lvalue): len eq");
+    $self->_set_terminator("  br i1 $wlen_eq, label \%$lbl_wcmp, label \%$lbl_wnxt");
+
+    $self->_new_block($lbl_wcmp);
+    my $wcmp_res  = $self->_fresh;
+    my $wis_match = $self->_fresh;
+    $self->_emit("  $wcmp_res  = call i32 \@memcmp(i8* nocapture readonly $went_kp, i8* nocapture readonly $wkey_ref, i64 $wkey_len)  ; Assign(Hash-lvalue): key memcmp");
+    $self->_emit("  $wis_match = icmp eq i32 $wcmp_res, 0  ; Assign(Hash-lvalue): key match?");
+    $self->_set_terminator("  br i1 $wis_match, label \%$lbl_wupd, label \%$lbl_wnxt");
+
+    $self->_new_block($lbl_wupd);
+    $self->_store_hash_value($went_p, $wdef, $wtag, $wpay, 'Assign(Hash-lvalue): update');
+    $self->_set_terminator("  br label \%$lbl_wend");
+
+    $self->_new_block($lbl_wnxt);
+    $self->_emit("  $wi_next = add i64 $wi_phi, 1  ; Assign(Hash-lvalue): i++");
+    $self->_set_terminator("  br label \%$lbl_wloop");
+
+    # A KEY NOT THERE IS ADDED. The search used to fall through to the
+    # end, and `$h->{b} = 2` on a hash without b stored nothing.
+    $self->_new_block($lbl_wins);
+    $self->_emit_hash_insert($hash_ref, $wkey_ref, $wkey_len, $wdef, $wtag, $wpay);
+    $self->_set_terminator("  br label \%$lbl_wend");
+
+    $self->_new_block($lbl_wend);
+    return;
 }
 
 # _emit_hash_insert($hash, $key_ptr, $key_len, $def, $tag, $pay): append a
