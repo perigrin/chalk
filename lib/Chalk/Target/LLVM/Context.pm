@@ -1511,6 +1511,10 @@ sub _refuse_an_in_place_write_to_a_location {
         || ( $op eq 'Call' && ( $node->dispatch_kind // '' ) eq 'builtin'
              && $_IN_PLACE_BUILTIN{ $node->name // '' } );
     return unless $writes;
+    # A 3-ARGUMENT substr READS: only the 4-argument form (an lvalue substr
+    # arrives as it) writes (pvm 154).
+    return if $op eq 'Call' && ( $node->name // '' ) eq 'substr'
+        && ( grep { blessed($_) } $node->inputs->@* ) < 4;
     my @in = $node->inputs->@*;
     shift @in if $op eq 'RegexSubst' || $op eq 'Transliterate';   # its subject is stored back
     for my $in (grep { blessed($_) && $_->operation eq 'PadAccess' } @in) {
@@ -3834,6 +3838,27 @@ sub _lower_assign {
     # the values undef. Lowered as `t1 = t2` it stored the wrong value.
     if ($node->can('targets') && defined $node->targets && !( blessed($node->inputs->[-1]) && _is_args_array($node->inputs->[-1]) )) {
         return $self->_lower_list_assign_into_locations($node);
+    }
+
+    # `my (...) = @_` INTO A LOCATION (a target passed on to another sub, kept
+    # in memory): inlining bound each target to its argument, but a later read
+    # loads the location -- so each bound value is stored there. Lowered as a
+    # value of @_, it was refused (pvm 102 154 203 220).
+    if (blessed($node->inputs->[-1]) && _is_args_array($node->inputs->[-1]) && $self->{_arg_bind}) {
+        my @t = $node->inputs->@[ 0 .. $#{ $node->inputs } - 1 ];
+        if (grep { blessed($_) && $_->operation eq 'PadAccess' && ( $_->shared || $_->is_location ) } @t) {
+            for my $t (@t) {
+                my $b = $self->{_arg_bind}{ refaddr($t) };
+                die "GAP: `my (...) = \@_` into a target inlining did not bind is not lowered\n"
+                    unless $b && defined $b->{ref} && ( $t->sigil // '$' ) eq '$';
+                next unless $t->shared || $t->is_location;
+                my $r = $b->{repr} // 'Scalar';
+                my $val = $r =~ /\A(?:Scalar|Slot)\z/ ? $b->{ref}
+                        : $self->_emit_coercion($b->{ref}, $r, 'Scalar', 'my (...) = @_');
+                $self->_emit("  store %Slot $val, %Slot* " . $self->_location_ptr($t) . "  ; my (...) = \@_: " . $t->name);
+            }
+            return $self->{cache}{ $node->id } = scalar @t;
+        }
     }
 
     my $lhs = $node->inputs->[0];
@@ -7635,6 +7660,23 @@ sub _process_loop_node {
     for my $rec (@phi_records) {
         $self->{cache}{ $rec->{node}->id } = $rec->{phi_ref};
         _update_var_table_for_phi($self, $rec->{node}, $rec->{phi_ref});
+    }
+
+    # A READ OF A LOCATION AT THIS PASS'S MEMORY is taken here, in the header,
+    # which dominates the body and the exit. Lowered at its use, a value the
+    # loop carries round (`$o .= $p * 10`, the back edge) read the location
+    # after the pass stored the next pass's `$p`: perl's 0.10.20. printed
+    # 10.20.30. (found under pvm 154).
+    for my $m (grep { blessed($_) && $_->operation eq 'Phi' && _is_memory_phi($_)
+                      && blessed($_->region) && refaddr($_->region) == refaddr($loop_node) }
+               ($loop_node->consumers // [])->@*) {
+        for my $c (grep { blessed($_) && $_->operation eq 'PadAccess' && $_->is_location
+                          && blessed($_->inputs->[0]) && refaddr($_->inputs->[0]) == refaddr($m) }
+                   ($m->consumers // [])->@*) {
+            next if $self->{_frozen_reads}{ $c->id };
+            $self->{cache}{ $c->id } = $self->lower_value($c);
+            $self->{_frozen_reads}{ $c->id } = 1;
+        }
     }
 
     # Emit the loop condition. The condition is drawn from consumers of the
