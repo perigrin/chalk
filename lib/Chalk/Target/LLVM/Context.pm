@@ -7437,6 +7437,12 @@ sub _process_loop_node {
         };
     }
 
+    # A NAMED AGGREGATE DECLARED BEFORE THE LOOP is made HERE, once: first
+    # lowered where an arm's store pre-lowers its container -- inside the
+    # body -- each pass made a fresh one, and the read after the loop saw
+    # the original (`my @o = (0); for (...) { next if ...; $o[0] += 1 }`).
+    $self->_prelower_aggregates_before($loop_node);
+
     # Re-capture the preheader label (multi-block inits may have moved us),
     # then jump from the preheader tail to the loop header.
     my $preheader_label = $self->_current_block_label;
@@ -7722,6 +7728,61 @@ sub _lower_loop_condition {
 }
 
 # _process_loop_body: lower the body of a loop (the statements in the body Proj).
+# _prelower_aggregates_before($loop): lower, in the block before $loop, each
+# array or hash literal (`my @o = (...)`, stamped Array/Hash; unpinned:
+# declared outside any loop) a node downstream of $loop reads or stores through, when what it
+# holds is already known here -- constants, values already lowered, and pure
+# operations over them. One declared inside the loop is pinned there, and
+# made each pass where it stands.
+sub _prelower_aggregates_before {
+    my ($self, $loop) = @_;
+    my $known;
+    $known = sub ($n, $seen) {
+        return 1 unless blessed($n);
+        return 1 if exists $self->{cache}{ $n->id };
+        return 1 if $seen->{ refaddr($n) }++;
+        my $op = $n->operation;
+        return 1 if $op eq 'Constant';
+        return 0 unless $PURE_DESCEND_OPS{$op} || $op =~ /\A(?:ArrayLiteral|HashLiteral|HashRef)\z/;
+        return 0 if $n->can('control_in') && blessed($n->control_in);
+        return !grep { !$known->($_, $seen) } grep { blessed($_) } $n->inputs->@*;
+    };
+    my (%seen, @q, @lits);
+    @q = ($loop);
+    while (defined(my $n = shift @q)) {
+        next if $seen{ refaddr($n) }++;
+        for my $in (grep { blessed($_) } $n->inputs->@*) {
+            # An Array or Hash, not a reference: `[...]` / `{...}` is a new
+            # one each time it is evaluated (`push @r, [0]` in a loop).
+            push @lits, $in if $in->operation =~ /\A(?:ArrayLiteral|HashLiteral|HashRef)\z/
+                && ( $in->stamp // '' ) =~ /\A(?:Array|Hash)\z/
+                && !( $in->can('control_in') && blessed($in->control_in) );
+        }
+        push @q, grep { blessed($_) } ($n->consumers // [])->@*;
+    }
+    # ONLY ONE AN ELEMENT STORE WRITES THROUGH, and never a loop's seed: the
+    # empty list a grep or map collects into is a Phi's input, and is new
+    # each time that loop runs (`my @p = grep { } ...` in a loop -- shared,
+    # it gathered every pass's elements, pvm 159).
+    my $stored_through = sub ($lit) {
+        my @c = grep { blessed($_) } ($lit->consumers // [])->@*;
+        return 0 if grep { $_->operation =~ /\A(?:Phi|ListAppend)\z/ } @c;
+        for my $sub (grep { $_->operation eq 'Subscript' } @c) {
+            return 1 if grep { blessed($_) && $_->operation eq 'Assign' && blessed($_->inputs->[0])
+                               && refaddr($_->inputs->[0]) == refaddr($sub) } ($sub->consumers // [])->@*;
+        }
+        return 0;
+    };
+    my %done;
+    for my $lit (@lits) {
+        next if $done{ refaddr($lit) }++ || exists $self->{cache}{ $lit->id };
+        next unless $stored_through->($lit);
+        next unless !grep { !$known->($_, {}) } grep { blessed($_) } $lit->inputs->@*;
+        $self->lower_value($lit);
+    }
+    return;
+}
+
 sub _process_loop_body {
     my ($self, $loop_node, $header_label) = @_;
 
@@ -10629,6 +10690,16 @@ sub _bind_captures {
     my ($self, $graph, $name, $anon) = @_;
     my @reads = grep { blessed($_) && $_->operation eq 'CellRead' } _graph_component($graph);
     my @writes = grep { blessed($_) && $_->operation eq 'CellWrite' } _graph_component($graph);
+    # A CELL USED BUT THROUGH A CELL READ OR WRITE is a shape not known here:
+    # B::SoN spells `$t += 1` on a capture as Coerce(CellParam) + 1 -- the
+    # cell's reference read as a number, and no write. Lowered, $t never
+    # changed (silently wrong).
+    for my $p (grep { blessed($_) && $_->operation eq 'CellParam' } _graph_component($graph)) {
+        die "GAP: a closure ('$name') uses what it captured other than by reading or "
+          . "writing it (an op-assign to a capture) -- not lowered\n"
+            if grep { blessed($_) && $_->operation !~ /\A(?:CellRead|CellWrite|MakeCell)\z/ }
+                    ($p->consumers // [])->@*;
+    }
     return unless @reads || @writes;
     die "GAP: a closure ('$name') that writes what it captured is not lowered\n" if @writes;
     my $via_anon = defined $anon;
