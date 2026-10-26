@@ -2007,6 +2007,21 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'substr') {
         return $self->_lower_substr($node);
     }
+    # AN ARRAY SLICE WALKED AS A CONTAINER -- `grep { } @a[...]` is
+    # Count(Slice) and Subscript(Slice, $i) -- is the slice made once, a
+    # fresh array. perl's $_ there is the array's own element, so one that is
+    # stored to, referenced or passed would be a copy: refused.
+    elsif ($op eq 'Slice' && _is_array_slice($node)) {
+        for my $el (grep { blessed($_) && $_->operation eq 'Subscript' } ($node->consumers // [])->@*) {
+            die "GAP: an element of an array slice walked by grep or map is written, referenced "
+              . "or passed -- perl aliases the array's element, and the walk here is of a copy\n"
+                if grep { blessed($_) && ( $_->operation eq 'Ref'
+                    || ( $_->operation eq 'Assign' && blessed($_->inputs->[0]) && $_->inputs->[0] == $el )
+                    || ( $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) ne 'builtin' ) ) }
+                    ($el->consumers // [])->@*;
+        }
+        return $self->{cache}{ $node->id } = $self->_emit_flattened_array_of([$node]);
+    }
     elsif ($op eq 'LocalAlias') {
         return $self->_lower_local_alias($node);
     }
@@ -8677,6 +8692,7 @@ sub _lower_length {
 
     my $operand = $node->inputs->[0];
     my $op_repr = _require_repr($operand, 'Length.operand');
+    $op_repr = 'Array' if $op_repr eq 'List' && _is_array_slice($operand);   # the slice made once
 
     if ($op_repr eq 'Array' || $op_repr eq 'ArrayRef') {
         $self->{_need_aggregate_types} = 1;
@@ -10771,6 +10787,7 @@ sub _lower_subscript {
     my $container = $self->_unwrap_ref_container($node->inputs->[0]);
     my $container_repr = $self->_repr_of($container)
         // _require_repr($container, 'Subscript.container');
+    $container_repr = 'Array' if $container_repr eq 'List' && _is_array_slice($container);   # the slice made once
     # A container read by its tag: the read says which kind it is.
     if ($container_repr =~ /\A(?:Scalar|Slot)\z/ && ($node->can('kind') ? $node->kind // '' : '') =~ /\A(array|hash)\z/) {
         $container_repr = $1 eq 'array' ? 'ArrayRef' : 'HashRef';
