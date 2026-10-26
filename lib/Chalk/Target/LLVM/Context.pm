@@ -3403,6 +3403,23 @@ sub _emit_coercion {
         # is known for free, which is exactly why the tag is written here.
         return $self->_emit_box_into_slot($input_ref, $from, "$what\[$from -> $to]");
     }
+    # A VALUE READ BY ITS TAG, READ AS A REFERENCE: the pointer it holds when
+    # its tag says that kind; anything else stops the program, as a read
+    # through it does (_container_ptr). Through the number readings it had no
+    # reference to give: `$r->{f} // []` was refused.
+    elsif (( $from eq 'Scalar' || $from eq 'Slot' ) && $to =~ /\A(?:Array|Hash|Scalar|Code)Ref\z/) {
+        my ($tag, $ok) = ($self->_slot_tag_of($input_ref), $self->_fresh);
+        $self->_emit("  $ok = icmp eq i8 $tag, " . _slot_tag_value($to) . "  ; $what: a $to?");
+        my ($yes, $no) = ($self->_fresh_label('sref.as.'), $self->_fresh_label('sref.not.'));
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $ok, label %$yes, label %$no");
+        $self->_new_block($no);
+        $self->_refuse_inside_eval("a value used as a $to that may not be one");
+        $self->_emit("  call void \@exit(i32 255)  ; $what: not a $to");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($yes);
+        $self->_emit("  $ref = inttoptr i64 " . $self->_slot_payload_of($input_ref) . " to i8*  ; $what: the $to");
+    }
     elsif ($from eq 'Scalar' || $from eq 'Slot') {
         # READING. The 2026-07-15 die that stood here said this needed "a T2
         # decision about how to read a %Slot payload ... either a tag or a
