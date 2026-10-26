@@ -3029,7 +3029,10 @@ sub _emit_read_slot_as {
     $self->_set_terminator("  br label \%$lbl_undef") unless @readings;
 
     # A reference is always true in perl; read as Boolean, its tag is the answer.
-    my $lbl_ref = $to eq 'Boolean' ? $self->_fresh_label('slotrd.ref.') : undef;
+    # As a string or a number it is what perl reads (_emit_ref_reading): read
+    # as undef, two references were one hash key "" and equal as numbers.
+    my $lbl_ref = $to eq 'Boolean' || ( $to =~ /\A(?:Str|Int|Num)\z/ )
+        ? $self->_fresh_label('slotrd.ref.') : undef;
 
     for my $i (0 .. $#readings) {
         my $repr = $readings[$i];
@@ -3054,7 +3057,22 @@ sub _emit_read_slot_as {
         $self->_set_terminator("  br label \%$lbl_join");
     }
 
-    if ($lbl_ref) {
+    if ($lbl_ref && $to ne 'Boolean') {
+        $self->_new_block($lbl_ref);
+        # shortcut: an Object (a class instance) still reads as undef -- its
+        # string names a class no tag carries; give it one when objects need it.
+        for my $kind (qw(ArrayRef HashRef CodeRef ScalarRef)) {
+            my ($hit, $body, $after) = ($self->_fresh, $self->_fresh_label('slotrd.r.'), $self->_fresh_label('slotrd.rn.'));
+            $self->_emit("  $hit = icmp eq i8 $tag, " . _slot_tag_value($kind) . "  ; $label: tag == $kind?");
+            $self->_set_terminator("  br i1 $hit, label \%$body, label \%$after");
+            $self->_new_block($body);
+            push @arms, [$self->_emit_ref_reading($payload, $kind, $to, $label), $self->_current_block_label];
+            $self->_set_terminator("  br label \%$lbl_join");
+            $self->_new_block($after);
+        }
+        $self->_set_terminator("  br label \%$lbl_undef");
+    }
+    elsif ($lbl_ref) {
         $self->_new_block($lbl_ref);
         my @is_ref = map {
             my $hit = $self->_fresh;
@@ -3088,6 +3106,41 @@ sub _emit_read_slot_as {
         . join(', ', map { "[ $_->[0], \%$_->[1] ]" } @arms)
         . "  ; $label: reading selected by tag");
     return $out;
+}
+
+# _emit_ref_reading($payload, $kind, $to, $label) -> a reference (its payload
+# the address) read as perl reads it: as a number its address, as a string
+# "KIND(0x<hex>)", "Class=KIND(0x<hex>)" when bless recorded a class.
+sub _emit_ref_reading {
+    my ($self, $payload, $kind, $to, $label) = @_;
+    return $payload if $to eq 'Int';
+    return $self->_emit_coercion($payload, 'Int', 'Num', "$label: address") if $to eq 'Num';
+    my %name = (ArrayRef => 'ARRAY', HashRef => 'HASH', CodeRef => 'CODE', ScalarRef => 'SCALAR');
+    my ($cp, $cl, $eq) = ($self->_str_const_parts('', "$label: no class"), undef);
+    ($cl, $eq) = (0, $cp);
+    if ($kind ne 'CodeRef') {   # bless records arrays, hashes and scalars
+        my $ptr = $self->_fresh;
+        $self->_emit("  $ptr = inttoptr i64 $payload to i8*");
+        my ($is, $bp, $bl) = $self->_bless_class($ptr);
+        my ($eqp) = $self->_str_const_parts('=', "$label: Class=");
+        my ($p, $l, $e) = map { $self->_fresh } 1 .. 3;
+        $self->_emit("  $p = select i1 $is, i8* $bp, i8* $cp  ; $label: blessed into?");
+        $self->_emit("  $l = select i1 $is, i64 $bl, i64 0");
+        $self->_emit("  $e = select i1 $is, i8* $eqp, i8* $cp");
+        ($cp, $cl, $eq) = ($p, $l, $e);
+    }
+    my ($fmt) = $self->_str_const_parts('%.*s%s%s(0x%lx)', "$label: ref fmt");
+    my ($kp)  = $self->_str_const_parts($name{$kind}, "$label: $kind");
+    $self->{$_} = 1 for qw(_need_snprintf _need_malloc_memcpy);
+    my ($cl32, $need, $need64, $size, $buf, $wrote) = map { $self->_fresh } 1 .. 6;
+    my $args = "i8* $fmt, i32 $cl32, i8* $cp, i8* $eq, i8* $kp, i64 $payload";
+    $self->_emit("  $cl32 = trunc i64 $cl to i32");
+    $self->_emit("  $need = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* null, i64 0, $args)  ; $label: measure");
+    $self->_emit("  $need64 = sext i32 $need to i64");
+    $self->_emit("  $size = add i64 $need64, 1");
+    $self->_emit("  $buf = call i8* \@malloc(i64 $size)");
+    $self->_emit("  $wrote = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* $buf, i64 $size, $args)  ; $label: KIND(0x...)");
+    return $self->_set_str_len($buf, $need64);
 }
 
 # _unbox_payload_as($payload_ref, $repr, $label) -> the SSA ref of the i64
@@ -3443,6 +3496,12 @@ sub _emit_coercion {
         $self->_emit("  $is_false = or i1 $is_empty, $is_single_zero  ; Coerce[Str->Boolean]: is false?");
         # result = NOT is_false -> true iff non-empty and not "0"
         $self->_emit("  $ref = xor i1 $is_false, true  ; Coerce[Str->Boolean]: invert -> Boolean");
+    }
+    # A REFERENCE AS A NUMBER IS ITS ADDRESS: `$r == $s` asks whether two
+    # references name one thing.
+    elsif ($from =~ /\A(?:Array|Hash|Scalar|Code)Ref\z/ && $to =~ /\A(?:Int|Num)\z/) {
+        $self->_emit("  $ref = ptrtoint i8* $input_ref to i64  ; $what\[$from->$to]: the address");
+        $ref = $self->_emit_coercion($ref, 'Int', 'Num', $what) if $to eq 'Num';
     }
     else {
         die "LLVM backend: cannot lower $what\[$from->$to]";
@@ -12058,8 +12117,8 @@ sub _lower_builtin_push {
     my $acc = $self->_container_ptr($array, 'Array');
     for my $v (@values) {
         # A VALUE READ BY ITS TAG (an element of an array handed in), or
-        # undef, is appended as its Slot, tag and all.
-        if (( $self->_repr_of($v) // '' ) =~ /\A(?:Scalar|Slot|Undef)\z/) {
+        # undef, or a reference (boxed with its tag), is appended as its Slot.
+        if (( $self->_repr_of($v) // '' ) =~ /\A(?:Scalar|Slot|Undef|ArrayRef|HashRef|CodeRef|ScalarRef|Object)\z/) {
             $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy);
             my $slot = $self->_slot_of_value($v, $self->lower_value($v), 'push');
             $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $slot)  ; push: a value by its tag");
@@ -12438,6 +12497,10 @@ sub _lower_ref {
         $ptr = $self->_container_ptr($x, $xs);
     }
     elsif ($x->operation eq 'PadAccess' && $x->is_location) {
+        # ONE LOCATION PER LEXICAL: a `my` a loop renews each pass is one
+        # $x here, so every pass's \$x named the last pass's (pvm 219).
+        die "GAP: a reference to a my variable a loop renews each pass is not lowered "
+          . "-- chalk keeps one location per lexical\n" if $node->fresh_each_pass;
         $ty  = '%Slot*';
         $ptr = $self->_location_ptr($x);
     }

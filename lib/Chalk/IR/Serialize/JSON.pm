@@ -700,6 +700,7 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'Ref') {
             # `\(@a)`: a reference to each element, not to the array.
             $args{each} = 1 if $fields->{each};
+            $args{fresh_each_pass} = 1 if $fields->{fresh_each_pass};
             # A REFERENCE TO A SCALAR VARIABLE is a ScalarRef, whatever
             # inference missed (`\$n` arrives Unknown).
             if (( $nd->{stamp} // 'Unknown' ) eq 'Unknown'

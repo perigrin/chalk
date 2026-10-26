@@ -15,8 +15,11 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
     # `\(@a)`: a reference to each element of its operand. Identity-bearing:
     # `\@a` beside it must not hash-cons with it.
     field $each :param :reader = 0;
+    # `\$x` of a `my` a loop renews each pass (B::SoN says so): each pass's
+    # reference is to that pass's variable.
+    field $fresh_each_pass :param :reader = 0;
 
     method content_hash() {
-        return join('|', 'Ref', ($each ? 'each' : ()), $self->_serialize_inputs());
+        return join('|', 'Ref', ($each ? 'each' : ()), ($fresh_each_pass ? 'fresh' : ()), $self->_serialize_inputs());
     }
 }

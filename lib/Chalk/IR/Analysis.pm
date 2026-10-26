@@ -2446,8 +2446,10 @@ sub _element_repr ($container) {
     # SO DOES A MERGE'S: `$e ? @{ $r->{s} // [] } : ()` is a Phi of an array
     # and a list, which flattens -- read as a nested array, its element was
     # an Array and lli rejected the module (pvm 211).
+    # SO DOES A NAMED ARRAY: `map { $_ + 1 } @r` walks (@r), each element read
+    # by its tag; read as a nested array, lli rejected the module.
     return 'Scalar' if grep { /\A(?:List|Hash)\z/ } @reprs
-        or grep { blessed($_) && $_->operation =~ /\A(?:Call|Phi|TernaryExpr)\z/ && ( $_->stamp // '' ) eq 'Array' } @elems
+        or grep { blessed($_) && $_->operation =~ /\A(?:Call|Phi|TernaryExpr|PadAccess)\z/ && ( $_->stamp // '' ) eq 'Array' } @elems
         or ( grep { $_ eq 'Array' } @reprs ) && grep { $_ ne 'Array' } @reprs;
     # A NESTED aggregate: the elements are themselves aggregates ([[1,2],[3,4]]).
     # Aggregate reprs (ArrayRef/HashRef) are not scalar-widenable, so the element

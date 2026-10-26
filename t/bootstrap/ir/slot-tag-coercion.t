@@ -174,9 +174,10 @@ subtest 'an undefined cell and a not-established tag both decline to read the pa
         [ 'false', 'Int',      42,  0, 'undef ignores the tag even when it is readable' ],
         [ 'false', 'Undef',    42,  0, 'undef with the Undef tag' ],
         [ 'true',  'Object',   42,  0, 'an Object pointer is not read as an integer' ],
-        [ 'true',  'ArrayRef', 42,  0, 'an ArrayRef pointer is not read as an integer' ],
-        [ 'true',  'HashRef',  42,  0, 'a HashRef pointer is not read as an integer' ],
-        [ 'true',  'CodeRef',  42,  0, 'a CodeRef pointer is not read as an integer' ],
+        # A REFERENCE AS A NUMBER IS ITS ADDRESS in perl ($r == $s): the payload.
+        [ 'true',  'ArrayRef', 42, 42, 'an ArrayRef reads as its address' ],
+        [ 'true',  'HashRef',  42, 42, 'a HashRef reads as its address' ],
+        [ 'true',  'CodeRef',  42, 42, 'a CodeRef reads as its address' ],
         [ 'true',  'Boolean',  42,  1, 'Boolean reads truthiness, not the payload word' ],
     );
 
