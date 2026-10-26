@@ -45,6 +45,9 @@ for my $c (
     [ q{sub w { my ($a, $b) = @_; return ($a && $b) ? "both" : "not" } print w(1, 2), w(1, 0), "\n";} ],
     # Typed by THIS call's arguments: the second call's are not the first's.
     [ q{sub w { my ($a, $b) = @_; return $a && $b } print w(1, 2), "|", w("x", "y"), "|", w(1.5, 2.5), "|", w("", "z"), "\n";} ],
+    # Falling off `return X unless $k` yields $k itself: the merge of a Str
+    # and the argument is typed by what this call passed.
+    [ q{sub big { my ($k) = @_; return "big" if $k > 1 } sub truthy { my ($k) = @_; return "none" unless $k } print "[", scalar(big(0)), "] [", big(5), "] [", truthy("value"), "] [", truthy(0), "] [", truthy(7), "]\n";} ],
     # The element read through $x is guarded by $on: not made ahead of it.
     [ q{my %h = (a => { v => 5 }); sub f { my ($k, $on) = @_; my $r = "none"; if ($on && (my $x = $h{$k})) { $r = $x->{v} } return $r } print f("a", 0), f("a", 1), f("b", 1), "\n";} ],
 ) {

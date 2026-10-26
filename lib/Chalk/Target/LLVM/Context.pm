@@ -5946,7 +5946,10 @@ sub _is_arith_over_element {
 # inputs[1] with control) -- distinguish from a scalar/field rebind.
 sub _is_element_store {
     my ($self, $assign) = @_;
-    for my $in ($assign->inputs->@*) {
+    # Its TARGETS, not the values it reads: `my ($a, $b) = ($r->[0], $r->[1])`
+    # stores no element (pvm 166 refused every read after it).
+    my $n = ( $assign->can('targets') && $assign->targets ) || 1;
+    for my $in (grep { defined } $assign->inputs->@[0 .. $n - 1]) {
         return 1 if blessed($in) && $in->operation eq 'Subscript';
     }
     return 0;
@@ -6345,6 +6348,18 @@ sub _wire_region_phis_with_preblock {
         # it in pass 2 (next to the phi) would reference each arm from the
         # merge block, which is invalid IR rather than a wrong answer.
         my $phi_repr = $phi_node->stamp;
+        # A MERGE NOTHING TYPED whose arms are scalars -- one an inlined
+        # argument, known only here (`return "none" unless $k` falls off
+        # with $k) -- is what they are; held as this lowering's (_lower_and).
+        # Stamped Unknown, not unstamped: no stamp at all is an analysis
+        # gap, which stays _require_repr's loud refusal.
+        if (defined $phi_repr && $phi_repr eq 'Unknown') {
+            my @r = map { $self->_repr_of($_) } grep { blessed($_) } $inputs->@*;
+            if (@r == 2 && !grep { !defined || !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @r) {
+                $phi_repr = $r[0] eq $r[1] ? $r[0] : 'Scalar';
+                $self->{cache}{ 'repr:' . $phi_node->id } = $phi_repr;
+            }
+        }
 
         # WHICH PHI SLOT IS THE THEN ARM? Read it off the Region, do not
         # assume slot 0.
@@ -6385,7 +6400,8 @@ sub _wire_region_phis_with_preblock {
     $self->{current_idx} = $merge_idx;
     for my $w (@wired) {
         my ($phi_node, $then_val, $else_val) = @$w;
-        my $repr      = Chalk::Target::LLVM::Context::_require_repr($phi_node, 'ElaboratedContext.Region.Phi');
+        my $repr      = $self->{cache}{ 'repr:' . $phi_node->id }
+                     // Chalk::Target::LLVM::Context::_require_repr($phi_node, 'ElaboratedContext.Region.Phi');
         my $llvm_type = Chalk::Target::LLVM::Context::_repr_to_llvm_type($repr);
         my $result    = $self->_fresh;
         $self->_emit("  $result = phi $llvm_type [ $then_val, %$then_label ], [ $else_val, %$else_label ]  ; Region phi");
@@ -6407,7 +6423,7 @@ sub _coerce_arm {
     # A PRINT IS ITS i1, whatever its stamp says: B::SoN stamps it Scalar,
     # and an if/else ending a sub merged two prints' i1s in a %Slot phi --
     # lli rejected the module (review of 4e1e9969).
-    my $arm_repr = $arm_node->operation eq 'Print' ? 'Boolean' : $arm_node->stamp;
+    my $arm_repr = $arm_node->operation eq 'Print' ? 'Boolean' : $self->_repr_of($arm_node);
     return $arm_val unless defined $arm_repr && $arm_repr ne $phi_repr;
 
     my $idx = $self->_find_block_idx($arm_label);
@@ -12193,10 +12209,23 @@ sub _lower_array_deref {
 
     my $in = $node->inputs->[0];
     my $arr;
+    my $in_repr = $self->_repr_of($in) // '';
+    # COUNTED, `@{ undef }` is undef, not 0 (perl's rvalue deref of undef in
+    # scalar context); the empty array below is only its list reading.
+    # shortcut: the tag-read path below still counts a run-time undef as 0;
+    # refusing it would refuse every `scalar @{ $h{k} }`. Upgrade: a Count
+    # that yields a Scalar when its deref's operand may be undef.
+    die "GAP: a count of \@{} over what may be undef is not lowered -- perl's is undef, not 0\n"
+        if $in_repr eq 'Undef' && !$node->copy   # a copy (`my @l = @$r`) is a real, empty array
+        && grep { blessed($_) && $_->operation eq 'Count' } ( $node->can('consumers') ? $node->consumers->@* : () );
+    # AN UNDEF (`@{ $h{missing} }`, known missing) is an empty list.
+    if ($in_repr eq 'Undef') {
+        $arr = $self->_emit_array_of([]);
+    }
     # A VALUE READ BY ITS TAG (`$h{k} // []` merges a Scalar and an ArrayRef
     # into a Slot): an ArrayRef is its payload, undef an empty array (perl's
     # rvalue `@{ undef }`); anything else dies in perl (exit 255).
-    if (( $self->_repr_of($in) // '' ) =~ /\A(?:Scalar|Slot)\z/) {
+    elsif ($in_repr =~ /\A(?:Scalar|Slot)\z/) {
         my $s   = $self->lower_value($in);
         my $tag = $self->_slot_tag_of($s);
         my ($isref, $isundef, $p, $yesp) = map { $self->_fresh } 1 .. 4;
@@ -12270,9 +12299,59 @@ sub _lower_hash_deref {
 
     $self->{_need_aggregate_types} = 1;
 
-    my $ref_val = $self->lower_value($node->inputs->[0]);
-    my $hash = $self->_fresh;
-    $self->_emit("  $hash = bitcast i8* $ref_val to %Hash*  ; HashDeref: i8* ref -> Hash*");
+    my $in = $node->inputs->[0];
+    my $hash;
+    # AN UNDEF (`%{ $h{missing} }`, known missing) is an empty hash.
+    my $empty_hash = sub {
+        my ($raw, $empty, $c0, $c1, $c2) = map { $self->_fresh } 1 .. 5;
+        $self->{_need_malloc_memcpy} = 1;
+        $self->_emit("  $raw = call i8* \@malloc(i64 " . _sizeof_llvm_type('%Hash') . ")  ; %{ undef }: an empty hash");
+        $self->_emit("  $empty = bitcast i8* $raw to %Hash*");
+        $self->_emit("  $c0 = getelementptr inbounds %Hash, %Hash* $empty, i32 0, i32 0");
+        $self->_emit("  store i64 0, i64* $c0  ; count=0");
+        $self->_emit("  $c1 = getelementptr inbounds %Hash, %Hash* $empty, i32 0, i32 1");
+        $self->_emit("  store i64 0, i64* $c1  ; cap=0");
+        $self->_emit("  $c2 = getelementptr inbounds %Hash, %Hash* $empty, i32 0, i32 2");
+        $self->_emit("  store %HashEntry* null, %HashEntry** $c2  ; no entries");
+        return $empty;
+    };
+    if (( $self->_repr_of($in) // '' ) eq 'Undef') {
+        $hash = $empty_hash->();
+    }
+    # A VALUE READ BY ITS TAG (an object's field, `$h{m} // $h{n}`): a
+    # HashRef is its payload, undef an empty hash (perl's rvalue `%{ undef }`),
+    # anything else dies in perl (exit 255) -- as _lower_array_deref.
+    elsif (( $self->_repr_of($in) // '' ) =~ /\A(?:Scalar|Slot)\z/) {
+        my $s   = $self->lower_value($in);
+        my $tag = $self->_slot_tag_of($s);
+        my ($isref, $isundef, $yesp) = map { $self->_fresh } 1 .. 3;
+        my ($yes, $notref, $undef, $no, $join) = map { $self->_fresh_label("hderef.$_.") } qw(ref notref undef no join);
+        $self->_emit("  $isref = icmp eq i8 $tag, " . _slot_tag_value('HashRef') . "  ; %{}: a hash reference?");
+        $self->_set_terminator("  br i1 $isref, label %$yes, label %$notref");
+        $self->_new_block($yes);
+        my $pl = $self->_slot_payload_of($s);
+        $self->_emit("  $yesp = inttoptr i64 $pl to %Hash*  ; Scalar -> %Hash*");
+        $self->_set_terminator("  br label %$join");
+        $self->_new_block($notref);
+        $self->_emit("  $isundef = icmp eq i8 $tag, " . _slot_tag_value('Undef') . "  ; %{}: undef?");
+        $self->_set_terminator("  br i1 $isundef, label %$undef, label %$no");
+        $self->_new_block($no);
+        $self->{_need_exit} = 1;
+        $self->_refuse_inside_eval("a deref that dies on what is not a HASH reference");
+        $self->_emit("  call void \@exit(i32 255)  ; not a HASH reference");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($undef);
+        my $empty = $empty_hash->();
+        $self->_set_terminator("  br label %$join");
+        $self->_new_block($join);
+        $hash = $self->_fresh;
+        $self->_emit("  $hash = phi %Hash* [ $yesp, %$yes ], [ $empty, %$undef ]  ; %{}: the hash");
+    }
+    else {
+        my $ref_val = $self->lower_value($in);
+        $hash = $self->_fresh;
+        $self->_emit("  $hash = bitcast i8* $ref_val to %Hash*  ; HashDeref: i8* ref -> Hash*");
+    }
     $hash = $self->_emit_aggregate_copy($hash, 'Hash') if $node->copy;
     $self->{cache}{ $node->id } = $hash;
     return $hash;
