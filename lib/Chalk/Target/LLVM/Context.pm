@@ -5423,6 +5423,19 @@ sub _lower_phi {
     my $region = $node->can('region') ? $node->region : undef;
     my $head   = (defined $region && blessed($region) && $region->can('head'))
         ? $region->head : undef;
+    # A LOOP'S OWN PHI has the loop for its region (no Region, no head): it is
+    # the structure to drive -- read from an arm's value (a slice by a grep,
+    # pvm 220) it was not.
+    $head = $region if !defined $head && blessed($region) && $region->can('operation')
+        && $region->operation =~ /\A(?:If|Loop)\z/
+        # ONLY ONE MADE ALREADY, and only when it changes nothing (a grep whose
+        # phi an arm's value reads after the arm dropped it). One not made yet
+        # is the control chain's to place: driven from an early read it ran
+        # out of place and again in place ("A A C A C" for "A C").
+        && $self->{_loops_made}{ refaddr($region) }
+        && !( grep { blessed($_) && $_->operation eq 'Phi' && _is_memory_phi($_)
+                        && blessed($_->region) && refaddr($_->region) == refaddr($region) }
+                  ($region->consumers // [])->@* );
 
     if (defined $head && blessed($head) && !$self->{_phi_forcing}{ $node->id }++) {
         my $op = $head->can('operation') ? $head->operation : '';
@@ -7628,6 +7641,7 @@ sub _lower_builtin_exit {
 # This method handles the general case (condition test in the header).
 sub _process_loop_node {
     my ($self, $loop_node) = @_;
+    $self->{_loops_made}{ refaddr($loop_node) } = 1;   # see _lower_phi's forcing
 
     my $header_label    = $self->_fresh_label('loop.header.');
     my $body_label      = $self->_fresh_label('loop.body.');
@@ -8296,6 +8310,10 @@ sub _prelower_condition_mutation_backedges {
                 && !($_->operation eq 'Phi' && $phi_id{ $_->id })
         } ($backedge->consumers // [])->@*;
         next unless $read_post_loop;
+        # ONE AN INNER LOOP MAKES (a value carried out through it, read again by
+        # a `last LABEL` merge) is not the header's to make: that loop is not
+        # made yet (pvm 115).
+        next if _reaches_an_unlowered_phi($self, $backedge);
         # Lower it in the header block; the cache now holds a header-dominating ref
         # that the body tail (_find_phi_backedge_value) and the post-loop read reuse.
         $self->lower_value($backedge);
