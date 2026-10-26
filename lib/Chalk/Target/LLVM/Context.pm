@@ -9193,6 +9193,10 @@ sub _emit_flattened_array_of {
             $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $lines)  ; list: the lines read");
             next;
         }
+        if (_is_hash_slice($in)) {
+            $self->_emit_hash_slice_into($acc, $in);
+            next;
+        }
         if (_is_array_slice($in)) {
             $self->_emit_array_slice_into($acc, $in);
             next;
@@ -9749,6 +9753,28 @@ sub _lower_split {
 }
 
 # _is_array_slice($node) -- an `@a[...]`.
+sub _is_hash_slice ($n) {
+    return blessed($n) && $n->operation eq 'Slice' && ( $n->kind // '' ) eq 'hash';
+}
+
+# _emit_hash_slice_into($acc, $slice): push onto $acc each key's value, in
+# the keys' order, undef for a missing one -- as perl's hslice. Its inputs
+# are the keys, then the hash. A key list that is itself a list (`@h{@k}`)
+# is refused: the keys here are each one scalar.
+sub _emit_hash_slice_into {
+    my ($self, $acc, $slice) = @_;
+    my @keys = grep { blessed($_) } $slice->inputs->@*;
+    my $src  = pop @keys;
+    die "GAP: a hash slice whose keys are a list (\@h{\@k}) is not lowered\n"
+        if grep { ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @keys;
+    my $hash = $self->_container_ptr($src, 'Hash');
+    for my $k (@keys) {
+        my $slot = $self->_emit_hash_slot_of($hash, $k);
+        $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $slot)  ; list: a hash slice's value");
+    }
+    return;
+}
+
 sub _is_array_slice ($n) {
     return blessed($n) && $n->operation eq 'Slice' && ( $n->kind // '' ) eq 'array';
 }
@@ -11443,7 +11469,7 @@ sub _lower_builtin_join {
     # `my @c = (1 .. $n)` is a join over the Range itself).
     $flatten ||= blessed($list_node) && $list_node->operation eq 'Range'
         && grep { $_->operation ne 'Constant' } $list_node->inputs->@[0, 1];
-    $flatten ||= _is_array_slice($list_node);
+    $flatten ||= _is_array_slice($list_node) || _is_hash_slice($list_node);
     my $elements = $flatten ? undef
         : @more ? [ $list_node, @more ]
         # A LIST READ AFTER IT WAS WRITTEN has no static elements: its
@@ -11888,7 +11914,21 @@ sub _lower_hash_read {
     # Typed pointer resolved at THIS use (re-lowered for mutable-read
     # containers; bitcast for Ref reprs) — see _container_ptr.
     my $hash_ref = $self->_container_ptr($container, 'Hash');
-    my $lkey_ref = $self->_hash_key_str($node->inputs->[1]);
+    my $repr     = _require_repr($node, 'HashRead');
+    my $slot     = $self->_emit_hash_slot_of($hash_ref, $node->inputs->[1]);
+    my $result = $self->_slot_as_reading($slot, $repr, 'HashRead');
+    $self->{cache}{ $node->id } = $result;
+    return $result;
+}
+
+# _emit_hash_slot_of($hash_ref, $key_node) -> the %Slot stored at that key
+# in the %Hash*, or an undef Slot when it is missing: the key scan a read
+# and a hash slice share.
+sub _emit_hash_slot_of {
+    my ($self, $hash_ref, $key_node) = @_;
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_memcmp}          = 1;
+    my $lkey_ref = $self->_hash_key_str($key_node);
     # The key length drives the memcmp scan; a silently-zeroed length makes a
     # zero-length memcmp match ANY entry (spurious key match). If the key length
     # is untracked it is a TypeInference/length-tracking gap — die loudly (matches
@@ -11898,7 +11938,6 @@ sub _lower_hash_read {
     defined $lkey_len
         or die "GAP: HashRead key (ref=$lkey_ref) has no tracked length — "
              . "would emit a 0-length memcmp matching any entry. Fix length tracking.";
-    my $repr     = _require_repr($node, 'HashRead');
 
     # Load count and entries pointer from Hash struct (in current/pre_loop block).
     my $cnt_ptr  = $self->_fresh;
@@ -12005,9 +12044,7 @@ sub _lower_hash_read {
     $self->_new_block($lbl_end);
     my $slot = $self->_fresh;
     $self->_emit("  $slot = phi %Slot [ $slot_hit, \%$lbl_hit ], [ $slot_miss, \%$lbl_miss ]  ; HashRead :Slot phi");
-    my $result = $self->_slot_as_reading($slot, $repr, 'HashRead');
-    $self->{cache}{ $node->id } = $result;
-    return $result;
+    return $slot;
 }
 
 # _lower_postfix_deref: repr-dispatch on sigil to dereference a ref value.
