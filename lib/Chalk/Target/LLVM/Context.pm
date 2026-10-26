@@ -124,6 +124,7 @@ sub new {
         _need_lex_agg           => 0,
         _need_array_append      => 0,
         _need_tr                => 0,
+        _need_time              => 0,
         _need_bless             => 0,
         _need_memchr            => 0,
         _need_select            => 0,
@@ -174,6 +175,7 @@ my @NEED_FLAGS = qw(
     _need_snprintf
     _need_array_append
     _need_tr
+    _need_time
     _need_bless
     _need_memchr
     _need_select
@@ -818,6 +820,7 @@ sub render_need_flag_prologue {
     if ($self->{_need_exit}) {
         push @lines, 'declare void @exit(i32)';
     }
+    push @lines, 'declare i64 @time(i64*)' if $self->{_need_time};
 
     # Declare getenv (+ strlen for the runtime value length) when EnvRead was
     # emitted. Plain C host-interface functions — NOT libperl.
@@ -1963,6 +1966,13 @@ sub lower_value {
     }
     elsif ($op eq 'Exists') {
         return $self->_lower_exists($node);
+    }
+    # time: the C clock, seconds since the epoch.
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'time') {
+        $self->{_need_time} = 1;
+        my $t = $self->_fresh;
+        $self->_emit("  $t = call i64 \@time(i64* null)  ; time");
+        return $self->{cache}{$id} = $t;
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
             && ($node->name // '') =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/) {
