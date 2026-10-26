@@ -1758,6 +1758,14 @@ sub lower_value {
     elsif ($op eq 'Modulo') {
         return $self->_lower_modulo($node);
     }
+    elsif ($op =~ /\ABit(And|Or|Xor)\z/) {
+        return $self->_lower_bitop($node, lc $1);
+    }
+    # ~ IS DONE ON BYTES when its operand is a string, and whether it is one
+    # (or was once read as a number) is not on the wire.
+    elsif ($op eq 'Complement') {
+        die "GAP: a bitwise ~ is not lowered -- perl does it on bytes when its operand is a string\n";
+    }
     elsif ($op eq 'Coerce') {
         return $self->_lower_coerce($node);
     }
@@ -2403,6 +2411,46 @@ sub _die_on_zero {
     $self->_set_terminator("  unreachable");
     $self->_new_block($ok);
     return;
+}
+
+# _lower_bitop($node, 'and'|'or'|'xor') -> i64: `&` `|` `^` on numbers.
+#
+# PERL DOES THEM ON NUMBERS when the bitwise feature says so (flavor
+# numeric), or when an operand has a number in it -- a literal surely does.
+# Otherwise on two strings it combines their bytes, and whether a variable
+# holds a number or a string (one a number was once read from counts as a
+# number) is not on the wire: refused. Its result is unsigned: one past
+# what an i64 holds stops the program, unless another bitwise op takes it.
+sub _lower_bitop {
+    my ($self, $node, $llop) = @_;
+    my @in = $node->inputs->@[0, 1];
+    my $is_number = sub ($n) {
+        $n = $n->inputs->[0] while blessed($n) && $n->operation eq 'Coerce';
+        blessed($n) && $n->operation eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:integer|number)\z/;
+    };
+    die "GAP: a bitwise " . $node->op_str . " that perl may do on strings (no number among its "
+      . "operands, no bitwise feature) is not lowered\n"
+        unless ( $node->flavor // '' ) eq 'numeric' || grep { $is_number->($_) } @in;
+    my @v = map {
+        my $s = $self->_repr_of($_) // $_->stamp // '';
+        my $r = $self->lower_value($_);
+        $s eq 'Int' ? $r : $self->_emit_coercion($r, $s, 'Int', 'a bitwise operand');
+    } @in;
+    my $ref = $self->_fresh;
+    $self->_emit("  $ref = $llop i64 $v[0], $v[1]  ; " . $node->op_str);
+    unless (grep { blessed($_) && $_->operation =~ /\ABit(?:And|Or|Xor)\z/ } ($node->consumers // [])->@*
+            and !grep { blessed($_) && $_->operation !~ /\ABit(?:And|Or|Xor)\z/ } ($node->consumers // [])->@*) {
+        $self->_refuse_inside_eval("a bitwise result past what an integer holds");
+        my ($big, $stop, $ok) = ($self->_fresh, $self->_fresh_label('bit.big.'), $self->_fresh_label('bit.ok.'));
+        $self->_emit("  $big = icmp slt i64 $ref, 0  ; unsigned past an i64?");
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $big, label %$stop, label %$ok");
+        $self->_new_block($stop);
+        $self->_emit("  call void \@exit(i32 255)  ; an unsigned bitwise result an i64 cannot hold");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($ok);
+    }
+    return $self->{cache}{ $node->id } = $ref;
 }
 
 sub _lower_modulo {

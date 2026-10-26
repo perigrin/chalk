@@ -11,4 +11,12 @@ class Chalk::IR::Node::BitOr :isa(Chalk::IR::Node::BinOp) {
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
     method op_str()    { '|' }
+
+    # numeric or string (`&.`), as the producer read the op; none: perl decides
+    # from its operands at run time. Identity-bearing.
+    field $flavor :param :reader = undef;
+
+    method content_hash() {
+        return join('|', $self->operation, ( $flavor // () ), $self->_serialize_inputs());
+    }
 }
