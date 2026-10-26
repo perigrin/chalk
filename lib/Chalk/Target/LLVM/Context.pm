@@ -15433,6 +15433,10 @@ sub _lower_entry_write {
     my ($target, $value) = grep { blessed($_) } $node->inputs->@[0, 1];
     die "GAP: an EntryWrite whose target is not an EntryDef is not lowered\n"
         unless blessed($target) && $target->operation eq 'EntryDef' && blessed($value);
+    # `*name = sub { ... }` that Analysis bound statically: every call of the
+    # name already runs that sub, so the assignment has nothing left to do.
+    return $self->{cache}{ $node->id } = '0'
+        if $value->operation eq 'AnonSub' && $value->glob_bound;
     my $ref = $self->_store_package_scalar($target, $value, $self->lower_value($value));
     $self->{cache}{ $node->id } = $ref;
     return $ref;

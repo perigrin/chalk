@@ -393,6 +393,7 @@ sub infer ($class, $graphs) {
     # wrong: _replay_classes seals the MOP ~30 lines BEFORE the direct-call
     # fixpoint, so the metaobject is available to it.
     _attach_call_targets(\%graphs, $mop);
+    _attach_glob_bound_subs(\%graphs, $mop);
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
     # through computed + aggregate-read nodes for EVERY graph (class or not).
@@ -761,6 +762,53 @@ sub _all_graph_nodes ($g) {
 #
 # Keyed by the callee's fully-qualified name (`main::f`), which is how the
 # producer names the graph and how declare_sub records the metaobject.
+# _attach_glob_bound_subs($graphs, $mop): `*name = sub { ... }` -- an
+# EntryWrite of an AnonSub to `&name` -- makes the direct calls of `name`
+# that FOLLOW it on the same graph's control chain calls of that sub. Only
+# when nothing makes that less than certain: the one write of `&name` in the
+# program, no sub declared by that name, and a body capturing nothing.
+# Anything else is left as it was: refused by name.
+sub _attach_glob_bound_subs ($graphs, $mop) {
+    my (%writes, %calls);
+    for my $gname (sort keys $graphs->%*) {
+        for my $n (_all_graph_nodes($graphs->{$gname})) {
+            if ($n->operation eq 'EntryWrite') {
+                my ($t) = $n->inputs->@*;
+                next unless blessed($t) && $t->operation eq 'EntryDef' && ( $t->sigil // '' ) eq '&';
+                push $writes{ $t->package . '::' . $t->symbol }->@*, [$n, $gname];
+            }
+            push $calls{ $n->name // '' }->@*, [$n, $gname]
+                if $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct' && !defined $n->target;
+        }
+    }
+    for my $name (sort keys %writes) {
+        my @w = $writes{$name}->@*;
+        next unless @w == 1;
+        my ($write, $wg) = $w[0]->@*;
+        my $anon = $write->inputs->[1];
+        next unless blessed($anon) && $anon->operation eq 'AnonSub' && $anon->sub;
+        next if grep { blessed($_) && $_->operation eq 'CellParam' } _all_graph_nodes($anon->sub->graph);
+        my ($pkg, $sym) = $name =~ /\A(.*)::([^:]+)\z/;
+        my $cls = $mop->for_class($pkg);
+        next if $cls && grep { $_->name eq $sym } $cls->subs;
+        my $after_write = sub ($call) {
+            my %been;
+            for (my $c = $call->control_in; blessed($c); $c = $c->can('control_in') ? $c->control_in : undef) {
+                return 1 if refaddr($c) == refaddr($write);
+                return 0 if $been{ refaddr($c) }++;
+            }
+            return 0;
+        };
+        my @mine = grep { $_->[1] eq $wg && $after_write->($_->[0]) } ( $calls{$name} // [] )->@*;
+        # Every call of the name must be one of these: a call elsewhere (another
+        # sub, before the write) may run before the glob holds the code.
+        next unless @mine && @mine == ( $calls{$name} // [] )->@*;
+        $_->[0]->set_target($anon->sub) for @mine;
+        $anon->set_glob_bound(1);
+    }
+    return;
+}
+
 sub _attach_call_targets ($graphs, $mop) {
     my %anon;   # one metaobject per anonymous body, however many calls name it
     for my $gname (sort keys $graphs->%*) {

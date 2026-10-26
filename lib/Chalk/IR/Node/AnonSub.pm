@@ -42,6 +42,12 @@ class Chalk::IR::Node::AnonSub :isa(Chalk::IR::Value) {
     field $sub :reader = undef;
     method set_sub($s) { $sub = $s; return }
 
+    # Set by Analysis when `*name = sub { ... }` binds this code to a name
+    # once, before every call of that name: the assignment then has nothing
+    # left to do at run time, and those calls are calls of this sub.
+    field $glob_bound :reader = 0;
+    method set_glob_bound($b) { $glob_bound = $b; return }
+
     method operation() { 'AnonSub' }
     method staleness_kind() { 'opaque' }
 
