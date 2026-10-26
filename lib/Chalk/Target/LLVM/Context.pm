@@ -123,6 +123,7 @@ sub new {
         _need_substr_helper     => 0,
         _need_lex_agg           => 0,
         _need_array_append      => 0,
+        _need_tr                => 0,
         _need_bless             => 0,
         _need_memchr            => 0,
         _need_select            => 0,
@@ -172,6 +173,7 @@ my @NEED_FLAGS = qw(
     _need_num_fmt
     _need_snprintf
     _need_array_append
+    _need_tr
     _need_bless
     _need_memchr
     _need_select
@@ -941,6 +943,7 @@ sub render_need_flag_postclass_reemit {
     # Shared aggregates: emitted once, here, after every body has named its own.
     push @lines, $self->_lex_aggregate_lines;
     push @lines, $self->_array_append_lines;
+    push @lines, $self->_tr_lines;
     push @lines, $self->_bless_lines;
     push @lines, $self->_hash_delete_lines;
     push @lines, '@chalk_selected = internal global i8* null  ; the handle a bare print writes to (null: STDOUT)'
@@ -1509,7 +1512,7 @@ sub _refuse_an_in_place_write_to_a_location {
              && $_IN_PLACE_BUILTIN{ $node->name // '' } );
     return unless $writes;
     my @in = $node->inputs->@*;
-    shift @in if $op eq 'RegexSubst';   # its subject is stored back
+    shift @in if $op eq 'RegexSubst' || $op eq 'Transliterate';   # its subject is stored back
     for my $in (grep { blessed($_) && $_->operation eq 'PadAccess' } @in) {
         die "GAP: " . ( $op eq 'Call' ? 'builtin ' . $node->name : $op )
           . " writing the location " . $in->name . " in place is not lowered\n"
@@ -1910,6 +1913,15 @@ sub lower_value {
     }
     # RegexSubst: s/// = match + splice (prefix + replacement(+$N) + suffix).
     # Produces the result string (i8*, runtime length in _str_len_table).
+    elsif ($op eq 'Transliterate') {
+        return $self->_lower_transliterate($node);
+    }
+    elsif ($op eq 'TransliterateCount') {
+        my $tr = $node->inputs->[0];
+        $self->lower_value($tr);
+        return $self->{cache}{$id} = $self->{cache}{ 'trcount:' . $tr->id }
+            // die "GAP: a tr/// count whose tr/// was not lowered here\n";
+    }
     elsif ($op eq 'RegexSubst') {
         return $self->_lower_regex_subst($node);
     }
@@ -10239,6 +10251,121 @@ none:
   ret i8* null
 }
 END_HELPER
+}
+
+# _tr_lines -- @chalk_tr(src, len, map, in, out) -> the count: each byte of
+# src whose `in` entry is set is counted and written as its `map` entry;
+# every other byte is copied as it is. One table pair per tr/// (_lower_transliterate).
+sub _tr_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_tr} && !$self->{_tr_emitted}++;
+    return ('', <<'END_HELPER');
+define internal i64 @chalk_tr(i8* %src, i64 %len, i8* %map, i8* %in, i8* %out) {
+entry:
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i1, %next ]
+  %n = phi i64 [ 0, %entry ], [ %n1, %next ]
+  %more = icmp slt i64 %i, %len
+  br i1 %more, label %body, label %done
+body:
+  %sp = getelementptr inbounds i8, i8* %src, i64 %i
+  %b = load i8, i8* %sp
+  %bi = zext i8 %b to i64
+  %ip = getelementptr inbounds i8, i8* %in, i64 %bi
+  %hit = load i8, i8* %ip
+  %is = icmp ne i8 %hit, 0
+  %mp = getelementptr inbounds i8, i8* %map, i64 %bi
+  %m = load i8, i8* %mp
+  %v = select i1 %is, i8 %m, i8 %b
+  %op = getelementptr inbounds i8, i8* %out, i64 %i
+  store i8 %v, i8* %op
+  %inc = zext i1 %is to i64
+  %n1 = add i64 %n, %inc
+  br label %next
+next:
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  ret i64 %n
+}
+END_HELPER
+}
+
+# _tr_expand($list) -> the bytes a tr/// list names, ranges expanded. Only
+# ASCII and the plain escapes; anything else is refused by name.
+sub _tr_expand {
+    my ($list) = @_;
+    my @c;
+    my @ch = split //, $list;
+    for (my $i = 0; $i < @ch; $i++) {
+        my $c = $ch[$i];
+        if ($c eq '\\') {
+            my $e = $ch[++$i] // die "GAP: a tr/// list ending in a backslash is not lowered\n";
+            my %esc = (n => "\n", t => "\t", r => "\r", '\\' => '\\', '-' => '-', '/' => '/', '.' => '.');
+            die "GAP: a tr/// escape \\$e is not lowered\n" unless exists $esc{$e};
+            $c = $esc{$e};
+        }
+        die "GAP: a tr/// list with a non-ASCII character is not lowered\n" if ord($c) > 127;
+        if (@c && $c eq '-' && $i > 0 && $ch[$i - 1] ne '\\' && $i < $#ch) {
+            my $to = $ch[++$i];
+            die "GAP: a tr/// range to an escape is not lowered\n" if $to eq '\\';
+            my $lo = $c[-1];
+            die "GAP: a tr/// range running backwards is not lowered\n" if ord($to) < ord($lo);
+            push @c, map { chr } ord($lo) + 1 .. ord($to);
+            next;
+        }
+        push @c, $c;
+    }
+    return @c;
+}
+
+# _lower_transliterate($node) -> the new string (Str); its count is cached for
+# TransliterateCount. Each byte of the from-list maps to the byte at its place
+# in the to-list -- a short to-list repeats its last, an empty one is the
+# from-list (counting only). The first mention of a byte wins. A location
+# subject is stored back, as s/// does.
+sub _lower_transliterate {
+    my ($self, $node) = @_;
+    die "GAP: tr///" . $node->flags . " is not lowered -- only tr/// with no flags\n"
+        if length( $node->flags // '' );
+    my @from = _tr_expand($node->from // '');
+    my @to   = _tr_expand($node->to // '');
+    @to = @from unless @to;
+    push @to, $to[-1] while @to < @from;
+    my ($map, $in) = ( "\0" x 256, "\0" x 256 );
+    for my $k (0 .. $#from) {
+        my $o = ord $from[$k];
+        next if substr($in, $o, 1) ne "\0";
+        substr($in, $o, 1)  = "\x01";
+        substr($map, $o, 1) = $to[$k];
+    }
+    my $subj_node = $node->inputs->[0];
+    my $subj_ref  = $self->lower_value($subj_node);
+    my $sr = $self->_repr_of($subj_node) // '';
+    $subj_ref = $self->_emit_coercion($subj_ref, $sr, 'Str', 'tr/// subject') if $sr ne 'Str';
+    my ($sp, $sl) = $self->_str_parts($subj_ref);
+    die "GAP: tr/// subject has no tracked length\n" unless defined $sl;
+    $self->{_need_tr} = 1;
+    $self->{_need_malloc_memcpy} = 1;
+    my ($mg, undef, $mt) = $self->_module_global_name('tr_map', $map);
+    my ($ig, undef, $it) = $self->_module_global_name('tr_in', $in);
+    my ($mp, $ip, $sz, $out, $cnt, $nul) = map { $self->_fresh } 1 .. 6;
+    $self->_emit("  $mp = getelementptr inbounds [$mt x i8], [$mt x i8]* $mg, i64 0, i64 0  ; tr///: map");
+    $self->_emit("  $ip = getelementptr inbounds [$it x i8], [$it x i8]* $ig, i64 0, i64 0  ; tr///: in the set");
+    $self->_emit("  $sz = add i64 $sl, 1");
+    $self->_emit("  $out = call i8* \@malloc(i64 $sz)  ; tr///: the new string");
+    $self->_emit("  $cnt = call i64 \@chalk_tr(i8* $sp, i64 $sl, i8* $mp, i8* $ip, i8* $out)  ; tr///: map and count");
+    $self->_emit("  $nul = getelementptr inbounds i8, i8* $out, i64 $sl");
+    $self->_emit("  store i8 0, i8* $nul");
+    my $res = $self->_set_str_len($out, $sl);
+    if ($subj_node->operation eq 'PadAccess' && $subj_node->is_location) {
+        my $boxed = $self->_emit_coercion($res, 'Str', 'Scalar', 'tr/// store-back');
+        $self->_emit("  store %Slot $boxed, %Slot* " . $self->_location_ptr($subj_node)
+            . "  ; tr/// stores lexical " . $subj_node->name);
+    }
+    $self->{cache}{ 'trcount:' . $node->id } = $cnt;
+    return $self->{cache}{ $node->id } = $res;
 }
 
 sub _array_append_lines {
