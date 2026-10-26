@@ -1236,6 +1236,13 @@ sub _emit_class_registry_ir {
                       =~ /\A(?:List|Array)\z/) {
                 push @lines, "  ret %Array* $body_val";
             }
+            # `return $self`: the invocant pointer the method was called with
+            # (Analysis typed the method Object for exactly this body).
+            elsif ($ret_repr eq 'Object' && $fn_ret eq 'i8*' && ( $body_node isa Chalk::IR::Node )
+                   && $body_node->operation eq 'PadAccess' && ( $body_node->symbol // '' ) eq 'self'
+                   && ( $body_node->sigil // '' ) eq '$') {
+                push @lines, "  ret i8* %self  ; return \$self";
+            }
             elsif ($fn_ret ne 'i64') {
                 die "GAP: a method returning repr=$ret_repr ($fn_ret) from a body of another "
                   . "shape is not lowered -- refusing to emit a mistyped ret\n";

@@ -394,6 +394,7 @@ sub infer ($class, $graphs) {
     # fixpoint, so the metaobject is available to it.
     _attach_call_targets(\%graphs, $mop);
     _attach_glob_bound_subs(\%graphs, $mop);
+    _type_calls_returning_self(\%graphs);
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
     # through computed + aggregate-read nodes for EVERY graph (class or not).
@@ -805,6 +806,38 @@ sub _attach_glob_bound_subs ($graphs, $mop) {
         next unless @mine && @mine == ( $calls{$name} // [] )->@*;
         $_->[0]->set_target($anon->sub) for @mine;
         $anon->set_glob_bound(1);
+    }
+    return;
+}
+
+# _type_calls_returning_self($graphs): a method whose every return is its
+# `$self` returns an object (of its class: the invocant), so a call of it
+# nothing typed is an Object -- a fluent `->add("a")->add("b")` dispatches on
+# the result (pvm 243 247). B::SoN leaves `$self` Unknown.
+sub _type_calls_returning_self ($graphs) {
+    for my $gname (sort keys $graphs->%*) {
+        for my $n (_all_graph_nodes($graphs->{$gname})) {
+            next unless $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'method'
+                && ( $n->stamp // 'Unknown' ) eq 'Unknown';
+            my $t = $n->target;
+            # A CLASS'S method: its `$self` is the class's object. A package
+            # sub's `my $self = shift` is a blessed reference, dispatched by
+            # its bless -- not this (a blessed-hash fluent call went invalid IR).
+            next unless blessed($t) && $t isa Chalk::MOP::Method;
+            my $g = $t->can('graph') ? $t->graph : undef;
+            next unless $g && $g->can('returns');
+            my @r = grep { blessed($_) && $_->operation eq 'Return' } $g->returns->@*;
+            next unless @r && !grep {
+                my $v = $_->inputs->[0];
+                !( blessed($v) && $v->operation eq 'PadAccess' && ( $v->symbol // '' ) eq 'self'
+                   && ( $v->sigil // '' ) eq '$' )
+            } @r;
+            $n->set_stamp('Object');
+            # ...and the method's own signature: a class method is emitted as a
+            # function whose return type is its metaobject's.
+            $t->set_return_type('Object')
+                if $t->can('set_return_type') && ( $t->return_type // 'Unknown' ) eq 'Unknown';
+        }
     }
     return;
 }

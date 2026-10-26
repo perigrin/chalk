@@ -13255,9 +13255,10 @@ sub _lower_call_direct {
         # a shared lexical returns a Scalar (that lexical's Slot); the call to
         # it, stamped Unknown, is that Scalar -- this call node is this call
         # site's own, so saying so is no one else's business.
+        # A reference too: a package method returning its blessed `$self`.
         $node->set_stamp($from)
             if ( $node->stamp // 'Unknown' ) eq 'Unknown'
-            && $from =~ /\A(?:Scalar|Int|Num|Str|Boolean)\z/;
+            && $from =~ /\A(?:Scalar|Int|Num|Str|Boolean|ArrayRef|HashRef|CodeRef|ScalarRef)\z/;
         # A SCALAR-CONTEXT CALL STAMPED AS A LIST reads its callee's scalar
         # reading, which is what was lowered: `sub g { return }` gives undef
         # there, and the call stamped List was "always defined" (backlog
@@ -13275,6 +13276,12 @@ sub _lower_call_direct {
               . "reads a $to -- that coercion would not keep the value.\n"
                 unless _keeps_value($from, $to);
             $ref = $self->_emit_coercion($ref, $from, $to, "call $name result");
+        }
+        # A REFERENCE where the call is a Scalar is boxed into the Slot that
+        # holds it: a method returning its blessed `$self` handed back the bare
+        # pointer, and the next call read it as a %Slot (invalid IR).
+        elsif ($from =~ /\A(?:ArrayRef|HashRef|CodeRef|ScalarRef)\z/ && $to =~ /\A(?:Scalar|Slot)\z/) {
+            $ref = $self->_slot_of_value($value, $ref, "call $name result");
         }
         return $ref;
     };
