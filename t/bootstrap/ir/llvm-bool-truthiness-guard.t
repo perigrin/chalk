@@ -118,18 +118,17 @@ for my $op (qw(And Or)) {
     }
 
     # Boolean is a SIBLING of the Int <: Num <: Str chain, not a point on it, so an
-    # Int/Boolean pair has NO join and the loader leaves the node untyped. With no
-    # repr to bridge to, this still GAPs -- verified end-to-end, not just here:
-    # `my $c = scalar(@a); my $v = $c && (2 < 1);` GAPs as a whole program.
-    subtest "$op(Int, Boolean) GAPs: no join, so no repr to bridge to" => sub {
+    # Int/Boolean pair has NO join and the loader leaves the node untyped. Both
+    # are scalars, so the merge is the Scalar either one is: each arm boxed to
+    # a %Slot, never a phi over two machine types. perl's answers, end to end:
+    # llvm-and-or-test-any-scalar-for-truth.t.
+    subtest "$op(Int, Boolean) merges as a Scalar: each arm boxed" => sub {
         my $f = Chalk::IR::NodeFactory->new;
         my ($ll, $err) = lower_binop($f, $op,
             make_const($f, 'Int', 1), make_bool_node($f, 1), undef);
-        ok(defined $err && length $err,
-            "$op(Int,Boolean) dies rather than emitting a mismatched phi")
-            or diag('no error; ir: ' . substr($ll // '', 0, 200));
-        like($err // '', qr/mismatched reprs/,
-            'the GAP names the repr mismatch');
+        ok(!defined $err || !length $err, "$op(Int,Boolean) lowers")
+            or diag("error: $err");
+        like($ll // '', qr/phi %Slot /, 'the merge phi is a %Slot');
     };
 
     # A Num IS a branch condition now, by perl's truth (not 0.0), as an if

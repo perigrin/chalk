@@ -44,6 +44,11 @@ for my $c (
     [ q{my $s = $ENV{NOPE} // "0"; my $t = $s || "dflt"; my $u = $s && "x"; print "[$t][$u]\n";} ],
     [ q{my $a = $ARGV[0] // 1; my $b = $ARGV[1] // 0; my $x = ($a xor $b); my $y = ($a xor $a); print "[$x][$y]\n";} ],
     [ q{my $n = $ENV{NOPE} // 0.5; my $r = $n && "y"; print "[$r]\n";} ],
+    # One right side two && share (a folded `2 < 1`) is made in each one's
+    # own block: cached from the first, the second's use was not dominated.
+    [ q{my @a = (1); my @b = (); my $c = @a; my $d = @b; my $v = ($c > 0) && (2 < 1); my $w = ($d < 1) && (2 < 1); my $x = ($d > 0) || (2 < 1); my $y = ($c < 1) || (2 < 1); print "[$v][$w][$x][$y]\n";} ],
+    # An Int and a Boolean side: the merge is the Scalar either is.
+    [ q{my @a = (1); my @b = (); my $c = scalar(@a); my $d = scalar(@b); my $v = $c && (2 < 1); my $w = $d && (2 < 1); my $x = $c || (2 < 1); my $y = $d || (1 < 2); my $z = $d || (2 < 1); print "[$v][$w][$x][$y][$z]\n";} ],
 ) {
     my ($src) = @$c;
     my $want = qx($^X -e '$src');

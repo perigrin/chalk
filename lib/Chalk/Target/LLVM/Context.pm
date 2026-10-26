@@ -2998,9 +2998,12 @@ sub _emit_read_slot_as {
         if @readings;
     $self->_set_terminator("  br label \%$lbl_undef") unless @readings;
 
+    # A reference is always true in perl; read as Boolean, its tag is the answer.
+    my $lbl_ref = $to eq 'Boolean' ? $self->_fresh_label('slotrd.ref.') : undef;
+
     for my $i (0 .. $#readings) {
         my $repr = $readings[$i];
-        my $next = $i < $#readings ? $test_lbls[$i+1] : $lbl_undef;
+        my $next = $i < $#readings ? $test_lbls[$i+1] : ( $lbl_ref // $lbl_undef );
 
         $self->_new_block($test_lbls[$i]);
         my $hit = $self->_fresh;
@@ -3018,6 +3021,26 @@ sub _emit_read_slot_as {
         # body label we opened. Reading it back is the same discipline the
         # Stringify loop uses with _current_block_label.
         push @arms, [$val, $self->_current_block_label];
+        $self->_set_terminator("  br label \%$lbl_join");
+    }
+
+    if ($lbl_ref) {
+        $self->_new_block($lbl_ref);
+        my @is_ref = map {
+            my $hit = $self->_fresh;
+            $self->_emit("  $hit = icmp eq i8 $tag, " . _slot_tag_value($_) . "  ; $label: tag == $_?");
+            $hit;
+        } qw(ArrayRef HashRef CodeRef Object ScalarRef);
+        my $any = shift @is_ref;
+        for my $hit (@is_ref) {
+            my $or = $self->_fresh;
+            $self->_emit("  $or = or i1 $any, $hit");
+            $any = $or;
+        }
+        my $lbl_true = $self->_fresh_label('slotrd.reftrue.');
+        $self->_set_terminator("  br i1 $any, label \%$lbl_true, label \%$lbl_undef");
+        $self->_new_block($lbl_true);
+        push @arms, ['true', $lbl_true];
         $self->_set_terminator("  br label \%$lbl_join");
     }
 
@@ -3411,7 +3434,8 @@ sub _lower_not {
     my $inputs   = $node->inputs;
     my $operand  = $inputs->[0];
     my $op_ref   = $self->lower_value($operand);
-    my $op_repr  = $operand->stamp;
+    # AS IT IS HELD: an inlined argument is the caller's value (_repr_of).
+    my $op_repr  = $operand->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($operand) // $operand->stamp );
     die "LLVM backend: Not operand has no representation set — cannot determine i1 vs i64"
         unless defined $op_repr;
 
@@ -4288,7 +4312,7 @@ sub _lower_str_compare {
 sub _lower_ternary_by_slot {
     my ($self, $node) = @_;
     my ($c, $t, $f) = $node->inputs->@*;
-    my $cond = $self->_ensure_i1($self->lower_value($c), _require_repr($c, 'TernaryExpr.condition'));
+    my $cond = $self->_ensure_i1($self->lower_value($c), $self->_repr_of($c) // _require_repr($c, 'TernaryExpr.condition'));
     my ($tl, $fl, $end) = map { $self->_fresh_label("tern.$_.") } qw(t f end);
     $self->_set_terminator("  br i1 $cond, label %$tl, label %$fl  ; ?: (Scalar)");
     my @in;
@@ -4327,8 +4351,30 @@ sub _lower_ternary {
     # `$c ? 7 : 9`), so coerce to i1 via truthiness: Boolean passes through,
     # Int -> icmp ne, Num -> fcmp une (the same rule _lower_not applies).
     my $cond_ref  = $self->lower_value($cond_node);
-    my $cond_repr = _require_repr($cond_node, 'TernaryExpr.condition');
+    my $cond_repr = $self->_repr_of($cond_node) // _require_repr($cond_node, 'TernaryExpr.condition');
     $cond_ref = $self->_ensure_i1($cond_ref, $cond_repr);
+
+    # BOTH ARMS ARRAYS (`for ($c ? @$x : ())`): the list is the taken arm's
+    # array itself, as perl's is (its elements aliased), and the other arm
+    # is never made -- branched, each arm lowered in its own block.
+    if (( $true_node->stamp // '' ) eq 'Array' && ( $fals_node->stamp // '' ) eq 'Array') {
+        my ($tl, $fl, $end) = map { $self->_fresh_label("tern.$_.") } qw(t f end);
+        $self->_set_terminator("  br i1 $cond_ref, label %$tl, label %$fl  ; ?: (Array)");
+        my @in;
+        for my $arm ([$tl, $true_node], [$fl, $fals_node]) {
+            my ($label, $n) = @$arm;
+            $self->_new_block($label);
+            my %before = map { $_ => 1 } keys %{ $self->{cache} };
+            my $ref = $self->lower_value($n);
+            push @in, "[ $ref, %" . $self->_current_block_label . " ]";
+            $self->_set_terminator("  br label %$end");
+            delete @{ $self->{cache} }{ grep { !$before{$_} } keys %{ $self->{cache} } };
+        }
+        $self->_new_block($end);
+        my $res = $self->_fresh;
+        $self->_emit("  $res = phi " . _repr_to_llvm_type('Array') . " " . join(', ', @in) . "  ; ?: (Array)");
+        return $self->{cache}{ $node->id } = $res;
+    }
 
     # Lower the true and false branches: must be same type (Int -> i64).
     my $true_ref = $self->lower_value($true_node);
@@ -4511,8 +4557,8 @@ sub _lower_and {
     # runtime-free. `$x eq $y && (print ...)` is Boolean && Boolean (a comparison guard
     # and a print's builtin::is_bool return) — the cond.t idiom. Any other repr is
     # a loud GAP (see _shortcircuit_i1_cond).
-    my $lhs_repr = $lhs_node->stamp;
-    my $rhs_repr = $rhs_node->stamp;
+    my $lhs_repr = $self->_repr_of($lhs_node) // $lhs_node->stamp;   # an inlined argument as held
+    my $rhs_repr = $rhs_node->operation eq "Print" ? "Boolean" : $self->_repr_of($rhs_node) // $rhs_node->stamp;
 
     # `&&` yields one of its OPERANDS, not a boolean -- measured:
     # `my $a=5; my $b="hi"; $a && $b` is "hi", and with $a=0 it is 0. So the two
@@ -4540,6 +4586,13 @@ sub _lower_and {
     #
     # _emit_coercion is a no-op when a side already matches, so widening the
     # condition costs nothing on the paths that were already correct.
+    # A MERGE NOTHING TYPED -- an operand an inlined argument, known only
+    # here -- boxes its arms to the Scalar they both are.
+    if (( $repr // 'Unknown' ) eq 'Unknown' && defined $lhs_repr && defined $rhs_repr
+            && !grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } $lhs_repr, $rhs_repr) {
+        $repr = $lhs_repr eq $rhs_repr ? $lhs_repr : 'Scalar';   # agreeing arms keep their type
+        $self->{cache}{ 'repr:' . $node->id } = $repr;   # this lowering's, not the node's: inlined again, its arguments differ
+    }
     my $merge_repr = (defined $repr && defined $lhs_repr && defined $rhs_repr
                         && ($lhs_repr ne $repr || $rhs_repr ne $repr))
                    ? $repr : undef;
@@ -4566,11 +4619,15 @@ sub _lower_and {
     # RHS block: evaluate the RHS, then jump to end. Validate its repr here so a
     # side-effect-only RHS (a print) is still checked against the phi type below.
     $self->_new_block($rhs_label);
+    # What the right side makes is this block's: cached past it, a later use
+    # of a shared node (a folded `2 < 1`) was not dominated (as an if arm's).
+    my %before        = map { $_ => 1 } keys %{ $self->{cache} };
     my $rhs_ref       = $self->lower_value($rhs_node);
     if (defined $merge_repr) {
         $rhs_ref = $self->_emit_coercion($rhs_ref, $rhs_repr, $merge_repr,
                                          'And.RHS');
     }
+    delete @{ $self->{cache} }{ grep { !$before{$_} && !/\Arepr:/ } keys %{ $self->{cache} } };
     my $rhs_end_label = $self->_current_block_label;   # may differ if rhs has its own blocks
     $self->_set_terminator("  br label %$end_label  ; And: rhs falls through to end");
 
@@ -4613,8 +4670,8 @@ sub _lower_or {
     # Validate operand reprs: Int (icmp ne i64) and Boolean (already i1) both lower
     # runtime-free. `$x ne $y || (print ...)` is Boolean || Boolean — the cond.t idiom.
     # Any other repr is a loud GAP (see _shortcircuit_i1_cond).
-    my $lhs_repr = $lhs_node->stamp;
-    my $rhs_repr = $rhs_node->stamp;
+    my $lhs_repr = $self->_repr_of($lhs_node) // $lhs_node->stamp;   # an inlined argument as held
+    my $rhs_repr = $rhs_node->operation eq "Print" ? "Boolean" : $self->_repr_of($rhs_node) // $rhs_node->stamp;
 
     # `||` yields one of its OPERANDS, so its arms can differ in type. Same rule
     # and same block-placement constraint as _lower_and: the bridge is emitted
@@ -4634,6 +4691,13 @@ sub _lower_or {
     #
     # _emit_coercion is a no-op when a side already matches, so widening the
     # condition costs nothing on the paths that were already correct.
+    # A MERGE NOTHING TYPED -- an operand an inlined argument, known only
+    # here -- boxes its arms to the Scalar they both are.
+    if (( $repr // 'Unknown' ) eq 'Unknown' && defined $lhs_repr && defined $rhs_repr
+            && !grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } $lhs_repr, $rhs_repr) {
+        $repr = $lhs_repr eq $rhs_repr ? $lhs_repr : 'Scalar';   # agreeing arms keep their type
+        $self->{cache}{ 'repr:' . $node->id } = $repr;   # this lowering's, not the node's: inlined again, its arguments differ
+    }
     my $merge_repr = (defined $repr && defined $lhs_repr && defined $rhs_repr
                         && ($lhs_repr ne $repr || $rhs_repr ne $repr))
                    ? $repr : undef;
@@ -4656,11 +4720,13 @@ sub _lower_or {
 
     # RHS block: evaluate the RHS, then jump to end.
     $self->_new_block($rhs_label);
+    my %before        = map { $_ => 1 } keys %{ $self->{cache} };   # the arm's own (see _lower_and)
     my $rhs_ref       = $self->lower_value($rhs_node);
     if (defined $merge_repr) {
         $rhs_ref = $self->_emit_coercion($rhs_ref, $rhs_repr, $merge_repr,
                                          'Or.RHS');
     }
+    delete @{ $self->{cache} }{ grep { !$before{$_} && !/\Arepr:/ } keys %{ $self->{cache} } };
     my $rhs_end_label = $self->_current_block_label;
     $self->_set_terminator("  br label %$end_label  ; Or: rhs falls through to end");
 
@@ -6029,6 +6095,13 @@ sub _freeze_memory_reads {
         # MemStart. Freezing it here would lower the Phi before its Loop is
         # processed (the Phi-before-loop guard). Leave it for the loop body walk.
         next if _reaches_an_unlowered_phi($self, $c);
+        # A READ THROUGH A SCALAR exits when it holds no reference; made here,
+        # ahead of the branch that guards it, it exited where perl never read
+        # it (pvm 152). With no later version of this memory, its use reads
+        # the same contents, so it is left there.
+        next if $c->operation eq 'Subscript'
+            && ( $self->_repr_of($c->inputs->[0]) // $c->inputs->[0]->stamp // '' ) =~ /\A(?:Scalar|Slot|Unknown)\z/
+            && !grep { blessed($_) && _is_memory_version($_) } $mem_node->consumers->@*;
         my $ref = $self->lower_value($c);
         $self->{cache}{ $c->id } = $ref;           # freeze at this memory version
         $self->{_frozen_reads}{ $c->id } = 1;
@@ -10584,6 +10657,7 @@ sub _static_class_of {
 # container: an element store through a reference a sub is handed.
 sub _repr_of {
     my ($self, $n) = @_;
+    return $self->{cache}{ 'repr:' . $n->id } if blessed($n) && exists $self->{cache}{ 'repr:' . $n->id };
     my $b = $self->{_arg_bind} && blessed($n) ? $self->{_arg_bind}{ refaddr($n) } : undef;
     # The caller's repr only where lower_value serves the caller's value as
     # it is -- a callee node nothing typed, or one used as a container; one
@@ -11567,7 +11641,12 @@ sub _static_list_elements {
     return undef unless blessed($node) && $node->can('operation');
 
     my $op = $node->operation;
-    return [ grep { blessed($_) } $node->inputs->@* ] if $op eq 'ArrayLiteral';
+    # An array among them (`my @r = $c ? @a : @b`) is its elements, not one.
+    if ($op eq 'ArrayLiteral') {
+        my @in = grep { blessed($_) } $node->inputs->@*;
+        return undef if grep { ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @in;
+        return \@in;
+    }
 
     if ($op eq 'Call' && $node->can('dispatch_kind')
             && ($node->dispatch_kind // '') eq 'direct') {
@@ -12952,7 +13031,7 @@ sub _lower_call_direct {
             ? $self->_lower_inlined_structure($returns[0], $void ? undef : $value)
             : $self->_lower_inlined_effects_then_value(\@effect_chain, $void ? undef : $value);
         return '0' if $void;
-        my $from = $value->operation eq 'Print' ? 'Boolean' : ($value->stamp // '');
+        my $from = $value->operation eq 'Print' ? 'Boolean' : ($self->{_inlined_value_repr} // $value->stamp // '');
         # What the inlined value IS, for a list that flattens it
         # (_emit_flattened_array_of): an Array, or one scalar.
         $self->{_inline_value_repr}{ $node->id } = $from;
@@ -13391,7 +13470,11 @@ sub _lower_inlined_structure {
     local $self->{_loop_ctx_stack}       = [];
     local $self->{_jump_merges}          = {};
     Chalk::Target::LLVM::_process_control_chain($self, $return);
-    return defined $value ? $self->lower_value($value) : undef;
+    my $ref = defined $value ? $self->lower_value($value) : undef;
+    # Its type as this lowering held it -- a merge typed by THESE arguments
+    # (_repr_of) -- read before the callee's cache goes.
+    $self->{_inlined_value_repr} = defined $value ? $self->_repr_of($value) : undef;
+    return $ref;
 }
 
 # _lower_inlined_effects_then_value(\@effect_chain, $value) -> $llvm_ref
@@ -13483,7 +13566,11 @@ sub _lower_inlined_effects_then_value {
         $self->_freeze_memory_reads($memstart, \%in);
     }
     $self->process_control_node($_) for reverse $effect_chain->@*;
-    return defined $value ? $self->lower_value($value) : undef;
+    my $ref = defined $value ? $self->lower_value($value) : undef;
+    # Its type as this lowering held it -- a merge typed by THESE arguments
+    # (_repr_of) -- read before the callee's cache goes.
+    $self->{_inlined_value_repr} = defined $value ? $self->_repr_of($value) : undef;
+    return $ref;
 }
 
 # _is_args_array($node) -> bool
