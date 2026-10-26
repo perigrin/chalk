@@ -3908,6 +3908,11 @@ sub _lower_assign {
 
     my $repr = _require_repr($node, 'Assign');
 
+    # A `local` STORE is put back when its scope ends, and chalk does not put
+    # it back -- nor is the restore always on the wire (pvm 176 kept it).
+    die "GAP: a local store is not lowered -- what it replaced is not put back\n"
+        if $node->can('local') && $node->local;
+
     # A LIST ASSIGNMENT INTO LOCATIONS: each target its own value, pairwise,
     # every value read before any target is stored (a swap), a target past
     # the values undef. Lowered as `t1 = t2` it stored the wrong value.
@@ -4000,13 +4005,20 @@ sub _lower_assign {
         my $container = $self->_unwrap_ref_container($lhs->inputs->[0]);
         my $key_idx   = $lhs->inputs->[1];
         my $ctr_repr  = $self->_repr_of($container) // '';
+        # A CONTAINER READ BY ITS TAG: the reference it holds, or one made where
+        # an undef stood -- perl autovivifies it (pvm 176 184 225 232 233).
+        my $autoviv = 0;
+        if ($ctr_repr =~ /\A(?:Scalar|Slot)\z/ && ( $lhs->can('kind') ? $lhs->kind // '' : '' ) =~ /\A(array|hash)\z/) {
+            $ctr_repr = $1 eq 'array' ? 'ArrayRef' : 'HashRef';
+            $autoviv  = 1;
+        }
 
         if ($ctr_repr eq 'Array' || $ctr_repr eq 'ArrayRef') {
             # Array element store: bounds-checked (same as _lower_array_write body).
             $self->{_need_aggregate_types} = 1;
 
             # Typed pointer resolved at THIS use — see _container_ptr.
-            my $arr_ref = $self->_container_ptr($container, 'Array');
+            my $arr_ref = $self->_container_ptr($container, 'Array', autoviv => $autoviv);
             my $idx_ref = $self->_index_i64($key_idx);
             # Past the end the array grows; from the end, it counts back.
             $idx_ref = $self->_emit_array_extend_to($arr_ref, $idx_ref);
@@ -4042,7 +4054,7 @@ sub _lower_assign {
             $self->{_need_memcmp}          = 1;
 
             # Typed pointer resolved at THIS use — see _container_ptr.
-            my $hash_ref = $self->_container_ptr($container, 'Hash');
+            my $hash_ref = $self->_container_ptr($container, 'Hash', autoviv => $autoviv);
             my $wkey_ref = $self->_hash_key_str($key_idx);
             # See HashRead: a 0-length key makes the memcmp match any entry.
             # Die loudly on an untracked length rather than default to 0.
@@ -6234,9 +6246,19 @@ sub _freeze_memory_reads {
         # ahead of the branch that guards it, it exited where perl never read
         # it (pvm 152). With no later version of this memory, its use reads
         # the same contents, so it is left there.
-        next if $c->operation eq 'Subscript'
-            && ( $self->_repr_of($c->inputs->[0]) // $c->inputs->[0]->stamp // '' ) =~ /\A(?:Scalar|Slot|Unknown)\z/
-            && !grep { blessed($_) && _is_memory_version($_) } $mem_node->consumers->@*;
+        # ...LEFT WHERE IT IS USED, it is recorded: a store through a reference
+        # (which may be the same aggregate) refuses while one is pending -- a
+        # direct call storing through its argument versions no memory here.
+        my $by_tag = sub ($n) { blessed($n) && ( $self->_repr_of($n) // $n->stamp // '' ) =~ /\A(?:Scalar|Slot|Unknown)\z/ };
+        my $through_tag = $by_tag->($c->inputs->[0])
+            || ( blessed($c->inputs->[0]) && $c->inputs->[0]->operation eq 'PostfixDeref' && $by_tag->($c->inputs->[0]->inputs->[0]) );
+        # AT A LOOP'S BODY START every such read waits: hoisted to the start of
+        # the pass it ran ahead of the arm guarding it (pvm 124's `if (ref $i)`).
+        if ($through_tag && ( $self->{_freezing_a_pass}
+                || $c->operation eq 'Subscript' && !grep { blessed($_) && _is_memory_version($_) } $mem_node->consumers->@* )) {
+            $self->{_pending_tag_reads}{ refaddr($c) } = $c;
+            next;
+        }
         my $ref = $self->lower_value($c);
         $self->{cache}{ $c->id } = $ref;           # freeze at this memory version
         $self->{_frozen_reads}{ $c->id } = 1;
@@ -7721,6 +7743,19 @@ sub _process_loop_node {
     # below, after the back-edge -- as an if arm's is when the arm ends).
     my %cached_before_body = map { $_ => 1 } keys %{ $self->{cache} };
     $self->_lower_pass_elements($loop_node);
+    # A READ AT THIS PASS'S MEMORY is taken here, before the body's first store
+    # -- as one at any other version is taken where that version is made.
+    # Lowered at its use, in an arm after the pass stored the element, it read
+    # the store (`my $s = $v{$k}; $v{$k} = "z"; if (...) { push @l, $s }`
+    # printed "z z" for "x y"). A read after the loop is at the exit's memory,
+    # not this; the header runs once more than the body, so not there.
+    {
+        local $self->{_freezing_a_pass} = 1;
+        $self->_freeze_memory_reads($_)
+            for grep { blessed($_) && $_->operation eq 'Phi' && _is_memory_phi($_)
+                       && blessed($_->region) && refaddr($_->region) == refaddr($loop_node) }
+                ($loop_node->consumers // [])->@*;
+    }
 
     # Save pre-body var_table for collecting backedge updates.
     my %pre_body_vars = %{ $self->{var_table} };
@@ -11371,14 +11406,26 @@ sub _unwrap_ref_container {
 # the OLD aggregate's pointer (019eb6ff item 3). A bitcast is a free no-op
 # cast; emitting one per use is always dominance-correct.
 sub _container_ptr {
-    my ($self, $container, $kind) = @_;
+    my ($self, $container, $kind, %opt) = @_;
     $container = $self->_unwrap_ref_container($container);
     my $repr = $self->_repr_of($container) // '';
     my $v = $self->_bound_ref($container) // $self->lower_value($container);
     # A VALUE READ BY ITS TAG holding the reference (a shared lexical, a
     # merge): its payload, when the tag says so. Anything else -- undef,
     # which perl would autovivify, or another kind -- exits 255.
+    #
+    # A STORE AUTOVIVIFIES (opt autoviv): an undef where its value came from
+    # can be written -- a variable kept in memory, an element -- becomes a
+    # new aggregate there, as perl makes one. Undef anywhere else (a copy, a
+    # call's value) still exits: there is nowhere to put it.
     if ($repr =~ /\A(?:Scalar|Slot)\z/ && defined $kind && $kind =~ /\A(?:Array|Hash)\z/) {
+        # A READ THROUGH A REFERENCE STILL TO BE MADE (_freeze_memory_reads left
+        # it where it is used) may be of this aggregate, and would then read
+        # this store: `my $s = $info->{n}; f($info)` where f stores through it
+        # (pvm 233 read "z" for "x").
+        die "GAP: a store through a reference while a read through a reference waits to be "
+          . "made -- it may read the same aggregate, after this store\n"
+            if $opt{autoviv} && grep { !exists $self->{cache}{ $_->id } } values %{ $self->{_pending_tag_reads} // {} };
         my $tag = $self->_slot_tag_of($v);
         my ($ok, $typed) = ($self->_fresh, $self->_fresh);
         my ($yes, $no) = ($self->_fresh_label('cref.ok.'), $self->_fresh_label('cref.no.'));
@@ -11386,18 +11433,88 @@ sub _container_ptr {
         $self->{_need_exit} = 1;
         $self->_set_terminator("  br i1 $ok, label %$yes, label %$no");
         $self->_new_block($no);
+        my (@made, $join);
+        if ($opt{autoviv} && $self->_autoviv_target($container)) {
+            my ($viv, $bad) = ($self->_fresh_label('cref.viv.'), $self->_fresh_label('cref.bad.'));
+            $self->_set_terminator("  br i1 " . $self->_slot_defined_bit($v) . ", label %$bad, label %$viv");
+            $self->_new_block($viv);
+            my $new = $kind eq 'Array' ? $self->_emit_array_of([]) : $self->_emit_empty_hash('autovivified');
+            my ($raw, $s0, $s1, $s2) = map { $self->_fresh } 1 .. 4;
+            $self->_emit("  $raw = ptrtoint %${kind}* $new to i64  ; autovivified");
+            $self->_emit("  $s0 = insertvalue %Slot undef, i1 true, " . _slot_idx('defined'));
+            $self->_emit("  $s1 = insertvalue %Slot $s0, i8 " . _slot_tag_value("${kind}Ref") . ", " . _slot_idx('tag'));
+            $self->_emit("  $s2 = insertvalue %Slot $s1, i64 $raw, " . _slot_idx('payload'));
+            $self->_autoviv_store($container, $s2, $raw, $kind);
+            push @made, [ $new, $self->_current_block_label ];
+            $join = $self->_fresh_label('cref.join.');
+            $self->_set_terminator("  br label %$join");
+            $self->_new_block($bad);
+        }
         $self->_refuse_inside_eval("an element read through what is not a ${kind} reference");
         $self->_emit("  call void \@exit(i32 255)  ; not a ${kind} reference");
         $self->_set_terminator("  unreachable");
         $self->_new_block($yes);
         my $pl = $self->_slot_payload_of($v);
         $self->_emit("  $typed = inttoptr i64 $pl to %${kind}*  ; Scalar -> %${kind}*");
-        return $typed;
+        return $typed unless @made;
+        my $merged = $self->_fresh;
+        push @made, [ $typed, $self->_current_block_label ];
+        $self->_set_terminator("  br label %$join");
+        $self->_new_block($join);
+        $self->_emit("  $merged = phi %${kind}* " . join(', ', map { "[ $_->[0], %$_->[1] ]" } @made));
+        return $merged;
     }
     return $v unless $repr eq "${kind}Ref";   # unboxed %Array*/%Hash* already
     my $typed = $self->_fresh;
     $self->_emit("  $typed = bitcast i8* $v to %${kind}*  ; ${kind}Ref -> ${kind}* (at use)");
     return $typed;
+}
+
+# _emit_empty_hash($what) -> %Hash*: no entries, grown on insert.
+sub _emit_empty_hash {
+    my ($self, $what) = @_;
+    my ($hb, $hash) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $hb = call i8* \@malloc(i64 " . _sizeof_llvm_type('%Hash') . ")  ; $what: hash header");
+    $self->_emit("  $hash = bitcast i8* $hb to %Hash*");
+    $self->_emit("  store %Hash zeroinitializer, %Hash* $hash  ; $what: empty");
+    return $hash;
+}
+
+# _autoviv_target($container) -> true when an undef read from $container can
+# be replaced where it came from: a variable kept in memory, or an element of
+# an array or a hash.
+sub _autoviv_target {
+    my ($self, $c) = @_;
+    return 0 if defined $self->_bound_ref($c);   # an argument: the caller's value, copied
+    return 1 if $c->operation eq 'PadAccess' && ( $c->sigil // '$' ) eq '$' && ( $c->shared || $c->is_location );
+    return 0 unless $c->operation eq 'Subscript' && ( $c->can('kind') ? $c->kind // '' : '' ) =~ /\A(?:array|hash)\z/;
+    return ( $self->_repr_of( $self->_unwrap_ref_container($c->inputs->[0]) ) // '' )
+        =~ /\A(?:Array|ArrayRef|Hash|HashRef|Scalar|Slot)\z/ ? 1 : 0;
+}
+
+# _autoviv_store($container, $slot, $raw, $kind): write the new reference
+# where $container's undef was read from (_autoviv_target).
+sub _autoviv_store {
+    my ($self, $c, $slot, $raw, $kind) = @_;
+    if ($c->operation eq 'PadAccess') {
+        $self->_emit("  store %Slot $slot, %Slot* " . $self->_location_ptr($c) . "  ; autovivified into " . $c->name);
+        return;
+    }
+    my ($inner, $key) = $c->inputs->@[0, 1];
+    if ($c->kind eq 'array') {
+        my $arr = $self->_container_ptr($inner, 'Array', autoviv => 1);
+        my $i   = $self->_emit_array_extend_to($arr, $self->_index_i64($key));
+        my ($ep, $els, $sp) = map { $self->_fresh } 1 .. 3;
+        $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2");
+        $self->_emit("  $els = load %Slot*, %Slot** $ep");
+        $self->_emit("  $sp = getelementptr inbounds %Slot, %Slot* $els, i64 $i");
+        $self->_emit("  store %Slot $slot, %Slot* $sp  ; autovivified into the element");
+        return;
+    }
+    my $hash = $self->_container_ptr($inner, 'Hash', autoviv => 1);
+    my ($kp, $kl) = $self->_str_parts($self->_hash_key_str($key));
+    $self->_emit_hash_upsert($hash, $kp, $kl, 'true', _slot_tag_value("${kind}Ref"), $raw);
+    return;
 }
 
 # _lower_subscript: repr-dispatch on inputs[0] container.

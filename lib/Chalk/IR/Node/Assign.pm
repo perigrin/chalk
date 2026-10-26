@@ -17,9 +17,11 @@ class Chalk::IR::Node::Assign :isa(Chalk::IR::Node::BinOp) {
     # A LIST assignment's target count: inputs[0 .. targets-1] are the
     # targets, the rest the values. Undef for a scalar assign. In the content
     # hash, since Assign(a, b, c) means a different store for 1 than for 2.
+    # A `local` store: perl puts the old value back when its scope ends.
+    field $local :param :reader = 0;
     field $targets :param :reader = undef;
     method content_hash() {
-        return join('|', 'Assign', (defined $targets ? "targets=$targets" : ()),
+        return join('|', 'Assign', (defined $targets ? "targets=$targets" : ()), ($local ? 'local' : ()),
             $self->_serialize_inputs());
     }
 }
