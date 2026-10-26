@@ -6889,7 +6889,22 @@ sub _arm_loop_exit_label {
     return undef unless defined $exit_id;
     my @regions = grep { defined $_ && ref($_) && $_->can('operation') && $_->operation eq 'Region' }
         ($proj->consumers // [])->@*;
-    for my $c (@regions) {
+    # AN ARM WITH STATEMENTS before its `next` or `last` reaches the latch or
+    # the exit from its last one (`{ push @o, "B"; last }`): the Region's
+    # input is that push, not the Proj. Follow the arm's chain to its end.
+    # Missed, a `last` arm was taken for an ordinary one and the loop ran on.
+    my @arm_regions = @regions;
+    my %been;
+    for (my $n = $proj; blessed($n) && !$been{ refaddr($n) }++; ) {
+        my @c = grep { blessed($_) } ($n->consumers // [])->@*;
+        push @arm_regions, grep { $_->operation eq 'Region' } @c;
+        my ($next) = grep {
+            $_->operation !~ /\A(?:Region|If|Loop|Proj|Phi)\z/
+                && $_->can('control_in') && blessed($_->control_in) && refaddr($_->control_in) == refaddr($n)
+        } @c;
+        $n = $next;
+    }
+    for my $c (@arm_regions) {
         return $ctx->{exit_label} if $c->id eq $exit_id;
     }
     # A REGION THIS LOOP HEADS THAT IS NOT ITS EXIT is where the body's arms
@@ -6901,9 +6916,13 @@ sub _arm_loop_exit_label {
     # It goes to the loop's LATCH, where every path that ends a pass meets
     # (_process_loop_node builds it and merges what the pass carries there).
     if (blessed($loop)) {
+        # Not the loop's EXIT, which the loop heads too: a `last` arm with
+        # statements reaches it the same way, and taken for the latch it ran
+        # as a `next` (`a B c` for perl's `a B`).
         my ($latch) = grep {
             $_->can('head') && blessed($_->head) && refaddr($_->head) == refaddr($loop)
-        } @regions;
+                && $_->id ne $exit_id
+        } @arm_regions;
         if ($latch) {
             $ctx->{latch_loop} = $loop;
             return $ctx->{latch_label} //= $self->_fresh_label('loop.latch.');
@@ -7063,10 +7082,24 @@ sub _latch_phis {
     my ($loop) = @_;
     my $exit = $loop->can('region') ? $loop->region : undef;
     my %seen;
-    return grep { !$seen{ $_->id }++ } grep {
-        blessed($_) && $_->operation eq 'Phi' && blessed($_->region)
-            && _is_latch_region($_->region, $loop)
-    } map { $_->inputs->[1] } _collect_loop_phis($loop);
+    # The back-edge itself, or -- a C-style for's step over the merge, `$i +=
+    # 2` of what the `next` arm left -- a Phi among its pure operands.
+    my $latch_phi = sub ($n) {
+        blessed($n) && $n->operation eq 'Phi' && blessed($n->region)
+            && _is_latch_region($n->region, $loop);
+    };
+    my @found;
+    for my $back (map { $_->inputs->[1] } _collect_loop_phis($loop)) {
+        my (%been, @q);
+        @q = ($back);
+        while (defined(my $n = shift @q)) {
+            next unless blessed($n) && !$been{ refaddr($n) }++;
+            if ($latch_phi->($n)) { push @found, $n; next }
+            next if $n->operation eq 'Phi' || !$PURE_DESCEND_OPS{ $n->operation };
+            push @q, $n->inputs->@*;
+        }
+    }
+    return grep { !$seen{ $_->id }++ } @found;
 }
 
 sub _is_latch_region {
