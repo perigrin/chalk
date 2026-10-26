@@ -2007,11 +2007,11 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'substr') {
         return $self->_lower_substr($node);
     }
-    # AN ARRAY SLICE WALKED AS A CONTAINER -- `grep { } @a[...]` is
-    # Count(Slice) and Subscript(Slice, $i) -- is the slice made once, a
-    # fresh array. perl's $_ there is the array's own element, so one that is
+    # AN ARRAY SLICE OR A RANGE WALKED AS A CONTAINER -- `grep { } @a[...]`
+    # is Count(Slice) and Subscript(Slice, $i) -- is the list made once, a
+    # fresh array (a range's numbers are no one's to alias). perl's $_ there is the array's own element, so one that is
     # stored to, referenced or passed would be a copy: refused.
-    elsif ($op eq 'Slice' && _is_array_slice($node)) {
+    elsif (( $op eq 'Slice' || $op eq 'Range' ) && _is_walked_list($node)) {
         for my $el (grep { blessed($_) && $_->operation eq 'Subscript' } ($node->consumers // [])->@*) {
             die "GAP: an element of an array slice walked by grep or map is written, referenced "
               . "or passed -- perl aliases the array's element, and the walk here is of a copy\n"
@@ -8692,7 +8692,7 @@ sub _lower_length {
 
     my $operand = $node->inputs->[0];
     my $op_repr = _require_repr($operand, 'Length.operand');
-    $op_repr = 'Array' if $op_repr eq 'List' && _is_array_slice($operand);   # the slice made once
+    $op_repr = 'Array' if $op_repr eq 'List' && _is_walked_list($operand);   # the list made once
 
     if ($op_repr eq 'Array' || $op_repr eq 'ArrayRef') {
         $self->{_need_aggregate_types} = 1;
@@ -9753,6 +9753,15 @@ sub _lower_split {
 }
 
 # _is_array_slice($node) -- an `@a[...]`.
+# _is_walked_list($n) -> true for a List grep/map walk as a container (its
+# Count and Subscripts): an array slice, or a range of integers -- made once
+# as a fresh array (lower_value).
+sub _is_walked_list ($n) {
+    return 1 if _is_array_slice($n);
+    return blessed($n) && $n->operation eq 'Range'
+        && !grep { !blessed($_) || ( $_->stamp // '' ) ne 'Int' } $n->inputs->@[0, 1];
+}
+
 sub _is_hash_slice ($n) {
     return blessed($n) && $n->operation eq 'Slice' && ( $n->kind // '' ) eq 'hash';
 }
@@ -10813,7 +10822,7 @@ sub _lower_subscript {
     my $container = $self->_unwrap_ref_container($node->inputs->[0]);
     my $container_repr = $self->_repr_of($container)
         // _require_repr($container, 'Subscript.container');
-    $container_repr = 'Array' if $container_repr eq 'List' && _is_array_slice($container);   # the slice made once
+    $container_repr = 'Array' if $container_repr eq 'List' && _is_walked_list($container);   # the list made once
     # A container read by its tag: the read says which kind it is.
     if ($container_repr =~ /\A(?:Scalar|Slot)\z/ && ($node->can('kind') ? $node->kind // '' : '') =~ /\A(array|hash)\z/) {
         $container_repr = $1 eq 'array' ? 'ArrayRef' : 'HashRef';

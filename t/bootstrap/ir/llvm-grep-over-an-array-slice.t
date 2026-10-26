@@ -1,5 +1,5 @@
-# ABOUTME: grep/map over an array slice walk the slice's elements: its count and each
-# ABOUTME: element are read off the slice made once: B::SoN -> chalk -> lli == perl.
+# ABOUTME: grep/map over an array slice or a computed range walk its elements: the count
+# ABOUTME: and each element are read off the list made once: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -42,6 +42,9 @@ for my $c (
     [ q{my @c = (1, 2, 3); my @x = grep { $_ > 1 } @c[0 .. 1]; print "@x\n";} ],
     [ q{my $c = [qw(a b c)]; print join("", grep { defined } @{$c}[1, 2, 5]), "\n";} ],
     [ q{my @c = (4, 5, 6); my @m = map { $_ * 2 } @c[2, 0]; print "@m\n";} ],
+    # A range whose bound the program computes walks the same way (pvm 075).
+    [ q{my $n = length("abc"); my @m = map { $_ * 2 } 1 .. $n; print "@m\n"; my @g = grep { $_ % 2 } 2 .. $n + 2; print "@g\n";} ],
+    [ q{sub collect { my ($n) = @_; return () unless defined $n; my @c = map { "n$_" } 1 .. $n; return @c } my @a = collect(2); my @b = collect(0); print scalar(@a), " ", scalar(@b), "\n";} ],
 ) {
     my ($src) = @$c;
     my $want = qx($^X -e '$src');
