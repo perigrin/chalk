@@ -11094,7 +11094,11 @@ sub _arg_binding {
     my $rep = $self->_repr_of($arg) // '';
     my $raw = $self->_bound_ref($arg);
     return { ref => $raw, repr => $rep, node => $arg } if $rep =~ /Ref\z/ && defined $raw;
-    return { ref => $ref, repr => $arg->stamp, node => $arg };
+    # A VARIABLE KEPT IN MEMORY: its location, taken here in the caller's
+    # frame, for a `\$_[N]` in the callee (_lower_ref).
+    my $loc = $arg->operation eq 'PadAccess' && ( $arg->sigil // '$' ) eq '$'
+              && ( $arg->shared || $arg->is_location ) ? $self->_location_ptr($arg) : undef;
+    return { ref => $ref, repr => $arg->stamp, node => $arg, loc => $loc };
 }
 
 # _static_class_of($node) -> the class a value is an object of, where that is
@@ -12532,6 +12536,19 @@ sub _lower_ref {
     my ($self, $node) = @_;
     my $x = $node->inputs->[0];
     die "GAP: a reference with no referent is not lowered\n" unless blessed($x);
+    # `\$_[N]` IS TO THE CALLER'S VARIABLE, whose location the binding took in
+    # the caller's frame (_arg_binding); through a copy it reached @_ (pvm
+    # 203). Resolved in this frame, it was a fresh `my` of the same name and a
+    # write through it was lost. Any other argument (an element, a value) is
+    # refused.
+    if ($x->operation eq 'Subscript' && $self->{_arg_bind}
+            && (my $b = $self->{_arg_bind}{ refaddr($x) })) {
+        die "GAP: a reference to an argument that is not a variable kept in memory is not lowered\n"
+            unless defined $b->{loc};
+        my $ref = $self->_fresh;
+        $self->_emit("  $ref = bitcast %Slot* $b->{loc} to i8*  ; \\\$_[N]: the caller's variable");
+        return $ref;
+    }
     my $xs = $x->stamp // '';
     my ($ptr, $ty);
     if ($xs eq 'Array' || $xs eq 'Hash') {
