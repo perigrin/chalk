@@ -51,9 +51,13 @@ for my $case (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
+# The nested-loop case once refused as "an if is reached again inside its
+# own arm": the arm walk cycled because the JSON loader interned two pinned
+# reads of one content into one node. Kept apart, the walk ends, and the
+# program is refused further on (a value nothing typed).
 for my $case (
     [ q{my @a; $a[1] = 1; my $s = ""; for my $x (@a) { $a[0] = 5; $s .= $x // "u" } print $s, "\n"}, qr/GAP: a reference to an element of an array that may grow/, 'an alias into an array a store may grow' ],
-    [ q{my %in = (a => [[1, 2], 3], b => [4]); my @dead; push @dead, qw(a b); my @seen; for my $d (@dead) { for my $i ($in{$d}->@*) { if (ref $i) { for my $e ($i->@*) { push @seen, "$d$e" } } else { push @seen, "$d$i" } } } print "@seen\n";}, qr/GAP: an if is reached again inside its own arm/, 'an arm walk that cycles ends, refused' ],
+    [ q{my %in = (a => [[1, 2], 3], b => [4]); my @dead; push @dead, qw(a b); my @seen; for my $d (@dead) { for my $i ($in{$d}->@*) { if (ref $i) { for my $e ($i->@*) { push @seen, "$d$e" } } else { push @seen, "$d$i" } } } print "@seen\n";}, qr/lattice TOP/, 'nested loops over an alias and a deref: refused, not cycling' ],
 ) {
     my ($src, $re, $name) = @$case;
     my $err = do { local $@; eval { through_llvm($src) }; $@ };

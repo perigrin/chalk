@@ -790,6 +790,13 @@ sub _deserialize_graph ($method_data) {
         }
         else {
             $node = $factory->make($op, %args);
+            # TWO PINNED NODES OF ONE CONTENT are two nodes: `exists $_[$i] ?
+            # $$alias : $_[$i]` read at two points of a foreach body. Interned
+            # to one, the second pin overwrote the first, the arm's control
+            # chain looped through its own If, and the loop body was dropped.
+            $node = $factory->make_unique($op, %args)
+                if defined $nd->{control_in} && blessed($node->control_in)
+                && refaddr($node->control_in) != refaddr($nodes[ $nd->{control_in} ]);
         }
 
         # Produce-time control: decode a genuine control_in wire key, emitted

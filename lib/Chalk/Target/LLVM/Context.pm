@@ -7472,7 +7472,10 @@ sub _process_loop_node {
     # of which are already defined -- so the cached SSA ref dominates every use.
     $self->_prelower_condition_mutation_backedges(\@phi_records);
 
-    # Conditional branch: condition true -> body; false -> exit.
+    # Conditional branch: condition true -> body; false -> exit. From the
+    # header's LAST block: one that stringified opened blocks of its own, and
+    # the exit's merge names this one as its predecessor.
+    my $header_exit_from = $self->_current_block_label;
     $self->_set_terminator("  br i1 $cond_val_ref, label %$body_label, label %$exit_label  ; Loop: header branch");
 
     # ---- Loop body ----
@@ -7616,7 +7619,7 @@ sub _process_loop_node {
         # inputs align 1:1 with these predecessors (the producer builds the Phi
         # over [header-value, break-value...] matching the Region predecessors).
         my @break_blocks = ($loop_ctx->{break_blocks} // [])->@*;
-        my @pred_labels  = ($header_label, @break_blocks);
+        my @pred_labels  = ($header_exit_from, @break_blocks);
 
         for my $phi (@live_exit_phis) {
             my $inputs = $phi->inputs;
