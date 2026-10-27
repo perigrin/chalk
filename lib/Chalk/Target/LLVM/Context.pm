@@ -6883,6 +6883,19 @@ sub _wire_region_phis_with_preblock {
                      // _phi_slot_for_proj($region, 0);
         my $else_slot = 1 - $then_slot;
 
+        # A MERGE OF LISTS is the chosen list. List is a shape with no machine
+        # type, so each arm is flattened into an array in its own tail and the
+        # merge is that array (pvm 077: `defined $p ? two() : ()`).
+        if (defined $phi_repr && $phi_repr eq 'List') {
+            my $flat = sub ($n) { $self->_emit_flattened_array_of([$n]) };
+            my ($tv, $ev);
+            ($tv, $then_label) = $self->_lower_arm_in_tail($inputs->[$then_slot], $then_label, $then_vars, $then_cache, $flat);
+            ($ev, $else_label) = $self->_lower_arm_in_tail($inputs->[$else_slot], $else_label, $else_vars, $else_cache, $flat);
+            $self->{cache}{ 'repr:' . $phi_node->id } = 'Array';
+            push @wired, [$phi_node, $tv, $ev];
+            next;
+        }
+
         my ($then_val, $else_val);
         ($then_val, $then_label) =
             $self->_lower_arm_in_tail($inputs->[$then_slot], $then_label, $then_vars, $then_cache);
@@ -6953,7 +6966,7 @@ sub _coerce_arm {
 # branch-to-merge to the new tail and report the new tail's label as the
 # phi's incoming label.
 sub _lower_arm_in_tail {
-    my ($self, $arm_node, $tail_label, $var_snapshot, $arm_cache) = @_;
+    my ($self, $arm_node, $tail_label, $var_snapshot, $arm_cache, $lower) = @_;
 
     my $idx = $self->_find_block_idx($tail_label);
     $self->{current_idx} = $idx;
@@ -6970,7 +6983,7 @@ sub _lower_arm_in_tail {
     for my $id (keys %{ $arm_cache // {} }) {
         $self->{cache}{$id} //= $arm_cache->{$id};
     }
-    my $val = $self->lower_value($arm_node);
+    my $val = $lower ? $lower->($arm_node) : $self->lower_value($arm_node);
     delete @{ $self->{cache} }{ grep { !$cached_before{$_} } keys %{ $self->{cache} } };
     if (defined $var_snapshot) {
         %{ $self->{var_table} } = %merge_vars;
@@ -9898,6 +9911,11 @@ sub _emit_flattened_array_of {
     my $acc = $self->_emit_array_of([]);
     for my $in (@$inputs) {
         my $s = $in->stamp // '';
+        # A merge of lists was lowered as the chosen array.
+        if (( $self->{cache}{ 'repr:' . $in->id } // '' ) eq 'Array' && exists $self->{cache}{ $in->id }) {
+            $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $self->{cache}{ $in->id })  ; list: the chosen list");
+            next;
+        }
         if (_returns_nothing_in_a_list($in)) {
             $self->lower_value($in);   # its effects, and no element
             next;
@@ -12964,6 +12982,8 @@ sub _lower_builtin_join {
     $flatten ||= blessed($list_node) && $list_node->operation eq 'Range'
         && grep { $_->operation ne 'Constant' } $list_node->inputs->@[0, 1];
     $flatten ||= _is_array_slice($list_node) || _is_hash_slice($list_node);
+    # So does a merge of lists (`@a = $c ? (7) : f()`), lowered as the array chosen.
+    $flatten ||= $list_node->operation eq 'Phi' && ( $list_node->stamp // '' ) eq 'List';
     my $elements = $flatten ? undef
         : @more ? [ $list_node, @more ]
         # A LIST READ AFTER IT WAS WRITTEN has no static elements: its
