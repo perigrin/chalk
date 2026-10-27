@@ -3458,6 +3458,15 @@ sub _lower_coerce {
 
     my $to = $node->to_repr;
 
+    # A qr// AS A STRING is perl's stringification of it, (?^FLAGS:pattern)
+    # (pvm 389).
+    my ($in0) = $node->inputs->@*;
+    if ($to eq 'Str' && blessed($in0) && $in0->operation eq 'Constant'
+            && ( $in0->const_type // '' ) eq 'regex') {
+        my $text = '(?^' . ( $in0->flags // '' ) . ':' . ( $in0->value // '' ) . ')';
+        return $self->{cache}{ $node->id } = $self->_set_str_len($self->_str_const_parts($text, 'qr// as a string'));
+    }
+
     # Lower the operand FIRST, then ask what it actually is. `from_repr` is a
     # static field stamped when the graph was loaded; it describes the operand
     # the analysis saw, which is not always the value the backend ends up
@@ -10507,6 +10516,8 @@ sub _lower_split {
         if blessed($lim) && !( $lim->operation eq 'Constant' && ( $lim->value // '' ) eq '0' );
     die "GAP: split by a pattern known only at run time is not lowered\n"
         unless blessed($pat) && $pat->operation eq 'Constant';
+    die "GAP: split by a regex with flags (" . $pat->flags . ") is not lowered\n"
+        if $pat->can('flags') && length( $pat->flags // '' );
     my $pv = $pat->value // '';
     my $mode = ( $pat->const_type // '' ) eq 'string' && $pv eq ' ' ? 'awk'
              : ( $pat->const_type // '' ) eq 'regex' && $pv eq ''  ? 'chars'
@@ -16459,7 +16470,9 @@ sub _lower_match_apply {
     my $pattern = $qr_node->value;
     # ...WITH THE MATCH'S FLAGS, which only B::SoN's Match carries for a
     # string: unsent, `/$p/i` matched case-sensitive (0 for perl's 1).
-    my $flags = '';
+    # A qr// CARRIES ITS OWN FLAGS: dropped by the loader, `"a" =~ qr/A/i`
+    # matched case-sensitive (0 for perl's 1).
+    my $flags = $qr_node->can('flags') ? $qr_node->flags // '' : '';
     if (($qr_node->const_type // '') eq 'string') {
         $flags = $node->can('flags') ? $node->flags : undef;
         die "GAP: a match against a string pattern whose flags were not sent is not lowered\n"

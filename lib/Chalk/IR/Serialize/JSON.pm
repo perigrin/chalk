@@ -115,6 +115,7 @@ sub _extract_fields ($node, $id_remap) {
         return {
             const_type => $node->const_type,
             value      => defined $node->value ? "${\$node->value}" : undef,
+            ( defined $node->flags ? ( flags => $node->flags ) : () ),
         };
     }
     if ($op eq 'AnonSub') {
@@ -554,6 +555,7 @@ sub _deserialize_graph ($method_data) {
         if ($op eq 'Constant') {
             $args{value}      = $fields->{value};
             $args{const_type} = $fields->{const_type} if exists $fields->{const_type};
+            $args{flags}      = $fields->{flags} if defined $fields->{flags};
         }
         elsif ($op eq 'AnonSub') {
             # The body's methods key. Without it the node falls back to a
