@@ -1961,6 +1961,9 @@ sub lower_value {
     elsif ($op eq 'RegexSubst') {
         return $self->_lower_regex_subst($node);
     }
+    elsif ($op eq 'RegexSubstCount') {
+        return $self->_lower_regex_subst_count($node);
+    }
     # Print: a control-pinned statement effect. Emit each list arg to stdout
     # (Str via printf("%.*s"), Int via printf("%d")); print yields boolean 1.
     elsif ($op eq 'Print') {
@@ -16708,8 +16711,9 @@ sub _lower_regex_subst {
     # /e is the producer's to compute; with the value here, it is spent.
     my $flags = $node->flags // '';
     $flags =~ s/e//g if $repl_node;
-    die "GAP: s///$flags flags not yet supported by the G6 sub-compiler "
-      . "(/g is a tracked follow-up)" if length $flags;
+    my $global = $flags =~ s/g//g;
+    die "GAP: s///$flags flags not yet supported by the G6 sub-compiler"
+        if length $flags;
 
     # s/// READS ITS SUBJECT AS A STRING: a Scalar (a location's Slot) is
     # read as one, by its tag. Taken apart as a %Str, lli rejected it.
@@ -16721,11 +16725,33 @@ sub _lower_regex_subst {
         // die "GAP: RegexSubst subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";
 
-    my $compiled = _compile_regex_pattern($node->pattern, $node->flags);
+    # A REPLACEMENT MADE PER MATCH (/ge) is a graph of its own, not lowered
+    # here: dropped, the replacement was "".
+    die "GAP: s/// whose replacement is computed per match (/ge) is not lowered\n"
+        if defined $node->replacement_body;
+    my $compiled = _compile_regex_pattern($node->pattern, $flags);
     my $segs     = $repl_node ? [ { kind => 'val' } ]
                  : _parse_subst_replacement($node->replacement // '', $compiled->{ngroups} // 0);
 
+    if ($global) {
+        # A COMPUTED REPLACEMENT is made once by B::SoN, not once per match.
+        die "GAP: s///g with a computed replacement (/e, or one made per match) is not lowered\n"
+            if $repl_node || defined $node->replacement_body;
+        # PERL STEPS OVER AN EMPTY MATCH by rules of its own, and ^ matches
+        # only at the start: neither is this loop's.
+        die "GAP: s///g whose pattern is anchored at the start is not lowered\n"
+            if $compiled->{anchored_start};
+        die "GAP: s///g whose pattern can match the empty string is not lowered\n"
+            unless grep { $_->{kind} =~ /\A(?:lit|class|any)\z/ && ( $_->{min} // 1 ) > 0 }
+                   $compiled->{atoms}->@*;
+        return $self->_lower_regex_subst_g($node, $subj_node, $subj_ptr, $subj_len, $compiled, $segs);
+    }
+
     my $match = $self->_emit_regex_matcher($subj_ptr, $subj_len, $compiled, 'RegexSubst');
+    # s///'s count: one, or none.
+    my $one = $self->_fresh;
+    $self->_emit("  $one = zext i1 $match->{matched} to i64  ; s///: how many replaced");
+    $self->{_subst_count}{ $node->id } = $one;
 
     $self->{_need_malloc_memcpy} = 1;
 
@@ -16844,6 +16870,79 @@ sub _lower_regex_subst {
     }
     $self->{cache}{ $node->id } = $res;
     return $res;
+}
+
+# _lower_regex_subst_g(...) -> %Str: s///g. Every match, left to right: the
+# text before it and its replacement are appended, and the next search starts
+# where it ended; the rest of the subject closes the result. Counted for
+# RegexSubstCount. (The pattern consumes at least one byte and is not
+# anchored: the caller refuses the others.)
+sub _lower_regex_subst_g {
+    my ($self, $node, $subj_node, $sp, $sl, $compiled, $segs) = @_;
+    $self->{_need_malloc_memcpy} = 1;
+    my $acc0 = $self->_empty_str_ref('s///g: so far');
+    my $from = $self->_current_block_label;
+    my ($head, $hit, $latch, $tail) = map { $self->_fresh_label("rxsg.$_.") } qw(head hit latch tail);
+    my ($acc, $off, $cnt, $acc_n, $off_n, $cnt_n, $rp, $rl) = map { $self->_fresh } 1 .. 8;
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($head);
+    $self->_emit("  $acc = phi %Str [ $acc0, %$from ], [ $acc_n, %$latch ]  ; s///g: the result so far");
+    $self->_emit("  $off = phi i64 [ 0, %$from ], [ $off_n, %$latch ]  ; s///g: where the search starts");
+    $self->_emit("  $cnt = phi i64 [ 0, %$from ], [ $cnt_n, %$latch ]  ; s///g: how many replaced");
+    $self->_emit("  $rp = getelementptr inbounds i8, i8* $sp, i64 $off");
+    $self->_emit("  $rl = sub i64 $sl, $off  ; s///g: what is left");
+    my $m = $self->_emit_regex_matcher($rp, $rl, $compiled, 's///g');
+    $self->_set_terminator("  br i1 $m->{matched}, label %$hit, label %$tail");
+
+    $self->_new_block($hit);
+    my $a = $self->_emit_str_append($acc, $self->_set_str_len($rp, $m->{m0s}), 's///g: before the match');
+    for my $seg (@$segs) {
+        if ($seg->{kind} eq 'lit') {
+            $a = $self->_emit_str_append($a, $self->_set_str_len($self->_str_const_parts($seg->{text}, 's///g: replacement')), 's///g');
+            next;
+        }
+        my $n = $seg->{n};
+        my ($cp, $clen) = map { $self->_fresh } 1 .. 2;
+        $self->_emit("  $cp = getelementptr inbounds i8, i8* $rp, i64 $m->{cap_s}[$n]  ; s///g: \$$n");
+        $self->_emit("  $clen = sub i64 $m->{cap_e}[$n], $m->{cap_s}[$n]");
+        $a = $self->_emit_str_append($a, $self->_set_str_len($cp, $clen), 's///g: a capture');
+    }
+    $self->_emit("  $acc_n = select i1 true, %Str $a, %Str $a");
+    $self->_emit("  $off_n = add i64 $off, $m->{m0e}  ; s///g: past the match");
+    $self->_emit("  $cnt_n = add i64 $cnt, 1");
+    $self->_set_terminator("  br label %$latch");
+    $self->_new_block($latch);
+    $self->_set_terminator("  br label %$head");
+
+    $self->_new_block($tail);
+    my $res = $self->_emit_str_append($acc, $self->_set_str_len($rp, $rl), 's///g: the rest');
+    $self->{_subst_count}{ $node->id } = $cnt;
+    if ($subj_node->operation eq 'PadAccess' && $subj_node->is_location) {
+        my $boxed = $self->_emit_coercion($res, 'Str', 'Scalar', 's///g store-back');
+        $self->_emit("  store %Slot $boxed, %Slot* " . $self->_location_ptr($subj_node)
+            . "  ; s///g stores lexical " . $subj_node->name);
+    }
+    return $self->{cache}{ $node->id } = $res;
+}
+
+# _lower_regex_subst_count($node): what s/// yields -- how many it replaced,
+# or "" when none (perl's false).
+sub _lower_regex_subst_count {
+    my ($self, $node) = @_;
+    my ($subst) = grep { blessed($_) } $node->inputs->@*;
+    $self->lower_value($subst);
+    my $cnt = $self->{_subst_count}{ $subst->id }
+        // die "GAP: the count of an s/// not lowered here is not lowered\n";
+    my $to = $node->stamp // 'Str';
+    return $self->{cache}{ $node->id } = $cnt if $to eq 'Int';
+    die "GAP: an s/// count read as a $to is not lowered\n" unless $to eq 'Str';
+    my ($np, $nl) = $self->_str_parts($self->_emit_int_to_str($cnt));
+    my ($ep) = $self->_str_const_parts('', 's///: none replaced');
+    my ($none, $p, $l) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  $none = icmp eq i64 $cnt, 0");
+    $self->_emit("  $p = select i1 $none, i8* $ep, i8* $np");
+    $self->_emit("  $l = select i1 $none, i64 0, i64 $nl");
+    return $self->{cache}{ $node->id } = $self->_set_str_len($p, $l);
 }
 
 # _lower_print($node) -> $llvm_ref (an i1 1, Boolean repr)

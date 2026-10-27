@@ -8,6 +8,8 @@ use Chalk::IR::Node::Regex;
 
 class Chalk::IR::Node::RegexSubst :isa(Chalk::IR::Node::Regex) {
     field $replacement :param :reader = '';
+    # A replacement B::SoN makes per match (/ge): the graph that computes it.
+    field $replacement_body :param :reader = undef;
 
     method operation() { 'RegexSubst' }
     method staleness_kind() { 'opaque' }
@@ -17,7 +19,7 @@ class Chalk::IR::Node::RegexSubst :isa(Chalk::IR::Node::Regex) {
 
     method content_hash() {
         return join('|', 'RegexSubst', "pattern=" . $self->pattern,
-            "replacement=$replacement", "flags=" . $self->flags,
+            "replacement=$replacement", "flags=" . $self->flags, "body=" . ( $replacement_body // '' ),
             $self->_serialize_inputs());
     }
 }
