@@ -3130,6 +3130,14 @@ sub _emit_to_str {
         return $self->_emit_int_to_str($cnt);
     }
 
+    # A REFERENCE reads as perl prints it: KIND(0x...), Class= in front when
+    # blessed -- the same reading a reference held in a cell gets (pvm 225).
+    if ($from =~ /\A(?:ArrayRef|HashRef|CodeRef|ScalarRef)\z/) {
+        my $addr = $self->_fresh;
+        $self->_emit("  $addr = ptrtoint i8* $input_ref to i64  ; $label: the address");
+        return $self->_emit_ref_reading($addr, $from, 'Str', $label);
+    }
+
     die "GAP: $label is not lowered runtime-free (Int, Boolean, Num, Slot, "
       . "Undef, Str and an aggregate's count are wired; this repr has no "
       . "stringification).";
@@ -10037,6 +10045,33 @@ sub _emit_flattened_array_of {
             $self->_new_block($done);
             next;
         }
+        # (LIST) x N is the list N times over; none for N < 1 (pvm 081). B::SoN
+        # wraps the list in a Coerce to Str, the scalar `x`'s reading of it.
+        if ($s eq 'List' && $in->operation eq 'Repeat') {
+            my ($l, $n) = $in->inputs->@*;
+            $l = $l->inputs->[0] while $l->operation eq 'Coerce' && ( $l->wire_from // $l->from_repr // '' ) eq 'List';
+            # A list literal is its elements: as one input it reads as a scalar.
+            my $one = $self->_emit_flattened_array_of(
+                $l->operation eq 'ArrayLiteral' ? [ $l->inputs->@* ] : [$l]);
+            my $cnt = $self->_emit_coercion($self->lower_value($n), $self->_repr_of($n), 'Int', 'list repeat count');
+            my $ip = $self->_fresh;
+            $self->_emit_entry("  $ip = alloca i64  ; list repeat: pass");
+            $self->_emit("  store i64 0, i64* $ip");
+            my ($head, $body, $done) = map { $self->_fresh_label("lrep.$_.") } qw(head body done);
+            $self->_set_terminator("  br label %$head");
+            $self->_new_block($head);
+            my ($i, $more, $i1) = map { $self->_fresh } 1 .. 3;
+            $self->_emit("  $i = load i64, i64* $ip");
+            $self->_emit("  $more = icmp slt i64 $i, $cnt");
+            $self->_set_terminator("  br i1 $more, label %$body, label %$done");
+            $self->_new_block($body);
+            $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $one)  ; list repeat: one pass");
+            $self->_emit("  $i1 = add i64 $i, 1");
+            $self->_emit("  store i64 $i1, i64* $ip");
+            $self->_set_terminator("  br label %$head");
+            $self->_new_block($done);
+            next;
+        }
         die "GAP: a list with a $s in it is not lowered -- it would flatten, and "
           . "only an array does here\n" if $s eq 'List';
         my $v = $self->_slot_of_value($in, $self->lower_value($in), 'list element');
@@ -12983,7 +13018,7 @@ sub _lower_builtin_join {
         && grep { $_->operation ne 'Constant' } $list_node->inputs->@[0, 1];
     $flatten ||= _is_array_slice($list_node) || _is_hash_slice($list_node);
     # So does a merge of lists (`@a = $c ? (7) : f()`), lowered as the array chosen.
-    $flatten ||= $list_node->operation eq 'Phi' && ( $list_node->stamp // '' ) eq 'List';
+    $flatten ||= $list_node->operation =~ /\A(?:Phi|Repeat)\z/ && ( $list_node->stamp // '' ) eq 'List';
     my $elements = $flatten ? undef
         : @more ? [ $list_node, @more ]
         # A LIST READ AFTER IT WAS WRITTEN has no static elements: its
