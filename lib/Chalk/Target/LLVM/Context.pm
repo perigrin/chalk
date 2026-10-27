@@ -6221,9 +6221,14 @@ sub _scan_memory_shape {
             next unless blessed($n);
             next if $s2{ $n->id }++;
             if ($n->operation eq 'Phi' && _is_memory_phi($n)) {
+                # THE STORES BEFORE A MERGED ONE in its arm or loop body reach
+                # it by control, so they are ordered as it is: walked back
+                # along control_in to the arm's start (pvm 125, 191).
                 for my $in ($n->inputs->@*) {
-                    $merged_store{ $in->id } = 1
-                        if blessed($in) && $in->operation eq 'Assign';
+                    for (my $s = $in; blessed($s) && !$CF_NODE{ $s->operation };
+                         $s = $s->can('control_in') ? $s->control_in : undef) {
+                        $merged_store{ $s->id } = 1 if $s->operation eq 'Assign';
+                    }
                 }
             }
             push @q2, grep { blessed($_) } $n->inputs->@*
