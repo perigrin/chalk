@@ -406,6 +406,7 @@ sub infer ($class, $graphs) {
     _attach_glob_bound_subs(\%graphs, $mop);
     _attach_autoload(\%graphs, $mop);
     _attach_formats(\%graphs, $mop);
+    _type_calls_through_named_refs(\%graphs, $mop);
     _type_calls_returning_self(\%graphs);
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
@@ -818,6 +819,31 @@ sub _attach_glob_bound_subs ($graphs, $mop) {
         next unless @mine && @mine == ( $calls{$name} // [] )->@*;
         $_->[0]->set_target($anon->sub) for @mine;
         $anon->set_glob_bound(1);
+    }
+    return;
+}
+
+# _type_calls_through_named_refs($graphs, $mop): a call through `\&name` --
+# an indirect Call of Ref(Constant code) -- returns what that sub does. B::SoN
+# stamps it Unknown, and a method returning it had no type (pvm 067).
+sub _type_calls_through_named_refs ($graphs, $mop) {
+    for my $gname (sort keys $graphs->%*) {
+        for my $n (_all_graph_nodes($graphs->{$gname})) {
+            next unless $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'indirect'
+                && ( $n->stamp // 'Unknown' ) eq 'Unknown';
+            my ($ref) = $n->inputs->@*;
+            next unless blessed($ref) && $ref->operation eq 'Ref';
+            my ($code) = $ref->inputs->@*;
+            next unless blessed($code) && $code->operation eq 'Constant' && ( $code->const_type // '' ) eq 'code';
+            my ($pkg, $sym) = ( $code->value // '' ) =~ /\A(.*)::([^:]+)\z/ or next;
+            my $cls = $mop->for_class($pkg) or next;
+            my ($sub) = grep { $_->name eq $sym } $cls->subs or next;
+            $n->set_target($sub);
+            my @r = grep { blessed($_) && $_->operation eq 'Return' } ( $sub->graph->returns // [] )->@*;
+            my %t = map { ( $_->inputs->[0] && $_->inputs->[0]->stamp // '' ) => 1 } @r;
+            my ($t) = keys %t;
+            $n->set_stamp($t) if keys %t == 1 && $t =~ /\A(?:Int|Num|Str|Boolean)\z/;
+        }
     }
     return;
 }

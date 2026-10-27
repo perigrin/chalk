@@ -11607,6 +11607,12 @@ sub _lower_call_indirect {
     my ($self, $node) = @_;
     my ($callee, @args) = $node->inputs->@*;
     pop @args if $node->can('memory_input') && $node->memory_input;
+    # A CALL THROUGH `\&name` runs that sub, which Analysis resolved.
+    if (blessed($callee) && $callee->operation eq 'Ref' && blessed($node->target)) {
+        my ($code) = $callee->inputs->@*;
+        $self->{_call_via} = { name => $code->value, target => $node->target, args => \@args };
+        return $self->_lower_call_direct($node);
+    }
     my $anon = $self->_static_code_of($callee);
     die "GAP: an indirect call whose code is not a sub this program makes and passes down "
       . "is not lowered\n" unless $anon && $anon->sub;
