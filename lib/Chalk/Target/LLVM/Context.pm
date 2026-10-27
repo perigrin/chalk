@@ -15819,7 +15819,11 @@ sub _compile_regex_pattern {
 
         # Quantifiers (T3): attach {min,max} to the PRECEDING atom. max undef
         # = unbounded. A quantifier with no preceding atom is malformed.
-        if ($c =~ /[*+?{]/) {
+        # A `{` THAT OPENS NO COUNT ({n} {n,} {n,m} {,m}) is a literal brace,
+        # as perl reads it: `m{a{b}c}` was refused as malformed (pvm 379).
+        # Blanks may stand by the braces and the comma (perl 5.34).
+        my $count_re = qr/^\{[ \t]*(?:(\d+)[ \t]*(,[ \t]*(\d*))?|,[ \t]*(\d+))[ \t]*\}/;
+        if ($c =~ /[*+?]/ || ( $c eq '{' && join('', @chars[ $i .. $#chars ]) =~ $count_re )) {
             die "regex quantifier '$c' with no preceding atom in pattern '$pattern'"
                 unless @atoms;
             my $atom = $atoms[-1];
@@ -15836,8 +15840,9 @@ sub _compile_regex_pattern {
             if ($c eq '?') { $atom->{min} = 0; $atom->{max} = 1;     $i++; next }
             # {n} {n,} {n,m}
             my $rest = join '', @chars[ $i .. $#chars ];
-            if ($rest =~ /^\{(\d+)(,(\d*))?\}/) {
-                my ($n, $has_comma, $m) = ($1, defined $2, $3);
+            if ($rest =~ $count_re) {
+                # {,m} is {0,m}
+                my ($n, $has_comma, $m) = defined $4 ? (0, 1, $4) : ($1, defined $2, $3);
                 $atom->{min} = 0 + $n;
                 $atom->{max} = $has_comma ? (length($m // '') ? 0 + $m : undef) : 0 + $n;
                 die "regex {n,m} with m < n in pattern '$pattern'"
@@ -15853,7 +15858,8 @@ sub _compile_regex_pattern {
         # literals (alternation arrives in T5). Mid-pattern ^/$ are perl
         # ASSERTIONS (usually unmatchable without /m) — matching them as
         # literal bytes would silently diverge.
-        if ($c =~ /[}|^\$]/) {
+        # (A lone `}` is a literal brace, as perl reads it.)
+        if ($c =~ /[|^\$]/) {
             die "GAP: regex metachar '$c' in pattern '$pattern' not yet supported "
               . "by the G6 sub-compiler (tranche pending; mid-pattern ^/\$ are "
               . "assertions, not literals)";
