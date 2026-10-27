@@ -13726,6 +13726,9 @@ sub _store_field_payload {
     my $pay_i64 = $self->_fresh;
     if ($repr eq 'Boolean') {
         $self->_emit("  $pay_i64 = zext i1 $val_ref to i64  ; Boolean->i64 for field '$pname'");
+    } elsif ($repr eq 'Array' || $repr eq 'Hash') {
+        # AN AGGREGATE FIELD'S DEFAULT: the field holds a reference to it.
+        $self->_emit("  $pay_i64 = ptrtoint %${repr}* $val_ref to i64  ; $repr -> its reference for field '$pname'");
     } elsif ($repr eq 'ArrayRef' || $repr eq 'HashRef') {
         # Pointer-repr value: ptrtoint before storing into the i64 payload,
         # mirroring the array/hash element-store branches. A bare
@@ -14077,12 +14080,25 @@ sub _lower_call_new {
             die "LLVM MOP: field '$pname' has has_default=true but no default "
               . "value node — ill-formed MOP." unless defined $def_node;
             my $def_repr = _require_repr($def_node, 'Call(new).default.field');
+            # A DEFAULT IS MADE ANEW for each object, as perl evaluates it: served
+            # from the cache, a second `new` shared the first one's hash (5252
+            # for 52u1; `field $r = {}` 5151 for 51u0).
+            {
+                my @q = ($def_node);
+                my %seen;
+                while (my $n = shift @q) {
+                    next unless blessed($n) && !$seen{ refaddr($n) }++;
+                    next if $n->operation eq 'Constant';
+                    delete $self->{cache}{ $n->id };
+                    push @q, $n->inputs->@*;
+                }
+            }
             my $def_ref  = $self->lower_value($def_node);
             my $def_gep = $self->_fresh;
             $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; default field[$fidx] defined");
             $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' default defined=true");
             my $tag_gep = $self->_fresh;
-            my $tag_nm  = _slot_tag_for_repr($def_repr);
+            my $tag_nm  = _slot_tag_for_repr($def_repr =~ s{\A(Array|Hash)\z}{${1}Ref}r);
             $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag  ; default field[$fidx] tag");
             $self->_emit("  store i8 " . _slot_tag_value($tag_nm) . ", i8* $tag_gep  ; field '$pname' default tag=$tag_nm");
 

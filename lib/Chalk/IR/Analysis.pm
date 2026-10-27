@@ -328,7 +328,9 @@ sub hydrate ($class, $graphs, $classes = undef) {
     for my $c (values %$classes) {
         for my $f (( ref $c eq 'HASH' ? $c->{fields} // [] : [] )->@*) {
             my ($sigil) = ( $f->{name} // '' ) =~ /\A([%@])/ or next;
-            $f->{type} //= $sigil eq '%' ? 'HashRef' : 'ArrayRef';
+            # (a default's type, Hash or Array, is what the reference is to)
+            $f->{type} = $sigil eq '%' ? 'HashRef' : 'ArrayRef'
+                if !defined $f->{type} || $f->{type} =~ /\A(?:Array|Hash)\z/;
         }
     }
     # A :param field's type comes from the constructor argument.
@@ -2828,7 +2830,12 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
                 $node->set_stamp($reader->{type});
                 next;
             }
-            if ($node->operation eq 'FieldAccess' && !_is_narrowed($node->stamp)) {
+            # AN AGGREGATE FIELD'S READ is its reference, whatever B::SoN stamped
+            # it (Hash or Array for `$h{b}`, Scalar where a foreach walks it).
+            if ($node->operation eq 'FieldAccess' && ( !_is_narrowed($node->stamp)
+                    || ( ( $node->stamp // '' ) =~ /\A(?:Array|Hash|Scalar)\z/
+                         && ( $field_type{ ( $node->field_stash // '' ) . '::' . ( $node->field_index // -1 ) } // '' )
+                            =~ /\A(?:Array|Hash)Ref\z/ ) )) {
                 my $stash = $node->field_stash // next;
                 my $fidx  = $node->field_index;
                 my $type  = $field_type{"$stash\::" . ($fidx // -1)} // next;
