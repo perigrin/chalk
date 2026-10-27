@@ -217,6 +217,9 @@ sub _extract_fields ($node, $id_remap) {
     if ($op eq 'VarDecl') {
         return { scope => $node->scope };
     }
+    if ($op eq 'Match' && defined $node->flags) {
+        return { flags => $node->flags };
+    }
     if ($op eq 'Coerce') {
         return {
             from_repr => $node->from_repr,
@@ -773,6 +776,9 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'PackageMark') {
             $args{package} = $fields->{package};
+        }
+        elsif ($op eq 'Match') {
+            $args{flags} = $fields->{flags} if defined $fields->{flags};
         }
         elsif ($op eq 'Transliterate') {
             $args{$_} = $fields->{$_} // '' for qw(from to flags);

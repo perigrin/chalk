@@ -16327,9 +16327,11 @@ sub _lower_match_apply {
     my $repr      = _require_repr($node, 'Match');
 
     my $qr_op = $qr_node->can('operation') ? $qr_node->operation : '';
+    # A CONSTANT STRING is the pattern perl compiles it to (`/$p/` with $p
+    # folded to "b", pvm 384).
     unless ($qr_op eq 'Constant'
         && $qr_node->can('const_type')
-        && ($qr_node->const_type // '') eq 'regex')
+        && ($qr_node->const_type // '') =~ /\A(?:regex|string)\z/)
     {
         my $why = ($qr_op eq 'Constant')
             ? "a string-valued =~ rhs (perl treats it as a pattern) is not yet "
@@ -16339,13 +16341,21 @@ sub _lower_match_apply {
           . "(Constant const_type='regex') — $why.";
     }
     my $pattern = $qr_node->value;
+    # ...WITH THE MATCH'S FLAGS, which only B::SoN's Match carries for a
+    # string: unsent, `/$p/i` matched case-sensitive (0 for perl's 1).
+    my $flags = '';
+    if (($qr_node->const_type // '') eq 'string') {
+        $flags = $node->can('flags') ? $node->flags : undef;
+        die "GAP: a match against a string pattern whose flags were not sent is not lowered\n"
+            unless defined $flags;
+    }
 
     my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($self->lower_value($subj_node));
     my $subj_len = $subj_len_tracked
         // die "GAP: Match subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";
 
-    my $compiled = _compile_regex_pattern($pattern, '');
+    my $compiled = _compile_regex_pattern($pattern, $flags);
     my $match    = $self->_emit_regex_matcher($subj_ptr, $subj_len, $compiled, 'Match(qr)');
 
     $match->{subj_ptr} = $subj_ptr;
@@ -16678,6 +16688,13 @@ sub _lower_regex_subst {
 
     my $subj_node = $node->inputs->[0];
     my $repr      = _require_repr($node, 'RegexSubst');
+
+    # AN EMPTY PATTERN is perl's last successful one, which is not tracked --
+    # and B::SoN sends `s/$p/X/` this way, $p's value in the replacement
+    # (printed "babcb" for perl's "aXcb").
+    die "GAP: s/// with an empty pattern (the last pattern that matched, or one "
+      . "interpolated at run time) is not lowered\n"
+        if ( $node->pattern // '' ) eq '';
 
     # A COMPUTED REPLACEMENT arrives as an operand between the subject and
     # the memory version, the `replacement` field then "": B::SoN computes it

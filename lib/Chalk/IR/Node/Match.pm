@@ -13,4 +13,12 @@ class Chalk::IR::Node::Match :isa(Chalk::IR::Node::BinOp) {
     # FIXED: sets the capture state a later $N read depends on
     method is_fixed() { return true }
     method op_str()    { '=~' }
+
+    # The match's flags (B::SoN), for a pattern made at run time -- a string
+    # whose flags no qr// carries. undef: not sent. In the hash: /b/ and /b/i
+    # are different matches.
+    field $flags :param :reader = undef;
+    method content_hash() {
+        return join('|', 'Match', "flags=" . ( $flags // '-' ), $self->_serialize_inputs());
+    }
 }
