@@ -2044,6 +2044,9 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'sprintf') {
         return $self->_lower_sprintf($node);
     }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'formline') {
+        return $self->_lower_formline($node);
+    }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'split') {
         return $self->_lower_split($node);
     }
@@ -10290,6 +10293,127 @@ sub _lower_sprintf {
     return $self->{cache}{ $node->id } = $acc;
 }
 
+# _lower_formline($node) -> %Slot: a picture line of the format a `write`
+# runs, filled from its values and printed to STDOUT. Text fields @<<< @>>>
+# @||| take the value up to its first newline, cut or padded to the width;
+# number fields @##.## render it as %W.Df ('#'s when it does not fit); the
+# rest of the picture is literal; each line's trailing spaces are chopped.
+# ^ fields, ~ and ~~, @*, a picture known at run time, a number field over a
+# value that may be undef, and formline outside a format are refused.
+sub _lower_formline {
+    my ($self, $node) = @_;
+    die "GAP: formline outside a format's write is not lowered -- it appends to \$^A\n"
+        unless $self->{_in_format};
+    die "GAP: write while the program selects a handle is not lowered\n" if $SELECTS;
+    my ($pic, @args) = grep { blessed($_) } $node->inputs->@*;
+    pop @args if $node->can('memory_input') && $node->memory_input;
+    die "GAP: a format picture known only at run time is not lowered\n"
+        unless blessed($pic) && $pic->operation eq 'Constant' && ( $pic->const_type // '' ) eq 'string';
+    my $text = $pic->value // '';
+    die "GAP: a format with a ^ field, ~ or \@* is not lowered\n" if $text =~ /[\^~]|\@\*/;
+    $self->{$_} = 1 for qw(_need_snprintf _need_malloc_memcpy _need_memchr _need_print_str_fmt);
+    my $take = sub {
+        die "GAP: a format line with too few values for its fields is not lowered\n" unless @args;
+        return shift @args;
+    };
+    my $render = sub ($cfmt, $vargs) {
+        my ($fp) = $self->_str_const_parts($cfmt, 'format: a field');
+        my ($need, $n64, $size, $buf, $wrote) = map { $self->_fresh } 1 .. 5;
+        $self->_emit("  $need = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* null, i64 0, i8* $fp, $vargs)  ; format: measure");
+        $self->_emit("  $n64 = sext i32 $need to i64");
+        $self->_emit("  $size = add i64 $n64, 1");
+        $self->_emit("  $buf = call i8* \@malloc(i64 $size)");
+        $self->_emit("  $wrote = call i32 (i8*, i64, i8*, ...) \@snprintf(i8* $buf, i64 $size, i8* $fp, $vargs)  ; format: render");
+        return ($buf, $n64);
+    };
+    my $i32 = sub ($v) {
+        my $t = $self->_fresh;
+        $self->_emit("  $t = trunc i64 $v to i32");
+        return $t;
+    };
+    my ($nothing) = $self->_str_const_parts('', 'format: no padding');
+    for my $line ($text =~ /([^\n]*\n?)/g) {
+        next unless length $line;
+        my $nl = $line =~ s/\n\z//;
+        my $acc = $self->_empty_str_ref('format: the line');
+        my $append = sub ($s) { $acc = $self->_emit_str_append($acc, $s, 'format') };
+        pos($line) = 0;
+        while (pos($line) < length $line) {
+            if ($line =~ /\G([^\@]+)/gc) {
+                $append->($self->_set_str_len($self->_str_const_parts($1, 'format: literal')));
+                next;
+            }
+            $line =~ /\G\@(<+|>+|\|+|#+(?:\.#+)?|\.#+)?/gc;
+            my $spec = $1 // '';
+            my $w = 1 + length $spec;
+            my $arg = $take->();
+            my $from = $arg->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($arg) // $arg->stamp // '' );
+            if ($spec =~ /#/) {
+                my $d = $spec =~ /\.(#+)\z/ ? length $1 : 0;
+                die "GAP: a number field over a $from value, which may be undef, is not lowered\n"
+                    unless $from =~ /\A(?:Int|Num)\z/;
+                my $v = $self->lower_value($arg);
+                $v = $self->_emit_coercion($v, $from, 'Num', 'format: a number') if $from ne 'Num';
+                my ($buf, $n) = $render->('%*.*f', "i32 $w, i32 $d, " . _repr_to_llvm_type('Num') . " $v");
+                # TOO WIDE FOR THE FIELD: perl fills it with '#'s.
+                my ($hp) = $self->_str_const_parts('#' x $w, 'format: a number too wide');
+                my ($over, $p, $l) = map { $self->_fresh } 1 .. 3;
+                $self->_emit("  $over = icmp sgt i64 $n, $w");
+                $self->_emit("  $p = select i1 $over, i8* $hp, i8* $buf");
+                $self->_emit("  $l = select i1 $over, i64 $w, i64 $n");
+                $append->($self->_set_str_len($p, $l));
+                next;
+            }
+            my $v = $self->lower_value($arg);
+            $v = $self->_emit_coercion($v, $from, 'Str', 'format: a text field') if $from ne 'Str';
+            my ($sp, $sl) = $self->_str_parts($v);
+            # Up to the value's first newline, cut to the width.
+            my ($nlp, $none, $pi, $si, $at, $cut, $lt, $n, $pad, $lp, $rp) = map { $self->_fresh } 1 .. 11;
+            $self->_emit("  $nlp = call i8* \@memchr(i8* $sp, i32 10, i64 $sl)  ; format: a newline ends the value");
+            $self->_emit("  $none = icmp eq i8* $nlp, null");
+            $self->_emit("  $pi = ptrtoint i8* $nlp to i64");
+            $self->_emit("  $si = ptrtoint i8* $sp to i64");
+            $self->_emit("  $at = sub i64 $pi, $si");
+            $self->_emit("  $cut = select i1 $none, i64 $sl, i64 $at");
+            $self->_emit("  $lt = icmp slt i64 $cut, $w");
+            $self->_emit("  $n = select i1 $lt, i64 $cut, i64 $w");
+            $self->_emit("  $pad = sub i64 $w, $n");
+            if    ($spec =~ /\A</ || $spec eq '') { $self->_emit("  $lp = add i64 0, 0");          $self->_emit("  $rp = add i64 $pad, 0") }
+            elsif ($spec =~ /\A>/)                 { $self->_emit("  $lp = add i64 $pad, 0");       $self->_emit("  $rp = add i64 0, 0") }
+            else                                   { $self->_emit("  $lp = udiv i64 $pad, 2");      $self->_emit("  $rp = sub i64 $pad, $lp") }
+            my ($l32, $n32, $r32) = map { $i32->($_) } $lp, $n, $rp;
+            $append->($self->_set_str_len($render->('%*s%.*s%*s',
+                "i32 $l32, i8* $nothing, i32 $n32, i8* $sp, i32 $r32, i8* $nothing")));
+        }
+        # THE LINE'S TRAILING SPACES are chopped.
+        my ($ap, $al) = $self->_str_parts($acc);
+        my $from = $self->_current_block_label;
+        my ($head, $chk, $done) = map { $self->_fresh_label("format.trim.$_.") } qw(head chk done);
+        my ($k, $more, $k1, $cp, $c, $sp) = map { $self->_fresh } 1 .. 6;
+        $self->_set_terminator("  br label %$head");
+        $self->_new_block($head);
+        $self->_emit("  $k = phi i64 [ $al, %$from ], [ $k1, %$chk ]  ; format: the line's length");
+        $self->_emit("  $more = icmp sgt i64 $k, 0");
+        $self->_set_terminator("  br i1 $more, label %$chk, label %$done");
+        $self->_new_block($chk);
+        $self->_emit("  $k1 = sub i64 $k, 1");
+        $self->_emit("  $cp = getelementptr inbounds i8, i8* $ap, i64 $k1");
+        $self->_emit("  $c = load i8, i8* $cp");
+        $self->_emit("  $sp = icmp eq i8 $c, 32");
+        $self->_set_terminator("  br i1 $sp, label %$head, label %$done");
+        $self->_new_block($done);
+        my $out = $self->_set_str_len($ap, $k);
+        $out = $self->_emit_str_append($out, $self->_set_str_len($self->_str_const_parts("\n", 'format: end of line')), 'format')
+            if $nl;
+        my ($op, $ol) = $self->_str_parts($out);
+        my ($ol32, $fp) = ($i32->($ol), $self->_fresh);
+        $self->_emit("  $fp = getelementptr inbounds [5 x i8], [5 x i8]* \@fmt_print_str, i64 0, i64 0");
+        $self->_emit("  call i32 (i8*, ...) \@printf(i8* $fp, i32 $ol32, i8* $op)  ; format: the line");
+    }
+    die "GAP: a format line with values its fields do not use is not lowered\n" if @args;
+    return $self->{cache}{ $node->id } = $self->_build_slot('true', '1', 'Int', 'formline: true');
+}
+
 # _lower_split($node) -> %Array*: split in a list, its fields as views of
 # the string. Three separators are lowered: a literal (a pattern with no
 # regex metacharacter), " " (awk mode: runs of whitespace, leading ones
@@ -14084,6 +14208,8 @@ sub _lower_call_direct {
       . "define+call emission is required to lower this."
         if $self->{_inlining} && $self->{_inlining}{$name};
     local $self->{_inlining} = { ($self->{_inlining} // {})->%*, $name => 1 };
+    # A FORMAT'S BODY is what `write` runs: its formlines print (_lower_formline).
+    local $self->{_in_format} = 1 if $name =~ /::__FORMAT__:/;
 
     # Through the METAOBJECT, not a bare graph. `target` is a MOP::Sub handle,
     # so the callee's graph AND its metadata (params, uses_args, return type)
@@ -14163,7 +14289,9 @@ sub _lower_call_direct {
     # are inlined; its value is not lowered -- a sub ending in an if makes
     # that value inside an arm, and refusing it refused every statement call
     # to such a sub. Nothing reads the call, so its ref is a placeholder.
-    my $void = ($want // '') eq 'void';
+    # ...but a FORMAT'S last line is its value: it prints (_lower_formline).
+    my $void = ($want // '') eq 'void'
+        && $name !~ /::__FORMAT__:/;
     my $inline = sub {
         my $ref = $structured
             ? $self->_lower_inlined_structure($returns[0], $void ? undef : $value)

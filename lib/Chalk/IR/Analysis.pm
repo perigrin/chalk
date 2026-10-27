@@ -395,6 +395,7 @@ sub infer ($class, $graphs) {
     _attach_call_targets(\%graphs, $mop);
     _attach_glob_bound_subs(\%graphs, $mop);
     _attach_autoload(\%graphs, $mop);
+    _attach_formats(\%graphs, $mop);
     _type_calls_returning_self(\%graphs);
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
@@ -807,6 +808,35 @@ sub _attach_glob_bound_subs ($graphs, $mop) {
         next unless @mine && @mine == ( $calls{$name} // [] )->@*;
         $_->[0]->set_target($anon->sub) for @mine;
         $anon->set_glob_bound(1);
+    }
+    return;
+}
+
+# _attach_formats($graphs, $mop): `write` is B::SoN's direct call of the
+# format's graph, `main::__FORMAT__:main::STDOUT`, which names no sub. Only
+# STDOUT's format, with no top-of-page format (perl prints that first) and no
+# store into $~ or $^ (which pick another format).
+sub _attach_formats ($graphs, $mop) {
+    my @all = map { _all_graph_nodes($graphs->{$_}) } sort keys $graphs->%*;
+    return if grep {
+        $_->operation eq 'EntryWrite' && do {
+            my ($t) = $_->inputs->@*;
+            !( blessed($t) && $t->operation eq 'EntryDef' ) || ( $t->symbol // '' ) =~ /\A[~^]\z/;
+        }
+    } @all;
+    my %sub;
+    for my $n (@all) {
+        next unless $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct'
+            && !defined $n->target;
+        my $name = $n->name // '';
+        next unless $name =~ /\A\w+::__FORMAT__:main::STDOUT\z/ && $graphs->{$name}
+            && !grep { blessed($_) } $n->inputs->@*;
+        # A FORMAT READING A LEXICAL: B::SoN drops the program's store into it
+        # (`my $lex = "mine"` printed nothing). Left refused.
+        next if grep { $_->operation eq 'PadAccess' } _all_graph_nodes($graphs->{$name});
+        $n->set_target($sub{$name} //= Chalk::MOP::Sub->new(
+            name => $name, class => $mop->for_class('main'),
+            graph => $graphs->{$name}, params => ['@_'], uses_args => true));
     }
     return;
 }
