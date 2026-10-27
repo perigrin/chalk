@@ -825,8 +825,12 @@ sub _populate_registry_from_mop_class {
     }
 
     for my $phaser ($cls->adjust_blocks) {
+        my @returns = grep { blessed($_) && $_->operation eq 'Return' } $phaser->graph->returns->@*;
         push @{ $registry->{$cname}{adjusts} }, {
-            body_nodes => _phaser_body_in_control_order($phaser),
+            body_nodes  => _phaser_body_in_control_order($phaser),
+            # One Return: the body is lowered along its control chain, as a
+            # method's is, so a store inside a branch keeps its branch.
+            body_return => @returns == 1 ? $returns[0] : undef,
         };
     }
     return;
@@ -1196,6 +1200,19 @@ sub _emit_class_registry_ir {
                     push @lines, "  %ret_s1 = insertvalue %Slot %ret_st, i64 %ret_pi, $ri_pay";
                     push @lines, '  ret %Slot %ret_s1';
                 }
+                elsif ($body_repr eq 'Num') {
+                    # A Num's bits ride in the payload, tagged Num, as a field
+                    # store writes them; the double itself was a module lli
+                    # rejected ("defined with type 'double' but expected 'i64'").
+                    my $C = 'Chalk::Target::LLVM::Context';
+                    push @lines, "  %ret_nb = bitcast " . $C->can('_repr_to_llvm_type')->('Num')
+                               . " $body_val to i64  ; Num bits";
+                    push @lines, "  %ret_s0 = insertvalue %Slot undef, i1 true, " . $C->can('_slot_idx')->('defined');
+                    push @lines, "  %ret_st = insertvalue %Slot %ret_s0, i8 " . $C->can('_slot_tag_value')->('Num')
+                               . ", " . $C->can('_slot_idx')->('tag');
+                    push @lines, "  %ret_s1 = insertvalue %Slot %ret_st, i64 %ret_nb, " . $C->can('_slot_idx')->('payload');
+                    push @lines, '  ret %Slot %ret_s1';
+                }
                 elsif ($body_node->operation eq 'Print') {
                     # A PRINT IS AN i1, perl's 1: widened to the Int payload.
                     # Boxed as it was, the i1 sat where the payload wants an
@@ -1389,8 +1406,7 @@ sub _emit_class_registry_ir {
         # of the same class cache-hit the body's statement nodes and
         # silently skipped the second object's stores (review I6).
         my $adjusts = $reg->{adjusts} // [];
-        my @adjust_stmts = map { @{ $_->{body_nodes} // [] } } @$adjusts;
-        if (@adjust_stmts) {
+        if (grep { $_->{body_return} || @{ $_->{body_nodes} // [] } } @$adjusts) {
             my $adj_ctx = Chalk::Target::LLVM::Context->new;
             $adj_ctx->configure_as_method_body(
                 class_name     => $cname,
@@ -1399,7 +1415,10 @@ sub _emit_class_registry_ir {
                 parent_ctx     => $ctx,
             );
 
-            $adj_ctx->lower_value($_) for @adjust_stmts;
+            for my $adj (@$adjusts) {
+                if (my $ret = $adj->{body_return}) { _process_control_chain($adj_ctx, $ret) }
+                else { $adj_ctx->lower_value($_) for @{ $adj->{body_nodes} // [] } }
+            }
             # Same back-propagation as the method-body path above: an ADJUST
             # block is lowered in its own Context, so a %Str built there is
             # invisible to the $ctx that declares the type. absorb_need_flags_from

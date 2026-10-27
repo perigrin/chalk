@@ -2719,6 +2719,18 @@ sub _static_miss ($container, $index) {
 # _stamp_field_access_reprs (the FieldAccess nodes) both see it. Cross-graph: the
 # Call(new) is in the driver graph, the field in a class section. Returns the
 # number of field types newly inferred.
+# _may_start_undef($field, \%graphs) -> true when a new object's field may be
+# undef: its default is undef, or it has neither a default nor a :param. Such
+# a field stays Scalar: a read narrowed to the argument's or a store's repr
+# would not see the undef.
+sub _may_start_undef ($f, $graphs) {
+    return !$f->{is_param} if !defined $f->{default_ref};
+    my $dg = $graphs->{ $f->{default_ref} };
+    my ($dret) = $dg ? $dg->returns->@* : ();
+    my $d = $dret ? $dret->inputs->[0] : undef;
+    return blessed($d) && ($d->stamp // '') eq 'Undef';
+}
+
 sub _infer_param_field_types ($classes, $graphs) {
     my %ctor_arg_repr = _ctor_arg_reprs($graphs);
     my $inferred = 0;
@@ -2733,6 +2745,7 @@ sub _infer_param_field_types ($classes, $graphs) {
             next if _is_narrowed($f->{type});
             my $pn = $f->{param_name} // next;
             my $repr = $ctor_arg_repr{"$cname\0$pn"} // next;
+            next if _may_start_undef($f, $graphs);
             $f->{type} = $repr;
             $inferred++;
         }
@@ -2789,7 +2802,7 @@ sub _infer_field_types_from_stores ($classes, $graphs) {
             # has no arm. _is_narrowed already states the rule.
             next if _is_narrowed($f->{type});
             my $repr = $store_repr{"$cname\0" . ($f->{fieldix} // -1)} // next;
-            $f->{type} = $repr;
+            $f->{type} = _may_start_undef($f, $graphs) ? 'Scalar' : $repr;
             $inferred++;
         }
     }

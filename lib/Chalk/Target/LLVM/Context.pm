@@ -3328,7 +3328,8 @@ sub _emit_read_slot_as {
     # A reference is always true in perl; read as Boolean, its tag is the answer.
     # As a string or a number it is what perl reads (_emit_ref_reading): read
     # as undef, two references were one hash key "" and equal as numbers.
-    my $lbl_ref = $to eq 'Boolean' || ( $to =~ /\A(?:Str|Int|Num)\z/ )
+    # Read as Scalar, a reference is the cell itself, its tag kept.
+    my $lbl_ref = $to =~ /\A(?:Boolean|Str|Int|Num|Scalar)\z/
         ? $self->_fresh_label('slotrd.ref.') : undef;
 
     for my $i (0 .. $#readings) {
@@ -3354,7 +3355,26 @@ sub _emit_read_slot_as {
         $self->_set_terminator("  br label \%$lbl_join");
     }
 
-    if ($lbl_ref && $to ne 'Boolean') {
+    if ($lbl_ref && $to eq 'Scalar') {
+        $self->_new_block($lbl_ref);
+        my $any;
+        for my $kind (qw(ArrayRef HashRef CodeRef ScalarRef Object)) {
+            my $hit = $self->_fresh;
+            $self->_emit("  $hit = icmp eq i8 $tag, " . _slot_tag_value($kind) . "  ; $label: tag == $kind?");
+            if (defined $any) {
+                my $or = $self->_fresh;
+                $self->_emit("  $or = or i1 $any, $hit");
+                $hit = $or;
+            }
+            $any = $hit;
+        }
+        my $lbl_keep = $self->_fresh_label('slotrd.refkeep.');
+        $self->_set_terminator("  br i1 $any, label \%$lbl_keep, label \%$lbl_undef");
+        $self->_new_block($lbl_keep);
+        push @arms, [$slot_ref, $lbl_keep];
+        $self->_set_terminator("  br label \%$lbl_join");
+    }
+    elsif ($lbl_ref && $to ne 'Boolean') {
         $self->_new_block($lbl_ref);
         # shortcut: an Object (a class instance) still reads as undef -- its
         # string names a class no tag carries; give it one when objects need it.
@@ -14073,7 +14093,9 @@ sub _field_store_is_coherent {
     return true if $field_repr eq $value_repr;
 
     my %BOXED  = map { $_ => 1 } qw(Str ArrayRef HashRef);
-    my %DIRECT = map { $_ => 1 } qw(Int Boolean);
+    # A reference's payload is its pointer as i64, and the store tags the cell
+    # with the reference's kind, so the general cell reads it back as that.
+    my %DIRECT = map { $_ => 1 } qw(Int Boolean ArrayRef HashRef);
 
     # The general cell reads as a bare i64, so it holds any direct value.
     return $DIRECT{$value_repr} ? true : false if $field_repr eq 'Scalar';
@@ -14466,7 +14488,10 @@ sub _lower_call_new {
         # not silently re-aim these GEPs at the wrong bytes.
         my ($fi_def, $fi_tag, $fi_pay) =
             (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
-        if ($finfo->{has_default}) {
+        # A default of undef is no default: the cell starts undefined.
+        my $undef_default = $finfo->{has_default} && blessed($finfo->{default_node})
+            && ($finfo->{default_node}->stamp // '') eq 'Undef';
+        if ($finfo->{has_default} && !$undef_default) {
             my $def_node = $finfo->{default_node};
             # has_default promises a default value node. If it is missing the MOP
             # is ill-formed: silently storing 0 reads at runtime identically to a
@@ -14537,7 +14562,7 @@ sub _lower_call_new {
     # constructions — the second new of the same class cache-hit the body's
     # statement nodes and skipped its stores (review I6).
     my $adjusts = $reg->{adjusts} // [];
-    if (grep { @{ $_->{body_nodes} // [] } } @$adjusts) {
+    if (grep { $_->{body_return} || @{ $_->{body_nodes} // [] } } @$adjusts) {
         $self->_refuse_inside_eval("a constructor that runs ADJUST");
         $self->_emit("  call void \@${class_name}__ADJUST(i8* $raw)  ; run ADJUST blocks");
     }
@@ -15914,6 +15939,12 @@ sub _lower_call_method {
                 $sp = $self->_set_str_len($sp, $sl);
                 $self->{cache}{ $node->id } = $sp;
                 return $sp;
+            }
+            # A Num is read by the cell's tag: the payload word is an i64, and
+            # the callee may have tagged it Int.
+            if (($node->stamp // '') eq 'Num') {
+                return $self->{cache}{ $node->id } =
+                    $self->_emit_read_slot_as($result, 'Num', "Call(method) $method_name");
             }
             # A BOOLEAN IS AN i1, the payload an i64: a method returning
             # print's 1 handed its consumer the word where a bit was wanted.

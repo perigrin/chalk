@@ -61,7 +61,14 @@ subtest 'a boxed value into the general cell is NOT silently allowed' => sub {
     # coherent, which is why subtyping alone is the WRONG test.
     ok(!$coherent->('Scalar', 'Str'),
        'Str into a Scalar field: Str <: Scalar, yet the encodings disagree');
-    ok(!$coherent->('Scalar', 'ArrayRef'), 'ArrayRef into a Scalar field');
+};
+
+subtest 'a reference into the general cell is coherent' => sub {
+    # The store tags the cell with the reference's kind and its payload is the
+    # pointer as i64; a Scalar field read dispatches on that tag and keeps a
+    # reference cell whole (pvm 244: `field $in :param` given [7, 8]).
+    ok($coherent->('Scalar', 'ArrayRef'), 'ArrayRef into a Scalar field');
+    ok($coherent->('Scalar', 'HashRef'),  'HashRef into a Scalar field');
 };
 
 subtest 'an undeclared field repr imposes no constraint' => sub {
