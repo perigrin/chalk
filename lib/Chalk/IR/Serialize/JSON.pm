@@ -996,6 +996,8 @@ sub _deserialize_graph ($method_data) {
 # -----------------------------------------------------------------------
 sub from_json ($json_string) {
     my $data    = JSON::PP->new->decode($json_string);
+    # The text after __DATA__ / __END__, which DATA reads (absent: none).
+    our $DATA_SECTION = $data->{data_section};
 
     # A BEGIN OR END BLOCK WITH EFFECTS OF ITS OWN is refused, not dropped:
     # only `methods` is loaded, so a program's `BEGIN { print }` and `END {

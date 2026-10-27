@@ -9966,6 +9966,31 @@ my $HANDLE = '{ i8*, i64, i64, i8* }';
 # _handle_cell($fh) -> the i8** cell the handle variable lives in.
 sub _handle_cell {
     my ($self, $fh) = @_;
+    # DATA reads the text after __DATA__ / __END__: a read handle open on it
+    # from the start, one for the program (pvm 363, 364).
+    if (blessed($fh) && $fh->operation eq 'Constant' && ( $fh->const_type // '' ) eq 'glob'
+            && ( $fh->value // '' ) =~ /\A(?:main::)?DATA\z/) {
+        my $text = $Chalk::IR::Serialize::JSON::DATA_SECTION;
+        die "GAP: DATA in a program with no __DATA__ or __END__ section is not lowered\n"
+            unless defined $text;
+        die "GAP: DATA read in a method body is not lowered -- the program has one DATA\n"
+            if defined $self->{_method_self_name};
+        return $self->{_handle_cells}{'|DATA'} //= do {
+            $self->{_need_malloc_memcpy} = 1;
+            my ($p, $l) = $self->_str_const_parts($text, 'DATA: the section');
+            my ($c, $h, $t, @f) = map { $self->_fresh } 1 .. 7;
+            $self->_emit_entry("  $c = alloca i8*  ; handle DATA");
+            $self->_emit_entry("  $h = call i8* \@malloc(i64 32)  ; DATA: a handle on the section");
+            $self->_emit_entry("  $t = bitcast i8* $h to $HANDLE*");
+            $self->_emit_entry("  $f[$_] = getelementptr inbounds $HANDLE, $HANDLE* $t, i32 0, i32 $_") for 0 .. 3;
+            $self->_emit_entry("  store i8* $p, i8** $f[0]");
+            $self->_emit_entry("  store i64 $l, i64* $f[1]");
+            $self->_emit_entry("  store i64 0, i64* $f[2]");
+            $self->_emit_entry("  store i8* null, i8** $f[3]");
+            $self->_emit_entry("  store i8* $h, i8** $c");
+            $c;
+        };
+    }
     die "GAP: a filehandle that is not a lexical `my \$fh` is not lowered\n"
         unless blessed($fh) && $fh->operation eq 'PadAccess' && ( $fh->stamp // '' ) eq 'GlobRef';
     # ONE PER SUB: inlined subs share this function, and each sub's `my $fh`
@@ -16845,7 +16870,7 @@ sub _lower_print {
     for my $arg (@args) {
         next unless defined $arg;
         my $repr = $arg->stamp;
-        my $ref  = $self->lower_value($arg);
+        my $ref  = $self->_print_arg($arg);
 
         if (defined $repr && $repr eq 'Str') {
             my ($str_ptr, $len) = $self->_str_parts($ref);
@@ -16921,8 +16946,23 @@ sub _print_strs {
     return map {
         my $r = ( $_->stamp // '' );
         die "GAP: Print of a $r arg to a handle -- Print takes Str\n" unless $r eq 'Str';
-        $self->lower_value($_);
+        $self->_print_arg($_);
     } grep { blessed($_) } @args;
+}
+
+# _print_arg($arg) -> its Str. A LIST MADE AT RUN TIME (a readline's lines)
+# reaches print as one Coerce[List->Str]: its elements, one after another --
+# read as an aggregate's scalar it printed their count.
+sub _print_arg {
+    my ($self, $arg) = @_;
+    # ...ONE B::SoN CALLED A LIST: one Analysis narrowed from Unknown (a sub's
+    # value, `print scalar(ff())`) is its scalar reading, the count (pvm 228).
+    if ($arg->operation eq 'Coerce' && ( $arg->wire_from // $arg->from_repr // '' ) =~ /\A(?:List|Array)\z/
+            && ( $arg->to_repr // '' ) eq 'Str'
+            && ( $self->_repr_of($arg->inputs->[0]) // '' ) =~ /\A(?:Array|List)\z/) {
+        return $self->{cache}{ $arg->id } //= $self->_emit_join_loop($arg->inputs->[0], $self->_empty_str_ref('print: no separator'));
+    }
+    return $self->lower_value($arg);
 }
 
 # _lower_select($node) -> i8*: `select(FH)` makes FH the handle a bare print

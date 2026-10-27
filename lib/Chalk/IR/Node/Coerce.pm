@@ -19,6 +19,10 @@ class Chalk::IR::Node::Coerce :isa(Chalk::IR::Value) {
     # Part of content_hash for the same reason as from_repr.
     field $to_repr :param :reader;
 
+    # What the PRODUCER said the source was, when Analysis narrowed an Unknown
+    # (undef: from_repr is it). A list print reads one it called a list.
+    field $wire_from :param :reader = undef;
+
     method operation() { 'Coerce' }
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }

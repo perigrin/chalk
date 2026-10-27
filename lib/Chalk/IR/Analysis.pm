@@ -1838,6 +1838,7 @@ sub _narrow_unknown_coercions ($graphs) {
                     inputs    => [$operand],
                     from_repr => $repr,
                     to_repr   => $c->to_repr,
+                    wire_from => $c->wire_from // $c->from_repr,
                 );
                 $new->set_stamp($c->to_repr);
 
