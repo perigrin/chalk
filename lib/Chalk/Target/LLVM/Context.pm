@@ -2082,6 +2082,9 @@ sub lower_value {
     elsif ($op eq 'IsaOp') {
         return $self->_lower_isa($node);
     }
+    elsif ($op eq 'Chomp' || $op eq 'ChompValue') {
+        return $self->_lower_chomp($node);
+    }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'chr') {
         return $self->_lower_chr($node);
     }
@@ -2110,6 +2113,11 @@ sub lower_value {
     # is Count(Slice) and Subscript(Slice, $i) -- is the list made once, a
     # fresh array (a range's numbers are no one's to alias). perl's $_ there is the array's own element, so one that is
     # stored to, referenced or passed would be a copy: refused.
+    # A HASH SLICE AS A VALUE (`print @h{"c"}`) is its keys' values, a fresh
+    # array (pvm 303).
+    elsif (_is_hash_slice($node)) {
+        return $self->{cache}{ $node->id } = $self->_emit_flattened_array_of([$node]);
+    }
     elsif (( $op eq 'Slice' || $op eq 'Range' ) && _is_walked_list($node)) {
         for my $el (grep { blessed($_) && $_->operation eq 'Subscript' } ($node->consumers // [])->@*) {
             die "GAP: an element of an array slice walked by grep or map is written, referenced "
@@ -10896,6 +10904,38 @@ sub _lower_blessed {
     my $to = $self->_repr_of($node) // $node->stamp // 'Scalar';
     return $self->{cache}{ $node->id } = $to =~ /\A(?:Scalar|Slot|Unknown)\z/ ? $r
         : $self->_emit_coercion($r, 'Scalar', $to, 'blessed()');
+}
+
+# _lower_chomp($node): Chomp is the string without one trailing "\n" (chomp)
+# or its last character (chop); ChompValue is how many chomp took (pvm 137).
+# $/ is "\n": a store to it is refused. chop's value (the character) is
+# refused.
+sub _lower_chomp {
+    my ($self, $node) = @_;
+    my $kind = $node->can('kind') ? ( $node->kind // 'chomp' ) : 'chomp';
+    die "GAP: the value of chop (the character it took) is not lowered\n"
+        if $node->operation eq 'ChompValue' && $kind ne 'chomp';
+    my ($in) = grep { blessed($_) } $node->inputs->@*;
+    my $from = $self->_repr_of($in) // $in->stamp // '';
+    my $v = $self->lower_value($in);
+    $v = $self->_emit_coercion($v, $from, 'Str', "$kind: the string") if $from ne 'Str';
+    my ($p, $l) = $self->_str_parts($v);
+    my ($nz, $lm1, $safe, $lp, $lc, $nl, $take, $n, $nl2) = map { $self->_fresh } 1 .. 9;
+    $self->_emit("  $nz = icmp sgt i64 $l, 0");
+    $self->_emit("  $lm1 = sub i64 $l, 1");
+    $self->_emit("  $safe = select i1 $nz, i64 $lm1, i64 0");
+    $self->_emit("  $lp = getelementptr inbounds i8, i8* $p, i64 $safe");
+    $self->_emit("  $lc = load i8, i8* $lp  ; $kind: the last byte");
+    $self->_emit("  $nl = icmp eq i8 $lc, 10");
+    if ($kind eq 'chomp') { $self->_emit("  $take = and i1 $nz, $nl  ; chomp: a newline at the end?") }
+    else                    { $self->_emit("  $take = and i1 $nz, true  ; chop: a character at the end?") }
+    if ($node->operation eq 'ChompValue') {
+        $self->_emit("  $n = zext i1 $take to i64  ; chomp: how many it took");
+        my $to = $node->stamp // 'Int';
+        return $self->{cache}{ $node->id } = $to eq 'Int' ? $n : $self->_emit_coercion($n, 'Int', $to, 'chomp');
+    }
+    $self->_emit("  $nl2 = select i1 $take, i64 $lm1, i64 $l  ; $kind: the new length");
+    return $self->{cache}{ $node->id } = $self->_set_str_len($p, $nl2);
 }
 
 # _lower_isa($node) -> i1: `$x isa C`, the class bless recorded is C. With no
