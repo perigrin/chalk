@@ -1607,6 +1607,19 @@ sub _location_ptr {
 
 
 
+# _list_cell($pad) -> the %Slot* a list assignment's undeclared target lives
+# in: one per node, made at the graph's entry and undef until stored.
+sub _list_cell {
+    my ($self, $pad) = @_;
+    return $self->{_list_cells}{ $pad->id } //= do {
+        my $slot = $self->_fresh;
+        $self->_emit_entry("  $slot = alloca %Slot, align 8  ; " . $pad->name . ", a list assignment's target");
+        push $self->{blocks}[ $self->{_graph_entry_idx} // 0 ]{insts}->@*,
+            "  store %Slot zeroinitializer, %Slot* $slot  ; undef until stored";
+        $slot;
+    };
+}
+
 # Ops that LOAD from a mutable memory location when lowered: a pad slot
 # (PadAccess reads var_table), an aggregate element (Subscript), or an object
 # field (FieldAccess). Their lowered value is program-point-dependent — a
@@ -4017,8 +4030,8 @@ sub _lower_padaccess {
     # from its %Slot, at this read's memory version (frozen there by
     # _freeze_memory_reads), and unboxed to the reading's repr.
     return $self->_lex_aggregate_ptr($node) if $node->shared && $node->sigil =~ /\A[@%]\z/;
-    if ($node->is_location) {
-        my $g    = $self->_location_ptr($node);
+    if ($node->is_location || ( !defined $node->inputs->[0] && $self->{_list_cells}{ $node->id } )) {
+        my $g    = $node->is_location ? $self->_location_ptr($node) : $self->{_list_cells}{ $node->id };
         my $slot = $self->_fresh;
         $self->_emit("  $slot = load %Slot, %Slot* $g  ; read lexical " . $node->name);
         my $repr = $node->stamp // '';
@@ -4153,12 +4166,44 @@ sub _lower_list_assign_into_locations {
         die "GAP: a list assignment to a " . ( blessed($t) ? $t->operation : 'undef' )
           . " that is not a scalar kept in memory is not lowered\n"
             unless blessed($t) && $t->operation eq 'PadAccess'
-                && ( $t->sigil // '' ) eq '$' && ( $t->shared || $t->is_location );
+                && ( $t->sigil // '' ) eq '$'
+                && ( $t->shared || $t->is_location || !defined $t->inputs->[0] );
     }
-    for my $v (@v) {
-        my $s = $v->operation eq 'Print' ? 'Boolean' : ( $v->stamp // '' );
-        die "GAP: a list assignment of a $s value, which may flatten, is not lowered\n"
-            unless $s =~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot)\z/;
+    # A TARGET WITH NO DECLARATION OF ITS OWN (`my ($a, $b) = f()`, or one
+    # B::SoN rebound to the target) reads this node: its value lives in a
+    # cell of its own, which the read loads. Keyed by the node, not the name:
+    # two `my ($x)` in nested scopes are two variables.
+    my $ptr = sub ($t) {
+        return $self->_location_ptr($t) if $t->shared || $t->is_location;
+        return $self->_list_cell($t);
+    };
+    # A VALUE THAT MAY FLATTEN (a call, split, a list) spreads over the
+    # targets at run time: element i, undef past the end.
+    if (grep { my $s = $_->operation eq 'Print' ? 'Boolean' : ( $_->stamp // '' );
+               $s !~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot)\z/ } @v) {
+        my $arr = $self->_emit_flattened_array_of(\@v);
+        my ($lp, $len, $ep, $els) = map { $self->_fresh } 1 .. 4;
+        $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0");
+        $self->_emit("  $len = load i64, i64* $lp  ; list assign: how many values");
+        $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2");
+        $self->_emit("  $els = load %Slot*, %Slot** $ep");
+        my @vals = map {
+            my ($in, $g, $ld, $v) = map { $self->_fresh } 1 .. 4;
+            my ($rd, $join) = map { $self->_fresh_label("lassign.$_.") } qw(rd join);
+            my $from = $self->_current_block_label;
+            $self->_emit("  $in = icmp slt i64 $_, $len");
+            $self->_set_terminator("  br i1 $in, label %$rd, label %$join");
+            $self->_new_block($rd);
+            $self->_emit("  $g = getelementptr inbounds %Slot, %Slot* $els, i64 $_");
+            $self->_emit("  $ld = load %Slot, %Slot* $g  ; list assign: element $_");
+            $self->_set_terminator("  br label %$join");
+            $self->_new_block($join);
+            $self->_emit("  $v = phi %Slot [ zeroinitializer, %$from ], [ $ld, %$rd ]  ; undef past the end");
+            $v;
+        } 0 .. $#t;
+        $self->_emit("  store %Slot $vals[$_], %Slot* " . $ptr->($t[$_]) . "  ; list assign: " . $t[$_]->name)
+            for 0 .. $#t;
+        return $self->{cache}{ $node->id } = $len;
     }
     my @boxed = map {
         my $v = $v[$_];
@@ -4171,7 +4216,7 @@ sub _lower_list_assign_into_locations {
     } 0 .. ( $#v < $#t ? $#v : $#t );
     for my $i (0 .. $#t) {
         my $val = $boxed[$i] // $self->_build_slot('false', '0', 'Undef', 'list assign: no value');
-        $self->_emit("  store %Slot $val, %Slot* " . $self->_location_ptr($t[$i])
+        $self->_emit("  store %Slot $val, %Slot* " . $ptr->($t[$i])
             . "  ; list assign: " . $t[$i]->name);
     }
     # In scalar context a list assignment is the count of its values.
@@ -5617,7 +5662,11 @@ sub _lower_defined {
         $self->{cache}{$node->id} = $bit;
         return $bit;
     }
-    elsif ($op_repr eq 'Slot' || $op_repr eq 'Scalar') {  # a Scalar is its %Slot, defined bit and all
+    elsif ($op_repr eq 'Slot' || $op_repr eq 'Scalar'  # a Scalar is its %Slot, defined bit and all
+           # so is a variable read from its cell under no narrower stamp: as
+           # "always defined" an undef target of `($a, $b) = (7)` read defined.
+           || ( $operand->operation eq 'PadAccess' && $op_repr !~ /\A(?:Int|Num|Str|Boolean)\z/
+                && ( $operand->is_location || ( !defined $operand->inputs->[0] && $self->{_list_cells}{ $operand->id } ) ) )) {
         # A Slot's value is the %Slot aggregate; its defined bit is field 0.
         # Split from the Undef arm below, which is genuinely a bare i1 -- the
         # two shared a branch while a Slot was ALSO carried as its defined bit.
