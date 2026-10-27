@@ -125,6 +125,7 @@ sub new {
         _need_array_append      => 0,
         _need_tr                => 0,
         _need_time              => 0,
+        _need_pow               => 0,
         _need_bless             => 0,
         _need_memchr            => 0,
         _need_select            => 0,
@@ -176,6 +177,7 @@ my @NEED_FLAGS = qw(
     _need_array_append
     _need_tr
     _need_time
+    _need_pow
     _need_bless
     _need_memchr
     _need_select
@@ -821,6 +823,7 @@ sub render_need_flag_prologue {
         push @lines, 'declare void @exit(i32)';
     }
     push @lines, 'declare i64 @time(i64*)' if $self->{_need_time};
+    push @lines, do { my $d = _repr_to_llvm_type('Num'); "declare $d \@pow($d, $d)" } if $self->{_need_pow};
 
     # Declare getenv (+ strlen for the runtime value length) when EnvRead was
     # emitted. Plain C host-interface functions — NOT libperl.
@@ -1761,6 +1764,18 @@ sub lower_value {
     elsif ($op =~ /\ABit(And|Or|Xor)\z/) {
         return $self->_lower_bitop($node, lc $1);
     }
+    elsif ($op eq 'Power') {
+        return $self->_lower_power($node);
+    }
+    elsif ($op eq 'Negate') {
+        return $self->_lower_negate($node);
+    }
+    elsif ($op eq 'Repeat') {
+        return $self->_lower_repeat($node);
+    }
+    elsif ($op =~ /\A(Left|Right)Shift\z/) {
+        return $self->_lower_shift($node, $1 eq 'Left' ? 'shl' : 'lshr');
+    }
     # ~ IS DONE ON BYTES when its operand is a string, and whether it is one
     # (or was once read as a number) is not on the wire.
     elsif ($op eq 'Complement') {
@@ -2453,6 +2468,125 @@ sub _lower_bitop {
     return $self->{cache}{ $node->id } = $ref;
 }
 
+# _operand_as($node, $repr, $what) -> $node lowered and coerced to $repr.
+sub _operand_as {
+    my ($self, $n, $to, $what) = @_;
+    my $s = $self->_repr_of($n) // $n->stamp // '';
+    my $r = $self->lower_value($n);
+    return $s eq $to ? $r : $self->_emit_coercion($r, $s, $to, $what);
+}
+
+# _stop_unless($ok_i1, $what) -- the program stops (exit 255) where $ok is
+# false: a value perl has that chalk's representation does not.
+sub _stop_unless {
+    my ($self, $ok, $what) = @_;
+    $self->_refuse_inside_eval($what);
+    my ($go, $stop) = ($self->_fresh_label('ok.'), $self->_fresh_label('stop.'));
+    $self->{_need_exit} = 1;
+    $self->_set_terminator("  br i1 $ok, label %$go, label %$stop");
+    $self->_new_block($stop);
+    $self->_emit("  call void \@exit(i32 255)  ; $what");
+    $self->_set_terminator("  unreachable");
+    $self->_new_block($go);
+    return;
+}
+
+# _lower_negate($node) -> unary minus on a number: Int `sub 0, x`, Num fneg.
+# On a string perl negates the text (-"abc" is "-abc"): a string operand is
+# refused, one read by its tag stops the program when its tag is a string.
+sub _lower_negate {
+    my ($self, $node) = @_;
+    my $x = $node->inputs->[0];
+    my $o = $x;
+    $o = $o->inputs->[0] while blessed($o) && $o->operation eq 'Coerce';
+    my $os = $self->_repr_of($o) // $o->stamp // '';
+    die "GAP: unary minus on a string is not lowered -- perl negates its text\n" if $os eq 'Str';
+    if ($os =~ /\A(?:Scalar|Slot)\z/) {
+        my $tag = $self->_slot_tag_of($self->lower_value($o));
+        my ($s, $ok) = ($self->_fresh, $self->_fresh);
+        $self->_emit("  $s = icmp eq i8 $tag, " . _slot_tag_value('Str') . "  ; -: a string?");
+        $self->_emit("  $ok = xor i1 $s, true");
+        $self->_stop_unless($ok, "unary minus on a string (perl negates its text)");
+    }
+    my $repr = ( $node->stamp // '' ) eq 'Int' ? 'Int' : 'Num';
+    my $v = $self->_operand_as($x, $repr, '-');
+    my $r = $self->_fresh;
+    $self->_emit($repr eq 'Int' ? "  $r = sub i64 0, $v  ; -" : "  $r = fneg " . _repr_to_llvm_type('Num') . " $v  ; -");
+    return $self->{cache}{ $node->id } = $r;
+}
+
+# _lower_power($node) -> double: perl's ** is a number, C's pow (an integer
+# result prints as one under %.15g, as perl prints it).
+sub _lower_power {
+    my ($self, $node) = @_;
+    my ($b, $e) = map { $self->_operand_as($_, 'Num', '**') } $node->inputs->@[0, 1];
+    $self->{_need_pow} = 1;
+    my $r = $self->_fresh;
+    my $d = _repr_to_llvm_type('Num');
+    $self->_emit("  $r = call $d \@pow($d $b, $d $e)  ; **");
+    return $self->{cache}{ $node->id } = $r;
+}
+
+# _lower_repeat($node) -> Str: `$s x $n`, the string $n times (none for $n
+# below 1). A list repeated -- `(1, 2) x 2` -- is refused.
+sub _lower_repeat {
+    my ($self, $node) = @_;
+    my ($l, $n) = $node->inputs->@[0, 1];
+    die "GAP: a list repeated (x on a list) is not lowered\n"
+        unless ( $self->_repr_of($l) // $l->stamp // '' ) =~ /\A(?:Str|Int|Num|Scalar|Boolean)\z/;
+    my ($p, $len) = $self->_str_parts($self->_operand_as($l, 'Str', 'x'));
+    my $cnt = $self->_operand_as($n, 'Int', 'x count');
+    $self->{_need_malloc_memcpy} = 1;
+    my ($neg, $k, $tot, $sz, $buf, $ip) = map { $self->_fresh } 1 .. 6;
+    $self->_emit("  $neg = icmp slt i64 $cnt, 0");
+    $self->_emit("  $k = select i1 $neg, i64 0, i64 $cnt  ; x: none below 1");
+    $self->_emit("  $tot = mul i64 $len, $k");
+    $self->_emit("  $sz = add i64 $tot, 1");
+    $self->_emit("  $buf = call i8* \@malloc(i64 $sz)  ; x: the repeated string");
+    $self->_emit_entry("  $ip = alloca i64  ; x: copies made");
+    $self->_emit("  store i64 0, i64* $ip");
+    my ($head, $body, $done) = map { $self->_fresh_label("rep.$_.") } qw(head body done);
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($head);
+    my ($i, $more) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  $i = load i64, i64* $ip");
+    $self->_emit("  $more = icmp slt i64 $i, $k");
+    $self->_set_terminator("  br i1 $more, label %$body, label %$done");
+    $self->_new_block($body);
+    my ($off, $dst, $i1) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  $off = mul i64 $i, $len");
+    $self->_emit("  $dst = getelementptr inbounds i8, i8* $buf, i64 $off");
+    $self->_emit("  call i8* \@memcpy(i8* $dst, i8* $p, i64 $len)");
+    $self->_emit("  $i1 = add i64 $i, 1");
+    $self->_emit("  store i64 $i1, i64* $ip");
+    $self->_set_terminator("  br label %$head");
+    $self->_new_block($done);
+    return $self->{cache}{ $node->id } = $self->_set_str_len($buf, $tot);
+}
+
+# _lower_shift($node, 'shl'|'lshr') -> i64: << >> on numbers, unsigned. A
+# count of 64 or more is 0. A negative operand or count, or a result past
+# an i64 (perl's is unsigned), stops the program.
+sub _lower_shift {
+    my ($self, $node, $llop) = @_;
+    my ($a, $c) = map { $self->_operand_as($_, 'Int', $node->op_str) } $node->inputs->@[0, 1];
+    my ($ok_a, $ok_c, $ok) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  $ok_a = icmp sge i64 $a, 0");
+    $self->_emit("  $ok_c = icmp sge i64 $c, 0");
+    $self->_emit("  $ok = and i1 $ok_a, $ok_c");
+    $self->_stop_unless($ok, "a shift of a negative number or by a negative count");
+    my ($big, $sh, $r) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  $big = icmp uge i64 $c, 64");
+    $self->_emit("  $sh = $llop i64 $a, $c");
+    $self->_emit("  $r = select i1 $big, i64 0, i64 $sh  ; " . $node->op_str);
+    if ($llop eq 'shl') {
+        my $fits = $self->_fresh;
+        $self->_emit("  $fits = icmp sge i64 $r, 0");
+        $self->_stop_unless($fits, "a shift past what an i64 holds (perl's is unsigned)");
+    }
+    return $self->{cache}{ $node->id } = $r;
+}
+
 sub _lower_modulo {
     my ($self, $node) = @_;
 
@@ -2812,7 +2946,14 @@ sub _emit_to_str {
         $self->_emit("  $out_p = select i1 $is_nf, i8* $nf_p, i8* $fin_ptr  ; $label: non-finite or rendered");
         $self->_emit("  $out_l = select i1 $is_nf, i64 $nf_l, i64 $fin_len  ; $label: matching length");
 
-        return $self->_set_str_len($out_p, $out_l);
+        # A ZERO WITH ITS SIGN SET is "0" to perl; %.15g printed "-0".
+        my ($zp, $zl) = $self->_str_const_parts('0', "$label: zero");
+        my ($is_z, $zo_p, $zo_l) = map { $self->_fresh } 1 .. 3;
+        $self->_emit("  $is_z = fcmp oeq double $input_ref, 0.0  ; $label: a zero, either sign");
+        $self->_emit("  $zo_p = select i1 $is_z, i8* $zp, i8* $out_p");
+        $self->_emit("  $zo_l = select i1 $is_z, i64 $zl, i64 $out_l");
+
+        return $self->_set_str_len($zo_p, $zo_l);
     }
 
     if ($from eq 'Int') {
