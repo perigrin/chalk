@@ -819,7 +819,7 @@ sub render_need_flag_prologue {
 
     # Declare exit when a `die` arm was lowered (Unwind -> exit(255) + unreachable).
     # A plain C host-interface function — NOT libperl.
-    if ($self->{_need_exit}) {
+    if ($self->{_need_exit} && !$self->{_exit_emitted}++) {
         push @lines, 'declare void @exit(i32)';
     }
     push @lines, 'declare i64 @time(i64*)' if $self->{_need_time};
@@ -962,6 +962,9 @@ sub render_need_flag_postclass_reemit {
         if $self->{_need_snprintf} && !$self->{_snprintf_emitted}++;
     push @lines, 'declare i8* @memchr(i8*, i32, i64)'
         if $self->{_need_memchr} && !$self->{_memchr_emitted}++;
+    # ...and exit, which a method body's helper (++ on a Scalar) calls.
+    push @lines, 'declare void @exit(i32)'
+        if $self->{_need_exit} && !$self->{_exit_emitted}++;
     # Post-class re-emit for _need_memcmp: a method body doing Subscript(Hash)
     # sets _need_memcmp on $body_ctx (propagated to $self by G.5), but the prologue
     # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
@@ -4162,6 +4165,14 @@ sub _lower_assign {
                  . "— _method_self_name not set";
         my $obj_typed = $self->_fresh;
         $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; Assign(FieldAccess-lvalue): typed self");
+        # A VALUE READ BY ITS TAG is a whole %Slot: it IS the field's cell, tag
+        # and all (`$count++` on an Int field is a Scalar, pvm 242).
+        if ($val_repr =~ /\A(?:Scalar|Slot)\z/) {
+            my $cell = $self->_fresh;
+            $self->_emit("  $cell = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx  ; FieldAccess-lvalue[$field_index] cell");
+            $self->_emit("  store %Slot $rhs_ref, %Slot* $cell  ; FieldAccess-lvalue[$field_index] = a Scalar");
+            return $self->{cache}{ $node->id } = $rhs_ref;
+        }
         # Store defined=true
         my $def_gep = $self->_fresh;
         $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_def  ; FieldAccess-lvalue[$field_index] defined");
@@ -6119,6 +6130,13 @@ sub process_control_node {
     # A READ OF $@ PINNED ON THE CHAIN is taken where it stands: an eval
     # rewrites $@ with no store, so its memory version does not place it.
     elsif ($op eq 'EntryDef' && ($node->symbol // '') eq '@' && ($node->package // '') eq 'main') {
+        $self->{cache}{ $node->id } = $self->lower_value($node);
+        $self->{_frozen_reads}{ $node->id } = 1;
+    }
+    # SO IS A FIELD READ PINNED ON THE CHAIN, which has no memory version to
+    # place it: lowered at its use instead, `my $id = $count++` read the field
+    # after the increment's store (1,2 for perl's 0,1; pvm 242).
+    elsif ($op eq 'FieldAccess') {
         $self->{cache}{ $node->id } = $self->lower_value($node);
         $self->{_frozen_reads}{ $node->id } = 1;
     }
@@ -8686,6 +8704,9 @@ sub _collect_body_recursive {
     # the Print at all.
     if ($op eq 'If' || $op eq 'Loop'
         || Chalk::IR::NodeFactory::is_statement_node($op)
+        # a field read the producer pinned on the chain is taken where it
+        # stands (process_control_node), not at its use after a store
+        || ( $op eq 'FieldAccess' && blessed($node->control_in) )
         # a die an eval opened in this arm catches is one of its statements
         # (one caught by an eval outside the arm ends the arm, as before)
         || ( $op eq 'Unwind' && defined $node->eval_id
@@ -12838,8 +12859,10 @@ sub _lower_builtin_push {
     my ($array, @values) = @in;
     die "GAP: push onto a " . (($array && $array->stamp) // 'NONE')
       . " is not lowered -- only an Array\n"
-        unless $array && ( $array->stamp // '' ) eq 'Array';
-    _seed_container_repr($array);
+        unless $array && ( ( $array->stamp // '' ) eq 'Array'
+            # ...or an array field, which the object holds by reference
+            || ( $array->operation eq 'FieldAccess' && ( $self->_repr_of($array) // '' ) eq 'ArrayRef' ) );
+    _seed_container_repr($array) unless $array->operation eq 'FieldAccess';
     my $acc = $self->_container_ptr($array, 'Array');
     for my $v (@values) {
         # A VALUE READ BY ITS TAG (an element of an array handed in), or
@@ -14068,6 +14091,18 @@ sub _lower_call_new {
             # Box the default the same way a :param value is (Str -> StrPair,
             # Boolean -> zext, else identity) via the shared payload-store helper.
             $self->_store_field_payload($def_ref, $def_repr, $pay_gep, $pname);
+        } elsif ($pname =~ /\A([%@])/) {
+            # AN AGGREGATE FIELD starts as an empty hash or array of its own.
+            my $kind = $1 eq '%' ? 'Hash' : 'Array';
+            my $new  = $kind eq 'Hash' ? $self->_emit_empty_hash("field '$pname'") : $self->_emit_array_of([]);
+            my ($def_gep, $tag_gep, $pay_gep, $raw) = map { $self->_fresh } 1 .. 4;
+            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def");
+            $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' defined");
+            $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag");
+            $self->_emit("  store i8 " . _slot_tag_value("${kind}Ref") . ", i8* $tag_gep  ; field '$pname' tag=${kind}Ref");
+            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay");
+            $self->_emit("  $raw = ptrtoint %${kind}* $new to i64");
+            $self->_emit("  store i64 $raw, i64* $pay_gep  ; field '$pname' = an empty \L$kind\E of its own");
         } else {
             my $def_gep = $self->_fresh;
             $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; uninit field[$fidx] defined");

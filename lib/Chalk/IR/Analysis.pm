@@ -323,6 +323,14 @@ sub hydrate ($class, $graphs, $classes = undef) {
     # write loops are classes-keyed) and _replay_classes builds the MOP
     # holding just the ADJUST-seeded `main`.
 
+    # AN AGGREGATE FIELD (`field %h`, `field @a`) is the object's reference to
+    # a hash or an array of its own; B::SoN declares no type for it (pvm 242).
+    for my $c (values %$classes) {
+        for my $f (( ref $c eq 'HASH' ? $c->{fields} // [] : [] )->@*) {
+            my ($sigil) = ( $f->{name} // '' ) =~ /\A([%@])/ or next;
+            $f->{type} //= $sigil eq '%' ? 'HashRef' : 'ArrayRef';
+        }
+    }
     # A :param field's type comes from the constructor argument.
     _infer_param_field_types($classes, \%graphs);
     # Stamp the field reads that are already typed, then propagate so an
