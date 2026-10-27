@@ -43,6 +43,8 @@ for my $c (
     [ q{my %h = (a => 1); sub f { local $h{b} = 2; join ",", sort keys %h } print f(), "|", join(",", sort keys %h), "\n";} ],
     [ q{my %h = (a => 1); sub g { $h{a} } sub f { local $h{a} = 5; g() } print f(), g(), "\n";} ],
     [ q{my $r = { a => 1 }; sub f { my ($s) = @_; local $s->{a} = 2; $s->{a} } print f($r), $r->{a}, "\n";} ],
+    # IN AN ARM: the saved value is read where the store is, inside the arm.
+    [ q{my %h = (a => 1); sub g { $h{a} } sub f { my $r = ""; if ($_[0]) { local $h{a} = 9; $r = g() } return $r . g() } print f(1), f(0), "\n";} ],
 ) {
     my ($src) = @$c;
     my $want = qx($^X -e '$src');

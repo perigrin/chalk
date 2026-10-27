@@ -6185,7 +6185,10 @@ sub _scan_memory_shape {
             if $c->can('control_in') && defined $c->control_in;
         # A control-flow node reaches its control predecessors through its inputs
         # (Region<-Proj, Proj<-Loop/If, Loop<-body/entry), so follow those too.
-        push @cq, grep { blessed($_) && ($CF_NODE{ $_->operation } || $_->operation eq 'Assign') }
+        # A Region's inputs are ALL control predecessors: an arm that ends in
+        # another effect (a `local`'s ElemRestore) still leads back to its stores.
+        push @cq, grep { blessed($_) && ($c->operation eq 'Region'
+                || $CF_NODE{ $_->operation } || $_->operation eq 'Assign') }
             $c->inputs->@*
             if $CF_NODE{ $c->operation } && $c->can('inputs') && defined $c->inputs;
     }
