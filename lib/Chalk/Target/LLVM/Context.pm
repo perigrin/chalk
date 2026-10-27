@@ -1463,6 +1463,10 @@ sub _module_global_name {
 # read of an aliased scalar goes through its pointer from the first one on.
 our %ALIASED;
 
+# %POS_VARS: the variables a scalar m//g matches, by name -- each has a pos()
+# cell (_pos_cell), which a store to the variable clears.
+our %POS_VARS;
+
 # _pkg_slot_ptr($stash, $var) -> a %Slot* to read or store a package scalar
 # through: its global, or -- aliased -- wherever its pointer points now.
 sub _pkg_slot_ptr {
@@ -1513,7 +1517,8 @@ sub _lex_global_name {
 # result back to the %Slot, so the read would see the value before it
 # (`s/a/$n+1/e` left "abc" for perl's "2bc").
 my %_IN_PLACE_WRITER   = map { $_ => 1 } qw(RegexSubst Transliterate Chomp ChompValue);
-my %_IN_PLACE_BUILTIN  = map { $_ => 1 } qw(chop chomp substr undef read sysread recv vec pos);
+# (pos() is not one: setting it moves where the next m//g starts, not the string.)
+my %_IN_PLACE_BUILTIN  = map { $_ => 1 } qw(chop chomp substr undef read sysread recv vec);
 sub _refuse_an_in_place_write_to_a_location {
     my ($node, $op) = @_;
     my $writes = $_IN_PLACE_WRITER{$op}
@@ -1567,6 +1572,8 @@ sub _is_memory_version {
     my ($node) = @_;
     my $op = $node->operation;
     return 1 if $op =~ /\A(?:MemStart|Assign|Call|RegexSubst|Transliterate|EntryWrite|CellWrite|Delete|ElemRestore)\z/;
+    # an m//g writes pos(), so B::SoN versions memory at it
+    return 1 if $op eq 'RegexMatch' && ( $node->flags // '' ) =~ /g/;
     return $op eq 'Phi' && _is_memory_phi($node) ? 1 : 0;
 }
 
@@ -2052,6 +2059,9 @@ sub lower_value {
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'formline') {
         return $self->_lower_formline($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'pos') {
+        return $self->_lower_pos($node);
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'split') {
         return $self->_lower_split($node);
@@ -4099,6 +4109,25 @@ sub _lower_assign {
     my ($self, $node) = @_;
 
     my $repr = _require_repr($node, 'Assign');
+
+    # pos($s) = N sets where its next m//g starts (undef: the start).
+    {
+        my ($lhs, $val) = $node->inputs->@[0, 1];
+        if (blessed($lhs) && $lhs->operation eq 'Call' && ( $lhs->dispatch_kind // '' ) eq 'builtin'
+                && ( $lhs->name // '' ) eq 'pos') {
+            my ($v) = grep { blessed($_) } $lhs->inputs->@*;
+            die "GAP: a store to pos() of what is not a variable a scalar m//g matches is not lowered\n"
+                unless blessed($v) && $v->operation eq 'PadAccess' && $POS_VARS{ $v->name } && $self->_pos_var_ok($v);
+            my $from = $self->_repr_of($val) // $val->stamp // '';
+            die "GAP: a store to pos() of a $from value is not lowered\n" unless $from eq 'Int';
+            my $n = $self->lower_value($val);
+            $self->_emit("  store i64 $n, i64* " . $self->_pos_cell($v) . "  ; pos() = ...");
+            return $self->{cache}{ $node->id } = $n;
+        }
+        # A STORE TO A VARIABLE m//g MATCHES clears its pos(), as perl's does.
+        $self->_emit("  store i64 -1, i64* " . $self->_pos_cell($lhs) . "  ; a store clears pos()")
+            if blessed($lhs) && $lhs->operation eq 'PadAccess' && $POS_VARS{ $lhs->name };
+    }
 
     # A `local` STORE is put back where its scope ends, by the ElemRestore
     # B::SoN places there. Without one (an explicit return, pvm 176) the old
@@ -16301,6 +16330,39 @@ sub _lower_regex_match {
         // die "GAP: RegexMatch subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";
 
+    # A SCALAR m//g matches from the variable's pos() and leaves pos() at the
+    # end of the match, or undef on a miss (pvm 388).
+    my $flags = $node->flags // '';
+    if ($flags =~ s/g//g) {
+        die "GAP: m//g in list context is not lowered\n" unless $repr eq 'Boolean';
+        die "GAP: m//g on what is not a `my` variable assigned in the program is not lowered "
+          . "-- its pos() belongs to what it aliases\n"
+            unless $subj_node->operation eq 'PadAccess' && $self->_pos_var_ok($subj_node);
+        my $compiled = _compile_regex_pattern($node->pattern, $flags);
+        die "GAP: m//g whose pattern is anchored at the start is not lowered\n"
+            if $compiled->{anchored_start};
+        die "GAP: m//g whose pattern can match the empty string is not lowered\n"
+            unless grep { $_->{kind} =~ /\A(?:lit|class|any)\z/ && ( $_->{min} // 1 ) > 0 }
+                   $compiled->{atoms}->@*;
+        my $cell = $self->_pos_cell($subj_node);
+        my ($p, $neg, $p0, $over, $start, $rp, $rl) = map { $self->_fresh } 1 .. 7;
+        $self->_emit("  $p = load i64, i64* $cell  ; m//g: pos()");
+        $self->_emit("  $neg = icmp slt i64 $p, 0");
+        $self->_emit("  $p0 = select i1 $neg, i64 0, i64 $p  ; m//g: from the start when pos() is undef");
+        $self->_emit("  $over = icmp sgt i64 $p0, $subj_len");
+        $self->_emit("  $start = select i1 $over, i64 $subj_len, i64 $p0");
+        $self->_emit("  $rp = getelementptr inbounds i8, i8* $subj_ptr, i64 $start");
+        $self->_emit("  $rl = sub i64 $subj_len, $start  ; m//g: what is left");
+        my $match = $self->_emit_regex_matcher($rp, $rl, $compiled, 'RegexMatch /g');
+        my ($end, $new) = map { $self->_fresh } 1 .. 2;
+        $self->_emit("  $end = add i64 $start, $match->{m0e}");
+        $self->_emit("  $new = select i1 $match->{matched}, i64 $end, i64 -1  ; m//g: pos() after");
+        $self->_emit("  store i64 $new, i64* $cell");
+        $match->{subj_ptr} = $rp;
+        $self->{_regex_captures}{ $node->id } = $match;
+        return $self->{cache}{ $node->id } = $match->{matched};
+    }
+
     my $compiled = _compile_regex_pattern($node->pattern, $node->flags);
     my $match    = $self->_emit_regex_matcher($subj_ptr, $subj_len, $compiled, 'RegexMatch');
 
@@ -16312,6 +16374,57 @@ sub _lower_regex_match {
 
     $self->{cache}{ $node->id } = $match->{matched};
     return $match->{matched};
+}
+
+# _pos_cell($var) -> the i64* that holds the pos() of a `my` variable: -1 for
+# undef. One per variable, keyed as handle cells are (the subs inlined around
+# it, its pad slot and name).
+sub _pos_cell {
+    my ($self, $v) = @_;
+    my $key = join(',', sort keys %{ $self->{_inlining} // {} }) . '|' . ( $v->targ // '' ) . $v->name;
+    return $self->{_pos_cells}{$key} //= do {
+        my $c = $self->_fresh;
+        $self->_emit_entry("  $c = alloca i64  ; pos(" . $v->name . ")");
+        $self->_emit_entry("  store i64 -1, i64* $c  ; pos() undef");
+        $c;
+    };
+}
+
+# _pos_var_ok($var): a variable whose pos() is kept here -- one the program
+# assigns (not a foreach alias, whose pos() is its element's), which nothing
+# but an assignment or s/// changes (those clear pos(); tr, chomp, chop and
+# the like would have to as well).
+sub _pos_var_ok {
+    my ($self, $v) = @_;
+    my $name = $v->name;
+    return $self->{_pos_var_ok}{$name} //= do {
+        my @p = @PROGRAM;
+        my $assigned = grep { $_->operation eq 'Assign' && blessed($_->inputs->[0])
+            && $_->inputs->[0]->operation eq 'PadAccess' && $_->inputs->[0]->name eq $name } @p;
+        my $other = grep { $_->operation =~ /\A(?:Transliterate|Chomp|ChompValue|Chop|CompoundAssign|Increment|Decrement)\z/
+            && grep { blessed($_) && $_->operation eq 'PadAccess' && $_->name eq $name } $_->inputs->@* } @p;
+        $assigned && !$other ? 1 : 0;
+    };
+}
+
+# _lower_pos($node) -> %Slot: pos($var), undef or the offset its last m//g
+# ended at.
+sub _lower_pos {
+    my ($self, $node) = @_;
+    my ($v) = grep { blessed($_) } $node->inputs->@*;
+    die "GAP: pos() of what is not a variable a scalar m//g matches is not lowered\n"
+        unless blessed($v) && $v->operation eq 'PadAccess' && $POS_VARS{ $v->name } && $self->_pos_var_ok($v);
+    my ($p, $def) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $p = load i64, i64* " . $self->_pos_cell($v) . "  ; pos()");
+    $self->_emit("  $def = icmp sge i64 $p, 0");
+    my ($s0, $s1, $s2) = map { $self->_fresh } 1 .. 3;
+    $self->{_need_aggregate_types} = 1;
+    $self->_emit("  $s0 = insertvalue %Slot undef, i1 $def, " . _slot_idx('defined'));
+    $self->_emit("  $s1 = insertvalue %Slot $s0, i8 " . _slot_tag_value('Int') . ", " . _slot_idx('tag'));
+    $self->_emit("  $s2 = insertvalue %Slot $s1, i64 $p, " . _slot_idx('payload'));
+    my $to = $self->_repr_of($node) // $node->stamp // 'Scalar';
+    return $self->{cache}{ $node->id } = $to =~ /\A(?:Scalar|Slot|Unknown)\z/ ? $s2
+        : $self->_emit_coercion($s2, 'Scalar', $to, 'pos()');
 }
 
 # _lower_match_apply($node) -> $llvm_ref (i1 matched?)
@@ -16865,6 +16978,8 @@ sub _lower_regex_subst {
     # version, and the read after it is frozen there -- at the slot.
     if ($subj_node->operation eq 'PadAccess' && $subj_node->is_location) {
         my $boxed = $self->_emit_coercion($res, 'Str', 'Scalar', 's/// store-back');
+        $self->_emit("  store i64 -1, i64* " . $self->_pos_cell($subj_node) . "  ; s/// clears pos()")
+            if $POS_VARS{ $subj_node->name };
         $self->_emit("  store %Slot $boxed, %Slot* " . $self->_location_ptr($subj_node)
             . "  ; s/// stores lexical " . $subj_node->name);
     }
@@ -16919,6 +17034,8 @@ sub _lower_regex_subst_g {
     $self->{_subst_count}{ $node->id } = $cnt;
     if ($subj_node->operation eq 'PadAccess' && $subj_node->is_location) {
         my $boxed = $self->_emit_coercion($res, 'Str', 'Scalar', 's///g store-back');
+        $self->_emit("  store i64 -1, i64* " . $self->_pos_cell($subj_node) . "  ; s///g clears pos()")
+            if $POS_VARS{ $subj_node->name };
         $self->_emit("  store %Slot $boxed, %Slot* " . $self->_location_ptr($subj_node)
             . "  ; s///g stores lexical " . $subj_node->name);
     }

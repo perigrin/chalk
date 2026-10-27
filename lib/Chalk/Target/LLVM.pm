@@ -1694,6 +1694,11 @@ sub lower_with_elaboration {
     local %Chalk::Target::LLVM::Context::ANON_SUBS = map { ( $_->name // '' ) => $_ }
         grep { $_->operation eq 'AnonSub' } Chalk::Target::LLVM::Context::_program_nodes($return_node);
     # Whether the program selects a handle, before any print lowers.
+    # Which variables a scalar m//g matches: each keeps a pos().
+    local %Chalk::Target::LLVM::Context::POS_VARS = map { ( $_->inputs->[0]->name => 1 ) } grep {
+        $_->operation eq 'RegexMatch' && ( $_->flags // '' ) =~ /g/
+            && blessed($_->inputs->[0]) && $_->inputs->[0]->operation eq 'PadAccess'
+    } Chalk::Target::LLVM::Context::_program_nodes($return_node);
     local $Chalk::Target::LLVM::Context::SELECTS = grep {
         $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'select'
     } Chalk::Target::LLVM::Context::_program_nodes($return_node);
