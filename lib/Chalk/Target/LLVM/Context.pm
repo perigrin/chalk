@@ -130,6 +130,7 @@ sub new {
         _need_memchr            => 0,
         _need_select            => 0,
         _need_hash_delete       => 0,
+        _need_index             => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -182,6 +183,7 @@ my @NEED_FLAGS = qw(
     _need_memchr
     _need_select
     _need_hash_delete
+    _need_index
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -952,6 +954,7 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_tr_lines;
     push @lines, $self->_bless_lines;
     push @lines, $self->_hash_delete_lines;
+    push @lines, $self->_index_lines;
     push @lines, '@chalk_selected = internal global i8* null  ; the handle a bare print writes to (null: STDOUT)'
         if $self->{_need_select} && !$self->{_select_emitted}++;
     # A method body that stringifies a Num needs these too; the prologue ran
@@ -1822,6 +1825,9 @@ sub lower_value {
     elsif ($op eq 'StrCmp') {
         return $self->_lower_str_cmp($node);
     }
+    elsif ($op =~ /\AStr(?:Lt|Gt|Le|Ge)\z/) {
+        return $self->_lower_str_order($node);
+    }
     elsif ($op eq 'Not') {
         return $self->_lower_not($node);
     }
@@ -1921,6 +1927,10 @@ sub lower_value {
     elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
             && defined $node->name && $node->name eq 'push') {
         return $self->_lower_builtin_push($node);
+    }
+    elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
+            && defined $node->name && $node->name eq 'unshift') {
+        return $self->_lower_builtin_unshift($node);
     }
     # Call(builtin, sort): the operand's elements, ordered.
     elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
@@ -2062,6 +2072,15 @@ sub lower_value {
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'pos') {
         return $self->_lower_pos($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'index') {
+        return $self->_lower_index($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'chr') {
+        return $self->_lower_chr($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'ord') {
+        return $self->_lower_ord($node);
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'split') {
         return $self->_lower_split($node);
@@ -4509,8 +4528,14 @@ sub _lower_num_cmp {
 # shorter length, then the shorter first.
 sub _lower_str_cmp {
     my ($self, $node) = @_;
-    my $lhs = $self->_str_compare_operand($node->inputs->[0], 'StrCmp', 'lhs');
-    my $rhs = $self->_str_compare_operand($node->inputs->[1], 'StrCmp', 'rhs');
+    return $self->{cache}{ $node->id } = $self->_emit_str_cmp($node, 'StrCmp');
+}
+
+# _emit_str_cmp($node, $op) -> i64: cmp of the node's two operands.
+sub _emit_str_cmp {
+    my ($self, $node, $op) = @_;
+    my $lhs = $self->_str_compare_operand($node->inputs->[0], $op, 'lhs');
+    my $rhs = $self->_str_compare_operand($node->inputs->[1], $op, 'rhs');
     my ($lp, $ll) = $self->_str_parts($lhs);
     my ($rp, $rl) = $self->_str_parts($rhs);
     $self->{_need_memcmp} = 1;
@@ -4531,7 +4556,18 @@ sub _lower_str_cmp {
     $self->_emit("  $g = zext i1 $gt to i64");
     $self->_emit("  $s = zext i1 $lt to i64");
     $self->_emit("  $res = sub i64 $g, $s  ; cmp: -1, 0 or 1");
-    return $self->{cache}{ $node->id } = $res;
+    return $res;
+}
+
+# _lower_str_order($node) -> i1: lt gt le ge, by cmp.
+sub _lower_str_order {
+    my ($self, $node) = @_;
+    my $op = $node->operation;
+    my %pred = (StrLt => 'slt', StrGt => 'sgt', StrLe => 'sle', StrGe => 'sge');
+    my $c = $self->_emit_str_cmp($node, $op);
+    my $r = $self->_fresh;
+    $self->_emit("  $r = icmp $pred{$op} i64 $c, 0  ; $op");
+    return $self->{cache}{ $node->id } = $r;
 }
 
 sub _lower_icmp_int {
@@ -6415,7 +6451,7 @@ sub _is_array_mutating_call {
     return 0 unless blessed($node) && $node->operation eq 'Call';
     return 0 unless $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin';
     my $name = $node->name // '';
-    return ($name eq 'shift' || $name eq 'pop' || $name eq 'push') ? 1 : 0;
+    return $name =~ /\A(?:shift|pop|push|unshift)\z/ ? 1 : 0;
 }
 
 # _reaches_an_unlowered_phi($self, $node) -> bool: does $node read, through
@@ -10808,6 +10844,115 @@ sub _lower_delete {
     return $self->{cache}{ $node->id } = $r;
 }
 
+# _lower_index($node) -> i64: index(STR, SUB [, POS]) -- where SUB first
+# starts at or after POS (clamped to the string), or -1 (pvm 335).
+sub _lower_index {
+    my ($self, $node) = @_;
+    my @in = grep { blessed($_) } $node->inputs->@*;
+    pop @in if $node->can('memory_input') && $node->memory_input;
+    die "GAP: index with " . scalar(@in) . " arguments is not lowered\n" unless @in == 2 || @in == 3;
+    my @str = map {
+        my $from = $self->_repr_of($_) // $_->stamp // '';
+        my $v = $self->lower_value($_);
+        [ $self->_str_parts($from eq 'Str' ? $v : $self->_emit_coercion($v, $from, 'Str', 'index: a string')) ];
+    } @in[0, 1];
+    my $pos = '0';
+    if (@in == 3) {
+        my $from = $self->_repr_of($in[2]) // $in[2]->stamp // '';
+        my $v = $self->lower_value($in[2]);
+        $pos = $from eq 'Int' ? $v : $self->_emit_coercion($v, $from, 'Int', 'index: the position');
+    }
+    $self->{$_} = 1 for qw(_need_index _need_memcmp);
+    my $r = $self->_fresh;
+    $self->_emit("  $r = call i64 \@chalk_index(i8* $str[0][0], i64 $str[0][1], i8* $str[1][0], i64 $str[1][1], i64 $pos)  ; index");
+    my $to = $node->stamp // 'Int';
+    return $self->{cache}{ $node->id } = $to eq 'Int' ? $r : $self->_emit_coercion($r, 'Int', $to, 'index');
+}
+
+# _lower_chr($node) -> %Str: chr(N), the one byte N for 0..255. Past that
+# perl makes a wide character, which a byte string cannot hold: the program
+# stops (exit 255), as it does for the other rare shapes (pvm 334).
+sub _lower_chr {
+    my ($self, $node) = @_;
+    my ($in) = grep { blessed($_) } $node->inputs->@*;
+    my $from = $self->_repr_of($in) // $in->stamp // '';
+    my $v = $self->lower_value($in);
+    $v = $self->_emit_coercion($v, $from, 'Int', 'chr: the code') if $from ne 'Int';
+    $self->{$_} = 1 for qw(_need_exit _need_malloc_memcpy);
+    my ($bad, $buf, $b, $nul) = map { $self->_fresh } 1 .. 4;
+    my ($stop, $ok) = map { $self->_fresh_label("chr.$_.") } qw(stop ok);
+    $self->_emit("  $bad = icmp ugt i64 $v, 255  ; chr: past a byte (or negative)?");
+    $self->_set_terminator("  br i1 $bad, label %$stop, label %$ok");
+    $self->_new_block($stop);
+    $self->_refuse_inside_eval("chr of a code past 255");
+    $self->_emit("  call void \@exit(i32 255)  ; chr: a wide character");
+    $self->_set_terminator("  unreachable");
+    $self->_new_block($ok);
+    $self->_emit("  $buf = call i8* \@malloc(i64 2)  ; chr");
+    $self->_emit("  $b = trunc i64 $v to i8");
+    $self->_emit("  store i8 $b, i8* $buf");
+    $self->_emit("  $nul = getelementptr inbounds i8, i8* $buf, i64 1");
+    $self->_emit("  store i8 0, i8* $nul");
+    return $self->{cache}{ $node->id } = $self->_set_str_len($buf, 1);
+}
+
+# _lower_ord($node) -> i64: ord(STR), its first byte, or 0 for "".
+sub _lower_ord {
+    my ($self, $node) = @_;
+    my ($in) = grep { blessed($_) } $node->inputs->@*;
+    my $from = $self->_repr_of($in) // $in->stamp // '';
+    my $v = $self->lower_value($in);
+    $v = $self->_emit_coercion($v, $from, 'Str', 'ord: the string') if $from ne 'Str';
+    my ($p, $l) = $self->_str_parts($v);
+    my ($empty, $b, $z, $r) = map { $self->_fresh } 1 .. 4;
+    my $from_lbl = $self->_current_block_label;
+    my ($rd, $join) = map { $self->_fresh_label("ord.$_.") } qw(rd join);
+    $self->_emit("  $empty = icmp eq i64 $l, 0");
+    $self->_set_terminator("  br i1 $empty, label %$join, label %$rd");
+    $self->_new_block($rd);
+    $self->_emit("  $b = load i8, i8* $p  ; ord: the first byte");
+    $self->_emit("  $z = zext i8 $b to i64");
+    $self->_set_terminator("  br label %$join");
+    $self->_new_block($join);
+    $self->_emit("  $r = phi i64 [ 0, %$from_lbl ], [ $z, %$rd ]  ; ord");
+    my $to = $node->stamp // 'Int';
+    return $self->{cache}{ $node->id } = $to eq 'Int' ? $r : $self->_emit_coercion($r, 'Int', $to, 'ord');
+}
+
+# _index_lines -> @chalk_index: a scan from the clamped start, memcmp at each
+# place SUB still fits.
+sub _index_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_index} && !$self->{_index_emitted}++;
+    return ('', <<'END_HELPER');
+define internal i64 @chalk_index(i8* %s, i64 %sl, i8* %t, i64 %tl, i64 %from) {
+entry:
+  %neg = icmp slt i64 %from, 0
+  %f0 = select i1 %neg, i64 0, i64 %from
+  %big = icmp sgt i64 %f0, %sl
+  %f = select i1 %big, i64 %sl, i64 %f0
+  %last = sub i64 %sl, %tl
+  br label %loop
+loop:
+  %i = phi i64 [ %f, %entry ], [ %i1, %next ]
+  %over = icmp sgt i64 %i, %last
+  br i1 %over, label %miss, label %cmp
+cmp:
+  %p = getelementptr inbounds i8, i8* %s, i64 %i
+  %m = call i32 @memcmp(i8* %p, i8* %t, i64 %tl)
+  %eq = icmp eq i32 %m, 0
+  br i1 %eq, label %hit, label %next
+next:
+  %i1 = add i64 %i, 1
+  br label %loop
+hit:
+  ret i64 %i
+miss:
+  ret i64 -1
+}
+END_HELPER
+}
+
 # _hash_delete_lines -> @chalk_hash_delete: find the key; its value as a
 # Slot; the entries after it shifted down one, so the rest keep their order.
 sub _hash_delete_lines {
@@ -12956,6 +13101,44 @@ sub _lower_builtin_push {
     $self->_emit("  $len = load i64, i64* $len_ptr  ; push: the new count");
     $self->{cache}{ $node->id } = $len;
     return $len;
+}
+
+# _lower_builtin_unshift($node) -> i64: `unshift @a, LIST` -- LIST (an array
+# in it, its elements) and then what @a held, made in a new array whose header
+# becomes @a's; the new count (pvm 017).
+sub _lower_builtin_unshift {
+    my ($self, $node) = @_;
+    $self->{$_} = 1 for qw(_need_aggregate_types _need_array_append _need_malloc_memcpy);
+    my @in = grep { blessed($_) } $node->inputs->@*;
+    pop @in if $node->can('memory_input') && $node->memory_input;
+    my ($array, @values) = @in;
+    die "GAP: unshift onto a " . (($array && $array->stamp) // 'NONE') . " is not lowered -- only an Array\n"
+        unless $array && ( $array->stamp // '' ) eq 'Array';
+    _seed_container_repr($array);
+    my $acc = $self->_container_ptr($array, 'Array');
+    my $tmp = $self->_emit_array_of([]);
+    for my $v (@values) {
+        my $r = $self->_repr_of($v) // $v->stamp // '';
+        if ($r eq 'Array') {
+            my $src = $self->_container_ptr($v, 'Array');
+            $self->_emit("  call void \@chalk_array_append_all(%Array* $tmp, %Array* $src)  ; unshift: an array's elements");
+        }
+        elsif ($r =~ /\A(?:Scalar|Slot|Undef|ArrayRef|HashRef|CodeRef|ScalarRef|Object)\z/) {
+            my $slot = $self->_slot_of_value($v, $self->lower_value($v), 'unshift');
+            $self->_emit("  call void \@chalk_array_push_slot(%Array* $tmp, %Slot $slot)  ; unshift: a value");
+        }
+        elsif ($r =~ /\A(?:Int|Num|Str|Boolean)\z/) {
+            $self->_emit_append_one($tmp, $v);
+        }
+        else { die "GAP: unshift of a $r value is not lowered\n" }
+    }
+    my ($whole, $len_ptr, $len) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  call void \@chalk_array_append_all(%Array* $tmp, %Array* $acc)  ; unshift: then what it held");
+    $self->_emit("  $whole = load %Array, %Array* $tmp");
+    $self->_emit("  store %Array $whole, %Array* $acc  ; unshift: the array is the new one");
+    $self->_emit("  $len_ptr = getelementptr inbounds %Array, %Array* $acc, i32 0, i32 0");
+    $self->_emit("  $len = load i64, i64* $len_ptr  ; unshift: the new count");
+    return $self->{cache}{ $node->id } = $len;
 }
 
 sub _lower_builtin_shift_pop {
