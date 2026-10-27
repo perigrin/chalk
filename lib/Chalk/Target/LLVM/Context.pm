@@ -2076,6 +2076,12 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'index') {
         return $self->_lower_index($node);
     }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'blessed') {
+        return $self->_lower_blessed($node);
+    }
+    elsif ($op eq 'IsaOp') {
+        return $self->_lower_isa($node);
+    }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'chr') {
         return $self->_lower_chr($node);
     }
@@ -10826,6 +10832,99 @@ sub _bless_class {
     $self->_emit("  $l = load i64, i64* $lp");
     $self->_emit("  $is = icmp ne i8* $p, null");
     return ($is, $p, $l);
+}
+
+# _class_of_value($x, $what) -> ($blessed_i1, $class_ptr, $class_len): the
+# class bless recorded for what $x is -- a reference, or one a Scalar holds
+# by its tag (anything else: not blessed). Refused as ref() is where a bless
+# elsewhere changes it; an object of a `class` stops (exit 255).
+sub _class_of_value {
+    my ($self, $x, $what) = @_;
+    my $xs = $self->_repr_of($x) // '';
+    # bless's value is the reference it blessed
+    $xs = $self->_repr_of($x->inputs->[0]) // ''
+        if $x->operation eq 'Call' && ( $x->name // '' ) eq 'bless' && $xs !~ /Ref\z|\AScalar\z/;
+    die "GAP: $what of a reference that a bless elsewhere changes is not lowered\n"
+        if grep {
+            blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
+                && ( $_->name // '' ) eq 'bless' && blessed($_->inputs->[0])
+                && refaddr($_->inputs->[0]) == refaddr($x)
+        } ($x->consumers // [])->@*;
+    if ($xs =~ /\A(?:Array|Hash|Scalar)Ref\z/) {
+        return $self->_bless_class($self->lower_value($x));
+    }
+    if ($xs eq 'Scalar') {
+        my $slot = $self->lower_value($x);
+        my $tag  = $self->_slot_tag_of($slot);
+        my ($ia, $ih, $isr, $any, $any2, $ptr, $both, $obj) = map { $self->_fresh } 1 .. 8;
+        $self->_emit("  $ia = icmp eq i8 $tag, " . _slot_tag_value('ArrayRef'));
+        $self->_emit("  $ih = icmp eq i8 $tag, " . _slot_tag_value('HashRef'));
+        $self->_emit("  $isr = icmp eq i8 $tag, " . _slot_tag_value('ScalarRef'));
+        $self->_emit("  $any = or i1 $ia, $ih");
+        $self->_emit("  $any2 = or i1 $any, $isr  ; $what: a reference that may be blessed?");
+        $self->_emit("  $ptr = inttoptr i64 " . $self->_slot_payload_of($slot) . " to i8*");
+        my ($is, $cp, $cl) = $self->_bless_class($ptr);
+        $self->_emit("  $both = and i1 $any2, $is");
+        $self->{_need_exit} = 1;
+        my ($ok, $stop) = ($self->_fresh_label('cls.ok.'), $self->_fresh_label('cls.obj.'));
+        $self->_emit("  $obj = icmp eq i8 $tag, " . _slot_tag_value('Object') . "  ; $what: an object?");
+        $self->_set_terminator("  br i1 $obj, label %$stop, label %$ok");
+        $self->_new_block($stop);
+        $self->_refuse_inside_eval("$what of an object");
+        $self->_emit("  call void \@exit(i32 255)  ; $what of a class's object: not lowered");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($ok);
+        return ($both, $cp, $cl);
+    }
+    return ('false', 'null', '0') if $xs =~ /\A(?:Int|Num|Str|Boolean|Undef|CodeRef)\z/;
+    die "GAP: $what of a $xs is not lowered\n";
+}
+
+# _lower_blessed($node) -> %Slot: blessed($x), its class, or undef (pvm 180).
+sub _lower_blessed {
+    my ($self, $node) = @_;
+    my ($x) = grep { blessed($_) } $node->inputs->@*;
+    my ($is, $cp, $cl) = $self->_class_of_value($x, 'blessed()');
+    my $undef = $self->_build_slot('false', '0', 'Undef', 'blessed(): not blessed');
+    my ($np, $nl) = map { $self->_fresh } 1 .. 2;
+    my ($ep) = $self->_str_const_parts('', 'blessed(): none');
+    $self->_emit("  $np = select i1 $is, i8* $cp, i8* $ep");
+    $self->_emit("  $nl = select i1 $is, i64 $cl, i64 0");
+    my $s = $self->_emit_coercion($self->_set_str_len($np, $nl), 'Str', 'Scalar', 'blessed(): the class');
+    my $r = $self->_fresh;
+    $self->_emit("  $r = select i1 $is, %Slot $s, %Slot $undef  ; blessed()");
+    my $to = $self->_repr_of($node) // $node->stamp // 'Scalar';
+    return $self->{cache}{ $node->id } = $to =~ /\A(?:Scalar|Slot|Unknown)\z/ ? $r
+        : $self->_emit_coercion($r, 'Scalar', $to, 'blessed()');
+}
+
+# _lower_isa($node) -> i1: `$x isa C`, the class bless recorded is C. With no
+# @ISA stored (refused) and no `class` object (stops), there is no other way
+# to be one (pvm 058).
+sub _lower_isa {
+    my ($self, $node) = @_;
+    my ($x, $c) = $node->inputs->@[0, 1];
+    die "GAP: isa of a class named at run time is not lowered\n"
+        unless blessed($c) && $c->operation eq 'Constant';
+    # INHERITANCE would make it one too: `use parent` / `use base` (in a use the
+    # loader drops), or any @ISA the program names.
+    die "GAP: isa in a program that may set up inheritance is not lowered\n"
+        if $Chalk::IR::Serialize::JSON::USED_MODULES{parent} || $Chalk::IR::Serialize::JSON::USED_MODULES{base}
+        || grep { $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq 'ISA' } @PROGRAM;
+    my ($is, $cp, $cl) = $self->_class_of_value($x, 'isa');
+    my ($np, $nl) = $self->_str_const_parts($c->value // '', 'isa: the class');
+    $self->{_need_memcmp} = 1;
+    my ($samel, $safe, $m, $eq, $r) = map { $self->_fresh } 1 .. 5;
+    $self->_emit("  $samel = icmp eq i64 $cl, $nl");
+    $self->_emit("  $safe = select i1 $samel, i64 $nl, i64 0");
+    my $p = $self->_fresh;
+    $self->_emit("  $p = select i1 $is, i8* $cp, i8* $np  ; isa: compared only when blessed");
+    $self->_emit("  $m = call i32 \@memcmp(i8* $p, i8* $np, i64 $safe)");
+    $self->_emit("  $eq = icmp eq i32 $m, 0");
+    my ($both) = map { $self->_fresh } 1;
+    $self->_emit("  $both = and i1 $is, $samel");
+    $self->_emit("  $r = and i1 $both, $eq  ; isa");
+    return $self->{cache}{ $node->id } = $r;
 }
 
 # _lower_delete($node) -> %Slot: `delete $h{k}` takes the key out of the

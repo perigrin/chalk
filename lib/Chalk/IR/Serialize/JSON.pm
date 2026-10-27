@@ -1017,6 +1017,8 @@ sub from_json ($json_string) {
     # X 1.0` checks a VERSION). Only that shape is let through -- the bare
     # names were, and a program's own `BEGIN { Foo->import }` and a `require`
     # of a file by path were dropped with whatever they printed.
+    # The modules a `use` names -- parent and base set up inheritance there.
+    our %USED_MODULES = ();
     for my $p (($data->{phase_blocks} // [])->@*) {
         my @nodes = ($p->{nodes} // [])->@*;
         my %by_id = map { ( $_->{id} // '' ) => $_ } @nodes;
@@ -1042,6 +1044,7 @@ sub from_json ($json_string) {
         } @nodes;
         die "GAP: a $p->{phase} block with effects of its own is not lowered "
           . "(a BEGIN or END block runs outside the main program)\n" if @effects;
+        $USED_MODULES{$module} = 1 if $is_use && defined $module;
     }
 
     my %graphs;
