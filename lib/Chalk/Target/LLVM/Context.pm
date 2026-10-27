@@ -13253,6 +13253,13 @@ sub _lower_builtin_join {
     $flatten ||= _is_array_slice($list_node) || _is_hash_slice($list_node);
     # So does a merge of lists (`@a = $c ? (7) : f()`), lowered as the array chosen.
     $flatten ||= $list_node->operation =~ /\A(?:Phi|Repeat)\z/ && ( $list_node->stamp // '' ) eq 'List';
+    # So does a sub's list: what its inlined body returned, flattened. Walked
+    # statically through the callee's Return, an element lowered as the array.
+    # (Its stamp may be the sub's scalar reading after Analysis; the call's
+    # `want` is what says it yields a list here.)
+    $flatten ||= $list_node->operation eq 'Call' && ( $list_node->dispatch_kind // '' ) eq 'direct'
+        && ( ( $list_node->stamp // '' ) eq 'List'
+             || ( $list_node->can('want') && ( $list_node->want // '' ) eq 'list' ) );
     my $elements = $flatten ? undef
         : @more ? [ $list_node, @more ]
         # A LIST READ AFTER IT WAS WRITTEN has no static elements: its
@@ -17866,6 +17873,17 @@ sub _print_arg {
             && ( $arg->to_repr // '' ) eq 'Str'
             && ( $self->_repr_of($arg->inputs->[0]) // '' ) =~ /\A(?:Array|List)\z/) {
         return $self->{cache}{ $arg->id } //= $self->_emit_join_loop($arg->inputs->[0], $self->_empty_str_ref('print: no separator'));
+    }
+    # A SUB CALLED IN LIST CONTEXT prints every value it returned. Read
+    # through its stamp (Analysis may have narrowed it to the scalar face) it
+    # printed the count: `print f(4)` gave 2 for perl's 48.
+    if ($arg->operation eq 'Coerce' && ( $arg->to_repr // '' ) eq 'Str') {
+        my $c = $arg->inputs->[0];
+        if (blessed($c) && $c->operation eq 'Call' && ( $c->dispatch_kind // '' ) eq 'direct'
+                && $c->can('want') && ( $c->want // '' ) eq 'list') {
+            return $self->{cache}{ $arg->id } //= $self->_emit_join_loop(undef,
+                $self->_empty_str_ref('print: no separator'), $self->_emit_flattened_array_of([$c]));
+        }
     }
     return $self->lower_value($arg);
 }
