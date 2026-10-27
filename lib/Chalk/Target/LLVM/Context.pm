@@ -131,6 +131,7 @@ sub new {
         _need_select            => 0,
         _need_hash_delete       => 0,
         _need_index             => 0,
+        _need_str_range         => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -184,6 +185,7 @@ my @NEED_FLAGS = qw(
     _need_select
     _need_hash_delete
     _need_index
+    _need_str_range
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -955,6 +957,7 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_bless_lines;
     push @lines, $self->_hash_delete_lines;
     push @lines, $self->_index_lines;
+    push @lines, $self->_str_range_lines;
     push @lines, '@chalk_selected = internal global i8* null  ; the handle a bare print writes to (null: STDOUT)'
         if $self->{_need_select} && !$self->{_select_emitted}++;
     # A method body that stringifies a Num needs these too; the prologue ran
@@ -9984,6 +9987,18 @@ sub _emit_flattened_array_of {
             $self->_new_block($done);
             next;
         }
+        # A RANGE OF STRINGS counts by perl's magic increment (pvm 372).
+        my $is_string = sub ($b) {
+            $b = $b->inputs->[0] while $b->operation eq 'Coerce';
+            ( $b->stamp // '' ) eq 'Str' ? $b : undef;
+        };
+        if ($in->operation eq 'Range'
+                && !grep { !$is_string->($_) } $in->inputs->@[0, 1]) {
+            my @b = map { [ $self->_str_parts($self->lower_value($is_string->($_))) ] } $in->inputs->@[0, 1];
+            $self->{$_} = 1 for qw(_need_str_range _need_memcmp _need_malloc_memcpy _need_exit _need_str_type _need_array_append);
+            $self->_emit("  call void \@chalk_str_range(%Array* $acc, i8* $b[0][0], i64 $b[0][1], i8* $b[1][0], i64 $b[1][1])  ; list: a range of strings");
+            next;
+        }
         if ($in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'builtin'
                 && ( $in->name // '' ) eq 'readline') {
             # lowered once, where it stands: read again here it would be empty
@@ -11161,6 +11176,117 @@ hit:
   ret i64 %i
 miss:
   ret i64 -1
+}
+END_HELPER
+}
+
+# _str_range_lines -> @chalk_str_range: perl's pp_flop for strings. Push the
+# string, stop at END or once longer than END, else magic-increment it (z->a
+# and Z->A carry; a carry off the front grows it by its first letter). Only a
+# start of letters is lowered -- one with digits, or "inf"/"nan" (which look
+# like numbers), is perl's numeric range -- so any other start stops (exit 255).
+sub _str_range_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_str_range} && !$self->{_str_range_emitted}++;
+    my ($SD, $ST, $SP) = map { _slot_idx($_) } qw(defined tag payload);
+    my ($XP, $XL, $XE) = map { _str_idx($_) } qw(ptr len enc);
+    my ($tag, $enc, $size) = (_slot_tag_value('Str'), _str_enc('utf8'), _sizeof_llvm_type('%Str'));
+    return ('', <<"END_HELPER");
+define internal void \@chalk_str_range(%Array* %acc, i8* %lo, i64 %ll, i8* %hi, i64 %hl) {
+entry:
+  %empty = icmp eq i64 %ll, 0
+  br i1 %empty, label %stop, label %first
+first:
+  %c0 = load i8, i8* %lo
+  %f0 = or i8 %c0, 32
+  %fi = icmp eq i8 %f0, 105
+  %fn = icmp eq i8 %f0, 110
+  %numish = or i1 %fi, %fn
+  br i1 %numish, label %stop, label %scan
+scan:
+  %j = phi i64 [ 0, %first ], [ %j1, %letter ]
+  %jd = icmp eq i64 %j, %ll
+  br i1 %jd, label %start, label %scanc
+scanc:
+  %pj = getelementptr inbounds i8, i8* %lo, i64 %j
+  %cj = load i8, i8* %pj
+  %lc = or i8 %cj, 32
+  %ge = icmp uge i8 %lc, 97
+  %le = icmp ule i8 %lc, 122
+  %isl = and i1 %ge, %le
+  %j1 = add i64 %j, 1
+  br i1 %isl, label %letter, label %stop
+letter:
+  br label %scan
+start:
+  %b0 = call i8* \@malloc(i64 %ll)
+  %u0 = call i8* \@memcpy(i8* %b0, i8* %lo, i64 %ll)
+  br label %loop
+loop:
+  %cur = phi i8* [ %b0, %start ], [ %nb, %next ]
+  %cl = phi i64 [ %ll, %start ], [ %nl, %next ]
+  %long = icmp sgt i64 %cl, %hl
+  br i1 %long, label %done, label %push
+push:
+  %sp = call i8* \@malloc(i64 $size)
+  %st = bitcast i8* %sp to %Str*
+  %g0 = getelementptr inbounds %Str, %Str* %st, i64 0, i32 $XP
+  store i8* %cur, i8** %g0
+  %g1 = getelementptr inbounds %Str, %Str* %st, i64 0, i32 $XL
+  store i64 %cl, i64* %g1
+  %g2 = getelementptr inbounds %Str, %Str* %st, i64 0, i32 $XE
+  store i32 $enc, i32* %g2
+  %pi = ptrtoint %Str* %st to i64
+  %s0 = insertvalue %Slot undef, i1 true, $SD
+  %s1 = insertvalue %Slot %s0, i8 $tag, $ST
+  %s2 = insertvalue %Slot %s1, i64 %pi, $SP
+  call void \@chalk_array_push_slot(%Array* %acc, %Slot %s2)
+  %same = icmp eq i64 %cl, %hl
+  br i1 %same, label %cmp, label %inc
+cmp:
+  %m = call i32 \@memcmp(i8* %cur, i8* %hi, i64 %cl)
+  %eq = icmp eq i32 %m, 0
+  br i1 %eq, label %done, label %inc
+inc:
+  %cap = add i64 %cl, 1
+  %nbuf = call i8* \@malloc(i64 %cap)
+  %np1 = getelementptr inbounds i8, i8* %nbuf, i64 1
+  %u1 = call i8* \@memcpy(i8* %np1, i8* %cur, i64 %cl)
+  br label %carry
+carry:
+  %k = phi i64 [ %cl, %inc ], [ %k1, %wrapped ]
+  %pk = getelementptr inbounds i8, i8* %nbuf, i64 %k
+  %ck = load i8, i8* %pk
+  %isz = icmp eq i8 %ck, 122
+  %isZ = icmp eq i8 %ck, 90
+  %wrap = or i1 %isz, %isZ
+  br i1 %wrap, label %wrapc, label %bump
+wrapc:
+  %wc = sub i8 %ck, 25
+  store i8 %wc, i8* %pk
+  %k1 = sub i64 %k, 1
+  %top = icmp eq i64 %k1, 0
+  br i1 %top, label %grow, label %wrapped
+wrapped:
+  br label %carry
+bump:
+  %bc = add i8 %ck, 1
+  store i8 %bc, i8* %pk
+  br label %next
+grow:
+  %p1 = getelementptr inbounds i8, i8* %nbuf, i64 1
+  %fc = load i8, i8* %p1
+  store i8 %fc, i8* %nbuf
+  br label %next
+next:
+  %nb = phi i8* [ %np1, %bump ], [ %nbuf, %grow ]
+  %nl = phi i64 [ %cl, %bump ], [ %cap, %grow ]
+  br label %loop
+done:
+  ret void
+stop:
+  call void \@exit(i32 255)
+  unreachable
 }
 END_HELPER
 }

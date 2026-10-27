@@ -50,11 +50,11 @@ for my $case (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
-# A RANGE OF STRINGS counts by perl's string increment ('aa' .. 'ad'):
-# refused by name, not counted as numbers.
+# A RANGE OF STRINGS counts by perl's string increment ('aa' .. 'ad'), not
+# as numbers (llvm-a-range-of-strings.t has the increment's edges).
 {
-    eval { through_llvm(q{my $e = $ENV{NO_SUCH_VAR} // "ad"; my @c = ("aa" .. $e); print "@c\n";}) };
-    like($@, qr/GAP: /, 'a range of strings is refused');
+    my $got = eval { through_llvm(q{my $e = $ENV{NO_SUCH_VAR} // "ad"; my @c = ("aa" .. $e); print "@c\n";}) };
+    is($got, "aa ab ac ad\n", 'a range of strings counts by string increment') or diag $@;
 }
 
 done_testing;
