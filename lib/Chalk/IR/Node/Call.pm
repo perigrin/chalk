@@ -124,6 +124,11 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     }
 
 
+    # A call of a sub no one defines, which runs its package's AUTOLOAD
+    # (Analysis): the full name perl puts in $AUTOLOAD first, or undef.
+    field $autoloads :reader = undef;
+    method set_autoloads($v) { $autoloads = $v; return }
+
     # The block eval whose body this call is in (B::SoN's eval_id), or
     # undef: the callee's own die names no eval.
     field $eval_id :reader = undef;

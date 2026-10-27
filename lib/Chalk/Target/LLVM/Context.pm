@@ -14104,6 +14104,20 @@ sub _lower_call_direct {
       . "graph (no Return) — it was declared without a body."
         unless $graph->returns && $graph->returns->@*;
 
+    # A SUB NO ONE DEFINES runs its package's AUTOLOAD (Analysis), which finds
+    # the name it was called by in $AUTOLOAD: perl stores it there first.
+    if (!$via && $node->can('autoloads') && defined(my $full = $node->autoloads)) {
+        my ($pkg) = $full =~ /\A(.*)::[^:]+\z/;
+        die "GAP: direct call to '$name' runs AUTOLOAD from inside AUTOLOAD -- "
+          . "inlining cannot terminate on that cycle\n"
+            if $self->{_inlining}{"${pkg}::AUTOLOAD"};
+        $self->{_inlining}{"${pkg}::AUTOLOAD"} = 1;
+        my ($p, $l) = $self->_str_const_parts($full, 'AUTOLOAD');
+        my $slot = $self->_emit_coercion($self->_str_value($p, len => $l), 'Str', 'Scalar', 'store to $AUTOLOAD');
+        $self->_emit("  store %Slot $slot, %Slot* " . $self->_pkg_slot_ptr($pkg, 'AUTOLOAD')
+            . "  ; \$${pkg}::AUTOLOAD = \"$full\"");
+    }
+
     my @returns = grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Return'
     } $graph->returns->@*;

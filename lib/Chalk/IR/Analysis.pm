@@ -394,6 +394,7 @@ sub infer ($class, $graphs) {
     # fixpoint, so the metaobject is available to it.
     _attach_call_targets(\%graphs, $mop);
     _attach_glob_bound_subs(\%graphs, $mop);
+    _attach_autoload(\%graphs, $mop);
     _type_calls_returning_self(\%graphs);
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
@@ -806,6 +807,48 @@ sub _attach_glob_bound_subs ($graphs, $mop) {
         next unless @mine && @mine == ( $calls{$name} // [] )->@*;
         $_->[0]->set_target($anon->sub) for @mine;
         $anon->set_glob_bound(1);
+    }
+    return;
+}
+
+# _attach_autoload($graphs, $mop): a direct call of a sub no one defines runs
+# its package's AUTOLOAD, with $AUTOLOAD set to the full name (pvm 409). Only
+# when the program can define no sub at run time -- no string eval, require or
+# do FILE, no store into a glob's code slot left unbound -- or perl would call
+# what that defined instead.
+sub _attach_autoload ($graphs, $mop) {
+    my @all = map { _all_graph_nodes($graphs->{$_}) } sort keys $graphs->%*;
+    return if grep {
+        my $op = $_->operation;
+        ( $op eq 'Coerce' && ( $_->to_repr // '' ) eq 'Code' )
+        || ( $op eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
+             && ( $_->name // '' ) =~ /\A(?:require|do|dofile|entereval)\z/ )
+        || ( $op eq 'EntryWrite' && do {
+                my ($t, $v) = $_->inputs->@[0, 1];
+                !( blessed($t) && $t->operation eq 'EntryDef' )
+                || ( ( $t->sigil // '' ) eq '&'
+                     && !( blessed($v) && $v->operation eq 'AnonSub' && $v->glob_bound ) )
+             } )
+    } @all;
+    # $AUTOLOAD READ OUTSIDE AUTOLOAD is not ordered after the call that stores
+    # it -- B::SoN does not put that call in memory -- so such a package's calls
+    # stay refused.
+    my %read_outside;
+    for my $gname (sort keys $graphs->%*) {
+        for my $n (_all_graph_nodes($graphs->{$gname})) {
+            next unless $n->operation eq 'EntryDef' && ( $n->symbol // '' ) eq 'AUTOLOAD';
+            $read_outside{ $n->package } = 1 if $gname ne $n->package . '::AUTOLOAD';
+        }
+    }
+    for my $n (@all) {
+        next unless $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct'
+            && !defined $n->target;
+        my ($pkg) = ( $n->name // '' ) =~ /\A(.*)::[^:]+\z/ or next;
+        next if $read_outside{$pkg};
+        my $cls = $mop->for_class($pkg) or next;
+        my ($auto) = grep { $_->name eq 'AUTOLOAD' } $cls->subs or next;
+        $n->set_target($auto);
+        $n->set_autoloads($n->name);
     }
     return;
 }
