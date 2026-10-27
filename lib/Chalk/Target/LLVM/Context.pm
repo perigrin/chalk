@@ -132,6 +132,7 @@ sub new {
         _need_hash_delete       => 0,
         _need_index             => 0,
         _need_str_range         => 0,
+        _need_localtime         => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -186,6 +187,7 @@ my @NEED_FLAGS = qw(
     _need_hash_delete
     _need_index
     _need_str_range
+    _need_localtime
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -958,6 +960,7 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_hash_delete_lines;
     push @lines, $self->_index_lines;
     push @lines, $self->_str_range_lines;
+    push @lines, $self->_localtime_lines;
     push @lines, '@chalk_selected = internal global i8* null  ; the handle a bare print writes to (null: STDOUT)'
         if $self->{_need_select} && !$self->{_select_emitted}++;
     # A method body that stringifies a Num needs these too; the prologue ran
@@ -2090,6 +2093,9 @@ sub lower_value {
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'chr') {
         return $self->_lower_chr($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'localtime') {
+        return $self->_lower_localtime($node);
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'ord') {
         return $self->_lower_ord($node);
@@ -11146,6 +11152,59 @@ sub _lower_ord {
     return $self->{cache}{ $node->id } = $to eq 'Int' ? $r : $self->_emit_coercion($r, 'Int', $to, 'ord');
 }
 
+# _lower_localtime($node) -> localtime(TIME): libc's localtime_r of TIME (now
+# when absent). A list is struct tm's first nine ints, perl's order; a scalar
+# is ctime's text, "%a %b %e %H:%M:%S %Y" -- perl's format, with the C locale.
+sub _lower_localtime {
+    my ($self, $node) = @_;
+    my ($in) = grep { blessed($_) } $node->inputs->@*;
+    $self->{$_} = 1 for qw(_need_localtime _need_malloc_memcpy _need_aggregate_types _need_array_append);
+    my $t;
+    if ($in) {
+        $t = $self->lower_value($in);
+        my $from = $self->_repr_of($in) // '';
+        $t = $self->_emit_coercion($t, $from, 'Int', 'localtime: the time') if $from ne 'Int';
+    } else {
+        $t = $self->_fresh;
+        $self->_emit("  $t = call i64 \@time(i64* null)  ; localtime: now");
+    }
+    my ($tp, $tm) = ($self->_fresh, $self->_fresh);
+    $self->_emit_entry("  $tp = alloca i64  ; localtime: the time");
+    $self->_emit_entry("  $tm = alloca [16 x i32], align 8  ; localtime: struct tm");
+    my ($tmp, $u) = ($self->_fresh, $self->_fresh);
+    $self->_emit("  store i64 $t, i64* $tp");
+    $self->_emit("  $tmp = bitcast [16 x i32]* $tm to i8*");
+    $self->_emit("  $u = call i8* \@localtime_r(i64* $tp, i8* $tmp)");
+    my $to = $node->stamp // '';
+    if ($to eq 'List' || $to eq 'Array') {
+        my $acc = $self->_emit_array_of([]);
+        for my $i (0 .. 8) {
+            my ($g, $v, $w) = map { $self->_fresh } 1 .. 3;
+            $self->_emit("  $g = getelementptr inbounds [16 x i32], [16 x i32]* $tm, i64 0, i64 $i");
+            $self->_emit("  $v = load i32, i32* $g  ; localtime: field $i");
+            $self->_emit("  $w = sext i32 $v to i64");
+            my $sl = $self->_emit_coercion($w, 'Int', 'Scalar', 'localtime: a field');
+            $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $sl)");
+        }
+        return $self->{cache}{ $node->id } = $acc;
+    }
+    my ($buf, $fmt, $n) = ($self->_fresh, undef, $self->_fresh);
+    ($fmt) = $self->_str_const_parts('%a %b %e %H:%M:%S %Y', 'localtime: ctime format');
+    $self->_emit("  $buf = call i8* \@malloc(i64 64)");
+    $self->_emit("  $n = call i64 \@strftime(i8* $buf, i64 64, i8* $fmt, i8* $tmp)  ; localtime: ctime text");
+    my $str = $self->_set_str_len($buf, $n);
+    return $self->{cache}{ $node->id } = $to eq 'Str' || $to eq '' ? $str
+        : $self->_emit_coercion($str, 'Str', $to, 'localtime');
+}
+
+# _localtime_lines -> the libc declarations localtime needs.
+sub _localtime_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_localtime} && !$self->{_localtime_emitted}++;
+    return ('', 'declare i64 @time(i64*)', 'declare i8* @localtime_r(i64*, i8*)',
+            'declare i64 @strftime(i8*, i64, i8*, i8*)');
+}
+
 # _index_lines -> @chalk_index: a scan from the clamped start, memcmp at each
 # place SUB still fits.
 sub _index_lines {
@@ -13977,6 +14036,17 @@ sub _lower_reftype {
         $self->_emit("  call void \@exit(i32 255)  ; ref() of an object names its class: not lowered");
         $self->_set_terminator("  unreachable");
         $self->_new_block($ok);
+        $ref = $self->_set_str_len($p, $l);
+    }
+    # A GLOB REFERENCE is GLOB (pvm 408), unless the program blesses one: a
+    # GlobRef has no machine type for the bless table to key on.
+    elsif ($xs eq 'GlobRef') {
+        die "GAP: ref() of a GlobRef where the program blesses a glob is not lowered\n"
+            if grep {
+                $_->operation eq 'Call' && ( $_->name // '' ) eq 'bless'
+                    && grep { blessed($_) && ( $_->stamp // '' ) eq 'GlobRef' } $_->inputs->@*
+            } @PROGRAM;
+        my ($p, $l) = $self->_str_const_parts('GLOB', 'ref(): GLOB');
         $ref = $self->_set_str_len($p, $l);
     }
     else {
