@@ -1764,6 +1764,9 @@ sub lower_value {
     elsif ($op =~ /\ABit(And|Or|Xor)\z/) {
         return $self->_lower_bitop($node, lc $1);
     }
+    elsif ($op eq 'ElemRestore') {
+        return $self->_lower_elem_restore($node);
+    }
     elsif ($op eq 'Power') {
         return $self->_lower_power($node);
     }
@@ -2489,6 +2492,45 @@ sub _stop_unless {
     $self->_set_terminator("  unreachable");
     $self->_new_block($go);
     return;
+}
+
+# _local_restore_of($assign) -> the ElemRestore that puts back the element a
+# `local` store writes: the same container and key (its memory is whatever
+# version the scope ends at, not the store).
+sub _local_restore_of {
+    my ($a) = @_;
+    my $lhs = $a->inputs->[0];
+    return () unless blessed($lhs) && $lhs->operation eq 'Subscript';
+    my ($c, $k) = $lhs->inputs->@[0, 1];
+    return grep { blessed($_) && $_->operation eq 'ElemRestore'
+                  && refaddr($_->inputs->[0]) == refaddr($c) && refaddr($_->inputs->[1]) == refaddr($k) }
+        ($c->consumers // [])->@*;
+}
+
+# _lower_elem_restore($node): where a `local $h{k}` scope ends, the element
+# B::SoN read before the local store goes back -- or, absent then, the key
+# goes (perl deletes it). inputs: container, key, saved value, existed, memory.
+sub _lower_elem_restore {
+    my ($self, $node) = @_;
+    my ($ctr, $key, $saved, $existed) = $node->inputs->@[0 .. 3];
+    die "GAP: putting back a local array element is not lowered\n"
+        unless ( $node->kind // '' ) eq 'hash';
+    $self->{$_} = 1 for qw(_need_aggregate_types _need_malloc_memcpy _need_memcmp _need_hash_delete);
+    my $hash = $self->_container_ptr($ctr, 'Hash');
+    my ($kp, $kl) = $self->_str_parts($self->_hash_key_str($key));
+    my @v = $self->_slot_fields_of_value($saved, $self->lower_value($saved), 'local restore');
+    my $had = $self->lower_value($existed);
+    my ($put, $del, $done) = map { $self->_fresh_label("lrest.$_.") } qw(put del done);
+    $self->_set_terminator("  br i1 $had, label %$put, label %$del");
+    $self->_new_block($put);
+    $self->_emit_hash_upsert($hash, $kp, $kl, @v);
+    $self->_set_terminator("  br label %$done");
+    $self->_new_block($del);
+    my $gone = $self->_fresh;
+    $self->_emit("  $gone = call %Slot \@chalk_hash_delete(%Hash* $hash, i8* $kp, i64 $kl)  ; local: the key was not there");
+    $self->_set_terminator("  br label %$done");
+    $self->_new_block($done);
+    return $self->{cache}{ $node->id } = '';
 }
 
 # _lower_negate($node) -> unary minus on a number: Int `sub 0, x`, Num fneg.
@@ -4049,10 +4091,19 @@ sub _lower_assign {
 
     my $repr = _require_repr($node, 'Assign');
 
-    # A `local` STORE is put back when its scope ends, and chalk does not put
-    # it back -- nor is the restore always on the wire (pvm 176 kept it).
+    # A `local` STORE is put back where its scope ends, by the ElemRestore
+    # B::SoN places there. Without one (an explicit return, pvm 176) the old
+    # value would never be put back: refused.
     die "GAP: a local store is not lowered -- what it replaced is not put back\n"
-        if $node->can('local') && $node->local;
+        if $node->can('local') && $node->local
+        && !_local_restore_of($node);
+    # WHAT IT REPLACES is read now, before the store: left to the restore it
+    # read the local value back.
+    if ($node->can('local') && $node->local) {
+        for my $r (_local_restore_of($node)) {
+            $self->lower_value($_) for $r->inputs->@[2, 3];
+        }
+    }
 
     # A LIST ASSIGNMENT INTO LOCATIONS: each target its own value, pairwise,
     # every value read before any target is stored (a swap), a target past
@@ -6031,7 +6082,7 @@ sub process_control_node {
         # shared lexical, and a read at that call's version must be taken
         # there, not at its use after a later store.
         $self->_freeze_memory_reads($node)
-            if $op eq 'Assign' || $op eq 'RegexSubst' || $op eq 'EntryWrite' || $op eq 'Delete'
+            if $op eq 'Assign' || $op eq 'RegexSubst' || $op eq 'EntryWrite' || $op eq 'Delete' || $op eq 'ElemRestore'
             || $self->_is_array_mutating_call($node)
             || ($op eq 'Call' && ($node->dispatch_kind // '') eq 'direct');
     }
