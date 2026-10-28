@@ -1019,6 +1019,12 @@ sub from_json ($json_string) {
     # of a file by path were dropped with whatever they printed.
     # The modules a `use` names -- parent and base set up inheritance there.
     our %USED_MODULES = ();
+    # BEGIN and END blocks of main with effects: loaded as graphs of their
+    # own, [phase, name] in source order; the program lowering runs a BEGIN
+    # before its main line and an END after it (pvm 258).
+    our @PHASE_BLOCKS = ();
+    our @PHASE_GRAPHS = ();
+    my $phase_n = 0;
     # Each sub's prototype, by its full name: prototype(\&f) reads it. A sub
     # the program defines with none is there, undef.
     our %PROTOTYPES = ();
@@ -1053,6 +1059,13 @@ sub from_json ($json_string) {
             ( $_->{op} // '' ) !~ /\A(?:Start|Constant|MemStart|Return)\z/
                 && !( $is_use && ( $_->{op} // '' ) eq 'Call' )
         } @nodes;
+        if (@effects && ( $p->{phase} // '' ) =~ /\A(?:BEGIN|END)\z/ && ( $p->{package} // 'main' ) eq 'main'
+                && !$is_use) {
+            my $name = "main::__$p->{phase}_" . $phase_n++;
+            $data->{methods}{$name} = { map { $_ => $p->{$_} } qw(nodes start returns) };
+            push @PHASE_BLOCKS, [ $p->{phase}, $name ];
+            next;
+        }
         die "GAP: a $p->{phase} block with effects of its own is not lowered "
           . "(a BEGIN or END block runs outside the main program)\n" if @effects;
         $USED_MODULES{$module} = 1 if $is_use && defined $module;
@@ -1080,8 +1093,10 @@ sub from_json ($json_string) {
     # callers keep working during the transition; measured by
     # t/bootstrap/ir/loader-reproduces-the-wire.t, it adds 16 stamps the wire
     # never sent. That number reaching zero is what finishing the split means.
-    return Chalk::IR::Analysis->run(
+    my $analysed = Chalk::IR::Analysis->run(
         \%graphs, (ref $data->{classes} eq "HASH" ? $data->{classes} : undef));
+    @PHASE_GRAPHS = map { [ $_->[0], $analysed->{ $_->[1] } ] } @PHASE_BLOCKS;
+    return $analysed;
 }
 
 

@@ -38,13 +38,10 @@ sub through_llvm ($src) {
 
 # THE LOADER READ ONLY `methods`, so B::SoN's `phase_blocks` were dropped: a
 # program with `BEGIN { print }` and `END { print }` printed only its main
-# line (pvm corpus compile-phase.md). Until BEGIN and END run in their places,
-# such a program is refused.
-{
-    my $got = eval { through_llvm(q{END { print "end\n" } BEGIN { print "begin\n" } print "main\n";}) };
-    ok(!defined $got, 'a BEGIN and an END that print are not lowered') or diag "got: $got";
-    like($@, qr/^load: .*BEGIN or END block/, 'refused, naming the phase block');
-}
+# line (pvm corpus compile-phase.md). They run in their places now
+# (llvm-begin-and-end-blocks.t has the orders and the exits).
+is(eval { through_llvm(q{END { print "end\n" } BEGIN { print "begin\n" } print "main\n";}) } // "died: $@",
+    "begin\nmain\nend\n", 'a BEGIN and an END that print run in their places');
 
 # A `use` IS A BEGIN BLOCK TOO, of a require and an import, and the program
 # around it still lowers.
@@ -58,22 +55,21 @@ is(eval { through_llvm(q{use Scalar::Util 1.0 (); print "ok\n";}) } // "died: $@
 is(eval { through_llvm(q{use v5.42; print "ok\n";}) } // "died: $@",
     "ok\n", 'a use of a perl version still lowers');
 
-# ONLY A `use` IS LET THROUGH, not a call that happens to be named import or
-# require: the program's own import printed, and was dropped (I5).
+# ONLY A `use` IS LET THROUGH AS A use, not a call that happens to be named
+# import or require: the program's own import printed, and was dropped (I5).
+# Its own import now runs as the BEGIN block it is; a require of a file by
+# path is still refused.
+is(eval { through_llvm(q{package Foo; sub import { print "imported\n" } package main; BEGIN { Foo->import } print "main\n";}) } // "died: $@",
+    "imported\nmain\n", 'a BEGIN calling an import of its own runs it first');
 my $setup = do {
     my ($fh, $f) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh qq{print "setup\\n"; 1;\n};
     close $fh;
     $f;
 };
-for my $case (
-    [ q{package Foo; sub import { print "imported\n" } package main; BEGIN { Foo->import } print "main\n";}, 'a BEGIN calling an import of its own' ],
-    [ qq{BEGIN { require "$setup" } print "main\\n";}, 'a BEGIN requiring a file by path' ],
-) {
-    my ($src, $name) = @$case;
-    my $got = eval { through_llvm($src) };
-    ok(!defined $got, "$name: not lowered") or diag "got: $got";
-    like($@, qr/^load: .*(?:BEGIN or END block|GAP)/, "$name: refused, naming why");
+{
+    my $got = eval { through_llvm(qq{BEGIN { require "$setup" } print "main\\n";}) };
+    ok(!defined $got && $@ =~ /GAP|cannot lower/, 'a BEGIN requiring a file by path is refused') or diag $got // $@;
 }
 
 done_testing;

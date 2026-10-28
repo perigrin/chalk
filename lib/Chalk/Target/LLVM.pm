@@ -1726,12 +1726,73 @@ sub lower_with_elaboration {
         map { ("main::$_" => 1) } grep { $_ eq '_' }
             Chalk::Target::LLVM::Context::_scan_local_aliases($return_node);
 
+    # BEGIN BLOCKS RUN FIRST, in order, before the main line (pvm 258). END
+    # blocks run at exit -- the main line's end, an exit, a die, a stop --
+    # last defined first: each is a function of its own, registered with
+    # atexit(3), which runs them in the reverse of that order on every one
+    # of those paths (an END lowered after the main line missed a die).
+    my @phase = grep { blessed($_->[1]) } @Chalk::IR::Serialize::JSON::PHASE_GRAPHS;
+    # A phase block reading a main-line lexical would read it unbound (`my
+    # $x; BEGIN { $x = 5 }` printed undef for perl's 5): refused.
+    for my $ph (@phase) {
+        die "GAP: a $ph->[0] block reading a variable of the main program is not lowered\n"
+            if grep { $_->operation eq 'PadAccess' && ( $_->shared || !defined $_->inputs->[0] ) }
+                Chalk::Target::LLVM::Context::_program_nodes($ph->[1]->returns->[0]);
+    }
+    # A phase block is a graph of its own, numbered from its own factory:
+    # sharing the main line's cache, `Print#2` of one hit the other's.
+    for my $g (map { $_->[1] } grep { $_->[0] eq 'BEGIN' } @phase) {
+        local $ctx->{cache} = {};
+        local $ctx->{var_table} = {};
+        _process_control_chain($ctx, $g->returns->[0]);
+    }
+
     # Process the control chain — VarDecl/Assign/If/Loop.
     _process_control_chain($ctx, $return_node);
 
     my $value_node  = $return_node->inputs->[0];
     my $result_ref  = $ctx->lower_value($value_node);
     my $result_repr = $value_node->stamp;
+    # END bodies lower after the main line, as method bodies do: their string
+    # globals continue its numbering (lowered first, both had @str_const_0).
+    my @end_lines;
+    my @ends = map { $_->[1] } grep { $_->[0] eq 'END' } @phase;
+    for my $i (0 .. $#ends) {
+        my $ectx = Chalk::Target::LLVM::Context->new;
+        $ectx->configure_as_method_body(class_name => 'main', method_name => "__END_$i",
+            has_self => 0, parent_ctx => $ctx, class_registry => $class_registry);
+        _process_control_chain($ectx, $ends[$i]->returns->[0]);
+        push @end_lines, "define internal void \@chalk_end_$i() {  ; END block $i",
+            'entry:', $ectx->render_blocks(1), '  ret void', '}', '';
+        $ctx->absorb_need_flags_from($ectx);
+        push @end_lines, $ectx->render_str_globals;
+    }
+    # ONE PLACE RUNS THEM, once: @chalk_ends, called before @main returns and
+    # by @chalk_exit, which every exit in the module calls instead of exit(3)
+    # (a die, an exit, a stop). atexit(3) was the obvious tool and lli does
+    # not run its handlers at a JIT program's exit.
+    if (@ends) {
+        push @end_lines,
+            '@chalk_ends_ran = internal global i1 false',
+            'define internal void @chalk_ends() {',
+            'entry:',
+            '  %ran = load i1, i1* @chalk_ends_ran',
+            '  br i1 %ran, label %done, label %run',
+            'run:',
+            '  store i1 true, i1* @chalk_ends_ran',
+            ( map { "  call void \@chalk_end_$_()  ; END block $_" } 0 .. $#ends ),
+            '  br label %done',
+            'done:',
+            '  ret void',
+            '}',
+            'define internal void @chalk_exit(i32 %status) {',
+            'entry:',
+            '  call void @chalk_ends()',
+            '  call void @exit(i32 %status)',
+            '  unreachable',
+            '}', '';
+        $ctx->{_need_exit} = 1;
+    }
     $ctx->start_eval_error_empty;
 
     my @lines;
@@ -1766,6 +1827,7 @@ sub lower_with_elaboration {
     # absorb_need_flags_from) after _emit_class_registry_ir runs above, so a
     # flag it set is invisible to render_need_flag_prologue, which ran before
     # any body lowered.
+    push @lines, @end_lines;
     push @lines, $ctx->render_need_flag_postclass_reemit($result_repr);
 
     push @lines, '';
@@ -1782,7 +1844,14 @@ sub lower_with_elaboration {
     push @lines, '  ret i32 0';
     push @lines, '}';
 
-    return join("\n", @lines) . "\n";
+    my $ir = join("\n", @lines) . "\n";
+    if (@ends) {
+        # Every exit but @chalk_exit's own goes through it; @main runs them
+        # before it returns.
+        $ir =~ s/call void \@exit\(i32 (?!%status\))/call void \@chalk_exit(i32 /g;
+        $ir =~ s/^(define i32 \@main\(.*?^)(  ret i32 )/$1  call void \@chalk_ends()\n$2/gms;
+    }
+    return $ir;
 }
 
 

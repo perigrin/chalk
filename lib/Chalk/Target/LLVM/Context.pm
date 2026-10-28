@@ -1447,7 +1447,9 @@ sub _module_global_name {
     my $byte_len = do { use bytes; length($content) };
 
     my $prefix = '';
-    if ($self->{_in_method_body}
+    # Any emitted function body, not only a method's: an END block's function
+    # (no invocant) named its strings @str_const_0 beside @main's.
+    if (( $self->{_in_method_body} || $self->{_in_function_body} )
         && defined $self->{_method_class_name}
         && defined $self->{_method_name}) {
         $prefix = "$self->{_method_class_name}__$self->{_method_name}__";
