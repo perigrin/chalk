@@ -3604,6 +3604,11 @@ sub _lower_coerce {
                   # a call returning one.
                   : ( ( $operand->stamp // '' ) eq 'Scalar'
                       && ( $node->from_repr // '' ) eq 'Unknown' ) ? 'Scalar'
+                  # A merge nothing typed that this lowering resolved from its
+                  # arms (a Region phi of scalars) is what it was resolved to.
+                  : ( ( $node->from_repr // '' ) eq 'Unknown'
+                      && defined $self->{cache}{ 'repr:' . $operand->id } )
+                      ? $self->{cache}{ 'repr:' . $operand->id }
                   : $node->from_repr;
 
     my $ref = $self->_emit_coercion($input_ref, $from, $to, 'Coerce');

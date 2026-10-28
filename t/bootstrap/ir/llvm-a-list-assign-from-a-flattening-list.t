@@ -49,4 +49,17 @@ for my $src (
     is($got, $want, "perl's answer for $src") or diag $@;
 }
 
+# A target's reads were stamped Unknown, so every consumer -- an
+# interpolation, a comparison, a merge -- refused them (pvm 168, 169, 214).
+# Its cell holds a Scalar, which is what it is read as.
+for my $src (
+    q{sub g { (5, 2) } sub f { my $lo = 0; if ($_[0]) { ($lo) = g(); } "$lo" } print f(1), f(0), "\n";},
+    q{sub p { ("p$_[0]", length $_[0]) } my ($ap, $al) = p("xy"); print "$ap ", $al + 1, ($al > 1 ? " long" : " short"), "\n";},
+    q{sub q2 { (3, "a") } my ($n, $s) = q2(); my @r = ($s) x $n; print "@r\n";},
+) {
+    my $want = qx($^X -e '$src');
+    my $got = eval { through_llvm($src) };
+    is($got, $want, "perl's answer for $src") or diag $@;
+}
+
 done_testing;

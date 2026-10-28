@@ -338,6 +338,7 @@ sub hydrate ($class, $graphs, $classes = undef) {
     # Stamp the field reads that are already typed, then propagate so an
     # ADJUST expression over them (`$val * 2`) carries a repr.
     _stamp_field_access_reprs($classes, \%graphs);
+    _stamp_list_assign_targets(\%graphs);
     _seed_and_propagate_reprs(\%graphs);
     # RETIRE THE VACUOUS WIDENINGS FIRST, because the inference below reads a
     # STORED VALUE'S repr and that reading is final -- it is written onto the
@@ -2426,6 +2427,12 @@ sub _propagate_computed_reprs ($graphs) {
                 # condition among its inputs to drop.
                 @in = @in[ 1 .. $#in ] if $op eq 'TernaryExpr' && @in > 1;
 
+                # A PHI IN A CYCLE (a loop phi and the merge inside its body)
+                # waits on itself: each is Unknown until the other is typed.
+                # Start the cycle from its typed operands -- an Unknown phi
+                # operand will be what this one is.
+                @in = grep { !( $_->operation eq 'Phi' && ( $_->stamp // 'Unknown' ) eq 'Unknown' ) } @in
+                    if $op eq 'Phi' && grep { !( $_->operation eq 'Phi' && ( $_->stamp // 'Unknown' ) eq 'Unknown' ) } @in;
                 my @reprs = map { $_->stamp } @in;
                 next if grep { !defined } @reprs;          # an input still untyped
 
@@ -2463,9 +2470,26 @@ sub _propagate_computed_reprs ($graphs) {
                 # ARMS WITH NO JOIN THAT ARE ALL SCALARS -- a number and undef
                 # -- box to a Scalar: each arm a Slot, nothing unboxed on an
                 # unproven type (the safe direction the note above asks for).
+                # So does a phi or a `//` -- each yields one of its operands --
+                # and a reference arm is a scalar too: its Slot keeps its tag
+                # (pvm 070: `defined $v ? $v : []`; a loop phi over a target a
+                # list assignment stored).
+                #
+                # NOT every Scalar arm: an inlined sub's merge over `shift` is
+                # resolved per call site by the backend, from the caller's
+                # values -- boxed here it lost that (an Int return read as a
+                # list element of Unknown). Only an arm that is a reference, a
+                # list assignment's target, or a merge this rule boxed.
+                my $boxable = $op eq 'TernaryExpr' || grep {
+                    ( $_->stamp // '' ) =~ /\A(?:ArrayRef|HashRef|CodeRef|ScalarRef)\z/
+                    || ( $_->operation eq 'PadAccess' && ( $_->stamp // '' ) eq 'Scalar'
+                         && !defined $_->inputs->[0] )
+                    || ( $_->operation eq 'Phi' && ( $_->stamp // '' ) eq 'Scalar' )
+                } @in;
                 $widest = 'Scalar'
-                    if $op eq 'TernaryExpr' && ( $widest // 'Unknown' ) eq 'Unknown'
-                    && !( grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @reprs )
+                    if $boxable && $op =~ /\A(?:TernaryExpr|Phi|DefinedOr)\z/ && ( $widest // 'Unknown' ) eq 'Unknown'
+                    && !( grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } @reprs )
+                    && ( $op eq 'TernaryExpr' || grep { /\A(?:Scalar|Undef|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } @reprs )
                     && ( $node->stamp // 'Unknown' ) =~ /\A(?:Unknown|Int|Num|Str|Boolean|Undef|Scalar)\z/;
                 next unless defined $widest;
                 my $prev = $node->stamp;
@@ -2807,6 +2831,23 @@ sub _infer_field_types_from_stores ($classes, $graphs) {
         }
     }
     return $inferred;
+}
+
+# _stamp_list_assign_targets(\%graphs) -- a scalar target of a list
+# assignment with no declaration of its own (`my ($a, $b) = f()`) is read
+# from the cell the assignment stores: any scalar, so Scalar, not Unknown
+# (pvm 168, 214: a merge or an interpolation over it was refused).
+sub _stamp_list_assign_targets ($graphs) {
+    for my $g (values %$graphs) {
+        for my $n (grep { $_->operation eq 'Assign' && $_->can('targets') && $_->targets } $g->nodes->@*) {
+            for my $t ($n->inputs->@[ 0 .. $n->targets - 1 ]) {
+                next unless blessed($t) && $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$'
+                    && !_is_narrowed($t->stamp) && ( $t->stamp // 'Unknown' ) eq 'Unknown'
+                    && !defined $t->inputs->[0];
+                $t->set_stamp('Scalar');
+            }
+        }
+    }
 }
 
 # _stamp_field_access_reprs($classes, \%graphs) — set each FieldAccess node's
