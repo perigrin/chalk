@@ -2107,6 +2107,45 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'chr') {
         return $self->_lower_chr($node);
     }
+    # wantarray IS THE CONTEXT ITS CALL WAS MADE IN, known at the inlined call
+    # site: 1 for a list, false for a scalar, undef for void -- and undef at
+    # the program's top level (pvm 271, 003).
+    elsif ($op eq 'Wantarray') {
+        my $w = exists $self->{_inline_want} ? $self->{_inline_want}
+              : $self->{_in_method_body} ? 'unknown' : 'void';
+        die "GAP: wantarray where the call's context is not known is not lowered\n"
+            unless $w =~ /\A(?:list|scalar|void)\z/;
+        my $slot = $w eq 'list'   ? $self->_emit_coercion('1', 'Int', 'Scalar', 'wantarray: list')
+                 : $w eq 'scalar' ? $self->_emit_coercion('false', 'Boolean', 'Scalar', 'wantarray: scalar')
+                 :                  $self->_build_slot('false', '0', 'Undef', 'wantarray: void');
+        my $to = $node->stamp // 'Scalar';
+        return $self->{cache}{ $node->id } = $to eq 'Scalar' ? $slot : $self->_emit_coercion($slot, 'Scalar', $to, 'wantarray');
+    }
+    # caller AT THE PROGRAM'S TOP LEVEL has no frame: undef, or the empty
+    # list (pvm 272). Anywhere a sub runs, it names its caller: refused.
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'caller') {
+        die "GAP: caller inside a sub is not lowered -- it names the caller's package, file and line\n"
+            if exists $self->{_inline_want} || $self->{_in_method_body} || grep { blessed($_) } $node->inputs->@*;
+        my $to = $node->stamp // 'Scalar';
+        return $self->{cache}{ $node->id } = $self->_emit_array_of([]) if $to =~ /\A(?:List|Array)\z/;
+        my $slot = $self->_build_slot('false', '0', 'Undef', 'caller: no frame');
+        return $self->{cache}{ $node->id } = $to eq 'Scalar' ? $slot : $self->_emit_coercion($slot, 'Scalar', $to, 'caller');
+    }
+    # prototype(\&f) OF A SUB THE PROGRAM DEFINES is its prototype, as the
+    # wire recorded it; undef for none (pvm 251).
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'prototype') {
+        my ($r) = grep { blessed($_) } $node->inputs->@*;
+        my $c = blessed($r) && $r->operation eq 'Ref' ? $r->inputs->[0] : undef;
+        my $name = blessed($c) && $c->operation eq 'Constant' ? $c->value // '' : '';
+        die "GAP: prototype of what is not a sub the program defines is not lowered\n"
+            unless exists $Chalk::IR::Serialize::JSON::PROTOTYPES{$name};
+        my $proto = $Chalk::IR::Serialize::JSON::PROTOTYPES{$name};
+        my $slot = defined $proto
+            ? $self->_emit_coercion($self->_set_str_len($self->_str_const_parts($proto, 'prototype')), 'Str', 'Scalar', 'prototype')
+            : $self->_build_slot('false', '0', 'Undef', 'prototype: none');
+        my $to = $node->stamp // 'Scalar';
+        return $self->{cache}{ $node->id } = $to eq 'Scalar' ? $slot : $self->_emit_coercion($slot, 'Scalar', $to, 'prototype');
+    }
     # lock() IS A NO-OP without threads (perl's pp_lock): it yields what it
     # was given (pvm 028).
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'lock') {
@@ -14973,6 +15012,9 @@ sub _copy_out_written_args {
 
 sub _lower_call_direct {
     my ($self, $node) = @_;
+    # The context the call is made in, which a wantarray in the inlined body
+    # reads -- set here, for every way this lowers its callee.
+    local $self->{_inline_want} = ( $node->can('want') && $node->want ) || 'unknown';
 
     # AN INDIRECT CALL RESOLVED to a sub (_lower_call_indirect) is lowered as
     # a direct one of it: its name, metaobject and arguments ride here, taken

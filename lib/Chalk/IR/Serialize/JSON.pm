@@ -1019,6 +1019,17 @@ sub from_json ($json_string) {
     # of a file by path were dropped with whatever they printed.
     # The modules a `use` names -- parent and base set up inheritance there.
     our %USED_MODULES = ();
+    # Each sub's prototype, by its full name: prototype(\&f) reads it. A sub
+    # the program defines with none is there, undef.
+    our %PROTOTYPES = ();
+    if (ref $data->{classes} eq 'HASH') {
+        for my $pkg (keys $data->{classes}->%*) {
+            my $subs = $data->{classes}{$pkg}{subs};
+            next unless ref $subs eq 'HASH';
+            $PROTOTYPES{"${pkg}::$_"} = ref $subs->{$_} eq 'HASH' ? $subs->{$_}{prototype} : undef
+                for keys %$subs;
+        }
+    }
     for my $p (($data->{phase_blocks} // [])->@*) {
         my @nodes = ($p->{nodes} // [])->@*;
         my %by_id = map { ( $_->{id} // '' ) => $_ } @nodes;
