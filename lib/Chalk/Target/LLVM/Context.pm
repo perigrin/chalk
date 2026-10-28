@@ -1541,9 +1541,8 @@ sub _refuse_an_in_place_write_to_a_location {
              && $_IN_PLACE_BUILTIN{ $node->name // '' } );
     return unless $writes;
     # A 3-ARGUMENT substr READS: only the 4-argument form (an lvalue substr
-    # arrives as it) writes (pvm 154).
-    return if $op eq 'Call' && ( $node->name // '' ) eq 'substr'
-        && ( grep { blessed($_) } $node->inputs->@* ) < 4;
+    # arrives as it) writes (pvm 154) -- and _lower_substr stores that back.
+    return if $op eq 'Call' && ( $node->name // '' ) eq 'substr';
     my @in = $node->inputs->@*;
     shift @in if $op eq 'RegexSubst' || $op eq 'Transliterate';   # its subject is stored back
     for my $in (grep { blessed($_) && $_->operation eq 'PadAccess' } @in) {
@@ -9977,6 +9976,8 @@ END_HELPER
 sub _lower_substr {
     my ($self, $node) = @_;
     my @in = grep { blessed($_) } $node->inputs->@*;
+    return $self->_lower_substr_replace($node, @in)
+        if @in == 4 && $in[0]->operation eq 'PadAccess' && $in[0]->is_location;
     die "GAP: substr with " . scalar(@in) . " arguments (a replacement) is not lowered\n"
         unless @in == 2 || @in == 3;
     my $s    = $in[0];
@@ -9995,6 +9996,43 @@ sub _lower_substr {
     $self->_emit("  $out = call i8* \@chalk_substr(i8* $p, i64 $l, i64 $off, i64 $len, i1 $has, i64* $lp)  ; substr");
     $self->_emit("  $n = load i64, i64* $lp");
     return $self->{cache}{ $node->id } = $self->_set_str_len($out, $n);
+}
+
+# _lower_substr_replace($node, $var, $off, $len, $repl) -> the part replaced:
+# substr's 4-argument form (an lvalue substr arrives as it) on a variable
+# kept in memory. The part is what 3-argument substr reads; the variable
+# becomes what is before it, the replacement, and what is after it (pvm 338).
+sub _lower_substr_replace {
+    my ($self, $node, $var, $offn, $lenn, $repn) = @_;
+    my $from = $self->_repr_of($var) // $var->stamp // '';
+    $from = 'Scalar' if $from eq 'Slot' || $from eq 'Unknown';
+    my $ref = $self->lower_value($var);
+    $ref = $self->_emit_coercion($ref, $from, 'Str', 'substr string') unless $from eq 'Str';
+    my ($p, $l) = $self->_str_parts($ref);
+    my $off = $self->_index_i64($offn);
+    my $len = $self->_index_i64($lenn);
+    my $rfrom = $self->_repr_of($repn) // $repn->stamp // '';
+    my $rep = $self->lower_value($repn);
+    $rep = $self->_emit_coercion($rep, $rfrom, 'Str', 'substr replacement') unless $rfrom eq 'Str';
+    $self->{$_} = 1 for qw(_need_substr_helper _need_malloc_memcpy _need_exit _need_str_type);
+    my $lp = $self->_fresh;
+    $self->_emit_entry("  $lp = alloca i64, align 8  ; substr length");
+    my ($out, $n, $neg, $o1, $o, $after, $ap, $al) = map { $self->_fresh } 1 .. 8;
+    $self->_emit("  $out = call i8* \@chalk_substr(i8* $p, i64 $l, i64 $off, i64 $len, i1 true, i64* $lp)  ; substr: the part replaced");
+    $self->_emit("  $n = load i64, i64* $lp");
+    $self->_emit("  $neg = icmp slt i64 $off, 0");
+    $self->_emit("  $o1 = add i64 $off, $l");
+    $self->_emit("  $o = select i1 $neg, i64 $o1, i64 $off  ; substr: where it starts");
+    $self->_emit("  $after = add i64 $o, $n");
+    $self->_emit("  $ap = getelementptr inbounds i8, i8* $p, i64 $after");
+    $self->_emit("  $al = sub i64 $l, $after");
+    my $new = $self->_emit_str_append($self->_set_str_len($p, $o), $rep, 'substr: before');
+    $new = $self->_emit_str_append($new, $self->_set_str_len($ap, $al), 'substr: after');
+    my $boxed = $self->_emit_coercion($new, 'Str', 'Scalar', 'substr: the new string');
+    $self->_emit("  store %Slot $boxed, %Slot* " . $self->_location_ptr($var) . "  ; substr: " . $var->name . " replaced in place");
+    my $part = $self->_set_str_len($out, $n);
+    my $to = $node->stamp // 'Str';
+    return $self->{cache}{ $node->id } = $to eq 'Str' ? $part : $self->_emit_coercion($part, 'Str', $to, 'substr');
 }
 
 sub _substr_helper_lines {
