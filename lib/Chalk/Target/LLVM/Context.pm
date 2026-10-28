@@ -1887,6 +1887,14 @@ sub lower_value {
     elsif ($op eq 'Loop') {
         return $self->_lower_loop($node);
     }
+    # A PACKAGE AGGREGATE'S CONTENTS, once its store has made them its own
+    # (_lower_entry_write), are that aggregate: what a push since put there
+    # too. Read before it, they are not yet anything's.
+    elsif (my ($sg, $pk, $sy) = _pkg_literal_of($node)) {
+        die "GAP: a package aggregate's contents read before its store is lowered are not lowered\n"
+            unless $self->{_pkg_agg_stored}{ refaddr($node) };
+        return $self->{cache}{$id} = $self->_pkg_aggregate_ptr($sg, $pk, $sy);
+    }
     elsif ($op eq 'ArrayLiteral') {
         return $self->_lower_array_ref($node);
     }
@@ -7728,8 +7736,25 @@ sub _arm_loop_exit_label {
             return $ctx->{latch_label} //= $self->_fresh_label('loop.latch.');
         }
     }
-    # A JUMP TO AN ENCLOSING LOOP (`next OUTER`, `last OUTER`): the arm joins a
-    # Region that control reaches only by leaving this loop -- past its exit.
+    # A JUMP TO AN ENCLOSING LOOP (`last OUTER`, `next OUTER`) branches to that
+    # loop's exit or latch, as this loop's own would to its: what this loop
+    # carries is not wanted past it.
+    for my $outer (reverse @$stack[ 0 .. $#$stack - 1 ]) {
+        my $oid = $outer->{exit_region_id} // next;
+        return $outer->{exit_label} if grep { $_->id eq $oid } @arm_regions;
+        my $oloop = blessed($outer->{exit_region}) && $outer->{exit_region}->can('head')
+            ? $outer->{exit_region}->head : undef;
+        next unless blessed($oloop);
+        my ($olatch) = grep {
+            $_->can('head') && blessed($_->head) && refaddr($_->head) == refaddr($oloop) && $_->id ne $oid
+        } @arm_regions;
+        if ($olatch) {
+            $outer->{latch_loop} = $oloop;
+            return $outer->{latch_label} //= $self->_fresh_label('loop.latch.');
+        }
+    }
+    # Otherwise the arm joins a Region control reaches only by leaving this
+    # loop -- past its exit.
     # Placed inside this loop's body it ran as this loop's own `next` (`acacac`
     # for perl's `aaa`). Lowering it needs a branch into the enclosing loop's
     # latch or exit with phis for the extra predecessor; until then, refused.
@@ -7783,8 +7808,7 @@ sub _record_break_block {
     my $stack = $self->{_loop_ctx_stack} // return;
     # A `next` arm: what it brings to each latch Phi is lowered here, in the
     # arm, before it branches.
-    if (@$stack && ($stack->[-1]{latch_label} // '') eq $exit_label) {
-        my $ctx = $stack->[-1];
+    if (my ($ctx) = grep { ( $_->{latch_label} // '' ) eq $exit_label } reverse @$stack) {
         my %vals;
         # What is lowered for it belongs to this arm: not served to another.
         my %cached_before = map { $_ => 1 } keys %{ $self->{cache} };
@@ -10198,6 +10222,36 @@ sub _lex_aggregate_ptr {
     $self->_emit("  $p = call $ty* \@chalk_lex_" . ( $array ? 'array' : 'hash' )
         . "($ty** \@$ident)  ; shared " . $node->sigil . $node->symbol);
     return $p;
+}
+
+# _pkg_aggregate_ptr($sigil, $package, $symbol) -> %Array* | %Hash*: a
+# package `@x` or `%x`, one aggregate every graph reads and writes, as a
+# shared file lexical's is (_lex_aggregate_ptr). perl's own -- @ISA, %INC,
+# %SIG, a stash -- hold what perl puts there: refused.
+my %_PERLS_AGGREGATE = map { $_ => 1 } qw(ISA EXPORT EXPORT_OK EXPORT_TAGS INC ENV SIG ARGV ARGVOUT _ F);
+sub _pkg_aggregate_ptr {
+    my ($self, $sigil, $pkg, $sym) = @_;
+    die "GAP: perl's own package variable $sigil$sym is not lowered -- perl puts what it holds there\n"
+        if $_PERLS_AGGREGATE{$sym} || $sym !~ /\A[A-Za-z_]\w*\z/ || $pkg !~ /\A\w+(?:::\w+)*\z/;
+    my $array = $sigil eq '@';
+    ( my $p = $pkg ) =~ s/::/_/g;
+    my $ident = ( $array ? 'pkga_' : 'pkgh_' ) . $p . '__' . $sym;
+    my $ty = $array ? '%Array' : '%Hash';
+    $self->{_lex_agg_globals}{"\@$ident"} = $ty;
+    $self->{$_} = 1 for qw(_need_lex_agg _need_aggregate_types _need_malloc_memcpy);
+    my $r = $self->_fresh;
+    $self->_emit("  $r = call $ty* \@chalk_lex_" . ( $array ? 'array' : 'hash' )
+        . "($ty** \@$ident)  ; package $sigil${pkg}::$sym");
+    return $r;
+}
+
+# _pkg_literal_of($node) -> ($sigil, $package, $symbol) when $node is the
+# literal B::SoN names for a package aggregate's contents (`@main::q`).
+sub _pkg_literal_of {
+    my ($node) = @_;
+    return () unless blessed($node) && $node->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/
+        && $node->can('symbol') && defined $node->symbol;
+    return $node->symbol =~ /\A([@%])(\w+(?:::\w+)*)::(\w+)\z/ ? ($1, $2, $3) : ();
 }
 
 # _lex_aggregate_lines() -> the shared aggregates' globals and their helpers.
@@ -17631,6 +17685,8 @@ sub _lower_stash_access {
     return $self->_argv_array($node)
         if ($node->sigil // '') eq '@' && $node->symbol eq 'ARGV'
         && ($node->package // 'main') eq 'main';
+    return $self->_pkg_aggregate_ptr($node->sigil, $node->package // 'main', $node->symbol)
+        if ( $node->sigil // '$' ) =~ /\A[@%]\z/ && ( $node->symbol // '' ) !~ /::\z/;
     my $repr = _require_repr($node, 'EntryDef');
     die "GAP: a package variable " . ($node->sigil // '?') . $node->symbol
       . " that is not a scalar is not lowered\n" unless ($node->sigil // '$') eq '$';
@@ -17782,6 +17838,33 @@ sub _lower_entry_write {
     # name already runs that sub, so the assignment has nothing left to do.
     return $self->{cache}{ $node->id } = '0'
         if $value->operation eq 'AnonSub' && $value->glob_bound;
+    # A WHOLE PACKAGE AGGREGATE STORED: its new contents copied over the one
+    # every graph holds, in place, and the literal is that aggregate after.
+    if (( $target->sigil // '$' ) =~ /\A[@%]\z/) {
+        my ($sg, $pk, $sy) = _pkg_literal_of($value);
+        die "GAP: a store to the package variable " . $target->sigil . $target->symbol
+          . " of other than its literal contents is not lowered\n"
+            unless defined $sg && $sg eq $target->sigil && $sy eq $target->symbol
+                && $pk eq ( $target->package // 'main' );
+        # STORED BY ONE STORE: the literal is the aggregate after, so another
+        # store of it (a `local`'s restore) would copy the aggregate onto
+        # itself. The same store run again (an inlined sub called twice) is
+        # its contents stored again.
+        my $by = $self->{_pkg_agg_stored}{ refaddr($value) };
+        die "GAP: a package aggregate's contents stored by a second store (a local's restore) "
+          . "are not lowered\n" if $by && $by != refaddr($node);
+        my $ty  = $sg eq '@' ? '%Array' : '%Hash';
+        my $src = $sg eq '@' ? $self->_lower_array_ref($value) : $self->_lower_hash_ref($value);
+        die "GAP: a package aggregate's contents that are not an aggregate are not lowered\n"
+            unless ( $value->stamp // '' ) eq ( $sg eq '@' ? 'Array' : 'Hash' );
+        my $dst = $self->_pkg_aggregate_ptr($sg, $pk, $sy);
+        my $v   = $self->_fresh;
+        $self->_emit("  $v = load $ty, $ty* $src  ; the new contents");
+        $self->_emit("  store $ty $v, $ty* $dst  ; into $sg${pk}::$sy, in place");
+        $self->{_pkg_agg_stored}{ refaddr($value) } = refaddr($node);
+        $self->{cache}{ $value->id } = $dst;
+        return $self->{cache}{ $node->id } = $dst;
+    }
     my $ref = $self->_store_package_scalar($target, $value, $self->lower_value($value));
     $self->{cache}{ $node->id } = $ref;
     return $ref;

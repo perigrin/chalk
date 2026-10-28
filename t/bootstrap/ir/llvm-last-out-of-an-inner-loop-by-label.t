@@ -46,7 +46,11 @@ for my $src (
     q{my $n = 0; O: for my $i (1..4) { for my $j (1..4) { last O if $i * $j > 6; $n++ } } print "$n\n";},
 ) {
     my $got = eval { through_llvm($src) };
-    if (defined $got) { is($got, qx($^X -e '$src'), "perl's answer: $src") }
+    # perl reads the source from a file: `-e '$src'` lost its `''` to the shell.
+    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $src;
+    close $fh;
+    if (defined $got) { is($got, qx($^X $pl), "perl's answer: $src") }
     else { like($@, qr/GAP:/, "refused by name: $src") }
 }
 

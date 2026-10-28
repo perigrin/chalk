@@ -621,6 +621,9 @@ sub _deserialize_graph ($method_data) {
             $args{sort_cmp_body} = $fields->{sort_cmp_body} if exists $fields->{sort_cmp_body};
             $args{sort_package}  = $fields->{sort_package}  if exists $fields->{sort_package};
         }
+        elsif ($op eq 'ArrayLiteral' || $op eq 'HashLiteral') {
+            $args{symbol} = $fields->{symbol} if defined $fields->{symbol};
+        }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];
             # B::SoN flags a memory Phi; a stamped Phi it did not flag is a value.

@@ -7,4 +7,7 @@ use experimental 'class';
 use Chalk::IR::Value;
 
 class Chalk::IR::Node::Aggregate :isa(Chalk::IR::Value) {
+    # The variable a literal is the contents of, as B::SoN names it: `@x`'s
+    # `x`, a package one's `@main::x`. Undef when the wire names none.
+    field $symbol :param :reader = undef;
 }
