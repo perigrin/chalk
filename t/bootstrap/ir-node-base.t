@@ -31,6 +31,21 @@ is($producer->consumers()->[0]->id(), 'c1', 'consumer is correct node');
 $producer->remove_consumer($consumer);
 is(scalar $producer->consumers()->@*, 0, 'remove_consumer removes it');
 
+# TWO CONSUMERS OF ONE ID (content-hashed ids collide: Analysis replaces a
+# Coerce with a new one of the same content) are two consumers: removing
+# the old one dropped the new one too, and a print's Coerce went missing
+# from its operand's consumers.
+{
+    my $p   = Chalk::IR::Node->new(id => 'p2');
+    my $old = Chalk::IR::Node->new(id => 'same');
+    my $new = Chalk::IR::Node->new(id => 'same');
+    $p->add_consumer($old);
+    $p->add_consumer($new);
+    $p->remove_consumer($old);
+    is(scalar $p->consumers()->@*, 1, 'remove_consumer removes that node, not every node of its id');
+    ok($p->consumers()->[0] == $new, '...and the one left is the other');
+}
+
 # Stamp can be set via constructor
 my $stamped = Chalk::IR::Node->new(id => 's1', stamp => 'Int');
 is($stamped->stamp(), 'Int', 'stamp is set from constructor');

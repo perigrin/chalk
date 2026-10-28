@@ -1734,6 +1734,9 @@ sub _version_superseded {
         ( $mem->consumers // [] )->@*;
 }
 
+# The pragmas a require of runs no code a program sees (_require_key).
+my %_PURE_PRAGMA = map { $_ => 1 } qw(strict.pm warnings.pm utf8.pm feature.pm);
+
 # lower_value($node) -> $llvm_ref (a string like "%tmp_1" or "1" for constants)
 # Recursively lowers the data sub-graph rooted at $node, accumulating
 # LLVM IR instructions into the current basic block. Returns the LLVM value
@@ -1829,6 +1832,9 @@ sub lower_value {
     if (exists $self->{cache}{$id} && !$self->_reads_mutable_location($node)) {
         return $self->{cache}{$id};
     }
+
+    # %INC: whether it holds a key (_lower_inc_read), before any hash read.
+    return $self->_lower_inc_read($node) if $op eq 'Subscript' && _is_inc_elem($node);
 
     if ($op eq 'Constant') {
         return $self->_lower_constant($node);
@@ -2104,6 +2110,16 @@ sub lower_value {
         my $t = $self->_fresh;
         $self->_emit("  $t = call i64 \@time(i64* null)  ; time");
         return $self->{cache}{$id} = $t;
+    }
+    # require OF A PURE PRAGMA (it runs no code a program sees): true. %INC
+    # then holds its key (_lower_inc_read).
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'require') {
+        my ($k) = _require_key($node);
+        die "GAP: require of what is not a pure pragma (strict, warnings, utf8, feature) is not "
+          . "lowered -- loading a module runs its code\n" unless defined $k && $_PURE_PRAGMA{$k};
+        $node->set_stamp('Int') if ( $node->stamp // 'Unknown' ) eq 'Unknown';
+        $self->{cache}{ 'repr:' . $id } = 'Int';
+        return $self->{cache}{$id} = '1';
     }
     # warn under an empty __WARN__ handler (_lower_assign) writes nothing and
     # is true. Without one perl's message names the file and line, which this
@@ -2536,6 +2552,24 @@ sub _lower_constant {
         # DefinedOr retrieves the payload via _undef_payload when needed.
         $self->{cache}{ $node->id } = $defined_bit;
         return $defined_bit;
+    }
+    # A REFERENCE TO A CONSTANT (`\1`, which perl folds): a slot of its own
+    # holding the constant's text, as a Str -- it prints and numifies as the
+    # constant does. perl dies storing through one (a read-only value), so a
+    # program that stores through any scalar reference is refused.
+    elsif ($repr eq 'ScalarRef' && ( $node->const_type // '' ) eq 'ref') {
+        die "GAP: a reference to a constant in a program that stores through a scalar "
+          . "reference is not lowered -- perl dies storing to the read-only value\n"
+            if grep { $_->operation eq 'Assign' && blessed($_->inputs->[0])
+                      && $_->inputs->[0]->operation eq 'PostfixDeref' && ( $_->inputs->[0]->sigil // '' ) eq '$' } @Chalk::Target::LLVM::Context::PROGRAM;
+        $self->{$_} = 1 for qw(_need_aggregate_types _need_malloc_memcpy);
+        my $str  = $self->_set_str_len($self->_str_const_parts($node->value // '', 'a constant referred to'));
+        my $slot = $self->_emit_coercion($str, 'Str', 'Scalar', 'a constant referred to');
+        my ($b, $p) = ($self->_fresh, $self->_fresh);
+        $self->_emit("  $b = call i8* \@malloc(i64 " . _sizeof_llvm_type('%Slot') . ")  ; \\constant: its slot");
+        $self->_emit("  $p = bitcast i8* $b to %Slot*");
+        $self->_emit("  store %Slot $slot, %Slot* $p");
+        return $self->{cache}{ $node->id } = $b;
     }
     else {
         die "LLVM backend: cannot lower Constant with repr=$repr";
@@ -4462,6 +4496,67 @@ sub _lower_list_assign_into_locations {
 #      (bounds-checked slot write into the container array or hash).
 #  (b) Scalar rebind: inputs[0] is a PadAccess(VarDecl) or VarDecl →
 #      update var_table with the new SSA value.
+# _require_key($require) -> the %INC key a require names: its constant
+# argument (a bareword arrives as "Name.pm"), or undef.
+sub _require_key {
+    my ($node) = @_;
+    my @in = grep { blessed($_) } $node->inputs->@*;
+    pop @in if $node->can('memory_input') && $node->memory_input;
+    return undef unless @in == 1 && $in[0]->operation eq 'Constant' && ( $in[0]->const_type // '' ) eq 'string';
+    my $k = $in[0]->value // return undef;
+    $k = join('/', split /::/, $k) . '.pm' unless $k =~ /\.pm\z/;
+    return $k;
+}
+
+sub _is_inc_elem {
+    my ($n) = @_;
+    return 0 unless ( $n->kind // '' ) eq 'hash';
+    my $h = $n->inputs->[0];
+    return blessed($h) && $h->operation eq 'EntryDef' && ( $h->sigil // '' ) eq '%'
+        && ( $h->symbol // '' ) eq 'INC' && ( $h->package // 'main' ) eq 'main';
+}
+
+# _lower_inc_read($node) -> %Slot: `$INC{K}` read as a truth: K required on
+# its memory chain, or used, is loaded (true); otherwise, where nothing the
+# program loads can load others, it is not (undef). What %INC holds is a
+# path this run does not share, so only its truth may be read.
+sub _lower_inc_read {
+    my ($self, $node) = @_;
+    my $key = $node->inputs->[1];
+    die "GAP: a %INC read whose key is not a constant is not lowered\n"
+        unless blessed($key) && $key->operation eq 'Constant';
+    my $k = $key->value // '';
+    # Its readers found by their inputs: the node's consumer list can miss one
+    # (a print's Coerce was not on it, and a path printed as "1").
+    my @readers = grep { my $c = $_; grep { blessed($_) && refaddr($_) == refaddr($node) } $c->inputs->@* }
+        ( @Chalk::Target::LLVM::Context::PROGRAM, ( $node->consumers // [] )->@* );
+    die "GAP: a %INC read none of whose readers is known is not lowered\n" unless @readers;
+    for my $c (@readers) {
+        next unless blessed($c);
+        my $op = $c->operation;
+        next if $op eq 'Defined' || $op eq 'Not'
+            || ( $op eq 'Coerce' && ( $c->to_repr // '' ) eq 'Boolean' )
+            || ( $op =~ /\A(?:TernaryExpr|If)\z/ && refaddr($c->inputs->[ $op eq 'If' ? 1 : 0 ] // 0) == refaddr($node) );
+        die "GAP: what %INC holds (a path this run does not share) is not lowered -- only whether it holds a key\n";
+    }
+    my $loaded = 0;
+    my (@q, %seen) = ($node->inputs->[2]);
+    while (defined(my $m = shift @q)) {
+        next unless blessed($m) && !$seen{ refaddr($m) }++;
+        if ($m->operation eq 'Call' && ( $m->name // '' ) eq 'require' && ( _require_key($m) // '' ) eq $k) { $loaded = 1; last }
+        push @q, grep { blessed($_) && _is_memory_version($_) } $m->inputs->@*;
+    }
+    my %used = %Chalk::IR::Serialize::JSON::USED_MODULES;
+    ( my $mod = $k ) =~ s/\.pm\z//;
+    $mod =~ s{/}{::}g;
+    $loaded ||= $used{$mod} ? 1 : 0;
+    die "GAP: whether %INC holds \"$k\" is not known -- a module the program loads may load it\n"
+        if !$loaded && grep { !$_PURE_PRAGMA{ join('/', split /::/, $_) . '.pm' } } keys %used;
+    return $self->{cache}{ $node->id } = $loaded
+        ? $self->_emit_coercion('1', 'Int', 'Scalar', '%INC: loaded')
+        : $self->_build_slot('false', '0', 'Undef', '%INC: not loaded');
+}
+
 sub _is_sig_elem {
     my ($n) = @_;
     return 0 unless blessed($n) && $n->operation eq 'Subscript' && ( $n->kind // '' ) eq 'hash';

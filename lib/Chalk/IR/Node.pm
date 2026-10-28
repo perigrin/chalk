@@ -109,10 +109,13 @@ class Chalk::IR::Node {
         push $consumers->@*, $node;
     }
 
-    # Remove a consumer from this node's consumer list
+    # Remove a consumer from this node's consumer list -- that node, not
+    # every node of its id: content-hashed ids collide (a Coerce Analysis
+    # replaces with one of the same content), and removing the old one by id
+    # dropped the new one too.
     method remove_consumer($node) {
-        my $target_id = $node->id();
-        $consumers->@* = grep { $_->id() ne $target_id } $consumers->@*;
+        my $target = Scalar::Util::refaddr($node);
+        $consumers->@* = grep { Scalar::Util::refaddr($_) != $target } $consumers->@*;
     }
 
     # Abstract method - subclasses must implement
