@@ -13022,6 +13022,22 @@ sub _emit_hash_insert {
 # _lower_call_indirect($node): `$cb->(...)` where $cb is, through the
 # arguments inlining bound, a code reference made in this program (an
 # AnonSub): a direct call of its sub. Anything else is refused by name.
+# _is_called_can($node): `$o->can("m")` on a run-time class, whose every
+# reader calls what it returns (_lower_call_indirect) -- the code itself is
+# never a value.
+sub _is_called_can {
+    my ($n) = @_;
+    return 0 unless blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'method'
+        && ( $n->name // '' ) eq 'can' && !defined $n->class_name;
+    my ($o, $m, @rest) = grep { blessed($_) } $n->inputs->@*;
+    return 0 unless blessed($m) && $m->operation eq 'Constant' && ( $m->const_type // '' ) eq 'string' && !@rest;
+    my @readers = grep { my $c = $_; grep { blessed($_) && refaddr($_) == refaddr($n) } $c->inputs->@* } @PROGRAM;
+    return @readers && !grep {
+        !( $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'indirect' && refaddr($_->inputs->[0]) == refaddr($n)
+           && !grep { blessed($_) && refaddr($_) == refaddr($n) } $_->inputs->@[ 1 .. $#{ $_->inputs } ] )
+    } @readers;
+}
+
 sub _lower_call_indirect {
     my ($self, $node) = @_;
     my ($callee, @args) = $node->inputs->@*;
@@ -13031,6 +13047,18 @@ sub _lower_call_indirect {
         my ($code) = $callee->inputs->@*;
         $self->{_call_via} = { name => $code->value, target => $node->target, args => \@args };
         return $self->_lower_call_direct($node);
+    }
+    # `$o->can("m")->(ARGS)`: the sub m of $o's run-time class, called with
+    # ARGS -- a dispatch on that class. Where no class has m, can is undef
+    # and calling it dies.
+    if (_is_called_can($callee)) {
+        $self->_refuse_inside_eval("a call of what ->can found");
+        my $m = $callee->inputs->[1]->value;
+        die "GAP: a call of what ->can(\"$m\") found, where no package declares $m (perl dies), is not lowered\n"
+            unless grep { my $c = $_; grep { $_->name eq $m } $c->subs } ( $self->{mop} ? $self->{mop}->classes : () );
+        my $r = $self->_lower_runtime_dispatch($node, $callee->inputs->[0], name => $m, args => \@args);
+        return $r if defined $r;
+        die "GAP: a call of what ->can found, on what is not a blessed reference, is not lowered\n";
     }
     my $anon = $self->_static_code_of($callee);
     # A FILE LEXICAL HOLDING ONE SUB (_code_of_shared) runs it -- once the
@@ -15347,9 +15375,9 @@ sub _store_field_payload {
 # stops the program (exit 255). Refused where a class could inherit or
 # AUTOLOAD (another sub would run), or a `class` declares the method.
 sub _lower_runtime_dispatch {
-    my ($self, $node, $obj) = @_;
+    my ($self, $node, $obj, %opt) = @_;
     my $mop = $self->{mop} or return undef;
-    my $name = $node->name // return undef;
+    my $name = $opt{name} // $node->name // return undef;
     my @classes = $mop->classes;
     my @cands = map { my $c = $_; map { [ $c->name, $_ ] } grep { $_->name eq $name } $c->subs } @classes;
     return undef unless @cands;
@@ -15416,6 +15444,7 @@ sub _lower_runtime_dispatch {
     my ($is, $cp, $cl) = $self->_bless_class($ref);
     my @args = grep { blessed($_) } $node->inputs->@*;
     pop @args if $node->can('memory_input') && $node->memory_input;
+    @args = $opt{args}->@* if $opt{args};
     my $end = $self->_fresh_label('dispatch.end.');
     my @in;
     for my $cand (@cands) {
@@ -15474,6 +15503,37 @@ sub _lower_runtime_dispatch {
 # run-time class -- stops the program (exit 255). The die is a branch to its
 # eval, and only where nothing reads $@: perl's message names the file and
 # line, which nothing here knows.
+# _lower_class_method_by_tag($node, $obj) -> the method's value, or undef
+# where it does not apply: a method on a Scalar that holds an object of a
+# `class`, where the program has one class -- so an object is of it -- and
+# that class has the method. What is not an object dies, as perl does.
+sub _lower_class_method_by_tag {
+    my ($self, $node, $obj) = @_;
+    my $mop = $self->{mop} or return undef;
+    my $name = $node->name;
+    return undef unless grep { $_->find_method($name) } $mop->classes;
+    my $cls = Chalk::IR::Analysis::_the_class_with($mop, $name)
+        // die "GAP: a method ('$name') on an object known only at run time, where the program has "
+              . "more than one `class` (or a package sub $name), is not lowered\n";
+    my $rs = $self->_repr_of($obj) // $obj->stamp // '';
+    return undef unless $rs eq 'Scalar';
+    $self->_refuse_inside_eval("a method on what may not be an object");
+    my $slot = $self->lower_value($obj);
+    my ($tag, $is) = ($self->_slot_tag_of($slot), $self->_fresh);
+    $self->_emit("  $is = icmp eq i8 $tag, " . _slot_tag_value('Object') . "  ; method '$name': an object?");
+    my ($no, $yes) = map { $self->_fresh_label("bytag.$_.") } qw(not obj);
+    $self->{_need_exit} = 1;
+    $self->_set_terminator("  br i1 $is, label %$yes, label %$no");
+    $self->_new_block($no);
+    $self->_emit("  call void \@exit(i32 255)  ; perl dies: a method on what is not an object");
+    $self->_set_terminator("  unreachable");
+    $self->_new_block($yes);
+    my $ptr = $self->_fresh;
+    $self->_emit("  $ptr = inttoptr i64 " . $self->_slot_payload_of($slot) . " to i8*  ; the object");
+    local $self->{_by_tag}{ refaddr($node) } = { class => $cls, ptr => $ptr };
+    return $self->_lower_call_method($node);
+}
+
 sub _lower_method_on_non_object {
     my ($self, $node, $obj) = @_;
     return undef unless blessed($obj);
@@ -16899,12 +16959,15 @@ sub _lower_call_method {
     if ($method_name eq 'new') {
         return $self->_lower_call_new($node);
     }
+    # `->can("m")` whose readers call it: lowered with them.
+    return $self->{cache}{ $node->id } = '0' if _is_called_can($node);
     my $obj_node    = $node->inputs->[0];
     # AN INVOCANT THE CALL SITE MADE: a sub's parameter, inlined, is the
     # caller's argument -- a `C->new(...)` or a bless into a literal class --
     # whose class is static there. The method is that class's sub, for this
     # lowering only: the Call is shared by every site that inlines the sub.
-    if (!defined $node->class_name && defined(my $cls = $self->_static_class_of($obj_node))) {
+    if (!defined $node->class_name && !( $self->{_by_tag} // {} )->{ refaddr($node) }
+            && defined(my $cls = $self->_static_class_of($obj_node))) {
         my $mop = $self->{mop};
         my $c   = $mop ? $mop->for_class($cls) : undef;
         my ($sub) = $c ? grep { $_->name eq $method_name } $c->subs : ();
@@ -16920,14 +16983,18 @@ sub _lower_call_method {
     }
     # A METHOD ON WHAT IS NOT AN OBJECT dies (`state $n` with no feature is
     # `$n->state`).
-    if (!defined $node->class_name) {
+    if (!defined $node->class_name && !( $self->{_by_tag} // {} )->{ refaddr($node) }) {
         my $r = $self->_lower_method_on_non_object($node, $obj_node);
         return $r if defined $r;
         $r = $self->_lower_runtime_dispatch($node, $obj_node);
         return $r if defined $r;
+        $r = $self->_lower_class_method_by_tag($node, $obj_node);
+        return $r if defined $r;
     }
-    # MOP-direct shape: the class rides as the class_name attribute.
-    my $class_name  = $node->class_name
+    # MOP-direct shape: the class rides as the class_name attribute -- or,
+    # for an object read by its tag, the program's one class (_by_tag).
+    my $by_tag = ( $self->{_by_tag} // {} )->{ refaddr($node) };
+    my $class_name  = $node->class_name // ( $by_tag ? $by_tag->{class} : undef )
         // die "GAP: LLVM MOP: Call(method) '$method_name' has no class_name — "
              . "method dispatch must name its statically-known class "
              . "(019eb42a MOP-direct contract).";
@@ -17032,7 +17099,7 @@ sub _lower_call_method {
     my $slot_idx = $minfo->{vtable_slot};
 
     # Lower the object to get the raw pointer
-    my $obj_raw = $self->lower_value($obj_node);
+    my $obj_raw = $by_tag ? $by_tag->{ptr} : $self->lower_value($obj_node);
 
     # Load vtable pointer
     my $obj_typed = $self->_fresh;

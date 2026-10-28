@@ -2943,6 +2943,17 @@ sub _stamp_field_access_reprs ($classes, $graphs) {
 
 # _stamp_method_call_reprs($classes, \%graphs, $mop) — set each method Call's repr
 # from the resolved callee method's return repr (its body's Return value repr).
+# _the_class_with($mop, $name) -> the one `class` of the program, where it
+# has method $name, no package declares a sub $name, and no class is empty:
+# then any object a method $name is called on is of it. Else undef.
+sub _the_class_with ($mop, $name) {
+    my @objc = grep { $_->methods || $_->fields || $_->adjust_blocks } $mop->classes;
+    return undef unless @objc == 1 && $objc[0]->find_method($name);
+    return undef if grep { !$_->methods && !$_->fields && !$_->adjust_blocks && !$_->subs } $mop->classes;
+    return undef if grep { my $c = $_; grep { $_->name eq $name } $c->subs } $mop->classes;
+    return $objc[0]->name;
+}
+
 sub _stamp_method_call_reprs ($graphs, $mop) {
     # Build class::method -> return_repr.
     #
@@ -3089,7 +3100,7 @@ sub _stamp_method_call_reprs ($graphs, $mop) {
             #
             # The resolution below is unchanged; the DOWNWARD-ONLY test lives
             # at the write site, where the callee's answer is actually in hand.
-            my $class = $node->class_name // next;
+            my $class = $node->class_name // _the_class_with($mop, $node->name // '') // next;
             my $mname = $node->name // '';
             # Resolve through the EDGE. _attach_call_targets has already put the
             # callee's metaobject on the Call, resolved through
