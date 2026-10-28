@@ -8519,7 +8519,26 @@ sub _process_loop_node {
         # Decided at each lowering: inlined again, its arguments differ.
         if (( $phi_node->stamp // '' ) eq 'Unknown') {
             delete $self->{cache}{ 'repr:' . $phi_node->id };
-            my @r = ( $self->_repr_of($inputs->[0]) // '', blessed($inputs->[1]) ? ( $inputs->[1]->stamp // '' ) : '' );
+            # The back-edge: what reaches it through merges nothing typed
+            # (the arms of the body's ifs), the loop phi itself left out.
+            my @back;
+            {
+                my (@q, %seen) = ($inputs->[1]);
+                while (defined(my $n = shift @q)) {
+                    next unless blessed($n) && !$seen{ refaddr($n) }++;
+                    next if refaddr($n) == refaddr($phi_node);
+                    if ($n->operation eq 'Phi' && ( $n->stamp // '' ) eq 'Unknown' && !_is_memory_phi($n)) {
+                        push @q, $n->inputs->@*;
+                        next;
+                    }
+                    push @back, $n->stamp // '';
+                }
+            }
+            my @r = ( $self->_repr_of($inputs->[0]) // '', @back ? @back : ('') );
+            # An `@x` (`%x`) read nothing typed is an array (a hash) all the same.
+            my %agg = ( '@' => 'Array', '%' => 'Hash' );
+            $r[0] = $agg{ $inputs->[0]->sigil // '' } // $r[0]
+                if $r[0] eq 'Unknown' && $inputs->[0]->operation eq 'PadAccess';
             $_ = 'Scalar' for grep { $_ eq 'Slot' } @r;
             $self->{cache}{ 'repr:' . $phi_node->id } = ( grep { $_ ne $r[0] } @r ) ? 'Scalar' : $r[0]
                 unless grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } @r;
@@ -8528,6 +8547,18 @@ sub _process_loop_node {
             if ($r[0] =~ /\A(?:Array|Hash)\z/ && !grep { $_ ne $r[0] } @r) {
                 $phi_node->set_stamp($r[0]);
                 delete $self->{cache}{ 'repr:' . $phi_node->id };
+            }
+            # The merges nothing typed its back-edge comes through (a latch
+            # where `next` arms meet) carry the same variable: read as it is.
+            if (defined( my $lr = $self->{cache}{ 'repr:' . $phi_node->id }
+                    // ( ( $phi_node->stamp // '' ) =~ /\A(?:Array|Hash)\z/ ? $phi_node->stamp : undef ) )) {
+                my (@q, %seen) = ($inputs->[1]);
+                while (defined(my $n = shift @q)) {
+                    next unless blessed($n) && !$seen{ refaddr($n) }++ && refaddr($n) != refaddr($phi_node);
+                    next unless $n->operation eq 'Phi' && ( $n->stamp // '' ) eq 'Unknown' && !_is_memory_phi($n);
+                    $self->{cache}{ 'repr:' . $n->id } = $lr;
+                    push @q, $n->inputs->@*;
+                }
             }
         }
         # Coerced here, in the preheader, where it is lowered.
@@ -8673,7 +8704,7 @@ sub _process_loop_node {
         $self->_new_block($loop_ctx->{latch_label});
         for my $phi (_latch_phis($loop_node)) {
             my $r = $self->_fresh;
-            $self->_emit("  $r = phi " . _repr_to_llvm_type(_require_repr($phi, 'Loop.latch.Phi')) . " "
+            $self->_emit("  $r = phi " . _repr_to_llvm_type($self->{cache}{ 'repr:' . $phi->id } // _require_repr($phi, 'Loop.latch.Phi')) . " "
                 . join(', ', map { "[ $_->{vals}{ $phi->id }, %$_->{label} ]" } @preds)
                 . "  ; latch: what the pass carries");
             $self->{cache}{ $phi->id } = $r;
