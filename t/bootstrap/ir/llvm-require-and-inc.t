@@ -42,6 +42,9 @@ for my $src (
     q{require strict; print "loaded ", ($INC{"strict.pm"} ? "yes" : "no"), "\n";},
     q{my $m = "warnings.pm"; require $m; print "loaded ", ($INC{$m} ? "yes" : "no"), "\n";},
     q{print "x ", ($INC{"strict.pm"} ? "yes" : "no"), "\n"; require strict; print "y ", (defined $INC{"strict.pm"} ? "yes" : "no"), "\n";},
+    # A call between the require and the read carries no memory: what ran
+    # before it is its control (pvm 013).
+    q{use POSIX (); sub f { "f" } require strict; print f(), " ", ($INC{"strict.pm"} ? "yes" : "no"), "\n";},
 ) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src;
@@ -56,6 +59,8 @@ for my $src (
 for my $src (
     q{require strict; print $INC{"strict.pm"}, "\n";},
     q{use POSIX (); print $INC{"Fcntl.pm"} ? "y" : "n", "\n";},
+    # A require in an arm may not have run; the walk stops at the merge.
+    q{use POSIX (); sub f { "f" } if ($ENV{R}) { require strict } print f(), ($INC{"strict.pm"} ? "y" : "n"), "\n";},
 ) {
     my $got = eval { through_llvm($src) };
     like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';

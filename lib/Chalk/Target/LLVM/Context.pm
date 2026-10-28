@@ -1735,7 +1735,7 @@ sub _version_superseded {
 }
 
 # The pragmas a require of runs no code a program sees (_require_key).
-my %_PURE_PRAGMA = map { $_ => 1 } qw(strict.pm warnings.pm utf8.pm feature.pm);
+our %_PURE_PRAGMA = map { $_ => 1 } qw(strict.pm warnings.pm utf8.pm feature.pm);
 
 # lower_value($node) -> $llvm_ref (a string like "%tmp_1" or "1" for constants)
 # Recursively lowers the data sub-graph rooted at $node, accumulating
@@ -1835,6 +1835,9 @@ sub lower_value {
 
     # %INC: whether it holds a key (_lower_inc_read), before any hash read.
     return $self->_lower_inc_read($node) if $op eq 'Subscript' && _is_inc_elem($node);
+    # %main::: a key read answered from when the program compiled.
+    return $self->_lower_stash_key($node)
+        if ( $op eq 'Subscript' || $op eq 'Exists' ) && _is_main_stash($node->inputs->[0]);
 
     if ($op eq 'Constant') {
         return $self->_lower_constant($node);
@@ -4567,6 +4570,10 @@ sub _lower_inc_read {
         next unless blessed($m) && !$seen{ refaddr($m) }++;
         if ($m->operation eq 'Call' && ( $m->name // '' ) eq 'require' && ( _require_key($m) // '' ) eq $k) { $loaded = 1; last }
         push @q, grep { blessed($_) && _is_memory_version($_) } $m->inputs->@*;
+        # What ran just before it, where a call carries no memory -- not
+        # past a merge or a loop, where a require may not have run.
+        my $c = $m->can('control_in') ? $m->control_in : undef;
+        push @q, $c if blessed($c) && $c->operation !~ /\A(?:Region|Loop|Start)\z/;
     }
     my %used = %Chalk::IR::Serialize::JSON::USED_MODULES;
     ( my $mod = $k ) =~ s/\.pm\z//;
@@ -4577,6 +4584,42 @@ sub _lower_inc_read {
     return $self->{cache}{ $node->id } = $loaded
         ? $self->_emit_coercion('1', 'Int', 'Scalar', '%INC: loaded')
         : $self->_build_slot('false', '0', 'Undef', '%INC: not loaded');
+}
+
+sub _is_main_stash {
+    my ($h) = @_;
+    return blessed($h) && $h->operation eq 'EntryDef' && ( $h->sigil // '' ) eq '%'
+        && ( $h->symbol // '' ) eq 'main::';
+}
+
+# _lower_stash_key($node) -> a constant-key read of %main:: (exists, or the
+# entry): what B::SoN saw when the program compiled (stash_has), where
+# nothing the program runs may change the stash (_stash_changes). An entry
+# is its glob, read as what it prints ("*main::NAME"); exists, whether it is
+# there.
+sub _lower_stash_key {
+    my ($self, $node) = @_;
+    my $has = $node->stash_has;
+    die "GAP: a read of the stash %main:: whose key was not known when the program compiled is not lowered\n"
+        unless defined $has;
+    if (defined(my $why = $Chalk::IR::Serialize::JSON::STASH_CHANGES)) {
+        die "GAP: a read of the stash %main:: is not lowered where the program may change the stash ($why)\n";
+    }
+    my $id = $node->id;
+    if ($node->operation eq 'Exists') {
+        my $ref = $self->_fresh;
+        $self->_emit("  $ref = add i1 0, $has  ; exists in the stash when the program compiled");
+        $self->{cache}{"repr:$id"} = 'Boolean';
+        return $self->{cache}{$id} = $ref;
+    }
+    my $key = $node->inputs->[1]->value;
+    my $slot = $has
+        ? $self->_emit_coercion($self->_set_str_len($self->_str_const_parts("*main::$key", 'a stash entry')),
+            'Str', 'Scalar', 'a stash entry')
+        : $self->_build_slot('false', '0', 'Undef', 'a stash entry: not there');
+    $node->set_stamp('Scalar') if ( $node->stamp // 'Unknown' ) eq 'Unknown';
+    $self->{cache}{"repr:$id"} = 'Scalar';
+    return $self->{cache}{$id} = $slot;
 }
 
 sub _is_sig_elem {

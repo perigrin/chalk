@@ -847,6 +847,9 @@ sub _deserialize_graph ($method_data) {
             if $op eq 'Region' && defined $nd->{fields} && $nd->{fields}{eval_may_die};
         $node->set_kind($nd->{fields}{kind})
             if ($op eq 'Subscript' || $op eq 'Slice') && defined $nd->{fields} && defined $nd->{fields}{kind};
+        # A key read of %main::: whether the key was there at compile time.
+        $node->set_stash_has($nd->{fields}{stash_has})
+            if ($op eq 'Subscript' || $op eq 'Exists') && defined $nd->{fields} && defined $nd->{fields}{stash_has};
         # A division's that may die: its eval and its site.
         $node->set_die_site($nd->{fields}{eval_id}, $nd->{fields}{file}, $nd->{fields}{line})
             if ( $op eq 'Divide' || $op eq 'Modulo' ) && defined $nd->{fields} && defined $nd->{fields}{line};
@@ -1012,6 +1015,52 @@ sub _deserialize_graph ($method_data) {
 
 # from_json($json_string) — deserialize JSON to named Chalk::IR::Graph instances.
 # -----------------------------------------------------------------------
+# _stash_changes($data) -> what in the program may change %main:: while it
+# runs (a reason), or undef. A key read of the stash is lowered from what
+# B::SoN saw when the program compiled (stash_has) only where nothing may:
+# a store to or delete from the stash, a symbolic dereference (it makes
+# the name it reads), a string eval, a do FILE, a require of a module not
+# already loaded, an import the program does not define.
+sub _stash_changes ($data) {
+    my %methods = ( $data->{methods} // {} )->%*;
+    for my $m (values %methods) {
+        my %by = map { ( $_->{id} // '' ) => $_ } ( $m->{nodes} // [] )->@*;
+        for my $n (values %by) {
+            my $op = $n->{op} // '';
+            my $f  = $n->{fields} // {};
+            my @in = map { defined $_ ? $by{$_} // {} : {} } ( $n->{inputs} // [] )->@*;
+            my $to_stash = sub ($x) {
+                my $i = $x->{op} // '';
+                ( $x = $by{ ( $x->{inputs} // [] )->[0] // '' } // {} ), $i = $x->{op} // ''
+                    if $i eq 'Subscript';
+                return $i eq 'EntryDef' && ( ( $x->{fields} // {} )->{symbol} // '' ) =~ /::\z/;
+            };
+            return 'a store to or delete from the stash'
+                if $op =~ /\A(?:Delete|EntryWrite|Assign|ListAssign|CompoundAssign|ElemRestore|LocalAlias)\z/
+                && @in && $to_stash->($in[0]);
+            return 'a symbolic dereference'
+                if $op eq 'PostfixDeref' && ( ( $in[0] // {} )->{stamp} // '' ) !~ /Ref\z|\ACode/;
+            return 'a string eval' if $op eq 'Coerce' && ( $f->{to_repr} // '' ) eq 'Code';
+            next unless $op eq 'Call';
+            my $name = $f->{name} // '';
+            return 'a do FILE' if $name eq 'dofile';
+            if ($name eq 'require') {
+                my $k = ( ( $in[0] // {} )->{op} // '' ) eq 'Constant' ? $in[0]{fields}{value} : undef;
+                return 'a require of what is not known to be loaded' unless defined $k;
+                ( my $mod = $k ) =~ s/\.pm\z//;
+                $mod =~ s{/}{::}g;
+                $k = join('/', split /::/, $k) . '.pm' unless $k =~ /\.pm\z/;
+                return 'a require of what is not known to be loaded'
+                    unless $Chalk::Target::LLVM::Context::_PURE_PRAGMA{$k} || $Chalk::IR::Serialize::JSON::USED_MODULES{$mod};
+            }
+            return 'an import the program does not define'
+                if $name =~ /\A(?:import|unimport)\z/ && ( $f->{dispatch_kind} // '' ) ne 'builtin'
+                && !$methods{ ( $f->{class_name} // '' ) . "::$name" };
+        }
+    }
+    return undef;
+}
+
 sub from_json ($json_string) {
     my $data    = JSON::PP->new->decode($json_string);
     # The text after __DATA__ / __END__, which DATA reads (absent: none).
@@ -1079,6 +1128,7 @@ sub from_json ($json_string) {
           . "(a BEGIN or END block runs outside the main program)\n" if @effects;
         $USED_MODULES{$module} = 1 if $is_use && defined $module;
     }
+    our $STASH_CHANGES = _stash_changes($data);
 
     my %graphs;
     for my $name (sort keys $data->{methods}->%*) {
