@@ -2697,7 +2697,7 @@ sub _lower_divide {
     my $lhs_ref = $self->_lower_as_repr($inputs->[0], $repr);
     my $rhs_ref = $self->_lower_as_repr($inputs->[1], $repr);
 
-    $self->_die_on_zero($inputs->[1], $rhs_ref, $ty, 'Illegal division by zero');
+    $self->_die_on_zero($inputs->[1], $rhs_ref, $ty, 'Illegal division by zero', $node);
     my $ref = $self->_fresh;
     $self->_emit("  $ref = fdiv $ty $lhs_ref, $rhs_ref  ; Divide(repr=$repr) -> fdiv $ty");
     $self->{cache}{$node->id} = $ref;
@@ -2709,11 +2709,33 @@ sub _lower_divide {
 # divisor cannot be zero. Inside an eval perl catches it, with " at FILE line
 # N." in $@ -- refused there.
 sub _die_on_zero {
-    my ($self, $divisor, $ref, $ty, $msg) = @_;
+    my ($self, $divisor, $ref, $ty, $msg, $node) = @_;
     my $lit = $divisor;
     $lit = $lit->inputs->[0] while blessed($lit) && $lit->operation eq 'Coerce';
     return if blessed($lit) && $lit->operation eq 'Constant'
         && ($lit->const_type // '') =~ /\A(?:integer|number)\z/ && ($lit->value // 0) != 0;
+    # IN ITS OWN EVAL (B::SoN names it, and the site perl's message names):
+    # a zero divisor is that eval's die. Lowered where another eval, or none,
+    # is open, it is refused -- caught there, or not, it would be wrong.
+    my $f = ($self->{_eval_frames} // [])->[-1];
+    my $own = $f && blessed($node) && $node->can('eval_id') && defined $node->eval_id
+        && ( $f->{region}->eval_id // '' ) eq $node->eval_id && defined $node->line;
+    die "GAP: a division that may die where its own block eval is not the one open is not "
+      . "lowered\n" if blessed($node) && $node->can('eval_id') && defined $node->eval_id && !$own;
+    if ($own) {
+        my ($z, $die, $ok) = ($self->_fresh, $self->_fresh_label('divzero'), $self->_fresh_label('divok'));
+        my $cmp = $ty eq 'i64' ? "icmp eq i64 $ref, 0" : "fcmp oeq $ty $ref, " . _repr_zero('Num');
+        $self->_emit("  $z = $cmp  ; a zero divisor?");
+        $self->_set_terminator("  br i1 $z, label %$die, label %$ok");
+        $self->_new_block($die);
+        $self->_store_eval_error($self->_set_str_len($self->_str_const_parts(
+            "$msg at " . ( $node->file // '-e' ) . " line " . $node->line . ".\n", $msg)));
+        $f->{cached_at_first_die} //= { map { $_ => 1 } keys %{ $self->{cache} } };
+        $f->{dies}++;
+        $self->_set_terminator("  br label %$f->{catch}  ; $msg: caught by its eval");
+        $self->_new_block($ok);
+        return;
+    }
     die "GAP: a divisor that may be zero, inside a block eval, is not lowered -- "
       . "perl's \"$msg\" message there names the file and line\n"
         if ($self->{_eval_frames} // [])->@*;
@@ -2994,7 +3016,7 @@ sub _lower_modulo {
     my $adj  = $self->_fresh;
     my $res  = $self->_fresh;
 
-    $self->_die_on_zero($inputs->[1], $rhs_ref, 'i64', 'Illegal modulus zero');
+    $self->_die_on_zero($inputs->[1], $rhs_ref, 'i64', 'Illegal modulus zero', $node);
     $self->_emit("  $t    = srem i64 $lhs_ref, $rhs_ref    ; Modulo step 1: srem (C/LLVM semantics)");
     $self->_emit("  $xorv = xor  i64 $t, $rhs_ref          ; Modulo step 2: signs-differ test");
     $self->_emit("  $nonz = icmp ne  i64 $t, 0              ; Modulo step 3: remainder nonzero?");
@@ -8341,9 +8363,16 @@ sub open_eval {
 
 sub close_eval {
     my ($self, $region) = @_;
-    my $f = pop( ($self->{_eval_frames} // [])->@* );
+    my $f = ($self->{_eval_frames} // [])->[-1];
     die "GAP: a block eval's join was reached without its body being opened\n"
         unless $f && $f->{region}->id eq $region->id;
+    my @phis = grep {
+        blessed($_) && $_->operation eq 'Phi' && blessed($_->region) && $_->region->id eq $region->id
+    } ($region->consumers // [])->@*;
+    # THE BODY'S VALUE IS MADE IN THE BODY, the eval still open: a division
+    # in it that dies is this eval's die (_die_on_zero).
+    my %raw = map { $_->id => $self->lower_value($_->inputs->[0]) } @phis;
+    pop $self->{_eval_frames}->@*;
     delete $self->{_eval_open_now}{ refaddr($region) };
     # IN LIST CONTEXT a die gives the empty list, not undef: the one value
     # this join carries cannot say that.
@@ -8351,9 +8380,6 @@ sub close_eval {
       . "it yields the empty list there, not undef\n"
         if $f->{dies} && defined $region->eval_want;
 
-    my @phis = grep {
-        blessed($_) && $_->operation eq 'Phi' && blessed($_->region) && $_->region->id eq $region->id
-    } ($region->consumers // [])->@*;
     my %normal;
     for my $phi (@phis) {
         my ($v)  = $phi->inputs->[0];
@@ -8362,7 +8388,7 @@ sub close_eval {
           . " where a die makes it undef -- only a Scalar holds both\n"
             if $f->{dies} && ($phi->stamp // '') ne 'Scalar';
         my $from = $v->stamp // '';
-        my $ref  = $self->lower_value($v);
+        my $ref  = $raw{ $phi->id };
         $ref = $self->_emit_coercion($ref, $from, $to, 'eval value') if $from ne $to;
         $normal{ $phi->id } = $ref;
     }

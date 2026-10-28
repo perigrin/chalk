@@ -847,6 +847,9 @@ sub _deserialize_graph ($method_data) {
             if $op eq 'Region' && defined $nd->{fields} && $nd->{fields}{eval_may_die};
         $node->set_kind($nd->{fields}{kind})
             if ($op eq 'Subscript' || $op eq 'Slice') && defined $nd->{fields} && defined $nd->{fields}{kind};
+        # A division's that may die: its eval and its site.
+        $node->set_die_site($nd->{fields}{eval_id}, $nd->{fields}{file}, $nd->{fields}{line})
+            if ( $op eq 'Divide' || $op eq 'Modulo' ) && defined $nd->{fields} && defined $nd->{fields}{line};
         # A die's site: the file and line perl's message names.
         $node->set_site($nd->{fields}{file}, $nd->{fields}{line})
             if $op eq 'Unwind' && defined $nd->{fields} && defined $nd->{fields}{line};
