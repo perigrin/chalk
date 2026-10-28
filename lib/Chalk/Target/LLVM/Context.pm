@@ -2107,6 +2107,20 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'chr') {
         return $self->_lower_chr($node);
     }
+    # lock() IS A NO-OP without threads (perl's pp_lock): it yields what it
+    # was given (pvm 028).
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'lock') {
+        my ($arg) = grep { blessed($_) } $node->inputs->@*;
+        # In void context nothing reads it, and its argument is the lvalue
+        # B::SoN leaves unbound: nothing to lower.
+        return $self->{cache}{ $node->id } = '0'
+            unless grep { blessed($_) && grep { blessed($_) && refaddr($_) == refaddr($node) } $_->inputs->@* }
+                ($node->consumers // [])->@*;
+        my $v = $self->lower_value($arg);
+        my ($from, $to) = ( $self->_repr_of($arg) // '', $node->stamp // '' );
+        $v = $self->_emit_coercion($v, $from, $to, 'lock') if $to ne '' && $to ne 'Unknown' && $from ne $to;
+        return $self->{cache}{ $node->id } = $v;
+    }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'localtime') {
         return $self->_lower_localtime($node);
     }
@@ -8023,11 +8037,15 @@ sub _lower_builtin_exit {
     if (@$inputs) {
         my $operand = $inputs->[0];
         my $repr    = _require_repr($operand, 'Call(builtin,exit).status');
-        die "GAP: exit status has repr=$repr; only Int is lowered (perl "
-          . "truncates a non-integer status, which belongs in an explicit "
-          . "Coerce on the operand, not a guess here)."
-            unless $repr eq 'Int';
+        # A STRING OR A NUMBER is read as perl's exit reads it (POPi): the
+        # string numified, the number truncated -- "1e1" is 10, "abc" 0
+        # (pvm 064).
+        die "GAP: exit status has repr=$repr; only Int, Num and Str are lowered\n"
+            unless $repr =~ /\A(?:Int|Num|Str)\z/;
         my $i64 = $self->lower_value($operand);
+        $i64 = $self->_emit_coercion($self->_emit_coercion($i64, $repr, 'Num', 'exit status'),
+                                     'Num', 'Int', 'exit status')
+            if $repr ne 'Int';
         # The status is an i32 at the C boundary; an i64 operand truncates.
         $status_ref = $self->_fresh;
         $self->_emit("  $status_ref = trunc i64 $i64 to i32  ; exit: status -> i32");
@@ -17285,10 +17303,35 @@ sub _lower_stash_access {
     my $repr = _require_repr($node, 'EntryDef');
     die "GAP: a package variable " . ($node->sigil // '?') . $node->symbol
       . " that is not a scalar is not lowered\n" unless ($node->sigil // '$') eq '$';
-    my $g    = $self->_pkg_slot_ptr($node->package, $node->symbol);
-    my $slot = $self->_fresh;
-    $self->_emit("  $slot = load %Slot, %Slot* $g  ; read package scalar \$"
-        . $node->package . '::' . $node->symbol);
+    my $slot;
+    # PERL'S OWN VARIABLES, which a program that never stores them reads as
+    # perl set them (pvm 342): $^W 0 (no -w), $^O the OS, $^ the top-of-page
+    # format name, $^T the start time (read here: a second may tick).
+    my %MAGIC = ("\x17" => 'W', "\x0f" => 'O', '^' => '^', "\x14" => 'T');
+    my $sym = $node->symbol // '';
+    if (( $node->package // 'main' ) eq 'main' && $MAGIC{$sym}
+            && !grep { $_->operation eq 'Assign' && blessed($_->inputs->[0])
+                       && $_->inputs->[0]->operation eq 'EntryDef' && ( $_->inputs->[0]->symbol // '' ) eq $sym } @PROGRAM) {
+        my $m = $MAGIC{$sym};
+        if ($m eq 'W' || $m eq 'T') {
+            my $n = '0';
+            if ($m eq 'T') {
+                $n = $self->_fresh;
+                $self->{_need_localtime} = 1;
+                $self->_emit("  $n = call i64 \@time(i64* null)  ; \$^T");
+            }
+            $slot = $self->_emit_coercion($n, 'Int', 'Scalar', "\$^$m");
+        } else {
+            my $text = $m eq 'O' ? $^O : 'STDOUT_TOP';
+            $slot = $self->_emit_coercion($self->_set_str_len($self->_str_const_parts($text, "\$^$m")),
+                                          'Str', 'Scalar', "\$^$m");
+        }
+    } else {
+        my $g = $self->_pkg_slot_ptr($node->package, $node->symbol);
+        $slot = $self->_fresh;
+        $self->_emit("  $slot = load %Slot, %Slot* $g  ; read package scalar \$"
+            . $node->package . '::' . $node->symbol);
+    }
     my $ref = $repr eq 'Undef'                          ? $self->_slot_defined_bit($slot)
             : $repr =~ /\A(?:Int|Num|Str|Boolean)\z/  ? $self->_emit_coercion($slot, 'Scalar', $repr,
                                                               'package scalar ' . $node->symbol)
@@ -17762,6 +17805,16 @@ sub _lower_print {
         unless (blessed($fh) && $fh->operation eq 'Constant' && ( $fh->value // '' ) eq 'STDOUT') {
             return $self->_lower_print_to_handle($node, $fh, @args)
                 if blessed($fh) && $fh->operation eq 'PadAccess';
+            # A BAREWORD HANDLE NOTHING OPENS writes nothing, and print is
+            # false (pvm 424: `print __CLASS__;` prints $_ to such a handle).
+            # Its arguments are read only for their effects.
+            if (blessed($fh) && $fh->operation eq 'Constant'
+                    && ( $fh->value // '' ) =~ /\A\w+\z/ && ( $fh->value // '' ) !~ /\A(?:STDERR|STDIN)\z/
+                    && !grep { $_->operation eq 'Call' && ( $_->name // '' ) eq 'open'
+                               && grep { blessed($_) && $_->operation eq 'Constant' && ( $_->value // '' ) eq $fh->value } $_->inputs->@* } @PROGRAM) {
+                $self->lower_value($_) for grep { $_->operation !~ /\A(?:Constant|PadAccess|EntryDef)\z/ } @args;
+                return $self->{cache}{ $node->id } = 'false';
+            }
             die "GAP: print to the handle "
               . ( blessed($fh) && $fh->can('value') ? ( $fh->value // '?' ) : '?' ) . " is not lowered\n";
         }

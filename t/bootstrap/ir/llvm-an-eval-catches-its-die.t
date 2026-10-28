@@ -77,10 +77,11 @@ for my $case (
 }
 
 # ONLY $@ IS A GLOBAL HERE. Another punctuation variable is perl's to set
-# ($^W is 0, $^O the OS): read from an empty global it printed "", refused.
+# ($^W is 0, $^O the OS): read from an empty global it printed "". It now
+# reads perl's value (llvm-perls-own-variables.t).
 {
-    eval { through_llvm(q{$::w = $^W; print $::w, "\n";}) };
-    like($@, qr/GAP: /, 'a read of $^W is refused');
+    my $got = eval { through_llvm(q{$::w = $^W; print $::w, "\n";}) };
+    is($got, "0\n", 'a read of $^W is perl\'s 0') or diag $@;
 }
 
 # AN EVAL IN A LOOP BODY is opened there as a branch (the body is lowered
