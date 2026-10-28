@@ -67,8 +67,8 @@ for my $case (
 
 # `&name` WITH NO PARENS SHARES THE CALLER'S @_ (the wire says shares_args).
 # Taken for a call passing nothing, it answered "[]" where perl says "[1 2]"
-# (pvm subroutines.md). Refused by name.
-my $err = do { local $@; eval { through_llvm(q{sub answer { "[@_]" } sub outer { print &answer, "\n" } outer(1, 2);}) }; $@ };
-like($err, qr/GAP: .*shares its caller.s \@_/, '&name sharing @_ is refused by name');
+# (pvm subroutines.md). It is the inlined caller's arguments.
+my $amp = q{sub answer { "[@_]" } sub outer { print &answer, "\n" } outer(1, 2);};
+is(eval { through_llvm($amp) }, "[1 2]\n", '&name shares its caller\'s @_') or diag $@;
 
 done_testing;

@@ -2049,6 +2049,19 @@ sub lower_value {
         $self->_emit("  $t = call i64 \@time(i64* null)  ; time");
         return $self->{cache}{$id} = $t;
     }
+    # warn under an empty __WARN__ handler (_lower_assign) writes nothing and
+    # is true. Without one perl's message names the file and line, which this
+    # run does not share: refused.
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'warn') {
+        die "GAP: a warn with no empty \$SIG{__WARN__} handler installed before it is not "
+          . "lowered -- perl's message names the file and line\n" unless $self->{_warn_quiet};
+        my @args = $node->inputs->@*;
+        pop @args if $node->can('memory_input') && $node->memory_input;
+        $self->lower_value($_) for grep { blessed($_) } @args;
+        $node->set_stamp('Int') if ( $node->stamp // 'Unknown' ) eq 'Unknown';
+        $self->{cache}{ 'repr:' . $id } = 'Int';
+        return $self->{cache}{$id} = '1';
+    }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
             && ($node->name // '') =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/) {
         return $self->_lower_case_map($node);
@@ -4355,6 +4368,37 @@ sub _lower_list_assign_into_locations {
 #      (bounds-checked slot write into the container array or hash).
 #  (b) Scalar rebind: inputs[0] is a PadAccess(VarDecl) or VarDecl →
 #      update var_table with the new SSA value.
+sub _is_sig_elem {
+    my ($n) = @_;
+    return 0 unless blessed($n) && $n->operation eq 'Subscript' && ( $n->kind // '' ) eq 'hash';
+    my $h = $n->inputs->[0];
+    return blessed($h) && $h->operation eq 'EntryDef' && ( $h->sigil // '' ) eq '%' && ( $h->symbol // '' ) eq 'SIG';
+}
+
+# _is_empty_sub($anon): its body does nothing -- `sub { }`.
+sub _is_empty_sub {
+    my ($anon) = @_;
+    my $g = $anon->sub && $anon->sub->can('graph') ? $anon->sub->graph : undef;
+    return 0 unless $g && $g->returns && $g->returns->@* == 1;
+    my $r = $g->returns->[0];
+    return 0 unless blessed($r->control_in) && $r->control_in->operation eq 'Start';
+    return !grep { blessed($_) && $_->operation !~ /\A(?:Start|Constant|Return)\z/ } _graph_component($g);
+}
+
+# _on_straight_line($node): its control reaches Start through no branch,
+# merge or loop -- it runs once, every run, before what follows it.
+sub _on_straight_line {
+    my ($n) = @_;
+    for (1 .. 10_000) {
+        my $c = $n->can('control_in') ? $n->control_in : undef;
+        return 0 unless blessed($c);
+        return 1 if $c->operation eq 'Start';
+        return 0 unless $c->operation =~ /\A(?:Assign|CompoundAssign|ListAssign|Print|Call|EntryWrite|Increment|PackageMark)\z/;
+        $n = $c;
+    }
+    return 0;
+}
+
 sub _lower_assign {
     my ($self, $node) = @_;
 
@@ -4390,6 +4434,35 @@ sub _lower_assign {
     if ($node->can('local') && $node->local) {
         for my $r (_local_restore_of($node)) {
             $self->lower_value($_) for $r->inputs->@[2, 3];
+        }
+    }
+
+    # A STORE TO %SIG installs a handler perl calls. An empty __WARN__ one,
+    # stored on the program's own straight line, silences every warn after it
+    # (_lower_warn); any other runs code this does not call.
+    if (_is_sig_elem($node->inputs->[0])) {
+        my ($lhs, $val) = $node->inputs->@[0, 1];
+        my $key = $lhs->inputs->[1];
+        die "GAP: a store to %SIG other than an empty __WARN__ handler on the program's "
+          . "straight line is not lowered -- perl would call it\n"
+            unless blessed($key) && $key->operation eq 'Constant' && ( $key->value // '' ) eq '__WARN__'
+                && blessed($val) && $val->operation eq 'AnonSub' && _is_empty_sub($val)
+                && !( $node->can('local') && $node->local && _local_restore_of($node) )
+                && !$self->{_inlining} && !$self->{_in_method_body} && !$self->{_in_function_body}
+                && _on_straight_line($node);
+        $self->{_warn_quiet} = 1;
+        return $self->{cache}{ $node->id } = '0';
+    }
+
+    # THE ONE SUB A FILE LEXICAL HOLDS (_code_of_shared) is stored as a
+    # CodeRef: what a call through it checks it holds.
+    {
+        my ($lhs, $val) = $node->inputs->@[0, 1];
+        if (blessed($val) && $val->operation eq 'AnonSub' && blessed($lhs)
+                && ( _code_of_shared($lhs) // 0 ) == $val) {
+            my $slot = $self->_build_slot('i1 true', '0', 'CodeRef', 'a code reference');
+            $self->_emit("  store %Slot $slot, %Slot* " . $self->_location_ptr($lhs) . "  ; " . $lhs->name . " = sub { ... }");
+            return $self->{cache}{ $node->id } = $slot;
         }
     }
 
@@ -7701,8 +7774,7 @@ sub _record_break_block {
             my $i = _phi_input_along($phi, $j->{region}, $proj)
                 // _phi_input_along($phi, $j->{region}, $j->{arms}{ $proj->id })
                 // die "GAP: a merge Phi with no input along a jump into it is not lowered\n";
-            $vals{ $phi->id } = $self->_as_phi_reading($self->lower_value($phi->inputs->[$i]),
-                $phi->inputs->[$i], $phi, 'a jump: its value');
+            $vals{ $phi->id } = $self->_jump_merge_value($phi, $phi->inputs->[$i], 'a jump: its value');
         }
         delete $self->{cache}{$_} for grep { !$cached_before{$_} } keys %{ $self->{cache} };
         push $j->{preds}->@*, { label => $self->_current_block_label, vals => \%vals };
@@ -7776,6 +7848,17 @@ sub _phi_input_along {
     return $i;
 }
 
+# _jump_merge_value($phi, $in, $what): what an arm brings to a jump merge's
+# Phi, read as the Phi is -- or, for a Phi nothing typed, [value, its repr]
+# for _close_jump_merge to settle once every arm is known.
+sub _jump_merge_value {
+    my ($self, $phi, $in, $what) = @_;
+    my $v = $self->lower_value($in);
+    return ( $phi->stamp // '' ) eq 'Unknown'
+        ? [ $v, $self->_repr_of($in) // '' ]
+        : $self->_as_phi_reading($v, $in, $phi, $what);
+}
+
 sub _close_jump_merge {
     my ($self, $j) = @_;
     my @preds = $j->{preds}->@*;
@@ -7785,16 +7868,37 @@ sub _close_jump_merge {
         for my $phi (_merge_phis($j->{region})) {
             my $i = _phi_input_along($phi, $j->{region}, $j->{way_in})
                 // die "GAP: a merge Phi with no input along its ordinary way in is not lowered\n";
-            $vals{ $phi->id } = $self->_as_phi_reading($self->lower_value($phi->inputs->[$i]),
-                $phi->inputs->[$i], $phi, 'the way in: its value');
+            $vals{ $phi->id } = $self->_jump_merge_value($phi, $phi->inputs->[$i], 'the way in: its value');
         }
         push @preds, { label => $self->_current_block_label, vals => \%vals };
         $self->_set_terminator("  br label %$j->{label}  ; to the merge");
     }
+    # A MERGE NOTHING TYPED is what its arms are: one repr, or a Scalar each
+    # arm is boxed to in its own block, before the branch that ends it.
+    my $here = $self->{current_idx};
+    for my $phi (grep { ( $_->stamp // '' ) eq 'Unknown' } _merge_phis($j->{region})) {
+        my @r = map { $_->{vals}{ $phi->id }[1] } @preds;
+        die "GAP: a merge of a jump nothing typed, with an arm that is not a scalar, is not lowered\n"
+            if grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @r;
+        my $to = ( grep { $_ ne $r[0] } @r ) ? 'Scalar' : $r[0];
+        for my $p (@preds) {
+            my ($v, $from) = $p->{vals}{ $phi->id }->@*;
+            if ($from ne $to) {
+                $self->{current_idx} = $self->_find_block_idx($p->{label});
+                $v = $from eq 'Undef' ? $self->_build_slot($v, '0', 'Undef', 'a jump merge')
+                   : $self->_emit_coercion($v, $from, $to, 'a jump merge');
+                die "GAP: a jump merge's arm opened blocks to be boxed -- not lowered\n"
+                    if $self->_current_block_label ne $p->{label};
+            }
+            $p->{vals}{ $phi->id } = $v;
+        }
+        $self->{cache}{ 'repr:' . $phi->id } = $to;
+    }
+    $self->{current_idx} = $here;
     $self->_new_block($j->{label});
     for my $phi (_merge_phis($j->{region})) {
         my $r = $self->_fresh;
-        $self->_emit("  $r = phi " . _repr_to_llvm_type(_require_repr($phi, 'jump merge Phi')) . " "
+        $self->_emit("  $r = phi " . _repr_to_llvm_type($self->{cache}{ 'repr:' . $phi->id } // _require_repr($phi, 'jump merge Phi')) . " "
             . join(', ', map { "[ $_->{vals}{ $phi->id }, %$_->{label} ]" } @preds)
             . "  ; the merge of a jump and the way in");
         $self->{cache}{ $phi->id } = $r;
@@ -12442,10 +12546,68 @@ sub _lower_call_indirect {
         return $self->_lower_call_direct($node);
     }
     my $anon = $self->_static_code_of($callee);
+    # A FILE LEXICAL HOLDING ONE SUB (_code_of_shared) runs it -- once the
+    # store has: before it, the variable is undef and perl dies.
+    if (!$anon && ($anon = _code_of_shared($callee))) {
+        die "GAP: a call through a variable that may not hold its sub yet, inside a block "
+          . "eval, is not lowered -- perl's message there names the file and line\n"
+            if ($self->{_eval_frames} // [])->@*;
+        my $slot = $self->_fresh;
+        $self->_emit("  $slot = load %Slot, %Slot* " . $self->_location_ptr($callee) . "  ; the code " . $callee->name . " holds");
+        my $tag = $self->_slot_tag_of($slot);
+        my ($z, $die, $ok) = ($self->_fresh, $self->_fresh_label('nocode'), $self->_fresh_label('code'));
+        $self->_emit("  $z = icmp ne i8 $tag, " . _slot_tag_value('CodeRef') . "  ; not its sub yet?");
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $z, label %$die, label %$ok");
+        $self->_new_block($die);
+        $self->_emit("  call void \@exit(i32 255)  ; perl dies: not a CODE reference");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($ok);
+    }
     die "GAP: an indirect call whose code is not a sub this program makes and passes down "
       . "is not lowered\n" unless $anon && $anon->sub;
     $self->{_call_via} = { name => $anon->name, target => $anon->sub, args => \@args, anon => $anon };
     return $self->_lower_call_direct($node);
+}
+
+# _code_of_shared($pad) -> the AnonSub a shared file lexical holds: the
+# program's one store to it is of that sub, which captures nothing, and
+# every other use of it -- anywhere, an anonymous sub's body and a phase
+# block's included -- is a call through it. Else undef.
+sub _code_of_shared {
+    my ($pad) = @_;
+    return undef unless blessed($pad) && $pad->operation eq 'PadAccess' && $pad->shared
+        && ( $pad->sigil // '$' ) eq '$';
+    my $name = $pad->name // return undef;
+    my (%seen, %code, @q);
+    @q = ( @PROGRAM, map { $_->[1]->returns->@* } grep { blessed($_->[1]) }
+           @Chalk::IR::Serialize::JSON::PHASE_GRAPHS );
+    while (defined(my $n = shift @q)) {
+        next unless blessed($n) && !$seen{ refaddr($n) }++;
+        push @q, grep { blessed($_) } $n->inputs->@*, ( $n->can('control_in') ? $n->control_in : () ),
+            ( $n->consumers // [] )->@*;
+        push @q, $n->sub->graph->returns->@*
+            if $n->operation eq 'AnonSub' && $n->sub && $n->sub->can('graph') && $n->sub->graph;
+        push @q, $n->target->graph->returns->@*
+            if $n->operation eq 'Call' && $n->can('target') && blessed($n->target)
+            && $n->target->can('graph') && $n->target->graph;
+        next unless $n->operation eq 'PadAccess' && ( $n->name // '' ) eq $name
+            && ( $n->sigil // '$' ) eq '$';
+        return undef unless $n->shared;
+        for my $c (( $n->consumers // [] )->@*) {
+            next unless blessed($c);
+            my @in = $c->inputs->@*;
+            next if $c->operation eq 'Call' && ( $c->dispatch_kind // '' ) eq 'indirect'
+                && refaddr($in[0] // 0) == refaddr($n) && !grep { refaddr($_) == refaddr($n) } grep { blessed($_) } @in[ 1 .. $#in ];
+            return undef unless $c->operation eq 'Assign' && @in == 2 && refaddr($in[0] // 0) == refaddr($n)
+                && !( $c->can('targets') && defined $c->targets ) && !( $c->can('local') && $c->local )
+                && blessed($in[1]) && $in[1]->operation eq 'AnonSub';
+            $code{ refaddr($in[1]) } = $in[1];
+        }
+    }
+    my @code = values %code;
+    return undef unless @code == 1 && !grep { blessed($_) } $code[0]->inputs->@*;
+    return $code[0];
 }
 
 # _static_code_of($node) -> the AnonSub a value is, through the arguments
@@ -15128,8 +15290,19 @@ sub _lower_call_direct {
     # at once so a call inside the inlined body does not see them.
     my $via = delete $self->{_call_via};
     my $name  = $via ? $via->{name} : $node->name;
-    die "GAP: direct call to '$name' as `&$name`, which shares its caller's \@_, is not lowered\n"
-        if $node->can('shares_args') && $node->shares_args;
+    # `&name;` SHARES ITS CALLER'S @_: the arguments of the inlined call it is
+    # made in (_frame_args), or none at the program's top level. A shift on
+    # either side would change the @_ the other sees: refused.
+    my $shared;
+    if ($node->can('shares_args') && $node->shares_args) {
+        $shared = $self->{_frame_args}
+            // ( !$self->{_inlining} && !$self->{_in_method_body} && !$self->{_in_function_body}
+                 ? { args => [], refs => [] } : undef );
+        die "GAP: direct call to '$name' as `&$name`, which shares an \@_ not known here, is not lowered\n"
+            unless $shared;
+        die "GAP: direct call to '$name' as `&$name` after its caller shifted or wrote \@_ is not lowered\n"
+            if $shared->{shifted};
+    }
     # A CALL IN AN EVAL'S BODY is caught by that eval: inlined with it not
     # open as a branch (in an arm, a loop body), the callee's die would leave
     # the program -- or reach another eval's end.
@@ -15304,7 +15477,7 @@ sub _lower_call_direct {
       . "does not yet thread in program order."
         if @trailing_effects;
 
-    my @args = $via ? $via->{args}->@* : $node->inputs->@*;
+    my @args = $shared ? $shared->{args}->@* : $via ? $via->{args}->@* : $node->inputs->@*;
 
     # A CLOSURE READS WHAT IT CAPTURED as it is when it runs: each CellRead of
     # its graph is the load of the variable it names, in the frame that made
@@ -15330,6 +15503,10 @@ sub _lower_call_direct {
         if (!$@ && !@reads && (my $aa = $self->{_args_read_as_a_list})) {
             $self->{_arg_bind}{ refaddr($aa) } = { ref => $self->_emit_array_of([]), repr => 'Array' };
         }
+        die "GAP: direct call to '$name' as `&$name` shifts or writes the \@_ it shares\n"
+            if $shared && ( $self->{_args_written} || grep { blessed($_) && $_->operation eq 'Call' } @reads );
+        local $self->{_frame_args} = { args => [], refs => [],
+            shifted => scalar grep { blessed($_) && $_->operation eq 'Call' } @reads };
         my $ref = $inline->();
         $self->{cache}{ $node->id } = $ref;
         return $ref;
@@ -15400,7 +15577,12 @@ sub _lower_call_direct {
     # AnonSub, it is what an indirect call in the callee runs.
     die "GAP: direct call to '$name': a code reference in an \@_ read as a list is not lowered\n"
         if $args_array && grep { blessed($_) && $_->operation eq 'AnonSub' } @args;
-    my @arg_refs = map { $_->operation eq 'AnonSub' ? undef : $self->lower_value($_) } @args;
+    my @arg_refs = $shared ? $shared->{refs}->@*
+                 : map { $_->operation eq 'AnonSub' ? undef : $self->lower_value($_) } @args;
+    my $shifts = grep { blessed($_) && $_->operation eq 'Call' } @arg_reads;
+    die "GAP: direct call to '$name' as `&$name` shifts or writes the \@_ it shares\n"
+        if $shared && ( $written || $shifts );
+    local $self->{_frame_args} = { args => \@args, refs => \@arg_refs, shifted => $shifts || $written };
 
     # Push the arg-binding frame (refaddr-keyed; see lower_value), inline the
     # callee's effect chain + result subgraph, then tear the frame down. Nested
