@@ -1574,6 +1574,9 @@ sub _as_phi_reading {
         if $to eq 'Scalar' && $from eq 'Undef';
     # An untyped side is left to the machine-type refusal that names it TOP.
     return $ref if $from eq $to || grep { $_ eq '' || $_ eq 'Unknown' } $from, $to;
+    # A REFERENCE is boxed into a Scalar by its tag (a walk down a structure).
+    return $self->_emit_coercion($ref, $from, 'Scalar', $what)
+        if $to eq 'Scalar' && $from =~ /\A(?:ArrayRef|HashRef|CodeRef|ScalarRef)\z/;
     # An integer stringified is exact, and numified back is the same integer.
     return $self->_emit_coercion($ref, $from, $to, $what)
         if $from =~ /\A(?:Int|Num|Str|Boolean)\z/
@@ -3784,6 +3787,9 @@ sub _lower_coerce {
     my $bound_repr = ( $operand->stamp // 'Unknown' ) eq 'Unknown' && $self->_bound_ref($operand)
                    ? $self->_repr_of($operand) : undef;
     my $from      = defined $bound_repr ? $bound_repr
+                  # Read as its Slot by this lowering (a shift only coerced).
+                  : ( $self->{cache}{ 'repr:' . $operand->id } // '' ) eq 'Scalar'
+                      && ( $operand->stamp // '' ) eq 'Scalar' ? 'Scalar'
                   : Chalk::IR::Analysis::_is_narrowed($operand->stamp)
                   ? $operand->stamp
                   # A Scalar operand IS its Slot, which says more than an
@@ -8423,7 +8429,13 @@ sub _process_loop_node {
             my @r = ( $self->_repr_of($inputs->[0]) // '', blessed($inputs->[1]) ? ( $inputs->[1]->stamp // '' ) : '' );
             $_ = 'Scalar' for grep { $_ eq 'Slot' } @r;
             $self->{cache}{ 'repr:' . $phi_node->id } = ( grep { $_ ne $r[0] } @r ) ? 'Scalar' : $r[0]
-                unless grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @r;
+                unless grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } @r;
+            # An array (a hash) the body re-makes is one, both ways, at every
+            # lowering: stamped so.
+            if ($r[0] =~ /\A(?:Array|Hash)\z/ && !grep { $_ ne $r[0] } @r) {
+                $phi_node->set_stamp($r[0]);
+                delete $self->{cache}{ 'repr:' . $phi_node->id };
+            }
         }
         # Coerced here, in the preheader, where it is lowered.
         $init_ref = $self->_as_phi_reading($init_ref, $inputs->[0], $phi_node, 'loop phi init');
@@ -8665,15 +8677,42 @@ sub _process_loop_node {
                   . "a multi-exit merge Phi.";
             }
             my $repr      = _require_repr($phi, 'Loop.exit.Phi');
-            my $llvm_type = _repr_to_llvm_type($repr);
             # Each input value (the header Phi and the break-point value) is
             # computed in a block that dominates the exit (the header block for
             # both the header Phi and the loop-body Add), so lower_value returns a
             # dominating SSA ref.
-            my @arms = map {
-                my $v = $loop_ctx->{break_vals}[$_]{ $phi->id } // $self->lower_value($inputs->[$_]);
-                "[ $v, %$pred_labels[$_] ]"
+            # ARMS OF TWO READINGS (an undef from the header, a hash read's
+            # Slot from a `last`) merge as a Scalar, each boxed in its own
+            # block before the branch that ends it -- as a jump merge's are.
+            my @from = map { my $f = $self->_repr_of($inputs->[$_]) // ''; $f eq 'Slot' ? 'Scalar' : $f } 0 .. $#pred_labels;
+            my $mixed = grep { $_ ne $repr } @from;
+            # An Undef arm boxed needs no value, and lowered here (the exit
+            # block) it would come before the phi.
+            my @vals = map {
+                $loop_ctx->{break_vals}[$_]{ $phi->id }
+                    // ( $mixed && $from[$_] eq 'Undef' ? undef : $self->lower_value($inputs->[$_]) )
             } 0 .. $#pred_labels;
+            if ($mixed) {
+                die "GAP: a loop-exit merge of a " . join('/', @from) . " is not lowered\n"
+                    if grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } @from, $repr;
+                $repr = 'Scalar';
+                my $here = $self->{current_idx};
+                for my $i (0 .. $#vals) {
+                    next if $from[$i] eq 'Scalar';
+                    $self->{current_idx} = $self->_find_block_idx($pred_labels[$i]);
+                    # An Undef is undef: its box needs no value (made where
+                    # this merge runs, it would not dominate the arm's block).
+                    $vals[$i] = $from[$i] eq 'Undef'
+                        ? $self->_build_slot('false', '0', 'Undef', 'a loop-exit merge')
+                        : $self->_emit_coercion($vals[$i], $from[$i], 'Scalar', 'a loop-exit merge');
+                    die "GAP: a loop-exit merge's arm opened blocks to be boxed -- not lowered\n"
+                        if $self->_current_block_label ne $pred_labels[$i];
+                }
+                $self->{current_idx} = $here;
+                $self->{cache}{ 'repr:' . $phi->id } = 'Scalar';
+            }
+            my $llvm_type = _repr_to_llvm_type($repr);
+            my @arms = map { "[ $vals[$_], %$pred_labels[$_] ]" } 0 .. $#pred_labels;
             my $phi_ref = $self->_fresh;
             $self->_emit("  $phi_ref = phi $llvm_type " . join(", ", @arms)
                 . "  ; loop-exit multi-exit merge (header OR mid-body last)");
@@ -13713,6 +13752,9 @@ sub _lower_builtin_join {
              || ( $list_node->can('want') && ( $list_node->want // '' ) eq 'list' ) );
     my $elements = $flatten ? undef
         : @more ? [ $list_node, @more ]
+        # ONE SCALAR is a list of itself: `my @l = (1); "@l"` arrives as
+        # join($", 1).
+        : ( $list_node->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/ ? [$list_node]
         # A LIST READ AFTER IT WAS WRITTEN has no static elements: its
         # declaration said empty, and a push since made it 2 4 6 -- read as
         # the declaration, "@r" printed "". It is walked at run time.
@@ -14000,6 +14042,13 @@ sub _lower_builtin_push {
             $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $slot)  ; push: a value by its tag");
             next;
         }
+        # AN ARRAY pushed is its elements, in order.
+        if (( $self->_repr_of($v) // '' ) eq 'Array') {
+            $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy);
+            my $src = $self->_container_ptr($v, 'Array');
+            $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $src)  ; push: an array's elements");
+            next;
+        }
         die "GAP: push of a " . ($v->stamp // 'NONE') . " value is not lowered\n"
             unless ( $v->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/;
         $self->_emit_append_one($acc, $v);
@@ -14066,6 +14115,19 @@ sub _lower_builtin_shift_pop {
     # its 0: `shift(@a) // 7` gave 0 for 7, and defined() said yes. Lowered
     # only where every value consumer reads a number (a later read taking it
     # as its memory version is no value consumer).
+    # ONLY COERCED (printed, concatenated): read as its Slot, which a Coerce
+    # reads by its tag -- undef is "" to a string, 0 to a number.
+    if ($repr eq 'Int') {
+        my @value_uses = grep {
+            my $c = $_;
+            blessed($c) && $c->operation !~ /\A(?:Region|Proj|If|Loop)\z/
+                && grep { blessed($_) && refaddr($_) == refaddr($node) } $c->inputs->@[ 0 .. ( $c->operation eq 'Coerce' ? 0 : $#{ $c->inputs } - 1 ) ]
+        } ($node->consumers // [])->@*;
+        if (@value_uses && !grep { $_->operation ne 'Coerce' } @value_uses) {
+            $node->set_stamp('Scalar');
+            $self->{cache}{ 'repr:' . $node->id } = $repr = 'Scalar';
+        }
+    }
     if ($repr eq 'Int') {
         for my $c (grep { blessed($_) } ($node->consumers // [])->@*) {
             my $cop = $c->operation;
