@@ -4375,6 +4375,41 @@ sub _lower_list_assign_into_locations {
         return $self->_location_ptr($t) if $t->shared || $t->is_location;
         return $self->_list_cell($t);
     };
+    # A MATCH IN LIST CONTEXT is its captures -- or (1) with no groups --
+    # when it matches, and an empty list when it misses: the targets are
+    # those, then undef. Assigned as its truth, `my ($c, $s) = $x =~ /(.)(.)/`
+    # gave $c 1 (pvm 226). Its captures are read only where it matched.
+    if (@v == 1 && blessed($v[0]) && $v[0]->operation eq 'RegexMatch' && ( $v[0]->flags // '' ) !~ /g/) {
+        my $m = $v[0];
+        die "GAP: a list-context match whose groups may not all take part (an alternation, an "
+          . "optional group) is not lowered -- such a group is undef\n"
+            if ( $m->pattern // '' ) =~ /\||\)[?*{]/;
+        my $matched = $self->lower_value($m);
+        my $rec = $self->{_regex_captures}{ $m->id }
+            // die "GAP: a list-context match with no capture record is not lowered\n";
+        my $groups = $#{ $rec->{cap_s} // [] };
+        $groups = 0 if $groups < 0;
+        my ($yes, $no, $join) = map { $self->_fresh_label("lmatch.$_.") } qw(yes no join);
+        $self->_set_terminator("  br i1 $matched, label %$yes, label %$no  ; list-context match: matched?");
+        $self->_new_block($yes);
+        for my $i (0 .. $#t) {
+            my $val = $groups ? ( $i < $groups ? $self->_emit_coercion($self->_capture_str($rec, $i + 1), 'Str', 'Scalar', 'a capture') : undef )
+                    : ( $i == 0 ? $self->_emit_coercion('1', 'Int', 'Scalar', 'a match') : undef );
+            $val //= $self->_build_slot('false', '0', 'Undef', 'list-context match: no value');
+            $self->_emit("  store %Slot $val, %Slot* " . $ptr->($t[$i]) . "  ; list-context match: " . $t[$i]->name);
+        }
+        $self->_set_terminator("  br label %$join");
+        $self->_new_block($no);
+        for my $i (0 .. $#t) {
+            my $u = $self->_build_slot('false', '0', 'Undef', 'list-context match: a miss');
+            $self->_emit("  store %Slot $u, %Slot* " . $ptr->($t[$i]) . "  ; list-context match: " . $t[$i]->name);
+        }
+        $self->_set_terminator("  br label %$join");
+        $self->_new_block($join);
+        my $cnt = $self->_fresh;
+        $self->_emit("  $cnt = select i1 $matched, i64 " . ( $groups || 1 ) . ", i64 0  ; list-context match: how many");
+        return $self->{cache}{ $node->id } = $cnt;
+    }
     # A VALUE THAT MAY FLATTEN (a call, split, a list) spreads over the
     # targets at run time: element i, undef past the end.
     if (grep { my $s = $_->operation eq 'Print' ? 'Boolean' : ( $_->stamp // '' );
@@ -5127,6 +5162,24 @@ sub _lower_ternary {
 
     return $self->_lower_ternary_by_slot($node) if defined $repr && $repr eq 'Scalar';
 
+    # NOTHING TYPED IT -- an arm is an argument the caller typed, known only
+    # here: arms of one reading are it; of two scalar readings, or a scalar
+    # and a reference, a Scalar each is boxed into (by_slot).
+    if (( $repr // '' ) eq 'Unknown') {
+        # The condition runs first either way, and lowered it types what it
+        # reads (`ref $r ? ... : $r` lowers the merge $r is).
+        $self->lower_value($node->inputs->[0]);
+        my @r = map { my $r = $_->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($_) // '' ); $r eq 'Slot' ? 'Scalar' : $r }
+            $node->inputs->@[1, 2];
+        if (!grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } @r) {
+            if ($r[0] ne $r[1] || $r[0] eq 'Scalar') {
+                $self->{cache}{ 'repr:' . $node->id } = 'Scalar';
+                return $self->_lower_ternary_by_slot($node);
+            }
+            $self->{cache}{ 'repr:' . $node->id } = $repr = $r[0];
+        }
+    }
+
     my $inputs    = $node->inputs;
     my $cond_node = $inputs->[0];
     my $true_node = $inputs->[1];
@@ -5168,6 +5221,9 @@ sub _lower_ternary {
     # Determine the branch type for the select.
     my $true_repr = _require_repr($true_node, 'TernaryExpr.true_branch');
     my $fals_repr = _require_repr($fals_node, 'TernaryExpr.false_branch');
+    # An arm nothing typed is what this lowering made it (an argument).
+    $true_repr = $self->_repr_of($true_node) // $true_repr if $true_repr eq 'Unknown';
+    $fals_repr = $self->_repr_of($fals_node) // $fals_repr if $fals_repr eq 'Unknown';
 
     # A merge yields one of its ARMS, so `$c ? 42 : "hi"` really is an Int on
     # one path and a Str on the other. The select is ONE instruction and needs
@@ -5618,8 +5674,8 @@ sub _subscript_slot {
 # a %Slot: defined by its bit, read as the result's repr; the RHS, lowered
 # only on the undef path, is brought to that repr too.
 sub _lower_defined_or_by_slot {
-    my ($self, $node, $slot) = @_;
-    my $to = $node->stamp // 'Scalar';
+    my ($self, $node, $slot, $to) = @_;
+    $to //= $node->stamp // 'Scalar';
     $to = 'Scalar' if $to eq 'Slot';
     my $def  = $self->_slot_defined_bit($slot);
     my $lval = $to eq 'Scalar' ? $slot : $self->_emit_coercion($slot, 'Scalar', $to, '// lhs');
@@ -5670,6 +5726,26 @@ sub _lower_defined_or {
 
     my $lhs_repr = $self->_repr_of($lhs_node) // _require_repr($lhs_node, 'DefinedOr.lhs');
     $lhs_repr = _require_repr($lhs_node, 'DefinedOr.lhs') if $lhs_repr eq 'Unknown';
+
+    # NOTHING TYPED IT -- its lhs an argument the caller typed: a definite
+    # lhs is the result, an Undef one the rhs, a Scalar one decided by its
+    # defined bit into a Scalar.
+    if (( $repr // '' ) eq 'Unknown') {
+        my $lr = $lhs_repr eq 'Slot' ? 'Scalar' : $lhs_repr;
+        if ($lr =~ /\A(?:Int|Num|Str|Boolean|ArrayRef|HashRef|CodeRef|ScalarRef)\z/) {
+            $self->{cache}{ 'repr:' . $node->id } = $lr;
+            return $self->{cache}{ $node->id } = $self->lower_value($lhs_node);
+        }
+        if ($lr eq 'Undef') {
+            my $rr = $self->_repr_of($rhs_node) // '';
+            $self->{cache}{ 'repr:' . $node->id } = $rr;
+            return $self->{cache}{ $node->id } = $self->lower_value($rhs_node);
+        }
+        if ($lr eq 'Scalar') {
+            $self->{cache}{ 'repr:' . $node->id } = 'Scalar';
+            return $self->_lower_defined_or_by_slot($node, $self->lower_value($lhs_node), 'Scalar');
+        }
+    }
 
     # AN ELEMENT READ MAY MISS, whatever it is stamped (Analysis types it from
     # what the container holds), and a Scalar into a narrower result needs
@@ -5915,6 +5991,19 @@ sub _lower_defined {
         my $bit = $self->_slot_defined_bit($self->_subscript_slot($operand));
         $self->{cache}{$node->id} = $bit;
         return $bit;
+    }
+
+    # A VARIABLE A LIST ASSIGNMENT KEEPS IN A CELL holds a Slot, whose defined
+    # bit is the answer whatever reading its stamp names: a list-context match
+    # that missed left `my ($c) = ...` undef, and a Str-stamped $c read
+    # "always defined". (Read where it is used, as its value is.)
+    if ($operand->operation eq 'PadAccess' && ( $operand->sigil // '$' ) eq '$'
+            && !( $self->{_arg_bind} && $self->{_arg_bind}{ refaddr($operand) } )
+            && !$operand->is_location && !defined $operand->inputs->[0] && $self->{_list_cells}{ $operand->id }) {
+        my $g = $self->{_list_cells}{ $operand->id };
+        my $slot = $self->_fresh;
+        $self->_emit("  $slot = load %Slot, %Slot* $g  ; defined: the variable's Slot");
+        return $self->{cache}{ $node->id } = $self->_slot_defined_bit($slot);
     }
 
     # Lower the operand to get its value ref (or defined bit for Undef-typed).
@@ -6927,8 +7016,10 @@ sub _freeze_memory_reads {
             || ( blessed($c->inputs->[0]) && $c->inputs->[0]->operation eq 'PostfixDeref' && $by_tag->($c->inputs->[0]->inputs->[0]) );
         # AT A LOOP'S BODY START every such read waits: hoisted to the start of
         # the pass it ran ahead of the arm guarding it (pvm 124's `if (ref $i)`).
+        # A COUNT through one too: frozen here it was ahead of the `ref $r`
+        # that guards it, and exited (pvm 073).
         if ($through_tag && ( $self->{_freezing_a_pass}
-                || $c->operation eq 'Subscript' && !grep { blessed($_) && _is_memory_version($_) } $mem_node->consumers->@* )) {
+                || $c->operation =~ /\A(?:Subscript|Count)\z/ && !grep { blessed($_) && _is_memory_version($_) } $mem_node->consumers->@* )) {
             $self->{_pending_tag_reads}{ refaddr($c) } = $c;
             next;
         }
@@ -7182,7 +7273,9 @@ sub _wire_region_phis_with_preblock {
         # gap, which stays _require_repr's loud refusal.
         if (defined $phi_repr && $phi_repr eq 'Unknown') {
             my @r = map { $self->_repr_of($_) } grep { blessed($_) } $inputs->@*;
-            if (@r == 2 && !grep { !defined || !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @r) {
+            # ...or references, boxed by their tag where the arms differ.
+            if (@r == 2 && !grep { !defined || !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } @r) {
+                $_ = 'Scalar' for grep { $_ eq 'Slot' } @r;
                 $phi_repr = $r[0] eq $r[1] ? $r[0] : 'Scalar';
                 $self->{cache}{ 'repr:' . $phi_node->id } = $phi_repr;
             }
@@ -14543,6 +14636,11 @@ sub _lower_reftype {
     my ($self, $node) = @_;
     my $x  = $node->inputs->[0];
     my $xs = blessed($x) ? ($self->_repr_of($x) // '') : '';
+    # A merge nothing typed says what it is once lowered (its arms decide).
+    if ($xs eq 'Unknown') {
+        $self->lower_value($x);
+        $xs = $self->_repr_of($x) // '';
+    }
     my %name = (ArrayRef => 'ARRAY', HashRef => 'HASH', ScalarRef => 'SCALAR', CodeRef => 'CODE');
     # ITS CLASS IS READ WHERE ref() IS LOWERED, not where it stands: a bless
     # elsewhere of this same reference (a rebless, or a bless after an
@@ -14637,6 +14735,11 @@ sub _lower_array_deref {
     my $in = $node->inputs->[0];
     my $arr;
     my $in_repr = $self->_repr_of($in) // '';
+    # A merge nothing typed says what it is once lowered (its arms decide).
+    if ($in_repr eq 'Unknown') {
+        $self->lower_value($in);
+        $in_repr = $self->_repr_of($in) // '';
+    }
     # COUNTED, `@{ undef }` is undef, not 0 (perl's rvalue deref of undef in
     # scalar context); the empty array below is only its list reading.
     # shortcut: the tag-read path below still counts a run-time undef as 0;
@@ -17773,6 +17876,16 @@ sub _lower_regex_capture {
           . "group(s) (\$& / group 0 is a tracked follow-up).";
     }
 
+    my $buf = $self->_capture_str($rec, $n);
+    $self->{cache}{ $node->id } = $buf;
+    return $buf;
+}
+
+# _capture_str($rec, $n) -> %Str: group $n of a match its record describes,
+# copied out of the subject.
+sub _capture_str {
+    my ($self, $rec, $n) = @_;
+    my ($s_ref, $e_ref) = ($rec->{cap_s}[$n], $rec->{cap_e}[$n]);
     $self->{_need_malloc_memcpy} = 1;
 
     my $src = $self->_fresh;
@@ -17788,9 +17901,7 @@ sub _lower_regex_capture {
     $self->_emit("  $nul = getelementptr inbounds i8, i8* $buf, i64 $len  ; RegexCapture: NUL slot");
     $self->_emit("  store i8 0, i8* $nul  ; RegexCapture: NUL-terminate");
 
-    $buf = $self->_set_str_len($buf, $len);
-    $self->{cache}{ $node->id } = $buf;
-    return $buf;
+    return $self->_set_str_len($buf, $len);
 }
 
 # _lower_env_read($node) -> $llvm_ref (i8* value string)
