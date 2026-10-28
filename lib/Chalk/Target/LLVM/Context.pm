@@ -133,6 +133,7 @@ sub new {
         _need_index             => 0,
         _need_str_range         => 0,
         _need_localtime         => 0,
+        _need_access            => 0,
         # G4 Array/Hash aggregate tracking:
         #   _need_aggregate_types => bool
         #     Set when any Array/Hash node is lowered; triggers type struct declarations.
@@ -188,6 +189,7 @@ my @NEED_FLAGS = qw(
     _need_index
     _need_str_range
     _need_localtime
+    _need_access
     _need_memcmp
     _need_aggregate_types
     _need_getenv
@@ -748,6 +750,8 @@ sub render_need_flag_prologue {
     if ($self->{_need_print_str_fmt}) {
         # "%.*s\0" = 5 bytes = [5 x i8]
         push @lines, '@fmt_print_str = private unnamed_addr constant [5 x i8] c"%.*s\00", align 1';
+        # print writes a Str's bytes with fwrite: %.*s stops at a NUL.
+        push @lines, '@stdout = external global i8*', 'declare i64 @fwrite(i8*, i64, i64, i8*)';
         # Records that the DEFINITION exists, so the post-class re-emit below
         # does not add a second one for a program that prints both in the main
         # graph and in a method body.
@@ -961,6 +965,7 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_index_lines;
     push @lines, $self->_str_range_lines;
     push @lines, $self->_localtime_lines;
+    push @lines, 'declare i32 @access(i8*, i32)' if $self->{_need_access} && !$self->{_access_emitted}++;
     push @lines, '@chalk_selected = internal global i8* null  ; the handle a bare print writes to (null: STDOUT)'
         if $self->{_need_select} && !$self->{_select_emitted}++;
     # A method body that stringifies a Num needs these too; the prologue ran
@@ -999,6 +1004,7 @@ sub render_need_flag_postclass_reemit {
     # is the mirror-image lli rejection.
     if ($self->{_need_print_str_fmt} && !$self->{_print_str_fmt_emitted}) {
         push @lines, '@fmt_print_str = private unnamed_addr constant [5 x i8] c"%.*s\00", align 1';
+        push @lines, '@stdout = external global i8*', 'declare i64 @fwrite(i8*, i64, i64, i8*)';
         $self->{_print_str_fmt_emitted} = 1;
     }
 
@@ -2106,6 +2112,67 @@ sub lower_value {
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'chr') {
         return $self->_lower_chr($node);
+    }
+    # pack WITH A CONSTANT TEMPLATE OF C ITEMS (C, C3, C*): each value one
+    # byte, wrapped to 0..255 as perl's C does (pvm 367). Anything else in the
+    # template, or a value that may flatten, is refused.
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'pack') {
+        my ($t, @vals) = grep { blessed($_) } $node->inputs->@*;
+        my $tmpl = blessed($t) && $t->operation eq 'Constant' ? $t->value // '' : undef;
+        die "GAP: pack with a template other than constant C items is not lowered\n"
+            unless defined $tmpl && $tmpl =~ /\A(?:C(?:\d+|\*)?\s*)+\z/;
+        die "GAP: pack of a value that may flatten is not lowered\n"
+            if grep { ( $self->_repr_of($_) // '' ) !~ /\A(?:Int|Num|Str|Boolean|Scalar)\z/ } @vals;
+        my $n = 0;
+        while ($tmpl =~ /C(\d+|\*)?/g) { $n += !defined $1 ? 1 : $1 eq '*' ? @vals - $n : $1 }
+        die "GAP: pack with fewer values than its template is not lowered\n" if $n > @vals;
+        $self->{_need_malloc_memcpy} = 1;
+        my $buf = $self->_fresh;
+        $self->_emit("  $buf = call i8* \@malloc(i64 " . ( $n + 1 ) . ")  ; pack: the bytes");
+        for my $i (0 .. $n - 1) {
+            my $from = $self->_repr_of($vals[$i]) // 'Scalar';
+            my $v = $self->lower_value($vals[$i]);
+            $v = $self->_emit_coercion($v, $from, 'Num', 'pack: a value') if $from ne 'Int' && $from ne 'Num';
+            $v = $self->_emit_coercion($v, 'Num', 'Int', 'pack: a value') if $from ne 'Int';
+            my ($b, $g) = ($self->_fresh, $self->_fresh);
+            $self->_emit("  $b = trunc i64 $v to i8  ; pack: C wraps to a byte");
+            $self->_emit("  $g = getelementptr inbounds i8, i8* $buf, i64 $i");
+            $self->_emit("  store i8 $b, i8* $g");
+        }
+        my $z = $self->_fresh;
+        $self->_emit("  $z = getelementptr inbounds i8, i8* $buf, i64 $n");
+        $self->_emit("  store i8 0, i8* $z");
+        my $str = $self->_set_str_len($buf, $n);
+        my $to = $node->stamp // 'Str';
+        return $self->{cache}{ $node->id } = $to eq 'Str' ? $str : $self->_emit_coercion($str, 'Str', $to, 'pack');
+    }
+    # -e PATH (ftis): 1 when access(2) finds it, else undef -- perl's yes and
+    # its undef for a missing file (pvm 420).
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'ftis') {
+        my ($pn) = grep { blessed($_) } $node->inputs->@*;
+        my $from = $self->_repr_of($pn) // '';
+        my $v = $self->lower_value($pn);
+        $v = $self->_emit_coercion($v, $from, 'Str', '-e: the path') if $from ne 'Str';
+        my ($p, $l) = $self->_str_parts($v);
+        $self->{$_} = 1 for qw(_need_access _need_malloc_memcpy);
+        my ($n1, $buf, $u, $end, $rc, $ok) = map { $self->_fresh } 1 .. 6;
+        $self->_emit("  $n1 = add i64 $l, 1");
+        $self->_emit("  $buf = call i8* \@malloc(i64 $n1)  ; -e: the path, NUL-ended");
+        $self->_emit("  $u = call i8* \@memcpy(i8* $buf, i8* $p, i64 $l)");
+        $self->_emit("  $end = getelementptr inbounds i8, i8* $buf, i64 $l");
+        $self->_emit("  store i8 0, i8* $end");
+        $self->_emit("  $rc = call i32 \@access(i8* $buf, i32 0)  ; -e: F_OK");
+        $self->_emit("  $ok = icmp eq i32 $rc, 0");
+        my ($zd, $tag) = ($self->_fresh, $self->_fresh);
+        my ($s0, $s1, $s2) = map { $self->_fresh } 1 .. 3;
+        $self->_emit("  $tag = select i1 $ok, i8 " . _slot_tag_value('Int') . ", i8 " . _slot_tag_value('Undef'));
+        $self->_emit("  $zd = zext i1 $ok to i64");
+        $self->_emit("  $s0 = insertvalue %Slot undef, i1 $ok, " . _slot_idx('defined'));
+        $self->_emit("  $s1 = insertvalue %Slot $s0, i8 $tag, " . _slot_idx('tag'));
+        $self->_emit("  $s2 = insertvalue %Slot $s1, i64 $zd, " . _slot_idx('payload') . "  ; -e: 1, or undef");
+        $self->{cache}{ 'repr:' . $node->id } = 'Scalar';
+        my $to = $node->stamp // 'Unknown';
+        return $self->{cache}{ $node->id } = $to =~ /\A(?:Scalar|Unknown)\z/ ? $s2 : $self->_emit_coercion($s2, 'Scalar', $to, '-e');
     }
     # wantarray IS THE CONTEXT ITS CALL WAS MADE IN, known at the inlined call
     # site: 1 for a list, false for a scalar, undef for void -- and undef at
@@ -17890,17 +17957,12 @@ sub _lower_print {
             die "Print of a Str arg whose length is not tracked in "
               . "_str_len_table — cannot emit exactly-len bytes."
                 unless defined $len;
-            # printf's %.*s precision arg is i32. A literal length passes through;
-            # an SSA (i64) length is truncated to i32.
-            my $len32 = ($len =~ /\A\d+\z/) ? $len : do {
-                my $t = $self->_fresh;
-                $self->_emit("  $t = trunc i64 $len to i32  ; Print: Str length -> i32");
-                $t;
-            };
+            # fwrite, not printf("%.*s"): that stops at a NUL ("a\0b" printed
+            # "a"). The same stdout stream, so output stays in order.
             $self->{_need_print_str_fmt} = 1;
-            my $fp = $self->_fresh;
-            $self->_emit("  $fp = getelementptr inbounds [5 x i8], [5 x i8]* \@fmt_print_str, i64 0, i64 0  ; Print: %.*s fmt");
-            $self->_emit("  call i32 (i8*, ...) \@printf(i8* $fp, i32 $len32, i8* $ref)  ; Print: emit Str arg");
+            my ($so, $u) = ($self->_fresh, $self->_fresh);
+            $self->_emit("  $so = load i8*, i8** \@stdout");
+            $self->_emit("  $u = call i64 \@fwrite(i8* $ref, i64 1, i64 $len, i8* $so)  ; Print: emit Str arg");
         }
         else {
             # Print's signature is Print(Str...). Anything else must arrive
