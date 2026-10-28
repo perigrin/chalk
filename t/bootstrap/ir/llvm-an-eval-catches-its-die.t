@@ -112,17 +112,17 @@ for my $case (
         or diag "got: " . ( $got // 'undef' ) . " want: $want $@";
 }
 
-# A DIE OF A LIST joins it: only a one-argument die is lowered.
+# A DIE OF A LIST joins it.
 {
-    eval { through_llvm(q{my $r = eval { die "a\n", "b\n" }; print "[$@]";}) };
-    like($@, qr/GAP: .*argument/, 'a die of two arguments is refused');
+    my $got = eval { through_llvm(q{my $r = eval { die "a\n", "b\n" }; print "[$@]";}) };
+    is($got, "[a\nb\n]", 'a die of two arguments joins them') or diag $@;
 }
 
-# A MESSAGE WITHOUT ITS NEWLINE gets " at FILE line N." from perl, which
-# this lowering does not know: refused by name, not answered wrong.
+# A MESSAGE WITHOUT ITS NEWLINE gets " at FILE line N." from perl -- the
+# site B::SoN records for the die.
 {
     my $got = eval { through_llvm(q{my $r = eval { die "no newline" }; print "died: $@";}) };
-    like($@, qr/GAP: .*newline/, 'a message perl would extend is refused');
+    like($got // $@, qr/\Adied: no newline at \S+\.pl line 1\.\n\z/, 'a message perl would extend names the file and line');
 }
 
 done_testing;

@@ -8473,9 +8473,11 @@ sub _store_eval_error {
 # ends in a newline: perl appends " at FILE line N." to any other.
 sub _die_message {
     my ($self, $unwind) = @_;
-    die "GAP: a caught die of " . scalar($unwind->inputs->@*) . " arguments is not lowered -- "
-      . "perl joins them into \$@\n" unless $unwind->inputs->@* == 1;
-    my $m = $unwind->inputs->[0];
+    # SEVERAL ARGUMENTS are joined: the last decides whether perl appends
+    # the file and line.
+    my @parts = $unwind->inputs->@*;
+    die "GAP: a caught die of no argument is not lowered\n" unless @parts;
+    my $m = $parts[-1];
     my $ends_nl;
     $ends_nl = sub ($n) {
         return 0 unless blessed($n);
@@ -8484,13 +8486,55 @@ sub _die_message {
         return $ends_nl->($n->inputs->[-1]) if $n->operation eq 'Concat';
         return 0;
     };
+    # NOT KNOWN TO END IN A NEWLINE: perl appends " at FILE line N." (an
+    # empty one is "Died" so), which B::SoN's site for the die names.
+    my $site = !$ends_nl->($m) && $unwind->can('line') && defined $unwind->line
+        ? " at " . ( $unwind->file // '-e' ) . " line " . $unwind->line . ".\n" : undef;
     die "GAP: a caught die whose message may not end in a newline is not lowered -- "
       . "perl appends \" at FILE line N.\", which this lowering does not know\n"
-        unless $ends_nl->($m);
-    my $ref = $self->lower_value($m);
-    my $from = $m->stamp // '';
-    $ref = $self->_emit_coercion($ref, $from, 'Str', 'die message') if $from ne 'Str';
-    return $ref;
+        unless $ends_nl->($m) || defined $site;
+    my $msg;
+    for my $p (@parts) {
+        my $ref  = $self->lower_value($p);
+        my $from = $p->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($p) // $p->stamp // '' );
+        $from = 'Scalar' if $from eq 'Slot';
+        $ref = $self->_emit_coercion($ref, $from, 'Str', 'die message') if $from ne 'Str';
+        $msg = defined $msg ? $self->_emit_str_append($msg, $ref, 'die: its arguments joined') : $ref;
+    }
+    return defined $site ? $self->_die_message_with_site($msg, $site) : $msg;
+}
+
+# _die_message_with_site($msg, $site) -> %Str: $msg as is where it ends in a
+# newline; else $msg (or "Died", when empty) with $site appended.
+sub _die_message_with_site {
+    my ($self, $msg, $site) = @_;
+    my ($p, $l) = $self->_str_parts($msg);
+    my ($empty, $lm1, $pos, $bp, $b, $nl, $ok) = map { $self->_fresh } 1 .. 7;
+    $self->_emit("  $empty = icmp eq i64 $l, 0  ; die: an empty message?");
+    $self->_emit("  $lm1 = sub i64 $l, 1");
+    $self->_emit("  $pos = select i1 $empty, i64 0, i64 $lm1");
+    $self->_emit("  $bp = getelementptr inbounds i8, i8* $p, i64 $pos");
+    $self->_emit("  $b = load i8, i8* $bp  ; die: its last byte");
+    $self->_emit("  $nl = icmp eq i8 $b, 10");
+    $self->_emit("  $ok = select i1 $empty, i1 false, i1 $nl  ; die: ends in a newline?");
+    my $from = $self->_current_block_label;
+    my ($add, $join) = ($self->_fresh_label('diesite.add.'), $self->_fresh_label('diesite.join.'));
+    $self->_set_terminator("  br i1 $ok, label %$join, label %$add");
+    $self->_new_block($add);
+    my ($dp, $dl) = $self->_str_const_parts('Died', 'die: an empty message');
+    my ($mp, $ml) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $mp = select i1 $empty, i8* $dp, i8* $p");
+    $self->_emit("  $ml = select i1 $empty, i64 $dl, i64 $l");
+    my $with = $self->_emit_str_append($self->_set_str_len($mp, $ml),
+        $self->_set_str_len($self->_str_const_parts($site, 'die: its site')), 'die: the site appended');
+    my ($wp, $wl) = $self->_str_parts($with);
+    my $add_end = $self->_current_block_label;
+    $self->_set_terminator("  br label %$join");
+    $self->_new_block($join);
+    my ($rp, $rl) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $rp = phi i8* [ $p, %$from ], [ $wp, %$add_end ]  ; die: the message");
+    $self->_emit("  $rl = phi i64 [ $l, %$from ], [ $wl, %$add_end ]");
+    return $self->_set_str_len($rp, $rl);
 }
 
 # _lower_builtin_exit($node) -> undef (it produces no value)

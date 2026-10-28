@@ -26,4 +26,14 @@ class Chalk::IR::Node::Unwind :isa(Chalk::IR::Node) {
         $eval_id = $v;
         return;
     }
+
+    # The file and line of its statement (B::SoN), which perl's message
+    # names when it does not end in a newline; undef when the wire has none.
+    field $file :reader = undef;
+    field $line :reader = undef;
+
+    method set_site($f, $l) {
+        ($file, $line) = ($f, $l);
+        return;
+    }
 }
