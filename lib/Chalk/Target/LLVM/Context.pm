@@ -1566,7 +1566,10 @@ sub _refuse_an_in_place_write_to_a_location {
 sub _as_phi_reading {
     my ($self, $ref, $value_node, $phi, $what) = @_;
     return $ref unless blessed($value_node);
-    my ($from, $to) = ( $value_node->stamp // '', $phi->stamp // '' );
+    my ($from, $to) = ( $value_node->stamp // '', $self->{cache}{ 'repr:' . $phi->id } // $phi->stamp // '' );
+    # A value nothing typed is what this lowering made it (an argument).
+    $from = $self->_repr_of($value_node) // '' if $from eq 'Unknown';
+    $from = 'Scalar' if $from eq 'Slot';
     return $self->_build_slot($ref, '0', 'Undef', $what)
         if $to eq 'Scalar' && $from eq 'Undef';
     # An untyped side is left to the machine-type refusal that names it TOP.
@@ -1694,6 +1697,40 @@ sub _reads_mutable_location {
     return $self->{_mut_read_memo}{$id} = $result;
 }
 
+# _read_only_as_its_stamp($node, $from) -> true when a caller's $from (an
+# undef, or an integer read as a string) is what the callee's reading of it
+# says to every consumer: the parameter's stamp is the reading its uses
+# require (B::SoN's backward inference), and none takes the value as it is
+# -- defined, an argument, a return, a store, a merge would see "" for undef.
+my %_READS_A_READING = map { $_ => 1 } qw(
+    Coerce RegexMatch NotMatch Concat Interpolate Add Subtract Multiply Divide Modulo Power Negate
+    NumEq NumNe NumLt NumLe NumGt NumGe NumCmp StrEq StrNe StrLt StrLe StrGt StrGe StrCmp Range);
+sub _read_only_as_its_stamp {
+    my ($node, $from) = @_;
+    my $to = $node->stamp // '';
+    return 0 unless ( $from eq 'Undef' && $to =~ /\A(?:Str|Num|Int)\z/ )
+                 || ( $from eq 'Int' && $to eq 'Str' );
+    for my $c (( $node->consumers // [] )->@*) {
+        next unless blessed($c);
+        my $op = $c->operation;
+        # The `my (...) = @_` that binds it: a target slot, not a use.
+        next if $op eq 'Assign' && blessed($c->inputs->[-1]) && _is_args_array($c->inputs->[-1]);
+        return 0 unless $_READS_A_READING{$op};
+        return 0 if $op eq 'Coerce' && ( $c->to_repr // '' ) !~ /\A(?:Str|Num|Int|Boolean)\z/;
+    }
+    return 1;
+}
+
+# _version_superseded($read) -> true when the memory version a Count or a
+# walking builtin reads is an input of a later version (a store, a call).
+sub _version_superseded {
+    my ($node) = @_;
+    my $mem = $node->operation eq 'Count' ? $node->inputs->[1] : $node->inputs->[-1];
+    return 0 unless blessed($mem);
+    return scalar grep { blessed($_) && refaddr($_) != refaddr($node) && _is_memory_version($_) }
+        ( $mem->consumers // [] )->@*;
+}
+
 # lower_value($node) -> $llvm_ref (a string like "%tmp_1" or "1" for constants)
 # Recursively lowers the data sub-graph rooted at $node, accumulating
 # LLVM IR instructions into the current basic block. Returns the LLVM value
@@ -1730,7 +1767,8 @@ sub lower_value {
                 die "GAP: an inlined argument is a $bound->{repr} where the "
                   . "callee reads a " . $node->stamp . " -- a coercion between "
                   . "them would not keep the value.\n"
-                    unless _keeps_value($bound->{repr}, $node->stamp);
+                    unless _keeps_value($bound->{repr}, $node->stamp)
+                        || _read_only_as_its_stamp($node, $bound->{repr});
                 return $self->_emit_coercion($bound->{ref}, $bound->{repr},
                     $node->stamp, 'inlined argument');
             }
@@ -1774,7 +1812,14 @@ sub lower_value {
     # read at any other version (a call's, a Phi's) is cached where it was
     # first lowered, and served to a block that one does not dominate, lli
     # rejected the module.
-    if (($op eq 'FieldAccess' || $op eq 'PadAccess' || $op eq 'EntryDef' || $op eq 'PostfixDeref') && $self->{_frozen_reads}{$id}
+    # ...and a count or a walk of a whole aggregate it froze, where a store
+    # recorded on the memory chain supersedes its version: re-made at its
+    # use, `my $g = scalar @{ $s->{a} }; push $s->{a}->@*, 1` counted the
+    # push (pvm 230: x1x2 for perl's x0x1). A version nothing on the chain
+    # supersedes (a push onto a field array carries no memory) is re-made
+    # at its use, as before -- served frozen it missed that push.
+    if (($op eq 'FieldAccess' || $op eq 'PadAccess' || $op eq 'EntryDef' || $op eq 'PostfixDeref'
+            || ( ( $op eq 'Count' || $op eq 'Call' ) && _version_superseded($node) )) && $self->{_frozen_reads}{$id}
             && exists $self->{cache}{$id}) {
         return $self->{cache}{$id};
     }
@@ -2282,7 +2327,7 @@ sub lower_value {
     elsif (_is_hash_slice($node)) {
         return $self->{cache}{ $node->id } = $self->_emit_flattened_array_of([$node]);
     }
-    elsif (( $op eq 'Slice' || $op eq 'Range' ) && _is_walked_list($node)) {
+    elsif (( $op eq 'Slice' || $op eq 'Range' ) && _is_walked_list($node, $self)) {
         for my $el (grep { blessed($_) && $_->operation eq 'Subscript' } ($node->consumers // [])->@*) {
             die "GAP: an element of an array slice walked by grep or map is written, referenced "
               . "or passed -- perl aliases the array's element, and the walk here is of a copy\n"
@@ -4787,8 +4832,11 @@ sub _coerce_ref_to_num {
         $self->_emit("  $d = call double \@chalk_str_to_num(i8* $ref, i64 $len_ref)  ; $op: Str operand -> double (leading-numeric)");
         return $d;
     }
+    # A SCALAR numifies by its tag, as perl's does; a Boolean is 1 or "".
+    return $self->_emit_coercion($ref, $repr eq 'Slot' ? 'Scalar' : $repr, 'Num', "$op operand")
+        if $repr =~ /\A(?:Scalar|Slot|Boolean)\z/;
     die "GAP: $op numeric comparison over a $repr operand is not lowered "
-      . "runtime-free (only Int, Num, and Str operands numify). Coerce the "
+      . "runtime-free (only Int, Num, Str and Scalar operands numify). Coerce the "
       . "operand or fix TypeInference.";
 }
 
@@ -4886,8 +4934,9 @@ sub _lower_icmp_int {
     my $inputs  = $node->inputs;
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
-    my $lhs_repr = $lhs_node->stamp;
-    my $rhs_repr = $rhs_node->stamp;
+    # An argument nothing typed is what the caller passed (_repr_of).
+    my $lhs_repr = $self->_repr_of($lhs_node);
+    my $rhs_repr = $self->_repr_of($rhs_node);
     my $lhs_ref = $self->lower_value($lhs_node);
     my $rhs_ref = $self->lower_value($rhs_node);
 
@@ -8365,6 +8414,17 @@ sub _process_loop_node {
         }
         # Lower init value in the preheader block (current block before _new_block).
         my $init_ref = $self->lower_value($inputs->[0]);
+        # A LOOP PHI NOTHING TYPED -- one carrying an argument the caller
+        # typed, known only here -- is what its two values are: one scalar
+        # repr, or a Scalar both are boxed to (the if-merge's rule).
+        # Decided at each lowering: inlined again, its arguments differ.
+        if (( $phi_node->stamp // '' ) eq 'Unknown') {
+            delete $self->{cache}{ 'repr:' . $phi_node->id };
+            my @r = ( $self->_repr_of($inputs->[0]) // '', blessed($inputs->[1]) ? ( $inputs->[1]->stamp // '' ) : '' );
+            $_ = 'Scalar' for grep { $_ eq 'Slot' } @r;
+            $self->{cache}{ 'repr:' . $phi_node->id } = ( grep { $_ ne $r[0] } @r ) ? 'Scalar' : $r[0]
+                unless grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @r;
+        }
         # Coerced here, in the preheader, where it is lowered.
         $init_ref = $self->_as_phi_reading($init_ref, $inputs->[0], $phi_node, 'loop phi init');
         my $phi_ref  = $self->_fresh;
@@ -8549,7 +8609,7 @@ sub _process_loop_node {
         my $init_ref = $rec->{init_ref};
         my $backedge_ref = $rec->{backedge_ref};
 
-        my $repr      = _require_repr($phi_node, 'Loop.Phi');
+        my $repr      = $self->{cache}{ 'repr:' . $phi_node->id } // _require_repr($phi_node, 'Loop.Phi');
         my $llvm_type = _repr_to_llvm_type($repr);
         my $phi_line  = "  $phi_ref = phi $llvm_type [ $init_ref, %$preheader_label ], [ $backedge_ref, %$body_end_label ]  ; Loop phi";
         push @phi_lines, $phi_line;
@@ -9801,7 +9861,7 @@ sub _lower_length {
 
     my $operand = $node->inputs->[0];
     my $op_repr = _require_repr($operand, 'Length.operand');
-    $op_repr = 'Array' if $op_repr eq 'List' && _is_walked_list($operand);   # the list made once
+    $op_repr = 'Array' if $op_repr eq 'List' && _is_walked_list($operand, $self);   # the list made once
 
     if ($op_repr eq 'Array' || $op_repr eq 'ArrayRef') {
         $self->{_need_aggregate_types} = 1;
@@ -10342,12 +10402,13 @@ sub _emit_flattened_array_of {
         # PERL COUNTS NUMBERS only when a bound IS one (pp_flop's
         # RANGE_IS_NUMERIC); two strings count by string increment even when
         # B::SoN coerced both to Int ("aa" .. "ad" counted 0 .. 0 here).
+        # A bound nothing typed (an argument) is what the caller passed.
         my $is_number = sub ($b) {
             $b = $b->inputs->[0] while $b->operation eq 'Coerce';
-            ( $b->stamp // '' ) =~ /\A(?:Int|Num|Boolean)\z/;
+            ( $self->_repr_of($b) // '' ) =~ /\A(?:Int|Num|Boolean)\z/;
         };
         if ($in->operation eq 'Range'
-                && !grep { ( $_->stamp // '' ) ne 'Int' } $in->inputs->@[0, 1]
+                && !grep { ( $self->_repr_of($_) // '' ) ne 'Int' } $in->inputs->@[0, 1]
                 and grep { $is_number->($_) } $in->inputs->@[0, 1]) {
             my ($lo, $hi) = map { $self->lower_value($_) } $in->inputs->@[0, 1];
             my ($head, $body, $done) = map { $self->_fresh_label("range.$_.") } qw(head body done);
@@ -11168,10 +11229,11 @@ sub _lower_split {
 # _is_walked_list($n) -> true for a List grep/map walk as a container (its
 # Count and Subscripts): an array slice, or a range of integers -- made once
 # as a fresh array (lower_value).
-sub _is_walked_list ($n) {
+# A bound nothing typed (an argument) is what the caller passed ($self).
+sub _is_walked_list ($n, $self = undef) {
     return 1 if _is_array_slice($n);
     return blessed($n) && $n->operation eq 'Range'
-        && !grep { !blessed($_) || ( $_->stamp // '' ) ne 'Int' } $n->inputs->@[0, 1];
+        && !grep { !blessed($_) || ( ( $self ? $self->_repr_of($_) : $_->stamp ) // '' ) ne 'Int' } $n->inputs->@[0, 1];
 }
 
 sub _is_hash_slice ($n) {
@@ -12800,6 +12862,10 @@ sub _static_class_of {
 sub _repr_of {
     my ($self, $n) = @_;
     return $self->{cache}{ 'repr:' . $n->id } if blessed($n) && exists $self->{cache}{ 'repr:' . $n->id };
+    # A LOCATION READ NOTHING TYPED is its %Slot (_lower_padaccess).
+    return 'Scalar' if blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '$' ) eq '$'
+        && ( $n->stamp // 'Unknown' ) eq 'Unknown' && ( $n->is_location || $n->shared )
+        && !( $self->{_arg_bind} && $self->{_arg_bind}{ refaddr($n) } );
     my $b = $self->{_arg_bind} && blessed($n) ? $self->{_arg_bind}{ refaddr($n) } : undef;
     # The caller's repr only where lower_value serves the caller's value as
     # it is -- a callee node nothing typed, or one used as a container; one
@@ -12979,7 +13045,7 @@ sub _lower_subscript {
     my $container = $self->_unwrap_ref_container($node->inputs->[0]);
     my $container_repr = $self->_repr_of($container)
         // _require_repr($container, 'Subscript.container');
-    $container_repr = 'Array' if $container_repr eq 'List' && _is_walked_list($container);   # the list made once
+    $container_repr = 'Array' if $container_repr eq 'List' && _is_walked_list($container, $self);   # the list made once
     # A container read by its tag: the read says which kind it is.
     if ($container_repr =~ /\A(?:Scalar|Slot)\z/ && ($node->can('kind') ? $node->kind // '' : '') =~ /\A(array|hash)\z/) {
         $container_repr = $1 eq 'array' ? 'ArrayRef' : 'HashRef';
@@ -13926,7 +13992,9 @@ sub _lower_builtin_push {
     for my $v (@values) {
         # A VALUE READ BY ITS TAG (an element of an array handed in), or
         # undef, or a reference (boxed with its tag), is appended as its Slot.
-        if (( $self->_repr_of($v) // '' ) =~ /\A(?:Scalar|Slot|Undef|ArrayRef|HashRef|CodeRef|ScalarRef|Object)\z/) {
+        # ...and an argument nothing typed, as what the caller passed.
+        if (( $self->_repr_of($v) // '' ) =~ /\A(?:Scalar|Slot|Undef|ArrayRef|HashRef|CodeRef|ScalarRef|Object)\z/
+                || ( ( $v->stamp // 'Unknown' ) eq 'Unknown' && ( $self->_repr_of($v) // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/ )) {
             $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy);
             my $slot = $self->_slot_of_value($v, $self->lower_value($v), 'push');
             $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $slot)  ; push: a value by its tag");
@@ -15054,6 +15122,25 @@ sub _lower_method_on_non_object {
     return $self->{cache}{ $node->id } = $self->_build_slot('false', '0', 'Undef', 'after a die: unreached');
 }
 
+# _die_into_eval($node, $message) -> the call's placeholder value, or undef:
+# a call that certainly dies (its arity, say) inside a block eval is a branch
+# to that eval's catch -- where nothing reads $@ (perl's message names the
+# file and line) and nothing reads the call's value (void context).
+sub _die_into_eval {
+    my ($self, $node, $msg) = @_;
+    my $f = ($self->{_eval_frames} // [])->[-1];
+    return undef if !$f || $READS_ERROR
+        || ( ( $node->can('want') ? $node->want : undef ) // '' ) ne 'void'
+        || !( $node->can('eval_id') && defined $node->eval_id
+              && ( $f->{region}->eval_id // '' ) eq $node->eval_id );
+    $self->_store_eval_error($self->_set_str_len($self->_str_const_parts("$msg\n", 'a call that dies')));
+    $f->{cached_at_first_die} //= { map { $_ => 1 } keys %{ $self->{cache} } };
+    $f->{dies}++;
+    $self->_set_terminator("  br label %$f->{catch}  ; $msg: caught by its eval");
+    $self->_new_block($self->_fresh_label('died.after.'));
+    return $self->{cache}{ $node->id } = '0';
+}
+
 # Lowers a Call(dispatch_kind='method', name='new') node.
 # This is the canonical form of the New node: malloc + vtable bind + :param binding.
 # Inputs are the :param values; the class rides as the class_name attribute.
@@ -15484,9 +15571,11 @@ sub _lower_call_direct {
         # it, stamped Unknown, is that Scalar -- this call node is this call
         # site's own, so saying so is no one else's business.
         # A reference too: a package method returning its blessed `$self`.
+        # An UNDEF too: its value is its defined bit, which `defined` of the
+        # call reads -- left Unknown, it answered "always defined".
         $node->set_stamp($from)
             if ( $node->stamp // 'Unknown' ) eq 'Unknown'
-            && $from =~ /\A(?:Scalar|Int|Num|Str|Boolean|ArrayRef|HashRef|CodeRef|ScalarRef)\z/;
+            && $from =~ /\A(?:Scalar|Int|Num|Str|Boolean|Undef|ArrayRef|HashRef|CodeRef|ScalarRef)\z/;
         # A SCALAR-CONTEXT CALL STAMPED AS A LIST reads its callee's scalar
         # reading, which is what was lowered: `sub g { return }` gives undef
         # there, and the call stamped List was "always defined" (backlog
@@ -15595,11 +15684,23 @@ sub _lower_call_direct {
             if $unknown;
         die "GAP: direct call to '$name': a signature with a slurpy parameter is not lowered\n"
             if grep { /\A[@%]/ } @declared;
-        die "GAP: direct call to '$name' passes " . scalar(@args) . " argument(s) to a "
-          . "signature of " . scalar(@declared) . " -- perl dies (Too many arguments).\n"
-            if @args > @declared && !$unknown;
+        if (@args > @declared && !$unknown) {
+            my $r = $self->_die_into_eval($node, "Too many arguments for subroutine '$name'");
+            return $r if defined $r;
+            die "GAP: direct call to '$name' passes " . scalar(@args) . " argument(s) to a "
+              . "signature of " . scalar(@declared) . " -- perl dies (Too many arguments).\n";
+        }
         my %read = map { $_->index => $_ } grep { blessed($_) } @arg_reads;
         for my $i (scalar(@args) .. $#declared) {
+            next if $read{$i} && defined $read{$i}->default_when
+                    # A DEFAULT THAT RUNS CODE (`$x = g()`) is the body's: an if on
+                    # how many arguments @_ holds. The declared signature says the
+                    # position is optional.
+                    or ref $sig eq 'HASH' && ( $sig->{kind} // '' ) eq 'declared'
+                        && defined $sig->{mandatory}   # every scalar; the last `optional` default
+                        && $i >= $sig->{mandatory} - ( $sig->{optional} // 0 );
+            my $r = $self->_die_into_eval($node, "Too few arguments for subroutine '$name'");
+            return $r if defined $r;
             die "GAP: direct call to '$name' passes " . scalar(@args) . " argument(s), too few "
               . "for its signature -- perl dies (Too few arguments).\n"
                 unless $read{$i} && defined $read{$i}->default_when
@@ -17403,8 +17504,15 @@ sub _lower_regex_match {
     my $subj_node = $node->inputs->[0];
     my $repr      = _require_repr($node, 'RegexMatch');
 
-    # Lower the subject to its i8* pointer and obtain its byte length.
-    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($self->lower_value($subj_node));
+    # Lower the subject to its i8* pointer and obtain its byte length -- read
+    # as a string from what it is: an argument nothing typed may be the
+    # caller's undef (""), a number, or a Scalar.
+    my $subj_from = $subj_node->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($subj_node) // '' );
+    $subj_from = 'Scalar' if $subj_from eq 'Slot';
+    my $subj_val = $self->lower_value($subj_node);
+    $subj_val = $self->_emit_coercion($subj_val, $subj_from, 'Str', 'RegexMatch subject')
+        if $subj_from =~ /\A(?:Int|Num|Boolean|Undef|Scalar)\z/;
+    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($subj_val);
     my $subj_len  = $subj_len_tracked
         // die "GAP: RegexMatch subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";
