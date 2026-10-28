@@ -1824,7 +1824,10 @@ sub lower_value {
     # push (pvm 230: x1x2 for perl's x0x1). A version nothing on the chain
     # supersedes (a push onto a field array carries no memory) is re-made
     # at its use, as before -- served frozen it missed that push.
+    # ...and a ternary made before a store its pending read may see
+    # (_make_pending_reads_before).
     if (($op eq 'FieldAccess' || $op eq 'PadAccess' || $op eq 'EntryDef' || $op eq 'PostfixDeref'
+            || $op eq 'TernaryExpr'
             || ( ( $op eq 'Count' || $op eq 'Call' ) && _version_superseded($node) )) && $self->{_frozen_reads}{$id}
             && exists $self->{cache}{$id}) {
         return $self->{cache}{$id};
@@ -6757,9 +6760,11 @@ sub process_control_node {
     my $op = $node->operation;
     $self->_open_evals_entered($node);
     if ($op eq 'If') {
+        $self->_make_pending_reads_before($node);
         $self->_process_if_node($node);
     }
     elsif ($op eq 'Loop') {
+        $self->_make_pending_reads_before($node);
         $self->_process_loop_node($node);
     }
     elsif (Chalk::IR::NodeFactory::is_statement_node($op)) {
@@ -6770,6 +6775,7 @@ sub process_control_node {
         # effect — a store, a dispatched call's field mutation, a
         # substitution — is emitted at its control position, before any
         # later read.
+        $self->_make_pending_reads_before($node);
         $self->lower_value($node);
         # Memory-SSA: an element-store Assign PRODUCES a new memory version.
         # Emit + freeze the element reads that observe THIS version (its
@@ -7181,6 +7187,7 @@ sub _freeze_memory_reads {
         if ($through_tag && ( $self->{_freezing_a_pass}
                 || $c->operation =~ /\A(?:Subscript|Count)\z/ && !grep { blessed($_) && _is_memory_version($_) } $mem_node->consumers->@* )) {
             $self->{_pending_tag_reads}{ refaddr($c) } = $c;
+            $self->{_pending_tag_cache}{ refaddr($c) } = refaddr($self->{cache});
             next;
         }
         my $ref = $self->lower_value($c);
@@ -12742,28 +12749,172 @@ sub _miss_kept {
 # buffer -- a push, unshift or splice, or an element store (through the array
 # or a reference to it) at an index not proven inside its literal length.
 # An element's reference points into that buffer, so it is refused then.
-sub _array_may_grow {
+sub _array_may_grow { return scalar _array_growths($_[0]) }
+
+# _array_growths($ctr) -> what may grow the array: a push, unshift or
+# splice of it, or a store to an element a literal of it does not hold.
+sub _array_growths {
     my ($ctr) = @_;
     my $n = $ctr->operation eq 'ArrayLiteral' ? scalar(@{ $ctr->inputs }) : 0;
     my @q = ($ctr);
-    my %seen;
+    my (%seen, @g);
     while (defined(my $c = shift @q)) {
         next if $seen{ refaddr($c) }++;
         for my $u (($c->consumers // [])->@*) {
             next unless blessed($u);
             my $op = $u->operation;
-            return 1 if $op eq 'Call' && ( $u->name // '' ) =~ /\A(?:push|unshift|splice)\z/;
+            push @g, $u if $op eq 'Call' && ( $u->name // '' ) =~ /\A(?:push|unshift|splice)\z/;
             push @q, $u if $op eq 'Ref';
             next unless $op eq 'Subscript' && refaddr($u->inputs->[0]) == refaddr($c);
             for my $a (($u->consumers // [])->@*) {
                 next unless blessed($a) && $a->operation eq 'Assign' && refaddr($a->inputs->[0] // 0) == refaddr($u);
                 my $ix = $u->inputs->[1];
-                return 1 unless blessed($ix) && $ix->operation eq 'Constant'
+                push @g, $a unless blessed($ix) && $ix->operation eq 'Constant'
                     && ( $ix->value // '' ) =~ /\A\d+\z/ && $ix->value < $n;
             }
         }
     }
-    return 0;
+    return @g;
+}
+
+# _make_pending_reads_before($store): a read through a reference left where
+# it is used (_freeze_memory_reads) may be of the element this store writes
+# -- a foreach alias is one -- and is made before it. A read only a ternary
+# chooses (`exists ? $$alias : $a[$i]`) is made by making the ternary, its
+# guard kept; another is refused.
+#
+# BEFORE A LOOP OR AN IF, too, the alias ternaries are made (only those): a
+# store in its body would make them there, which does not dominate a use
+# after it.
+sub _make_pending_reads_before {
+    my ($self, $node) = @_;
+    my $op = $node->operation;
+    my $lhs = $op eq 'Assign' ? $node->inputs->[0] : undef;
+    my $structure = $op eq 'Loop' || $op eq 'If';
+    return unless $structure || ( blessed($lhs) && $lhs->operation =~ /\A(?:Subscript|PostfixDeref)\z/ )
+        || $self->_is_array_mutating_call($node);
+    # A STORE TO AN AGGREGATE NOTHING REFERS TO: no read through a
+    # reference reads it.
+    my $ctr = blessed($lhs) && $lhs->operation eq 'Subscript' ? $lhs->inputs->[0]
+            : !$structure && !blessed($lhs) ? $node->inputs->[0] : undef;
+    return if blessed($ctr) && _never_referenced($ctr);
+    # What the store itself reads is made by it, before it stores.
+    my %own;
+    unless ($structure) {
+        my @q = grep { blessed($_) } $node->inputs->@*;
+        while (defined(my $n = shift @q)) {
+            next if $own{ refaddr($n) }++ || $n->operation =~ /\A(?:Phi|Loop|Region|Start|MemStart)\z/;
+            push @q, grep { blessed($_) } $n->inputs->@*;
+        }
+    }
+    for my $p (values %{ $self->{_pending_tag_reads} // {} }) {
+        next if exists $self->{cache}{ $p->id };
+        # Another loop's, not open here.
+        next if _reaches_an_unlowered_phi($self, $p);
+        next if $own{ refaddr($p) };
+        # Another frame's (an inlined sub's, or its caller's): left waiting
+        # under another cache.
+        next unless ( $self->{_pending_tag_cache}{ refaddr($p) } // 0 ) == refaddr($self->{cache});
+        # A named variable's read: no element store writes it.
+        next unless $p->operation =~ /\A(?:PostfixDeref|Subscript|Count|Exists)\z/;
+        my @readers = grep { my $c = $_; blessed($c) && grep { blessed($_) && refaddr($_) == refaddr($p) } $c->inputs->@* }
+            ( $p->consumers // [] )->@*;
+        my $guarded = @readers && !grep {
+            my $c = $_;
+            !( $c->operation eq 'TernaryExpr' && refaddr($c->inputs->[0] // 0) != refaddr($p)
+               && ( !$structure || ( blessed($c->inputs->[0]) && $c->inputs->[0]->operation eq 'Exists' ) ) )
+        } @readers;
+        next if $structure && !$guarded;
+        die "GAP: a store to an element while a read through a reference waits to be made "
+          . "-- it may read the same element, after this store\n" unless $guarded;
+        for my $t (@readers) {
+            next if exists $self->{cache}{ $t->id };
+            $self->{cache}{ $t->id } = $self->lower_value($t);
+            $self->{_frozen_reads}{ $t->id } = 1;
+        }
+    }
+}
+
+# _never_referenced($ctr): a lexical aggregate no reference is taken of --
+# of it, or of an element of it.
+sub _never_referenced {
+    my ($ctr) = @_;
+    return 0 unless $ctr->operation =~ /\A(?:PadAccess|ArrayLiteral|HashLiteral)\z/;
+    for my $u (( $ctr->consumers // [] )->@*) {
+        next unless blessed($u);
+        return 0 if $u->operation eq 'Ref';
+        return 0 if $u->operation eq 'Subscript'
+            && grep { blessed($_) && $_->operation eq 'Ref' } ( $u->consumers // [] )->@*;
+    }
+    return 1;
+}
+
+# _alias_loop($ref) -> the Loop a foreach alias `\$a[$i]` lives one pass of,
+# or undef: its index is that loop's counter, and its value is only read,
+# stored through, or bound as the loop's variable -- never referred to again
+# (it would outlive the pass).
+sub _alias_loop {
+    my ($ref) = @_;
+    my $x  = $ref->inputs->[0];
+    my $ix = blessed($x) ? $x->inputs->[1] : undef;
+    return undef unless blessed($ix) && $ix->operation eq 'Phi' && blessed($ix->region)
+        && $ix->region->operation eq 'Loop';
+    my (@q, %seen) = ($ref);
+    while (defined(my $n = shift @q)) {
+        next if $seen{ refaddr($n) }++;
+        for my $c (( $n->consumers // [] )->@*) {
+            # A data reader; one that only follows it in control does not read it.
+            next unless blessed($c) && grep { blessed($_) && refaddr($_) == refaddr($n) } $c->inputs->@*;
+            my $op = $c->operation;
+            return undef if $op eq 'Ref';
+            if ($op eq 'TernaryExpr' || $op eq 'LocalAlias') { push @q, $c; next }
+            if ($op eq 'PostfixDeref' && refaddr($c->inputs->[0] // 0) == refaddr($n)) {
+                return undef if grep { blessed($_) && $_->operation eq 'Ref' } ( $c->consumers // [] )->@*;
+                next;
+            }
+            return undef;
+        }
+    }
+    return $ix->region;
+}
+
+# _store_bounded_by_its_loop($sub, $ctr): `$a[$i] = ...` where $i is the
+# counter (from 0) of a loop whose test is `@a > $i`, stored in its body,
+# and nothing shrinks @a -- the element is there: the store cannot grow it.
+sub _store_bounded_by_its_loop {
+    my ($sub, $ctr) = @_;
+    my $ix = $sub->inputs->[1];
+    return 0 unless blessed($ix) && $ix->operation eq 'Phi' && blessed($ix->region)
+        && $ix->region->operation eq 'Loop';
+    my $loop  = $ix->region;
+    my $start = $ix->inputs->[0];
+    return 0 unless blessed($start) && $start->operation eq 'Constant' && ( $start->value // '' ) eq '0';
+    my $is_ctr = sub ($n) { blessed($n) && refaddr($n) == refaddr($ctr) };
+    my ($test) = grep {
+        blessed($_) && $_->operation eq 'NumGt' && blessed($_->control_in) && refaddr($_->control_in) == refaddr($loop)
+            && blessed($_->inputs->[0]) && $_->inputs->[0]->operation eq 'Count' && $is_ctr->($_->inputs->[0]->inputs->[0])
+            && refaddr($_->inputs->[1] // 0) == refaddr($ix)
+    } ( $loop->consumers // [] )->@*;
+    return 0 unless $test && _in_loop_body($sub, $loop);
+    return !grep {
+        blessed($_) && $_->operation eq 'Call' && ( $_->name // '' ) =~ /\A(?:pop|shift|splice)\z/
+    } ( $ctr->consumers // [] )->@*;
+}
+
+# _in_loop_body($n, $loop): $n runs in $loop's body -- its control, walked
+# back, reaches the loop's body before the loop itself (unknown: it does).
+sub _in_loop_body {
+    my ($n, $loop) = @_;
+    my $c = $n->can('control_in') ? $n->control_in : undef;
+    my %seen;
+    while (blessed($c) && !$seen{ refaddr($c) }++) {
+        my $op = $c->operation;
+        return ( $c->index // 0 ) == 0
+            if $op eq 'Proj' && refaddr($c->inputs->[0] // 0) == refaddr($loop);
+        return 0 if $op eq 'Start' || refaddr($c) == refaddr($loop);
+        $c = $op =~ /\A(?:Region|Loop|Proj)\z/ ? $c->inputs->[0] : $c->control_in;
+    }
+    return 1;
 }
 
 # _emit_array_extend_to($arr, $idx) -> $idx': make index $idx storable, as
@@ -14859,8 +15010,21 @@ sub _lower_ref {
     # for an array anything grows: a grown buffer is a new one.
     elsif ($x->operation eq 'Subscript' && ( $self->_repr_of($x->inputs->[0]) // '' ) =~ /\A(?:Array|ArrayRef)\z/) {
         my $ctr = $self->_unwrap_ref_container($x->inputs->[0]);
-        die "GAP: a reference to an element of an array that may grow is not lowered\n"
-            if _array_may_grow($ctr);
+        my @grows = _array_growths($ctr);
+        # A FOREACH ALIAS lives one pass: only what grows the array in the
+        # loop's body moves it -- not a store at 0, there (the loop walks an
+        # array with an element).
+        if (@grows && (my $loop = _alias_loop($node))) {
+            @grows = grep {
+                my $g = $_;
+                my $s = $g->operation eq 'Assign' ? $g->inputs->[0] : undef;
+                _in_loop_body($g, $loop)
+                    && !( blessed($s) && blessed($s->inputs->[1]) && $s->inputs->[1]->operation eq 'Constant'
+                          && ( $s->inputs->[1]->value // '' ) eq '0' )
+                    && !( blessed($s) && _store_bounded_by_its_loop($s, $ctr) )
+            } @grows;
+        }
+        die "GAP: a reference to an element of an array that may grow is not lowered\n" if @grows;
         $self->_refuse_inside_eval("a reference to an array element (it dies before the start)");
         my $arr = $self->_container_ptr($ctr, 'Array');
         my $i   = $self->_index_i64($x->inputs->[1]);

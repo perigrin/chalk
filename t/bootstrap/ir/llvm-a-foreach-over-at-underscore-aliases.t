@@ -55,8 +55,39 @@ for my $case (
 # own arm": the arm walk cycled because the JSON loader interned two pinned
 # reads of one content into one node. Kept apart, the walk ends, and the
 # program is refused further on (a value nothing typed).
+# An alias lives one pass of its loop: what grows the array before the
+# loop, or stores at 0 in it (the array has an element there), does not move
+# it (pvm 187 190 198).
 for my $case (
-    [ q{my @a; $a[1] = 1; my $s = ""; for my $x (@a) { $a[0] = 5; $s .= $x // "u" } print $s, "\n"}, qr/GAP: a reference to an element of an array that may grow/, 'an alias into an array a store may grow' ],
+    [ q{sub f { my @a; $a[1] = 1; my $s = ""; for my $x (@a) { $a[0] = 5; $s .= $x // "u" } print $s, (exists $a[0] ? "e" : "n"), "\n" } f();}, 'a store at 0 in the loop, one past before it' ],
+    [ q{sub f { my @a; push @a, 1, 2; my $s = ""; for my $x (@a) { $s .= $x; $_ = 0 for @a } return "$s|@a" } print f(), "\n";}, 'a push before the loop, an inner loop storing through aliases' ],
+    [ q{my @a = (1); push @a, 2; my $s = ""; for my $x (@a) { $x *= 10 } push @a, 3; print "@a\n";}, 'a push after the loop' ],
+) {
+    my ($src, $name) = @$case;
+    my $want = qx($^X -e '$src');
+    my $got = eval { through_llvm($src) };
+    is($got, $want, "$name: perl's answer") or diag $@;
+}
+
+# A read through the alias before a store to its element in the same pass
+# reads what was there -- it once read the store (rw1 rw2 rw3).
+for my $case (
+    [ q{my @a = (1, 2); my $s = ""; for my $x (@a) { $s .= $x; $a[1] = 0; $a[0] = 0 } print "$s|@a\n";}, 'read, then stores to both elements' ],
+    [ q{sub f { my @a = (1, 2); my $s = ""; for my $x (@a) { $s .= $x; $a[0] = 0 } return "$s|@a" } print f(), "\n";}, 'in a sub' ],
+    [ q{my @a = (1, 2); my $s = ""; for my $x (@a) { my $y = $x; $a[0] = 9; $s .= $y } print "$s\n";}, 'a copy, then a store' ],
+) {
+    my ($src, $name) = @$case;
+    my $want = qx($^X -e '$src');
+    my $got = eval { through_llvm($src) };
+    if (!defined $got && $@ =~ /GAP: /) { pass("$name: refused by name") }
+    else { is($got, $want, "$name: perl's answer") or diag $@ }
+}
+
+# What grows the array while an alias into it lives moves the alias.
+for my $case (
+    [ q{my @a = (1, 2); my $s = ""; for my $x (@a) { push @a, 3 if @a < 4; $s .= $x } print "$s\n"}, qr/GAP: a reference to an element of an array that may grow/, 'a push in the loop' ],
+    # B::SoN refuses this one today; chalk refuses it too, should it arrive.
+    [ q{my @a = (1); my @r; for my $x (@a) { push @r, \$x } push @a, 2 .. 9; ${$r[0]} = 7; print "$a[0]\n"}, qr/\A(?:load|lower):/, 'an alias that escapes its pass' ],
 ) {
     my ($src, $re, $name) = @$case;
     my $err = do { local $@; eval { through_llvm($src) }; $@ };
