@@ -3097,6 +3097,16 @@ sub _lower_concat {
     my $inputs  = $node->inputs;
     my $lhs_val = $self->lower_value($inputs->[0]);
     my $rhs_val = $self->lower_value($inputs->[1]);
+    # AN OPERAND NOTHING TYPED is what it was lowered as: `$b // 'u'` of an
+    # argument held as a Scalar is a %Slot, read here as a %Str.
+    for my $side ([ \$lhs_val, $inputs->[0] ], [ \$rhs_val, $inputs->[1] ]) {
+        my ($v, $in) = @$side;
+        next unless ( $in->stamp // 'Unknown' ) eq 'Unknown';
+        my $r = $self->_repr_of($in) // '';
+        $r = 'Scalar' if $r eq 'Slot';
+        $$v = $self->_emit_coercion($$v, $r, 'Str', 'Concat operand')
+            if $r =~ /\A(?:Scalar|Int|Num|Boolean)\z/;
+    }
 
     # Through the consumer seam: a Str's pointer and length arrive TOGETHER, so
     # they cannot be sourced from two places that disagree.
@@ -13854,22 +13864,12 @@ sub _lower_subscript {
     }
 }
 
-# _lower_array_read: bounds-checked element read.
-# inputs = [Array, index :Int]. repr=Int: extract payload (in-bounds known).
-# repr=Slot: return an alloca {i1,i64} — defined=true if in-bounds, false if OOB.
-# The bounds-check is ALWAYS emitted (soundness). For repr=Int, the OOB path
-# stores undefined into the payload (unreachable for valid in-bounds indices).
-sub _lower_array_read {
-    my ($self, $node) = @_;
-
+# _emit_array_slot_at($arr_ref, $idx_ref) -> the %Slot at that index of an
+# %Array, bounds-checked: from the end for a negative index, and an undef Slot
+# past either end. The element read's own repr is the caller's to decode.
+sub _emit_array_slot_at {
+    my ($self, $arr_ref, $idx_ref) = @_;
     $self->{_need_aggregate_types} = 1;
-
-    my $container = $node->inputs->[0];
-    # Typed pointer resolved at THIS use (re-lowered for mutable-read
-    # containers; bitcast for Ref reprs) — see _container_ptr.
-    my $arr_ref = $self->_container_ptr($container, 'Array');
-    my $idx_ref = $self->_index_i64($node->inputs->[1]);
-    my $repr    = _require_repr($node, 'ArrayRead');
 
     # Load len and elems pointer from the Array struct.
     my $len_ptr  = $self->_fresh;
@@ -13933,6 +13933,26 @@ sub _lower_array_read {
     $self->_new_block($lbl_end);
     my $slot = $self->_fresh;
     $self->_emit("  $slot = phi %Slot [ $slot_all, \%$lbl_inb ], [ $slot_oob, \%$lbl_oob ]  ; ArrayRead :Slot phi");
+    return $slot;
+}
+
+# _lower_array_read: bounds-checked element read.
+# inputs = [Array, index :Int]. repr=Int: extract payload (in-bounds known).
+# repr=Slot: return an alloca {i1,i64} — defined=true if in-bounds, false if OOB.
+# The bounds-check is ALWAYS emitted (soundness). For repr=Int, the OOB path
+# stores undefined into the payload (unreachable for valid in-bounds indices).
+sub _lower_array_read {
+    my ($self, $node) = @_;
+
+    $self->{_need_aggregate_types} = 1;
+
+    my $container = $node->inputs->[0];
+    # Typed pointer resolved at THIS use (re-lowered for mutable-read
+    # containers; bitcast for Ref reprs) — see _container_ptr.
+    my $arr_ref = $self->_container_ptr($container, 'Array');
+    my $idx_ref = $self->_index_i64($node->inputs->[1]);
+    my $repr    = _require_repr($node, 'ArrayRead');
+    my $slot    = $self->_emit_array_slot_at($arr_ref, $idx_ref);
     my $result = $self->_slot_as_reading($slot, $repr, 'ArrayRead');
     $self->{cache}{ $node->id } = $result;
     return $result;
@@ -16615,9 +16635,21 @@ sub _lower_call_direct {
     # the arguments flattened (_emit_flattened_array_of): an array, or a
     # list a call returns, is its elements. A hash is not built so.
     my $as_list_only = $args_array && !@arg_reads && !$slurpy && !$written;
+    # @_ READ ONLY BY POSITION (no write, slurpy, signature or list read) of an
+    # argument that flattens is the arguments flattened, each read the
+    # element at its index -- undef past the end.
+    my $flattens = sub ($a) {
+        my $st = $a->stamp // 'Unknown';
+        return $st eq 'Array' || ( $st eq 'List' && $a->operation eq 'Call' )
+            || ( $st eq 'Unknown' && $a->operation eq 'Call' && ( $a->can('want') ? $a->want // '' : '' ) eq 'list' );
+    };
+    my $by_position = @arg_reads && !$args_array && !$slurpy && !$written && !$signature && !$shared
+        && ( grep { $flattens->($_) } @args )
+        && !grep { ( $_->stamp // '' ) =~ /\A(?:Hash|List)\z/ && !$flattens->($_) } @args;
     for my $a ( ( @arg_reads || $args_array || $slurpy || $written ) ? @args : () ) {
         my $st = $a->stamp // 'Unknown';
         next if $as_list_only && ( $st eq 'Array' || ( $st eq 'List' && $a->operation eq 'Call' ) );
+        next if $by_position;
         die "GAP: direct call to '$name': an argument stamped $st flattens into \@_, "
           . "which inlining does not build.\n"
             if $st =~ /\A(?:Array|Hash|List)\z/
@@ -16638,7 +16670,10 @@ sub _lower_call_direct {
     # AnonSub, it is what an indirect call in the callee runs.
     die "GAP: direct call to '$name': a code reference in an \@_ read as a list is not lowered\n"
         if $args_array && grep { blessed($_) && $_->operation eq 'AnonSub' } @args;
+    # Flattened once: each argument's effects run once, in order.
+    my $flat = $by_position ? $self->_emit_flattened_array_of(\@args) : undef;
     my @arg_refs = $shared ? $shared->{refs}->@*
+                 : $by_position ? ()
                  : map { $_->operation eq 'AnonSub' ? undef : $self->lower_value($_) } @args;
     my $shifts = grep { blessed($_) && $_->operation eq 'Call' } @arg_reads;
     die "GAP: direct call to '$name' as `&$name` shifts or writes the \@_ it shares\n"
@@ -16670,6 +16705,14 @@ sub _lower_call_direct {
             my $k = $r->index;
             if ($k < @args) { $self->{_arg_bind}{ refaddr($r) } = $self->_arg_binding($args[$k], $arg_refs[$k]) }
             else              { push @defaulted, $r }
+        }
+        elsif ($by_position) {
+            # Read as the read's own repr where it has one, as an element read is.
+            my $slot = $self->_emit_array_slot_at($flat, $i);
+            my $st   = $r->stamp // 'Scalar';
+            $self->{_arg_bind}{ refaddr($r) } = $st =~ /\A(?:Scalar|Unknown|Slot)\z/
+                ? { ref => $slot, repr => 'Scalar' }
+                : { ref => $self->_slot_as_reading($slot, $st, "$name: argument $i"), repr => $st };
         }
         elsif ($i < @args) {
             $self->{_arg_bind}{ refaddr($r) } = $self->_arg_binding($args[$i], $arg_refs[$i]);
