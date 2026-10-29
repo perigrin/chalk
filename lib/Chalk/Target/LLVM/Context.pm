@@ -5646,12 +5646,26 @@ sub _shortcircuit_operand_repr {
     my ($self, $node, $seen) = @_;
     $seen //= {};
     my $r = $self->_repr_of($node) // $node->stamp;
+    # A METHOD CALL NOTHING TYPED is typed once lowered: a run-time dispatch
+    # is a Scalar, and an inlined one is boxed to it after (_held_as).
+    return 'Scalar' if ( $r // '' ) eq 'Unknown' && $node->operation eq 'Call'
+        && ( $node->can('dispatch_kind') ? $node->dispatch_kind // '' : '' ) eq 'method';
     return $r unless ( $r // '' ) eq 'Unknown'
         && $node->operation =~ /\A(?:And|Or)\z/ && !$seen->{ refaddr($node) }++;
     my @a = map { $_->operation eq 'Print' ? 'Boolean' : $self->_shortcircuit_operand_repr($_, $seen) }
         $node->inputs->@[0, 1];
-    return $r if grep { !defined || !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @a;
+    return $r if grep { !defined || !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } @a;
     return $a[0] eq $a[1] ? $a[0] : 'Scalar';
+}
+
+# _held_as($ref, $node, $predicted, $what) -> $ref read as the repr the
+# short-circuit decided before lowering it, from the repr it was lowered as.
+sub _held_as {
+    my ($self, $ref, $node, $predicted, $what) = @_;
+    my $actual = $self->_repr_of($node) // $node->stamp // '';
+    $actual = 'Scalar' if $actual eq 'Slot';
+    return $ref if !defined $predicted || $actual eq $predicted || $actual eq 'Unknown';
+    return $self->_emit_coercion($ref, $actual, $predicted, $what);
 }
 
 sub _lower_and {
@@ -5711,7 +5725,7 @@ sub _lower_and {
     # A MERGE NOTHING TYPED -- an operand an inlined argument, known only
     # here -- boxes its arms to the Scalar they both are.
     if (( $repr // 'Unknown' ) eq 'Unknown' && defined $lhs_repr && defined $rhs_repr
-            && !grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } $lhs_repr, $rhs_repr) {
+            && !grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } $lhs_repr, $rhs_repr) {
         $repr = $lhs_repr eq $rhs_repr ? $lhs_repr : 'Scalar';   # agreeing arms keep their type
         $self->{cache}{ 'repr:' . $node->id } = $repr;   # this lowering's, not the node's: inlined again, its arguments differ
     }
@@ -5721,6 +5735,7 @@ sub _lower_and {
 
     # Lower the LHS in the current block, then test its truthiness.
     my $lhs_ref    = $self->lower_value($lhs_node);
+    $lhs_ref = $self->_held_as($lhs_ref, $lhs_node, $lhs_repr, 'short-circuit lhs');
     my $cond = $self->_shortcircuit_i1_cond($lhs_ref, $lhs_repr, 'And', 'LHS');
     if (defined $merge_repr) {
         $lhs_ref = $self->_emit_coercion($lhs_ref, $lhs_repr, $merge_repr,
@@ -5745,6 +5760,7 @@ sub _lower_and {
     # of a shared node (a folded `2 < 1`) was not dominated (as an if arm's).
     my %before        = map { $_ => 1 } keys %{ $self->{cache} };
     my $rhs_ref       = $self->lower_value($rhs_node);
+    $rhs_ref = $self->_held_as($rhs_ref, $rhs_node, $rhs_repr, 'short-circuit rhs');
     if (defined $merge_repr) {
         $rhs_ref = $self->_emit_coercion($rhs_ref, $rhs_repr, $merge_repr,
                                          'And.RHS');
@@ -5816,7 +5832,7 @@ sub _lower_or {
     # A MERGE NOTHING TYPED -- an operand an inlined argument, known only
     # here -- boxes its arms to the Scalar they both are.
     if (( $repr // 'Unknown' ) eq 'Unknown' && defined $lhs_repr && defined $rhs_repr
-            && !grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } $lhs_repr, $rhs_repr) {
+            && !grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } $lhs_repr, $rhs_repr) {
         $repr = $lhs_repr eq $rhs_repr ? $lhs_repr : 'Scalar';   # agreeing arms keep their type
         $self->{cache}{ 'repr:' . $node->id } = $repr;   # this lowering's, not the node's: inlined again, its arguments differ
     }
@@ -5826,6 +5842,7 @@ sub _lower_or {
 
     # Lower the LHS in the current block, then test its truthiness.
     my $lhs_ref    = $self->lower_value($lhs_node);
+    $lhs_ref = $self->_held_as($lhs_ref, $lhs_node, $lhs_repr, 'short-circuit lhs');
     my $cond = $self->_shortcircuit_i1_cond($lhs_ref, $lhs_repr, 'Or', 'LHS');
     if (defined $merge_repr) {
         $lhs_ref = $self->_emit_coercion($lhs_ref, $lhs_repr, $merge_repr,
@@ -5844,6 +5861,7 @@ sub _lower_or {
     $self->_new_block($rhs_label);
     my %before        = map { $_ => 1 } keys %{ $self->{cache} };   # the arm's own (see _lower_and)
     my $rhs_ref       = $self->lower_value($rhs_node);
+    $rhs_ref = $self->_held_as($rhs_ref, $rhs_node, $rhs_repr, 'short-circuit rhs');
     if (defined $merge_repr) {
         $rhs_ref = $self->_emit_coercion($rhs_ref, $rhs_repr, $merge_repr,
                                          'Or.RHS');
@@ -9970,7 +9988,10 @@ sub _lower_list_append {
 
     if (defined $gate_node) {
         my $gate = $self->lower_value($gate_node);
-        my $gr   = $gate_node->operation eq 'Print' ? 'Boolean' : ($gate_node->stamp // '');
+        # As lowered: a short-circuit nothing typed is typed by its lowering.
+        my $gr   = $gate_node->operation eq 'Print' ? 'Boolean'
+                 : ( ( $gate_node->stamp // '' ) eq 'Unknown' ? $self->_repr_of($gate_node) : undef ) // $gate_node->stamp // '';
+        $gr = 'Scalar' if $gr eq 'Slot';
         $gate = $self->_emit_coercion($gate, $gr, 'Boolean', 'grep test') if $gr ne 'Boolean';
         $self->_set_terminator("  br i1 $gate, label %$body_label, label %$cont_label  ; ListAppend: predicate gate");
         $self->_new_block($body_label);

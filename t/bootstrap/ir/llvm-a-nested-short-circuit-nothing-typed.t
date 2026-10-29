@@ -42,6 +42,11 @@ for my $case (
     [ q{sub f { my ($c, $a, $b) = @_; if ($c) { if ($a && $b) { return "y" } } }
         my @r = map { scalar(f(@$_)) // "u" } [1, "P", 3], [1, "P", 0], [0, 1, 1]; print "@r\n";}, "y 0 0\n", 'a nested && falls off, by flattened arguments' ],
     [ q{sub f { my ($c, $a, $b) = @_; $c && ($a || $b) } my @x = (1, 0, "z"); my @y = (0, 1, 1); print f(@x), "|", f(@y), "\n";}, "z|0\n", 'an && over an ||' ],
+    # A REFERENCE ARM is boxed to the Scalar too (pvm 143, "And.LHS[Boolean->Unknown]").
+    [ q{use v5.42; my @ag; sub g ($e, $p, $ag) { if ($e == $p && $ag) { push $ag->@*, $e } } g(1, 1, \@ag); g(1, 2, \@ag); g(3, 3, \@ag); print "@ag\n";}, "1 3\n", 'an && of a comparison and an array reference' ],
+    # A METHOD CALL NOTHING TYPED is typed once lowered -- a run-time dispatch a
+    # Scalar, an inlined one its callee's (pvm 180, "grep test[Unknown->Boolean]").
+    [ q{use Scalar::Util qw(blessed); package K { sub new { bless {}, shift } sub ok { 1 } } my @a = (K->new, 3, K->new); my @g = grep { blessed($_) && $_->ok } @a; print scalar(@g), "\n";}, "2\n", 'a grep test of blessed && a method' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };
