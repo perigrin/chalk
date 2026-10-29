@@ -1768,6 +1768,11 @@ sub lower_value {
             # as "a coercion between them would not keep the value". Its
             # consumers read the caller's repr (_repr_of).
             return $bound->{ref} if ( $node->stamp // 'Unknown' ) eq 'Unknown';
+            # AN OBJECT THAT IS A BLESSED REFERENCE: B::SoN stamps what a
+            # `->new` made Object; passed on, it is the reference it is, read
+            # as that (_repr_of gives a reference binding to its readers).
+            return $bound->{ref}
+                if $node->stamp eq 'Object' && ( $bound->{repr} // '' ) =~ /\A(?:Hash|Array|Scalar)Ref\z/;
             if (defined $bound->{repr} && defined $node->stamp
                     && $node->stamp ne $bound->{repr}) {
                 die "GAP: an inlined argument is a $bound->{repr} where the "
@@ -4446,6 +4451,37 @@ sub _lower_padaccess {
 }
 
 
+# _lower_field_aggregate_assign($node, $field, \@values) -> the field's
+# aggregate: `@l = LIST` / `%h = LIST` in a method, its value not read. The
+# list is built as a new aggregate, and its header (count, capacity, buffer)
+# copied over the field's: the field keeps its aggregate, as perl assigns in
+# place.
+sub _lower_field_aggregate_assign {
+    my ($self, $node, $t, $v) = @_;
+    ( my $kind = $self->_repr_of($t) ) =~ s/Ref\z//;   # a field holds its aggregate by reference
+    # ITS VALUE READ is the list's count in scalar context, the aggregate in
+    # list context -- a method returning it has one return type for both.
+    die "GAP: a list assignment to a field $kind whose value is read is not lowered -- "
+      . "perl's is the list's count in scalar context, its elements in list context\n"
+        if _value_readers($node);
+    my $dst = $self->_container_ptr($t, $kind);
+    my $src;
+    if ($kind eq 'Array') { $src = $self->_emit_flattened_array_of($v) }
+    else {
+        my $lit = Chalk::IR::Node::HashLiteral->new(
+            id => "fieldhash:" . refaddr($node) . ":" . $self->_fresh, inputs => [@$v]);
+        $lit->set_stamp('HashRef');
+        my $hr = $self->_lower_hash_ref($lit);
+        $src = $self->_fresh;
+        $self->_emit("  $src = bitcast i8* $hr to %Hash*  ; the field's new contents");
+    }
+    my $h = $self->_fresh;
+    $self->_emit("  $h = load %$kind, %$kind* $src  ; field $kind assigned: its header");
+    $self->_emit("  store %$kind $h, %$kind* $dst  ; ...over the field's own");
+    $self->{cache}{ 'repr:' . $node->id } = $kind;
+    return $self->{cache}{ $node->id } = $dst;
+}
+
 # _lower_list_assign_into_locations($node): `my ($a, $b) = (1, 2)` where the
 # targets are kept in memory. Pairwise, all values read before any store.
 # Anything else on the wire's list form -- a target that is not a scalar
@@ -4456,6 +4492,10 @@ sub _lower_list_assign_into_locations {
     my $n  = $node->targets;
     my @t  = @in[ 0 .. $n - 1 ];
     my @v  = @in[ $n .. $#in ];
+    # A FIELD'S ARRAY OR HASH, assigned whole: its contents replaced.
+    return $self->_lower_field_aggregate_assign($node, $t[0], [ grep { blessed($_) } @v ])
+        if @t == 1 && blessed($t[0]) && $t[0]->operation eq 'FieldAccess'
+            && ( $self->_repr_of($t[0]) // '' ) =~ /\A(?:Array|Hash)(?:Ref)?\z/;
     for my $t (@t) {
         die "GAP: a list assignment to a " . ( blessed($t) ? $t->operation : 'undef' )
           . " that is not a scalar kept in memory is not lowered\n"
@@ -13223,6 +13263,31 @@ sub _is_called_can {
     } @readers;
 }
 
+# _memory_input_of($r) -> the input $r takes as its memory version, or undef.
+sub _memory_input_of {
+    my ($r) = @_;
+    my $op = $r->operation;
+    return $op =~ /\A(?:Subscript|Exists)\z/ ? $r->inputs->[2]
+         : $op =~ /\A(?:PostfixDeref|Count)\z/ ? $r->inputs->[1]
+         : $op =~ /\A(?:EntryDef|PadAccess|FieldAccess)\z/ ? $r->inputs->[0]
+         : $op eq 'Call' && $r->can('memory_input') && $r->memory_input ? $r->inputs->[-1]
+         : undef;
+}
+
+# _value_readers($node) -> what reads $node's value: not a use of it as a
+# memory version, a memory Phi, or a merge's control input.
+sub _value_readers {
+    my ($node) = @_;
+    my $is = sub ($x) { blessed($x) && refaddr($x) == refaddr($node) };
+    return grep {
+        my $r = $_;
+        blessed($r) && grep { $is->($_) } $r->inputs->@*
+            and !( $r->operation eq 'Phi' && _is_memory_phi($r) )
+            and $r->operation !~ /\A(?:Region|Loop)\z/
+            and !( $is->(_memory_input_of($r)) && 1 == grep { $is->($_) } $r->inputs->@* )
+    } ( $node->consumers // [] )->@*;
+}
+
 # _is_can_read_as_truth($node): `$o->can("m")` on a run-time class whose
 # value is only tested -- an if, a not, a ternary's condition, a defined, a
 # Boolean coercion, or a merge only those read. A use as its memory version
@@ -13235,13 +13300,7 @@ sub _is_can_read_as_truth {
     pop @rest if $n->can('memory_input') && $n->memory_input;
     return 0 unless blessed($m) && $m->operation eq 'Constant' && ( $m->const_type // '' ) eq 'string' && !@rest;
     my $is = sub ($x, $y) { blessed($x) && refaddr($x) == refaddr($y) };
-    my $mem_of = sub ($r) {
-        my $op = $r->operation;
-        return $op =~ /\A(?:Subscript|Exists)\z/ ? $r->inputs->[2]
-             : $op =~ /\A(?:PostfixDeref|Count|EntryDef)\z/ ? $r->inputs->[1]
-             : $op eq 'Call' && $r->can('memory_input') && $r->memory_input ? $r->inputs->[-1]
-             : undef;
-    };
+    my $mem_of = \&_memory_input_of;
     my (@q, %seen) = ($n);
     my $reads = 0;
     while (defined(my $v = shift @q)) {

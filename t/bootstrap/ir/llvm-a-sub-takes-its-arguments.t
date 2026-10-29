@@ -71,6 +71,9 @@ for my $case (
 for my $case (
     [ q{sub f { my ($c, %o) = @_; return "$c:$o{ix}:" . join(",", sort keys %o) } print f("m", ix => 3, k => 4), "\n";}, "m:3:ix,k\n", 'a slurpy hash target' ],
     [ q{sub new { my ($c, %o) = @_; return $o{ix} } my @a = (1, 2, 3); print main->new(ix => scalar(@a)), "\n";}, "3\n", 'a slurpy hash in a class method' ],
+    # A package new's blessed hash, passed on as $self: an Object to B::SoN,
+    # the hash reference it is (pvm 208 224).
+    [ q{package C; sub new { bless {}, shift } sub g { "g$_[1]" } sub f { my ($self, $x) = @_; return $self->g($x) } package main; print C->new->f(7), "\n";}, "g7\n", 'a blessed hash passed as $self' ],
 ) {
     my ($src, $want, $name) = @$case;
     is(eval { through_llvm($src) }, $want, "$name: perl's answer") or diag $@;
