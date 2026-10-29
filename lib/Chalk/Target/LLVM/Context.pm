@@ -5668,6 +5668,36 @@ sub _held_as {
     return $self->_emit_coercion($ref, $actual, $predicted, $what);
 }
 
+# _short_circuit_at_merge($node, $lhs, $rhs) -> the value of an && or ||
+# whose right side B::SoN ran as a statement in an If's arm (the If's test
+# its left side), or undef. That value is the If's merge: the left side along
+# the arm that skipped the right, the right along the other. Lowered as a
+# second short-circuit after the merge instead, it took the right side's
+# value from an arm that does not dominate it (lli: "Instruction does not
+# dominate all uses").
+sub _short_circuit_at_merge {
+    my ($self, $node, $lhs, $rhs) = @_;
+    return undef unless blessed($rhs) && $rhs->can('control_in') && blessed(my $p = $rhs->control_in);
+    return undef unless $p->operation eq 'Proj' && exists $self->{cache}{ $rhs->id };
+    my $if  = $p->inputs->[0];
+    return undef unless blessed($if) && $if->operation eq 'If' && blessed($if->inputs->[1])
+        && $if->inputs->[1]->id eq $lhs->id;   # one node by id (the loader may hold two copies)
+    my $reg = $if->can('region') ? $if->region : undef;
+    my $m   = blessed($reg) ? $self->{_if_merge_at}{ $reg->id } : undef;
+    return undef unless $m;
+    my ($lr, $rr) = map { my $r = $self->_repr_of($_) // $_->stamp // ''; $r eq 'Slot' ? 'Scalar' : $r } $lhs, $rhs;
+    die "GAP: an " . $node->operation . " whose right side ran in an if arm, its sides a $lr and a $rr, is not lowered\n"
+        unless $lr eq $rr && $lr =~ /\A(?:Int|Num|Str|Boolean|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/;
+    my ($rlab, $llab) = $p->index == 0 ? @$m{qw(then else)} : @$m{qw(else then)};
+    my $res = $self->_fresh;
+    my $blk = $self->{blocks}[ $m->{idx} ];
+    unshift $blk->{insts}->@*, "  $res = phi " . _repr_to_llvm_type($lr)
+        . " [ $m->{cond}, %$llab ], [ $self->{cache}{ $rhs->id }, %$rlab ]  ; "
+        . $node->operation . ": its value at the if's merge";
+    $self->{cache}{ 'repr:' . $node->id } = $lr;
+    return $self->{cache}{ $node->id } = $res;
+}
+
 sub _lower_and {
     my ($self, $node) = @_;
 
@@ -5693,6 +5723,8 @@ sub _lower_and {
     # runtime-free. `$x eq $y && (print ...)` is Boolean && Boolean (a comparison guard
     # and a print's builtin::is_bool return) — the cond.t idiom. Any other repr is
     # a loud GAP (see _shortcircuit_i1_cond).
+    my $at_merge = $self->_short_circuit_at_merge($node, $lhs_node, $rhs_node);
+    return $at_merge if defined $at_merge;
     my $lhs_repr = $self->_shortcircuit_operand_repr($lhs_node);   # an inlined argument as held
     my $rhs_repr = $rhs_node->operation eq "Print" ? "Boolean" : $self->_shortcircuit_operand_repr($rhs_node);
 
@@ -5808,6 +5840,8 @@ sub _lower_or {
     # Validate operand reprs: Int (icmp ne i64) and Boolean (already i1) both lower
     # runtime-free. `$x ne $y || (print ...)` is Boolean || Boolean — the cond.t idiom.
     # Any other repr is a loud GAP (see _shortcircuit_i1_cond).
+    my $at_merge = $self->_short_circuit_at_merge($node, $lhs_node, $rhs_node);
+    return $at_merge if defined $at_merge;
     my $lhs_repr = $self->_shortcircuit_operand_repr($lhs_node);   # an inlined argument as held
     my $rhs_repr = $rhs_node->operation eq "Print" ? "Boolean" : $self->_shortcircuit_operand_repr($rhs_node);
 
@@ -7360,6 +7394,7 @@ sub _process_if_node {
         unless defined $cond_input;
 
     my $cond_ref = $self->lower_value($cond_input);
+    my $cond_value = $cond_ref;   # before its truth is taken: a short-circuit's left side
 
     # A parameter nothing typed, inlined, is the caller's value: its truth.
     my $cond_repr = $self->_repr_of($cond_input) // 'Boolean';
@@ -7476,6 +7511,10 @@ sub _process_if_node {
             $self->{var_table}{$vd_id} = $phi_ref;
         }
 
+        # Where this If merged, by which arm ends: a short-circuit whose right
+        # side ran in an arm takes its value here (_short_circuit_at_merge).
+        $self->{_if_merge_at}{ $region->id } = { idx => $self->{current_idx},
+            then => $then_end_label, else => $else_end_label, cond => $cond_value };
     }
 }
 
