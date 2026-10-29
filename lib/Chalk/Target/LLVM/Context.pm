@@ -6363,6 +6363,8 @@ sub _lower_proj {
 # that lli would silently miscompile.
 sub _lower_phi {
     my ($self, $node) = @_;
+    die "GAP: a merge of a jump nothing typed, with an arm that is not a scalar, is not lowered\n"
+        if $self->{_unbuilt_jump_phi}{ $node->id };
 
     my $inputs = $node->inputs;
     unless (defined $inputs && scalar @$inputs > 0) {
@@ -8343,9 +8345,15 @@ sub _close_jump_merge {
     # arm is boxed to in its own block, before the branch that ends it.
     my $here = $self->{current_idx};
     for my $phi (grep { ( $_->stamp // '' ) eq 'Unknown' } _merge_phis($j->{region})) {
+        delete $self->{_unbuilt_jump_phi}{ $phi->id };   # this close's call, not an earlier inlining's
         my @r = map { $_->{vals}{ $phi->id }[1] } @preds;
-        die "GAP: a merge of a jump nothing typed, with an arm that is not a scalar, is not lowered\n"
-            if grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @r;
+        # AN ARM THAT IS NOT A SCALAR -- a bare `return`'s empty list, the
+        # list face of an exit a scalar caller reads the other face of -- is
+        # not built: a read of this Phi is refused by name (_lower_phi).
+        if (grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @r) {
+            $self->{_unbuilt_jump_phi}{ $phi->id } = 1;
+            next;
+        }
         my $to = ( grep { $_ ne $r[0] } @r ) ? 'Scalar' : $r[0];
         for my $p (@preds) {
             my ($v, $from) = $p->{vals}{ $phi->id }->@*;
@@ -8362,7 +8370,7 @@ sub _close_jump_merge {
     }
     $self->{current_idx} = $here;
     $self->_new_block($j->{label});
-    for my $phi (_merge_phis($j->{region})) {
+    for my $phi (grep { !$self->{_unbuilt_jump_phi}{ $_->id } } _merge_phis($j->{region})) {
         my $r = $self->_fresh;
         $self->_emit("  $r = phi " . _repr_to_llvm_type($self->{cache}{ 'repr:' . $phi->id } // _require_repr($phi, 'jump merge Phi')) . " "
             . join(', ', map { "[ $_->{vals}{ $phi->id }, %$_->{label} ]" } @preds)
