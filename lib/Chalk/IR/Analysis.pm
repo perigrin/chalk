@@ -403,6 +403,7 @@ sub infer ($class, $graphs) {
     # belief that the repr fixpoint below needed to precede it -- measured
     # wrong: _replay_classes seals the MOP ~30 lines BEFORE the direct-call
     # fixpoint, so the metaobject is available to it.
+    _rewrite_tied_scalars(\%graphs);
     _attach_call_targets(\%graphs, $mop);
     _attach_glob_bound_subs(\%graphs, $mop);
     _attach_autoload(\%graphs, $mop);
@@ -757,6 +758,106 @@ sub _is_narrowed ($repr) {
 # if CONDITION (`if (($x = foo(1)) == 1)`) -- reached via control_in, not the
 # Return value chain -- is absent. The call-stamping passes must see it to type
 # the Call result (and thus the `$x = foo(1)` Assign consuming it).
+# %TIED: the tie Calls _rewrite_tied_scalars rewrote around (by refaddr):
+# lowered as TIESCALAR on the class they name (Context's _lower_tie).
+our %TIED;
+
+# _rewrite_tied_scalars(\%graphs): a tie of a lexical scalar x to CLASS, where the tie is
+# on its graph's straight line (no arm or loop holds it), and $x is one
+# PadAccess nothing stores, refers to or unties: its read becomes
+# CLASS's FETCH on the tie's object, and a tied() of x the object. One read at
+# most -- each would run FETCH, and a method call is lowered once -- and
+# only after the tie. tied() of what nothing ties is undef.
+sub _rewrite_tied_scalars ($graphs) {
+    %TIED = ();
+    my $factory = Chalk::IR::NodeFactory->new();
+    my $is_call = sub ($n, $name) {
+        $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) eq $name
+    };
+    my $back = sub ($n) {
+        my $op = $n->operation;
+        return $op =~ /\A(?:Region|Loop|Proj)\z/ ? $n->inputs->[0] : $n->can('control_in') ? $n->control_in : undef;
+    };
+    for my $g (values %$graphs) {
+        my @nodes = _all_graph_nodes($g);
+        my %tied_vars;
+        TIE: for my $tie (grep { $is_call->($_, 'tie') } @nodes) {
+            my ($var) = $tie->inputs->@*;
+            next unless blessed($var) && $var->operation eq 'PadAccess' && ( $var->sigil // '$' ) eq '$';
+            next if grep { $_->operation eq 'PadAccess' && ( $_->name // '' ) eq ( $var->name // '' )
+                           && refaddr($_) != refaddr($var) } @nodes;
+            # On the straight line: back to Start through no arm or loop.
+            for (my $c = $tie->control_in; ; $c = $back->($c)) {
+                next TIE unless blessed($c);
+                last if $c->operation eq 'Start';
+                next TIE if $c->operation =~ /\A(?:Proj|Region|Loop)\z/;
+            }
+            my $after = sub ($n) {
+                for (my $c = $n; blessed($c); $c = $back->($c)) {
+                    return 1 if refaddr($c) == refaddr($tie);
+                    return 0 if $c->operation eq 'Start';
+                }
+                return 0;
+            };
+            # By the graph's nodes: a consumer list can miss a reader.
+            my @readers = grep { my $c = $_; refaddr($c) != refaddr($tie)
+                && grep { blessed($_) && refaddr($_) == refaddr($var) } $c->inputs->@* } @nodes;
+            my @tieds = grep { $is_call->($_, 'tied') } @readers;
+            my @reads = grep { !$is_call->($_, 'tied') } @readers;
+            my $uses = 0;
+            for my $r (@reads) { $uses += grep { blessed($_) && refaddr($_) == refaddr($var) } $r->inputs->@* }
+            next if $uses > 1 || grep {
+                $_->operation =~ /\A(?:Assign|Ref|CompoundAssign|Increment)\z/ || $is_call->($_, 'untie')
+            } @reads;
+            # Each statement the read, or a tied(), reaches runs after the tie.
+            my (@q, %seen) = (@reads, @tieds);
+            while (defined(my $n = shift @q)) {
+                next if $seen{ refaddr($n) }++;
+                if ($n->can('control_in') && blessed($n->control_in) || $n->operation eq 'If') {
+                    next TIE unless $after->($n);
+                    next;
+                }
+                next if $n->operation eq 'Phi';
+                push @q, grep { blessed($_) } ( $n->consumers // [] )->@*;
+            }
+            $TIED{ refaddr($tie) } = 1;
+            $tied_vars{ refaddr($var) } = $tie;
+            for my $r (@reads) {
+                my $fetch = $factory->make('Call', dispatch_kind => 'method', name => 'FETCH',
+                    inputs => [$tie], want => 'scalar');
+                $fetch->set_stamp('Scalar');   # FETCH's value, by its tag
+                # Read as the variable was typed: its readers expect that.
+                my $st = $var->stamp // 'Unknown';
+                my $v = $fetch;
+                if ($st ne 'Unknown' && $st ne 'Scalar') {
+                    $v = $factory->make('Coerce', inputs => [$fetch], from_repr => 'Scalar', to_repr => $st);
+                    $v->set_stamp($st);
+                }
+                $_ = $v for grep { blessed($_) && refaddr($_) == refaddr($var) } $r->inputs->@*;
+                $var->remove_consumer($r);
+                $v->add_consumer($r);
+            }
+        }
+        # tied(): the tie's object, or undef where nothing ties it.
+        for my $t (grep { $is_call->($_, 'tied') } @nodes) {
+            my ($var) = $t->inputs->@*;
+            next unless blessed($var) && $var->operation eq 'PadAccess';
+            my $tie = $tied_vars{ refaddr($var) };
+            next if !$tie && grep { $is_call->($_, 'tie') && refaddr($_->inputs->[0] // 0) == refaddr($var) } @nodes;
+            my $v = $tie // do {
+                my $u = $factory->make('Constant', const_type => 'undef', value => undef);
+                $u->set_stamp('Undef');
+                $u;
+            };
+            for my $c (grep { my $c = $_; grep { blessed($_) && refaddr($_) == refaddr($t) } $c->inputs->@* } @nodes) {
+                $_ = $v for grep { blessed($_) && refaddr($_) == refaddr($t) } $c->inputs->@*;
+                $v->add_consumer($c);
+            }
+        }
+    }
+    return;
+}
+
 sub _all_graph_nodes ($g) {
     my %seen;
     my @out;

@@ -2331,6 +2331,23 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'indirect') {
         return $self->_lower_call_indirect($node);
     }
+    # tie OF A SCALAR the loader rewrote around (Analysis::_rewrite_tied_scalars):
+    # its class's TIESCALAR, the class and the arguments its arguments.
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'tie') {
+        die "GAP: a tie whose variable is read before it, more than once, stored, referred to or "
+          . "untied -- or that an arm or a loop holds -- is not lowered\n"
+            unless $Chalk::IR::Analysis::TIED{ refaddr($node) };
+        $self->_refuse_inside_eval("a tie (TIESCALAR may die)");
+        my (undef, $class, @args) = grep { blessed($_) } $node->inputs->@*;
+        my $r = $self->_lower_runtime_dispatch($node, $class, name => 'TIESCALAR', args => [ $class, @args ],
+            as => 'Scalar');
+        die "GAP: a tie to a class no package of this program declares TIESCALAR in is not lowered\n"
+            unless defined $r;
+        # Its value is the object by its tag, whatever TIESCALAR was typed.
+        $node->set_stamp('Scalar');
+        $self->{cache}{ 'repr:' . $id } = 'Scalar';
+        return $self->{cache}{$id} = $r;
+    }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'select') {
         return $self->_lower_select($node);
     }
@@ -4189,6 +4206,7 @@ sub _ensure_i1 {
         unless defined $repr;
 
     return $ref if $repr eq 'Boolean';
+    return 'false' if $repr eq 'Undef';   # undef is false
     # A string, or a value read by its tag, is true by perl's rule: the
     # coercion's truthiness arms ("" and "0" false; undef false).
     return $self->_emit_coercion($ref, $repr, 'Boolean', '_ensure_i1')
@@ -15575,6 +15593,12 @@ sub _lower_runtime_dispatch {
             if @lacking;
     }
     my $rs = $self->_repr_of($obj) // $obj->stamp // '';
+    # A CLASS NAMED BY A STRING (a tie's): its sub of that name.
+    my ($is, $cp, $cl);
+    if ($rs eq 'Str') {
+        ($cp, $cl) = $self->_str_parts($self->lower_value($obj));
+        $is = 'true';
+    }
     # AN INLINED ARGUMENT is the caller's value: its element read is the
     # caller's, read there (the callee's `$_[0]` has no array of its own).
     my $root = $obj;
@@ -15584,7 +15608,8 @@ sub _lower_runtime_dispatch {
         $root = $b->{node};
     }
     my $ref;
-    if ($rs =~ /\A(?:Hash|Array|Scalar)Ref\z/) { $ref = $self->lower_value($obj) }
+    if ($rs eq 'Str') { }
+    elsif ($rs =~ /\A(?:Hash|Array|Scalar)Ref\z/) { $ref = $self->lower_value($obj) }
     elsif ($rs eq 'Scalar' || ( $rs eq 'Object' && $root->operation eq 'Subscript' )) {
         # An element stamped Object is read as its Slot, by its tag.
         my $slot = $rs eq 'Scalar' ? $self->lower_value($obj) : $self->_subscript_slot($root);
@@ -15605,7 +15630,7 @@ sub _lower_runtime_dispatch {
         $self->_emit("  $ref = inttoptr i64 $pl to i8*  ; dispatch: the invocant");
     }
     else { return undef }
-    my ($is, $cp, $cl) = $self->_bless_class($ref);
+    ($is, $cp, $cl) = $self->_bless_class($ref) unless $rs eq 'Str';
     my @args = grep { blessed($_) } $node->inputs->@*;
     pop @args if $node->can('memory_input') && $node->memory_input;
     @args = $opt{args}->@* if $opt{args};
@@ -15633,6 +15658,9 @@ sub _lower_runtime_dispatch {
             my $from = $self->{_inline_value_repr}{ $node->id } // '';
             die "GAP: a method ('$name') on a run-time class whose ${cname}::$name returns a list is not lowered\n"
                 if $from =~ /\A(?:Array|List|Hash)\z/;
+            # The call's value is read as the call is typed (it took its
+            # callee's type where it had none).
+            $from = $node->stamp if ( $node->stamp // 'Unknown' ) ne 'Unknown';
             $from eq 'Scalar' ? $r
               : $from eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', 'dispatch: undef')
               : $self->_emit_coercion($r, $from, 'Scalar', "dispatch: ${cname}::$name");
@@ -15649,7 +15677,7 @@ sub _lower_runtime_dispatch {
     $self->_emit("  $res = phi %Slot " . join(', ', @in) . "  ; dispatch: its value");
     # READ AS THE CALL IS TYPED: Analysis may have typed it from a sub's
     # return (a Str), and its consumers read that.
-    my $st = $node->stamp // 'Unknown';
+    my $st = $opt{as} // $node->stamp // 'Unknown';
     if ($st eq 'Unknown') { $node->set_stamp('Scalar'); $st = 'Scalar' }
     if ($st ne 'Scalar') {
         die "GAP: a method ('$name') on a run-time class read as a $st is not lowered\n"
