@@ -46,6 +46,9 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # (docs/plans/2026-06-11-llvm-reads-mop-directly.md). Undef for
     # builtins/subs and for calls whose class is not statically known.
     field $class_name :param :reader = undef;
+    # Set by Analysis for a method on what a `class` method returning $self
+    # returned (_class_of_self_chains).
+    method set_class_name($c) { $class_name = $c; return }
 
     # The CALLSITE's own context: 'void', 'scalar', 'list', or undef.
     #

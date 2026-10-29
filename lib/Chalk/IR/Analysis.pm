@@ -405,6 +405,7 @@ sub infer ($class, $graphs) {
     # fixpoint, so the metaobject is available to it.
     _rewrite_tied_scalars(\%graphs);
     _attach_call_targets(\%graphs, $mop);
+    _class_of_self_chains(\%graphs, $mop);
     _attach_glob_bound_subs(\%graphs, $mop);
     _attach_autoload(\%graphs, $mop);
     _attach_formats(\%graphs, $mop);
@@ -1048,6 +1049,45 @@ sub _type_calls_returning_self ($graphs) {
             # function whose return type is its metaobject's.
             $t->set_return_type('Object')
                 if $t->can('set_return_type') && ( $t->return_type // 'Unknown' ) eq 'Unknown';
+        }
+    }
+    return;
+}
+
+# _class_of_self_chains(\%graphs, $mop): `C->new->add(1)->add(2)` -- a
+# method with no class_name whose invocant is a `class` method of C that
+# returns its $self is a method of C too. B::SoN names a class only from a
+# constructor (what another method returns is not its class); this is the
+# one case where it is, and it is resolved to a fixpoint, link by link.
+sub _class_of_self_chains ($graphs, $mop) {
+    my $returns_self = sub ($m) {
+        my $g = blessed($m) && $m isa Chalk::MOP::Method && $m->can('graph') ? $m->graph : undef;
+        return 0 unless $g && $g->can('returns');
+        my @r = grep { blessed($_) && $_->operation eq 'Return' } $g->returns->@*;
+        return @r && !grep {
+            my $v = $_->inputs->[0];
+            !( blessed($v) && $v->operation eq 'PadAccess' && ( $v->symbol // '' ) eq 'self'
+               && ( $v->sigil // '' ) eq '$' )
+        } @r;
+    };
+    my $changed = 1;
+    while ($changed) {
+        $changed = 0;
+        for my $gname (sort keys $graphs->%*) {
+            for my $n (_all_graph_nodes($graphs->{$gname})) {
+                next unless $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'method'
+                    && !defined $n->class_name && $n->can('set_class_name');
+                my $inv = $n->inputs->[0];
+                next unless blessed($inv) && $inv->operation eq 'Call'
+                    && ( $inv->dispatch_kind // '' ) eq 'method' && defined $inv->class_name
+                    && $returns_self->($inv->target);
+                my $c = $inv->class_name;
+                my $cls = $mop->for_class($c) or next;
+                $n->set_class_name($c);
+                my $m = $cls->find_method($n->name // '');
+                $n->set_target($m) if $m && !defined $n->target;
+                $changed = 1;
+            }
         }
     }
     return;

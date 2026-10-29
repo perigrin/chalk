@@ -57,6 +57,11 @@ for my $case (
 for my $case (
     [ q{sub f { my ($a, @rest) = @_; return $a + scalar(@rest) } print f(1, 2, 3), "\n";}, "3\n", 'a slurpy array target' ],
     [ q{sub f { return $_[1] } print f(1, 2), "\n";}, "2\n", 'a $_[1] with no $_[0]' ],
+    # AN ARRAY, A HASH OR A LIST PASSED FLATTENS into @_: read by position,
+    # bound as one argument, the later positions were undef (1 for perl's 3).
+    [ q{sub f { my ($c, $a) = @_; return $a + 1 } my @x = (1, 2, 3); print f(@x), "\n";}, "3\n", 'an array passed, read by my (...) = @_' ],
+    [ q{sub g { return (1, 2, 3) } sub f { my ($c, $a) = @_; return $a + 1 } print f(g()), "\n";}, "3\n", 'a list a call returns, passed' ],
+    [ q{sub f { return $_[1] + 1 } my %h = (a => 1); my @x = (1, 2, 3); print f(@x), f(%h), "\n";}, "32\n", 'an array and a hash passed, read by $_[N]' ],
     # An Int bound to a Str-stamped parameter would be stringified, and a
     # later numeric read of it would not give the Int back past 2**53.
     [ q{sub f { my ($s, $n) = @_; return "$s=$n" } print f("x", 4), "\n";}, "x=4\n", 'an Int argument read as a Str' ],
@@ -74,6 +79,8 @@ for my $case (
     # A package new's blessed hash, passed on as $self: an Object to B::SoN,
     # the hash reference it is (pvm 208 224).
     [ q{package C; sub new { bless {}, shift } sub g { "g$_[1]" } sub f { my ($self, $x) = @_; return $self->g($x) } package main; print C->new->f(7), "\n";}, "g7\n", 'a blessed hash passed as $self' ],
+    # A hash passed to a sub that never reads @_: nothing to flatten into.
+    [ q{sub g { 1 } my %h = (a => 1); g(%h); print "$h{a}\n";}, "1\n", 'a hash passed to a sub reading no arguments' ],
 ) {
     my ($src, $want, $name) = @$case;
     is(eval { through_llvm($src) }, $want, "$name: perl's answer") or diag $@;

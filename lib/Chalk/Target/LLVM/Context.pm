@@ -16546,6 +16546,17 @@ sub _lower_call_direct {
                 if $read{$i} && ( $read{$i}->default_when // 'absent' ) ne 'absent';
         }
     }
+    # AN ARGUMENT THAT FLATTENS -- an array, a hash, a list, a list-context
+    # call that may return one -- fills as many positions of @_ as it has
+    # elements. Bound as one argument, every later position was undef
+    # (`my ($c, $a) = @_` of f(@x) read undef for perl's $x[1]).
+    for my $a ( ( @arg_reads || $args_array || $slurpy || $written ) ? @args : () ) {
+        my $st = $a->stamp // 'Unknown';
+        die "GAP: direct call to '$name': an argument stamped $st flattens into \@_, "
+          . "which inlining does not build.\n"
+            if $st =~ /\A(?:Array|Hash|List)\z/
+            || ( $st eq 'Unknown' && $a->operation eq 'Call' && ( $a->can('want') ? $a->want // '' : '' ) eq 'list' );
+    }
     # @_ READ AS A LIST is one argument per element: an argument that is
     # itself a list would flatten, which this does not build.
     if ($args_array) {
