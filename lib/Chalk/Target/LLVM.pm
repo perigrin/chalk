@@ -1632,6 +1632,19 @@ sub _process_control_chain {
                 && $_->control_in->id eq $node->id
         } $node->consumers->@*;
         my %by_id = map { $_->id => $_ } @succ;
+        # A LOOP'S TEST READS AN EFFECT OF ITS OWN -- `while (my $n = shift @w)`
+        # hangs the shift and the test off the Loop -- and lowering the test
+        # lowers that operand with it, each pass: not a fork.
+        if ($node->operation eq 'Loop') {
+            my %operand;
+            my @q = grep { blessed($_) } map { $_->inputs->@* } values %by_id;
+            while (defined(my $n = shift @q)) {
+                next if !blessed($n) || $operand{ $n->id }++;
+                # Through values only: an operand's own effects stop the walk there.
+                push @q, grep { blessed($_) } $n->inputs->@* unless $n->can('control_in') && blessed($n->control_in);
+            }
+            delete @by_id{ grep { $operand{$_} } keys %by_id } if keys %by_id > 1;
+        }
         die "GAP: a control node with " . scalar(keys %by_id) . " successors is not lowered "
           . "(one of " . join(', ', sort map { $_->operation } values %by_id)
           . " would be dropped)\n" if keys %by_id > 1;
