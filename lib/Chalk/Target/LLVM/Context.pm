@@ -8442,6 +8442,11 @@ sub _find_unwind_consumer {
             return $c if $c->operation eq 'Unwind';
             next if $c->operation eq 'Region';
             push @queue, $c;
+            # AN IF OF THE ARM'S OWN goes on at its merge: a die after it ends
+            # the arm on every path that reaches it (`else { if (C) { die } die }`
+            # branched on to the merge, and the sub returned).
+            push @queue, $c->region
+                if $c->operation eq 'If' && $c->can('region') && blessed($c->region);
         }
     }
     return undef;
