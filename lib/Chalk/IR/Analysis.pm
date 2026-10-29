@@ -1313,16 +1313,20 @@ sub _resolve_direct_calls ($graphs, $pkg_methods_only = 0) {
             # list-returning sub's callsites from its SCALAR face --
             # the same bug bson hit in _graph_return_type (7b26a89).
             my $val = $ret ? $ret->value() : undef;
-            if ($val && _is_narrowed($val->stamp)) {
+            # (A package `new` returning a Scalar -- an element, say -- is
+            # that, not the Object B::SoN stamped.)
+            if ($val && ( _is_narrowed($val->stamp)
+                    || $pkg_method && ( $node->stamp // '' ) eq 'Object' && ( $val->stamp // '' ) eq 'Scalar' )) {
                 my $have = $node->stamp;
                 my $want = $val->stamp;
                 # B::SoN stamps any `->new` Object, a class's instance; a
-                # package's `new` returns what its body does (a blessed ref).
+                # package's `new` returns what its body does (a blessed ref,
+                # or anything else -- `return $o{ix}`).
                 $node->set_stamp($want)
                     if !_is_narrowed($have)
                     || ($have ne $want
                         && Chalk::Grammar::Perl::TypeLibrary::is_subtype($want, $have))
-                    || ($pkg_method && $have eq 'Object' && $want =~ /\A(?:Array|Hash|Scalar)Ref\z/);
+                    || ($pkg_method && $have eq 'Object');
             }
             elsif ( _stamp_is_absent($node)
                     && refaddr($callee) == refaddr($graphs->{$gname}) ) {

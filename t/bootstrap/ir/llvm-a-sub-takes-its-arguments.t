@@ -67,4 +67,13 @@ for my $case (
     else { like($@, qr/^(?:load|lower): .*GAP/, "$name: refused, naming why") or diag $@ }
 }
 
+# A slurpy hash takes the pairs after the scalars (pvm 068 127): lowered.
+for my $case (
+    [ q{sub f { my ($c, %o) = @_; return "$c:$o{ix}:" . join(",", sort keys %o) } print f("m", ix => 3, k => 4), "\n";}, "m:3:ix,k\n", 'a slurpy hash target' ],
+    [ q{sub new { my ($c, %o) = @_; return $o{ix} } my @a = (1, 2, 3); print main->new(ix => scalar(@a)), "\n";}, "3\n", 'a slurpy hash in a class method' ],
+) {
+    my ($src, $want, $name) = @$case;
+    is(eval { through_llvm($src) }, $want, "$name: perl's answer") or diag $@;
+}
+
 done_testing;

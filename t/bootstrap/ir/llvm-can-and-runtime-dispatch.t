@@ -58,4 +58,25 @@ for my $case ([ $can, undef ], [ $can, 'Bar' ], [ $meth, 'Bar' ], [ $in_eval, 'B
     is($got, $want, "perl's answer, X=" . ( $x // 'unset' ) . ": " . ( $src =~ s/\n/ /gr ));
 }
 
+# ->can("m") read only as a truth: whether the run-time class has m (pvm 068).
+my $kinds = qq{package N;\nsub new { my (\$c, %a) = \@_; return bless {%a}, \$c }\nsub kind { return \$_[0]{kind} }\npackage M;\nsub new { return bless {}, \$_[0] }\npackage main;\n};
+for my $case (
+    [ $kinds . qq{my \@n = (N->new(kind => "x"), undef, M->new);\nmy \$s = "";\nfor my \$n (\@n) { \$s .= (defined \$n && \$n->can("kind")) ? "y" : "n" }\nprint "\$s\\n";\n}, undef ],
+    [ $kinds . qq{my \$o = bless {}, \$ENV{X} // "N";\nif (\$o->can("kind")) { print "can\\n" } else { print "cannot\\n" }\n}, 'M' ],
+) {
+    my ($src, $x) = @$case;
+    my $pl = file_of($src);
+    local $ENV{X} = $x;
+    delete $ENV{X} unless defined $x;
+    my $want = qx($^X $pl 2>/dev/null) . "exit " . ($? >> 8);
+    my $got = eval { through_llvm_file($pl) } // "REFUSED $@";
+    is($got, $want, "can as a truth, X=" . ( $x // 'unset' ) . ": " . ( $src =~ s/\n/ /gr ));
+}
+# ...but its value kept, or printed: refused.
+{
+    my $src = $kinds . qq{my \$o = N->new(kind => "x");\nmy \$c = \$o->can("kind");\nprint ref(\$c), "\\n";\n};
+    my $got = eval { through_llvm_file(file_of($src)) } // "REFUSED $@";
+    like($got, qr/\AREFUSED (?:lower|load): /, "can whose value is kept: refused");
+}
+
 done_testing;

@@ -2331,6 +2331,22 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'indirect') {
         return $self->_lower_call_indirect($node);
     }
+    # A METHOD NAMED BY A VALUE (`$o->$m`) the producer knows is a constant:
+    # a run-time dispatch of that name, the invocant its first argument.
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'dynamic_method') {
+        my ($obj, $m, @args) = grep { blessed($_) } $node->inputs->@*;
+        pop @args if $node->can('memory_input') && $node->memory_input;
+        die "GAP: a method named by a value that is not a constant is not lowered\n"
+            unless blessed($m) && $m->operation eq 'Constant' && ( $m->const_type // '' ) eq 'string';
+        my $name = $m->value;
+        die "GAP: a method named by a value ('$name') that no package declares (perl dies) is not lowered\n"
+            unless grep { my $c = $_; grep { $_->name eq $name } $c->subs } ( $self->{mop} ? $self->{mop}->classes : () );
+        $self->_refuse_inside_eval("a method named by a value (no package may have it)");
+        my $r = $self->_lower_runtime_dispatch($node, $obj, name => $name, args => [ $obj, @args ]);
+        die "GAP: a method named by a value, on what is not a blessed reference, is not lowered\n"
+            unless defined $r;
+        return $self->{cache}{$id} = $r;
+    }
     # tie OF A SCALAR the loader rewrote around (Analysis::_rewrite_tied_scalars):
     # its class's TIESCALAR, the class and the arguments its arguments.
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'tie') {
@@ -13207,6 +13223,94 @@ sub _is_called_can {
     } @readers;
 }
 
+# _is_can_read_as_truth($node): `$o->can("m")` on a run-time class whose
+# value is only tested -- an if, a not, a ternary's condition, a defined, a
+# Boolean coercion, or a merge only those read. A use as its memory version
+# (a method call is one) is no read of its value.
+sub _is_can_read_as_truth {
+    my ($n) = @_;
+    return 0 unless blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'method'
+        && ( $n->name // '' ) eq 'can' && !defined $n->class_name;
+    my ($o, $m, @rest) = grep { blessed($_) } $n->inputs->@*;
+    pop @rest if $n->can('memory_input') && $n->memory_input;
+    return 0 unless blessed($m) && $m->operation eq 'Constant' && ( $m->const_type // '' ) eq 'string' && !@rest;
+    my $is = sub ($x, $y) { blessed($x) && refaddr($x) == refaddr($y) };
+    my $mem_of = sub ($r) {
+        my $op = $r->operation;
+        return $op =~ /\A(?:Subscript|Exists)\z/ ? $r->inputs->[2]
+             : $op =~ /\A(?:PostfixDeref|Count|EntryDef)\z/ ? $r->inputs->[1]
+             : $op eq 'Call' && $r->can('memory_input') && $r->memory_input ? $r->inputs->[-1]
+             : undef;
+    };
+    my (@q, %seen) = ($n);
+    my $reads = 0;
+    while (defined(my $v = shift @q)) {
+        next if $seen{ refaddr($v) }++;
+        for my $r (grep { blessed($_) } ( $v->consumers // [] )->@*) {
+            next unless grep { $is->($_, $v) } $r->inputs->@*;
+            next if $r->operation eq 'Phi' && _is_memory_phi($r);
+            next if $r->operation =~ /\A(?:Region|Loop)\z/;   # its control, not its value
+            next if $is->($mem_of->($r), $v) && !grep { $is->($_, $v) } @{ $r->inputs }[ 0 .. $#{ $r->inputs } - 1 ];
+            my $op = $r->operation;
+            if ($op eq 'Phi') { push @q, $r; next }
+            $reads++;
+            next if $op eq 'If' && $is->($r->inputs->[1], $v);
+            next if $op eq 'TernaryExpr' && $is->($r->inputs->[0], $v)
+                && !grep { $is->($_, $v) } @{ $r->inputs }[ 1 .. 2 ];
+            next if $op =~ /\A(?:Not|Defined)\z/;
+            next if $op eq 'Coerce' && ( $r->to_repr // '' ) eq 'Boolean';
+            return 0;
+        }
+    }
+    return $reads > 0;
+}
+
+# _lower_can_as_truth($node) -> i1: does the class $o is blessed into (or
+# names) declare m? Refused where a class could inherit or AUTOLOAD (can
+# would find another sub), for a name UNIVERSAL itself has, or for a
+# `class` method.
+sub _lower_can_as_truth {
+    my ($self, $node) = @_;
+    my ($obj, $m) = grep { blessed($_) } $node->inputs->@*;
+    my $name = $m->value;
+    my @classes = $self->{mop} ? $self->{mop}->classes : ();
+    die "GAP: ->can('$name') where a class inherits or has AUTOLOAD is not lowered\n"
+        if grep { defined $_->superclass || defined $_->parent_name || grep { $_->name eq 'AUTOLOAD' } $_->subs } @classes;
+    die "GAP: ->can('$name') of a method UNIVERSAL has is not lowered\n"
+        if $name =~ /\A(?:can|isa|DOES|VERSION|import|unimport)\z/;
+    die "GAP: ->can('$name') where a `class` declares it is not lowered\n"
+        if grep { $_->find_method($name) } @classes;
+    $self->_refuse_inside_eval("->can (on what is not an object perl dies)");
+    my ($is, $cp, $cl) = $self->_dispatch_invocant($obj)
+        or die "GAP: ->can('$name') on what is not a blessed reference or a class name is not lowered\n";
+    my @cands = map { $_->name } grep { my $c = $_; grep { $_->name eq $name } $c->subs } @classes;
+    my $end = $self->_fresh_label('can.end.');
+    my @in;   # the end's edges: each class's hit (true), the last miss (false)
+    $self->{_need_memcmp} = 1;
+    for my $cname (@cands) {
+        my ($p, $l) = $self->_str_const_parts($cname, 'can: a class');
+        my ($leq, $mc, $meq, $hit) = map { $self->_fresh } 1 .. 4;
+        my ($cmp, $next) = map { $self->_fresh_label("can.$_.") } qw(cmp next);
+        $self->_emit("  $leq = icmp eq i64 $cl, $l");
+        $self->_set_terminator("  br i1 $leq, label %$cmp, label %$next");
+        $self->_new_block($cmp);
+        $self->_emit("  $mc = call i32 \@memcmp(i8* $cp, i8* $p, i64 $l)  ; can: is it $cname?");
+        $self->_emit("  $meq = icmp eq i32 $mc, 0");
+        $self->_emit("  $hit = and i1 $meq, $is");
+        push @in, "[ true, %" . $self->_current_block_label . " ]";
+        $self->_set_terminator("  br i1 $hit, label %$end, label %$next");
+        $self->_new_block($next);
+    }
+    push @in, "[ false, %" . $self->_current_block_label . " ]";
+    $self->_set_terminator("  br label %$end");
+    $self->_new_block($end);
+    my $res = $self->_fresh;
+    $self->_emit("  $res = phi i1 " . join(', ', @in) . "  ; can: has it");
+    $self->{cache}{ 'repr:' . $node->id } = 'Boolean';
+    $node->set_stamp('Boolean') if ( $node->stamp // 'Unknown' ) eq 'Unknown';
+    return $self->{cache}{ $node->id } = $res;
+}
+
 sub _lower_call_indirect {
     my ($self, $node) = @_;
     my ($callee, @args) = $node->inputs->@*;
@@ -15549,6 +15653,54 @@ sub _store_field_payload {
     return $pay_i64;
 }
 
+# _dispatch_invocant($obj) -> ($is, $class_ptr, $class_len): the class a
+# method on $obj dispatches by -- a class string's own, or a blessed
+# reference's (bless table); $is says it is blessed. What is not a reference
+# exits 255, as perl dies. () where $obj is no shape this reads.
+sub _dispatch_invocant {
+    my ($self, $obj) = @_;
+    my $rs = $self->_repr_of($obj) // $obj->stamp // '';
+    # A CLASS NAMED BY A STRING (a tie's): its sub of that name.
+    my ($is, $cp, $cl);
+    if ($rs eq 'Str') {
+        ($cp, $cl) = $self->_str_parts($self->lower_value($obj));
+        $is = 'true';
+    }
+    # AN INLINED ARGUMENT is the caller's value: its element read is the
+    # caller's, read there (the callee's `$_[0]` has no array of its own).
+    my $root = $obj;
+    for (1 .. 32) {
+        my $b = $self->{_arg_bind} ? $self->{_arg_bind}{ refaddr($root) } : undef;
+        last unless $b && blessed($b->{node});
+        $root = $b->{node};
+    }
+    my $ref;
+    if ($rs eq 'Str') { }
+    elsif ($rs =~ /\A(?:Hash|Array|Scalar)Ref\z/) { $ref = $self->lower_value($obj) }
+    elsif ($rs eq 'Scalar' || ( $rs eq 'Object' && $root->operation eq 'Subscript' )) {
+        # An element stamped Object is read as its Slot, by its tag.
+        my $slot = $rs eq 'Scalar' ? $self->lower_value($obj) : $self->_subscript_slot($root);
+        my ($tag, $ok) = ($self->_slot_tag_of($slot), $self->_fresh);
+        my $pl = $self->_slot_payload_of($slot);
+        my @is = map { my $t = $self->_fresh; $self->_emit("  $t = icmp eq i8 $tag, " . _slot_tag_value($_)); $t } qw(HashRef ArrayRef ScalarRef);
+        $self->_emit("  $ok = or i1 $is[0], $is[1]");
+        my $ok2 = $self->_fresh;
+        $self->_emit("  $ok2 = or i1 $ok, $is[2]  ; dispatch: a reference?");
+        my ($no, $yes) = map { $self->_fresh_label("dispatch.$_.") } qw(notref ref);
+        $self->{_need_exit} = 1;
+        $self->_set_terminator("  br i1 $ok2, label %$yes, label %$no");
+        $self->_new_block($no);
+        $self->_emit("  call void \@exit(i32 255)  ; a method on what is not a blessed reference");
+        $self->_set_terminator("  unreachable");
+        $self->_new_block($yes);
+        $ref = $self->_fresh;
+        $self->_emit("  $ref = inttoptr i64 $pl to i8*  ; dispatch: the invocant");
+    }
+    else { return () }
+    ($is, $cp, $cl) = $self->_bless_class($ref) unless $rs eq 'Str';
+    return ($is, $cp, $cl);
+}
+
 # _lower_runtime_dispatch($node, $obj) -> %Slot, or undef where it does not
 # apply: a method on a blessed reference whose class is known only at run
 # time. The candidates are the packages whose sub of that name the program
@@ -15592,45 +15744,7 @@ sub _lower_runtime_dispatch {
           . "(@lacking) does not have is not lowered -- perl's death there names the file and line\n"
             if @lacking;
     }
-    my $rs = $self->_repr_of($obj) // $obj->stamp // '';
-    # A CLASS NAMED BY A STRING (a tie's): its sub of that name.
-    my ($is, $cp, $cl);
-    if ($rs eq 'Str') {
-        ($cp, $cl) = $self->_str_parts($self->lower_value($obj));
-        $is = 'true';
-    }
-    # AN INLINED ARGUMENT is the caller's value: its element read is the
-    # caller's, read there (the callee's `$_[0]` has no array of its own).
-    my $root = $obj;
-    for (1 .. 32) {
-        my $b = $self->{_arg_bind} ? $self->{_arg_bind}{ refaddr($root) } : undef;
-        last unless $b && blessed($b->{node});
-        $root = $b->{node};
-    }
-    my $ref;
-    if ($rs eq 'Str') { }
-    elsif ($rs =~ /\A(?:Hash|Array|Scalar)Ref\z/) { $ref = $self->lower_value($obj) }
-    elsif ($rs eq 'Scalar' || ( $rs eq 'Object' && $root->operation eq 'Subscript' )) {
-        # An element stamped Object is read as its Slot, by its tag.
-        my $slot = $rs eq 'Scalar' ? $self->lower_value($obj) : $self->_subscript_slot($root);
-        my ($tag, $ok) = ($self->_slot_tag_of($slot), $self->_fresh);
-        my $pl = $self->_slot_payload_of($slot);
-        my @is = map { my $t = $self->_fresh; $self->_emit("  $t = icmp eq i8 $tag, " . _slot_tag_value($_)); $t } qw(HashRef ArrayRef ScalarRef);
-        $self->_emit("  $ok = or i1 $is[0], $is[1]");
-        my $ok2 = $self->_fresh;
-        $self->_emit("  $ok2 = or i1 $ok, $is[2]  ; dispatch: a reference?");
-        my ($no, $yes) = map { $self->_fresh_label("dispatch.$_.") } qw(notref ref);
-        $self->{_need_exit} = 1;
-        $self->_set_terminator("  br i1 $ok2, label %$yes, label %$no");
-        $self->_new_block($no);
-        $self->_emit("  call void \@exit(i32 255)  ; a method on what is not a blessed reference");
-        $self->_set_terminator("  unreachable");
-        $self->_new_block($yes);
-        $ref = $self->_fresh;
-        $self->_emit("  $ref = inttoptr i64 $pl to i8*  ; dispatch: the invocant");
-    }
-    else { return undef }
-    ($is, $cp, $cl) = $self->_bless_class($ref) unless $rs eq 'Str';
+    my ($is, $cp, $cl) = $self->_dispatch_invocant($obj) or return undef;
     my @args = grep { blessed($_) } $node->inputs->@*;
     pop @args if $node->can('memory_input') && $node->memory_input;
     @args = $opt{args}->@* if $opt{args};
@@ -16433,11 +16547,23 @@ sub _lower_call_direct {
     # in the callee, whichever memory version, is that one array.
     if ($slurpy) {
         my @rest = @args[ scalar(@arg_reads) .. $#args ];
-        my $arr  = $self->_emit_array_of(\@rest);
+        my $sig  = $slurpy->sigil // '@';
+        my ($ref, $repr);
+        if ($sig eq '%') {
+            # The pairs as a hash literal of this call's own.
+            my $lit = Chalk::IR::Node::HashLiteral->new(id => "slurpy-hash:" . refaddr($node) . ":" . $self->_fresh,
+                inputs => [@rest]);
+            $lit->set_stamp('HashRef');
+            my $hr = $self->_lower_hash_ref($lit);
+            $ref = $self->_fresh;
+            $self->_emit("  $ref = bitcast i8* $hr to %Hash*  ; $name: its slurpy hash");
+            $repr = 'Hash';
+        }
+        else { ($ref, $repr) = ($self->_emit_array_of(\@rest), 'Array') }
         for my $n (_graph_component($graph)) {
             next unless blessed($n) && $n->operation eq 'PadAccess'
-                && ( $n->sigil // '' ) eq '@' && ( $n->symbol // '' ) eq ( $slurpy->symbol // '' );
-            $self->{_arg_bind}{ refaddr($n) } = { ref => $arr, repr => 'Array' };
+                && ( $n->sigil // '' ) eq $sig && ( $n->symbol // '' ) eq ( $slurpy->symbol // '' );
+            $self->{_arg_bind}{ refaddr($n) } = { ref => $ref, repr => $repr };
         }
     }
     # A DEFAULT IS THE CALLEE'S, lowered in this frame: taken after the
@@ -17085,8 +17211,9 @@ sub _collect_positional_arg_reads {
         my @targets = @inputs[ 0 .. $#inputs - 1 ];
         # A SLURPY ARRAY LAST takes every argument after the scalars: bound by
         # the call to an array of them (_lower_call_direct, _args_slurpy).
+        # ...or A SLURPY HASH, its pairs.
         if (@targets && blessed($targets[-1]) && $targets[-1]->operation eq 'PadAccess'
-                && ( $targets[-1]->sigil // '' ) eq '@') {
+                && ( $targets[-1]->sigil // '' ) =~ /\A[\@%]\z/) {
             $self->{_args_slurpy} = pop @targets;
         }
         for my $t (@targets) {
@@ -17153,6 +17280,8 @@ sub _lower_call_method {
     }
     # `->can("m")` whose readers call it: lowered with them.
     return $self->{cache}{ $node->id } = '0' if _is_called_can($node);
+    # ...read only as a truth: whether the invocant's class has m.
+    return $self->_lower_can_as_truth($node) if _is_can_read_as_truth($node);
     my $obj_node    = $node->inputs->[0];
     # AN INVOCANT THE CALL SITE MADE: a sub's parameter, inlined, is the
     # caller's argument -- a `C->new(...)` or a bless into a literal class --
