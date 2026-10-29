@@ -2644,6 +2644,24 @@ sub _lower_binop_int {
 
     my $inputs  = $node->inputs;
 
+    # ARITHMETIC NOTHING TYPED -- an operand a loop phi carrying a Str in --
+    # is a number of what its operands are, as held here: an Int of Ints, a
+    # Num otherwise (a Str operand may be "2.5"). Decided at each lowering.
+    if ($repr eq 'Unknown') {
+        my @r = map { my $r = $self->_repr_of($_) // $_->stamp // ''; $r eq 'Slot' ? 'Scalar' : $r } @$inputs[0, 1];
+        die "GAP: $op nothing typed over " . join(' and ', @r) . " operands is not lowered\n"
+            if grep { !/\A(?:Int|Num|Str|Scalar|Boolean|Undef)\z/ } @r;
+        $repr = ( grep { !/\A(?:Int|Boolean)\z/ } @r ) ? 'Num' : 'Int';
+        $self->{cache}{ 'repr:' . $node->id } = $repr;
+        my @v = map { my $v = $self->lower_value($inputs->[$_]);
+                      $r[$_] eq $repr ? $v : $self->_emit_coercion($v, $r[$_], $repr, "$op operand") } 0, 1;
+        my $ref = $self->_fresh;
+        $self->_emit("  $ref = " . _repr_opcode($llvm_op, $repr) . " " . _repr_to_llvm_type($repr)
+            . " $v[0], $v[1]  ; $op(nothing typed, as $repr)");
+        $self->{cache}{$node->id} = $ref;
+        return $ref;
+    }
+
     # The result's representation decides BOTH the machine type and the
     # instruction; neither is named here. A Num-repr arithmetic op (the
     # repr-join widened it because at least one operand is Num — e.g. a Num-init
@@ -8886,7 +8904,11 @@ sub _process_loop_node {
                         push @q, $n->inputs->@*;
                         next;
                     }
-                    push @back, $n->stamp // '';
+                    # ARITHMETIC NOTHING TYPED is a number whatever it reads:
+                    # a Num, as a Str operand ("2.5") may make it (pvm 326).
+                    push @back, ( ( $n->stamp // '' ) eq 'Unknown'
+                                  && $n->operation =~ /\A(?:Add|Subtract|Multiply|Divide|Negate)\z/ )
+                        ? 'Num' : $n->stamp // '';
                 }
             }
             my @r = ( $self->_repr_of($inputs->[0]) // '', @back ? @back : ('') );
