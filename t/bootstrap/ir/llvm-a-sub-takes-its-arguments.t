@@ -73,7 +73,12 @@ for my $case (
 }
 
 # A slurpy hash takes the pairs after the scalars (pvm 068 127): lowered.
+# ...and @_ read only as a list is the arguments flattened: an array passed
+# is its elements (pvm 112, whose map aliases $_ to them and only reads it).
 for my $case (
+    [ q{sub n { return scalar(@_) } my @a = (1, 2, 3); print n(@a, 9), "\n";}, "4\n", '@_ counted, an array passed' ],
+    [ q{sub j { return join ",", @_ } my @a = ("x", "y"); print j(0, @a), "\n";}, "0,x,y\n", '@_ joined, an array passed' ],
+    [ q{use v5.36; my sub c ($s) { $s =~ s/1/9/; "[$s]" } sub e { join ",", map { c($_) } @_ } my @a = ("a1", "b1"); print e(@a), " @a\n";}, "[a9],[b9] a1 b1\n", 'a map over @_ that only reads its $_' ],
     [ q{sub f { my ($c, %o) = @_; return "$c:$o{ix}:" . join(",", sort keys %o) } print f("m", ix => 3, k => 4), "\n";}, "m:3:ix,k\n", 'a slurpy hash target' ],
     [ q{sub new { my ($c, %o) = @_; return $o{ix} } my @a = (1, 2, 3); print main->new(ix => scalar(@a)), "\n";}, "3\n", 'a slurpy hash in a class method' ],
     # A package new's blessed hash, passed on as $self: an Object to B::SoN,

@@ -13263,6 +13263,35 @@ sub _is_called_can {
     } @readers;
 }
 
+# _may_write_topic($graph [, \%seen]): may $graph -- or a sub it calls --
+# store the global $_? A store to it (EntryWrite, Assign), an s///, tr///
+# or chomp of it, or a call whose callee is not a direct one known here
+# (a method, a code reference) counts.
+sub _may_write_topic {
+    my ($graph, $seen) = @_;
+    $seen //= {};
+    return 0 if $seen->{ refaddr($graph) }++;
+    my $is_topic = sub ($n) {
+        blessed($n) && $n->operation eq 'EntryDef' && ( $n->symbol // '' ) eq '_'
+            && ( $n->sigil // '$' ) eq '$' && ( $n->package // 'main' ) eq 'main'
+    };
+    for my $n (_graph_component($graph)) {
+        next unless blessed($n);
+        my $op = $n->operation;
+        return 1 if $op =~ /\A(?:EntryWrite|Assign|RegexSubst|Transliterate|Chomp|ChompValue)\z/
+            && grep { $is_topic->($_) } $n->inputs->@*;
+        next unless $op eq 'Call';
+        my $kind = $n->dispatch_kind // '';
+        next if $kind eq 'builtin';
+        return 1 unless $kind eq 'direct';
+        my $t = $n->can('target') ? $n->target : undef;
+        my $g = blessed($t) && $t->can('graph') ? $t->graph : undef;
+        return 1 unless $g;
+        return 1 if _may_write_topic($g, $seen);
+    }
+    return 0;
+}
+
 # _memory_input_of($r) -> the input $r takes as its memory version, or undef.
 sub _memory_input_of {
     my ($r) = @_;
@@ -16550,8 +16579,13 @@ sub _lower_call_direct {
     # call that may return one -- fills as many positions of @_ as it has
     # elements. Bound as one argument, every later position was undef
     # (`my ($c, $a) = @_` of f(@x) read undef for perl's $x[1]).
+    # @_ READ ONLY AS A LIST (no position, no slurpy, no write) is built as
+    # the arguments flattened (_emit_flattened_array_of): an array, or a
+    # list a call returns, is its elements. A hash is not built so.
+    my $as_list_only = $args_array && !@arg_reads && !$slurpy && !$written;
     for my $a ( ( @arg_reads || $args_array || $slurpy || $written ) ? @args : () ) {
         my $st = $a->stamp // 'Unknown';
+        next if $as_list_only && ( $st eq 'Array' || ( $st eq 'List' && $a->operation eq 'Call' ) );
         die "GAP: direct call to '$name': an argument stamped $st flattens into \@_, "
           . "which inlining does not build.\n"
             if $st =~ /\A(?:Array|Hash|List)\z/
@@ -16559,7 +16593,7 @@ sub _lower_call_direct {
     }
     # @_ READ AS A LIST is one argument per element: an argument that is
     # itself a list would flatten, which this does not build.
-    if ($args_array) {
+    if ($args_array && !$as_list_only) {
         for my $a (@args) {
             die "GAP: direct call to '$name': an argument stamped "
               . ( $a->stamp // 'NONE' ) . " flattens into \@_, which inlining "
@@ -16650,7 +16684,9 @@ sub _lower_call_direct {
         }
         $self->{_arg_bind}{ refaddr($r) } = { ref => $self->lower_value($d), repr => $d->stamp };
     }
-    my $args_arr = $args_array ? $self->_emit_array_of(\@args) : undef;
+    my $args_arr = !$args_array ? undef
+        : $as_list_only ? $self->_emit_flattened_array_of(\@args)
+        : $self->_emit_array_of(\@args);
     $self->{_arg_bind}{ refaddr($args_array) } = { ref => $args_arr, repr => 'Array' }
         if $args_array;
 
@@ -17217,11 +17253,13 @@ sub _collect_positional_arg_reads {
                                 next;
                             }
                         }
+                        # `for (@_)` / `map {...} @_` ALIAS $_ to each element:
+                        # a write only where something may store $_ meanwhile.
                         die "GAP: direct call to '$name': callee writes \$_[N] -- an "
                           . "alias of the caller's argument, which inlining does not "
                           . "write back.\n"
                             if ( $uop eq 'Assign' && refaddr($u->inputs->[0] // 0) == refaddr($v) )
-                            || $uop eq 'LocalAlias';
+                            || ( $uop eq 'LocalAlias' && _may_write_topic($graph) );
                         push @q, $u if $uop =~ /\A(?:Ref|TernaryExpr|PostfixDeref)\z/;
                     }
                 }
@@ -17733,8 +17771,22 @@ sub _regex_escape_byte {
       . "are pending tranches — refusing to silently match a literal '$e')";
 }
 
+# _without_inert_u($pattern, $flags) -> $flags, less a `u` (unicode_strings,
+# as `use v5.12`+ sets) that changes nothing here: it decides only how \w
+# \s \d (and their negations), POSIX classes and /i treat a byte past
+# ASCII, and a pattern with none of them matches the same bytes either way.
+sub _without_inert_u {
+    my ($pattern, $flags) = @_;
+    $flags //= '';
+    return $flags unless $flags =~ /u/;
+    return $flags if $flags =~ /i/
+        || ( $pattern // '' ) =~ /\\[wWsSdDbBhHvVRXpPN]|\[:/;
+    return $flags =~ s/u//gr;
+}
+
 sub _compile_regex_pattern {
     my ($pattern, $flags) = @_;
+    $flags = _without_inert_u($pattern, $flags);
 
     # No flag is implemented yet; silently ignoring one (e.g. /i compiling a
     # case-sensitive matcher, /x treating whitespace as literal atoms) would
@@ -18935,7 +18987,7 @@ sub _lower_regex_subst {
         if @rest > 1 || ( @rest == 1 && !_is_memory_version($rest[0]) );
 
     # /e is the producer's to compute; with the value here, it is spent.
-    my $flags = $node->flags // '';
+    my $flags = _without_inert_u($node->pattern, $node->flags);
     $flags =~ s/e//g if $repl_node;
     my $global = $flags =~ s/g//g;
     die "GAP: s///$flags flags not yet supported by the G6 sub-compiler"
