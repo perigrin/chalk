@@ -5620,6 +5620,22 @@ sub _shortcircuit_phi_repr {
       . "machine type. Insert a Coerce so both operands share a repr, or fix TypeInference.";
 }
 
+# _shortcircuit_operand_repr($node) -> the repr an operand of && or || is held
+# as. A short-circuit NOTHING TYPED is typed only once lowered, which is after
+# the one it is nested in asks: its repr is its arms' -- agreeing arms keep
+# their type, others are the Scalar both are (as _lower_and decides it).
+sub _shortcircuit_operand_repr {
+    my ($self, $node, $seen) = @_;
+    $seen //= {};
+    my $r = $self->_repr_of($node) // $node->stamp;
+    return $r unless ( $r // '' ) eq 'Unknown'
+        && $node->operation =~ /\A(?:And|Or)\z/ && !$seen->{ refaddr($node) }++;
+    my @a = map { $_->operation eq 'Print' ? 'Boolean' : $self->_shortcircuit_operand_repr($_, $seen) }
+        $node->inputs->@[0, 1];
+    return $r if grep { !defined || !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @a;
+    return $a[0] eq $a[1] ? $a[0] : 'Scalar';
+}
+
 sub _lower_and {
     my ($self, $node) = @_;
 
@@ -5645,8 +5661,8 @@ sub _lower_and {
     # runtime-free. `$x eq $y && (print ...)` is Boolean && Boolean (a comparison guard
     # and a print's builtin::is_bool return) — the cond.t idiom. Any other repr is
     # a loud GAP (see _shortcircuit_i1_cond).
-    my $lhs_repr = $self->_repr_of($lhs_node) // $lhs_node->stamp;   # an inlined argument as held
-    my $rhs_repr = $rhs_node->operation eq "Print" ? "Boolean" : $self->_repr_of($rhs_node) // $rhs_node->stamp;
+    my $lhs_repr = $self->_shortcircuit_operand_repr($lhs_node);   # an inlined argument as held
+    my $rhs_repr = $rhs_node->operation eq "Print" ? "Boolean" : $self->_shortcircuit_operand_repr($rhs_node);
 
     # `&&` yields one of its OPERANDS, not a boolean -- measured:
     # `my $a=5; my $b="hi"; $a && $b` is "hi", and with $a=0 it is 0. So the two
@@ -5758,8 +5774,8 @@ sub _lower_or {
     # Validate operand reprs: Int (icmp ne i64) and Boolean (already i1) both lower
     # runtime-free. `$x ne $y || (print ...)` is Boolean || Boolean — the cond.t idiom.
     # Any other repr is a loud GAP (see _shortcircuit_i1_cond).
-    my $lhs_repr = $self->_repr_of($lhs_node) // $lhs_node->stamp;   # an inlined argument as held
-    my $rhs_repr = $rhs_node->operation eq "Print" ? "Boolean" : $self->_repr_of($rhs_node) // $rhs_node->stamp;
+    my $lhs_repr = $self->_shortcircuit_operand_repr($lhs_node);   # an inlined argument as held
+    my $rhs_repr = $rhs_node->operation eq "Print" ? "Boolean" : $self->_shortcircuit_operand_repr($rhs_node);
 
     # `||` yields one of its OPERANDS, so its arms can differ in type. Same rule
     # and same block-placement constraint as _lower_and: the bridge is emitted
