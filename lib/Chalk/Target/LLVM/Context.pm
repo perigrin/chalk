@@ -7545,6 +7545,31 @@ sub _wire_region_phis_with_preblock {
                      // _phi_slot_for_proj($region, 0);
         my $else_slot = 1 - $then_slot;
 
+        # AN ARM THAT DIES never reaches the merge: its block ends in
+        # `unreachable`, so the phi has no entry from it, and the live arm's
+        # value is the merge's (`if ... return; else die`, whose exit Region
+        # takes the die's Unwind as an input).
+        my %dead = map {
+            my $in = $region->inputs->[$_];
+            ( blessed($in) && $in->can('operation')
+              && ( $in->operation eq 'Unwind'
+                   || ( $in->operation eq 'Proj' && defined _find_unwind_consumer($in) ) ) )
+                ? ( $_ => 1 ) : ()
+        } 0 .. $#{ $region->inputs };
+        if ($dead{$then_slot} || $dead{$else_slot}) {
+            die "GAP: a merge whose every arm dies has no value to take\n"
+                if $dead{$then_slot} && $dead{$else_slot};
+            my ($slot, $vars, $cache, $label) = $dead{$then_slot}
+                ? ($else_slot, $else_vars, $else_cache, $else_label)
+                : ($then_slot, $then_vars, $then_cache, $then_label);
+            my $v;
+            ($v, $label) = $self->_lower_arm_in_tail($inputs->[$slot], $label, $vars, $cache);
+            ($v, $label) = $self->_coerce_arm($inputs->[$slot], $v, $phi_repr, $label, 'Region.Phi.live');
+            if ($dead{$then_slot}) { $else_label = $label; push @wired, [$phi_node, undef, $v] }
+            else                   { $then_label = $label; push @wired, [$phi_node, $v, undef] }
+            next;
+        }
+
         # A MERGE OF LISTS is the chosen list. List is a shape with no machine
         # type, so each arm is flattened into an array in its own tail and the
         # merge is that array (pvm 077: `defined $p ? two() : ()`).
@@ -7578,7 +7603,9 @@ sub _wire_region_phis_with_preblock {
                      // Chalk::Target::LLVM::Context::_require_repr($phi_node, 'ElaboratedContext.Region.Phi');
         my $llvm_type = Chalk::Target::LLVM::Context::_repr_to_llvm_type($repr);
         my $result    = $self->_fresh;
-        $self->_emit("  $result = phi $llvm_type [ $then_val, %$then_label ], [ $else_val, %$else_label ]  ; Region phi");
+        my @in = ( ( defined $then_val ? "[ $then_val, %$then_label ]" : () ),
+                   ( defined $else_val ? "[ $else_val, %$else_label ]" : () ) );
+        $self->_emit("  $result = phi $llvm_type " . join(', ', @in) . "  ; Region phi");
         $self->{cache}{ $phi_node->id } = $result;
     }
     return ($then_label, $else_label);
