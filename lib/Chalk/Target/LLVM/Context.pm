@@ -10564,8 +10564,10 @@ sub _lower_length {
 # reached a GEP as a %Slot), a Num truncated.
 sub _index_i64 {
     my ($self, $idx) = @_;
-    my $r = $self->_repr_of($idx) // '';
     my $v = $self->lower_value($idx);   # a bound argument as $r reads it
+    # Read after lowering: an index nothing typed is typed by its lowering.
+    my $r = $self->_repr_of($idx) // '';
+    $r = 'Scalar' if $r eq 'Slot';
     return $v if $r eq 'Int';
     return $self->_emit_coercion($v, 'Scalar', 'Int', 'array index') if $r eq 'Scalar';
     if ($r eq 'Num' || $r eq 'Boolean') {

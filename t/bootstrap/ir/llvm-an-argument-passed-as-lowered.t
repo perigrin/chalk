@@ -83,4 +83,22 @@ PERL
        'pvm 169: not refused as arithmetic over an operand its lowering types') or diag $err;
 }
 
+# AN INDEX NOTHING TYPED is what its lowering made it: `$chars[$k]` with `$k`
+# an Add nothing typed was read before it was lowered, so Unknown, and
+# refused ("an array index with repr=Unknown", pvm 169).
+{
+    my $got = eval { through_llvm(<<'PERL') };
+sub esc { return (ord($_[0][$_[1]]) + 100, 1) }
+sub f { my @chars = split //, $_[0]; my $j = 0; my @r;
+  while ($j <= $#chars) { my $cc = $chars[$j]; my ($lo, $lo_used);
+    if ($cc eq 'x') { ($lo, $lo_used) = esc(\@chars, $j + 1); $lo_used += 1 } else { ($lo, $lo_used) = (ord($cc), 1) }
+    my $k = $j + $lo_used;
+    if (($chars[$k] // '') eq '-') { push @r, "$lo-" . ord($chars[$k + 1]); $j = $k + 2; next }
+    push @r, $lo; $j = $k }
+  return "@r" }
+print f('a-bxyc'), "\n";
+PERL
+    is($got, "97-98 221 99\n", 'an index computed in a loop: perl\'s answer') or diag $@;
+}
+
 done_testing;
