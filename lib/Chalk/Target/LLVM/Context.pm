@@ -9885,10 +9885,17 @@ sub _owned_by_arm {
     # after the loop where it did not dominate.
     my $after_a_merge = sub {
         grep {
-            blessed($_) && $_->operation eq 'Phi' && $_->can('region')
+            ( blessed($_) && $_->operation eq 'Phi' && $_->can('region')
                 && blessed($_->region) && $_->region->operation eq 'Region'
                 && !$visited->{continues}{ $_->region->id }
-                && !$visited->{owned}{ $_->region->id }
+                && !$visited->{owned}{ $_->region->id } )
+            # ...OR A STATEMENT PINNED PAST IT: `return "@l"` after `push @l`
+            # after the if reads the push, not the phi, and taken into the
+            # arm its join forced the If again (pvm 216).
+            || ( blessed($_) && $_->can('control_in') && blessed($_->control_in)
+                && $_->control_in->operation eq 'Region'
+                && !$visited->{continues}{ $_->control_in->id }
+                && !$visited->{owned}{ $_->control_in->id } )
         } $node->inputs->@*;
     };
     return ($after_a_merge->() ? 0 : 1) unless $node->can('control_in');
