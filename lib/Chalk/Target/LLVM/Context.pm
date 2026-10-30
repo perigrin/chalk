@@ -131,6 +131,7 @@ sub new {
         _need_select            => 0,
         _need_hash_delete       => 0,
         _need_index             => 0,
+        _need_str_bitop         => 0,
         _need_str_range         => 0,
         _need_localtime         => 0,
         _need_access            => 0,
@@ -187,6 +188,7 @@ my @NEED_FLAGS = qw(
     _need_select
     _need_hash_delete
     _need_index
+    _need_str_bitop
     _need_str_range
     _need_localtime
     _need_access
@@ -963,6 +965,7 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_bless_lines;
     push @lines, $self->_hash_delete_lines;
     push @lines, $self->_index_lines;
+    push @lines, $self->_str_bitop_lines;
     push @lines, $self->_str_range_lines;
     push @lines, $self->_localtime_lines;
     push @lines, 'declare i32 @access(i8*, i32)' if $self->{_need_access} && !$self->{_access_emitted}++;
@@ -1898,7 +1901,7 @@ sub lower_value {
     # ~ IS DONE ON BYTES when its operand is a string, and whether it is one
     # (or was once read as a number) is not on the wire.
     elsif ($op eq 'Complement') {
-        die "GAP: a bitwise ~ is not lowered -- perl does it on bytes when its operand is a string\n";
+        return $self->_lower_bitop_on_strings($node, 'not');
     }
     elsif ($op eq 'Coerce') {
         return $self->_lower_coerce($node);
@@ -2841,8 +2844,7 @@ sub _lower_bitop {
         $n = $n->inputs->[0] while blessed($n) && $n->operation eq 'Coerce';
         blessed($n) && $n->operation eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:integer|number)\z/;
     };
-    die "GAP: a bitwise " . $node->op_str . " that perl may do on strings (no number among its "
-      . "operands, no bitwise feature) is not lowered\n"
+    return $self->_lower_bitop_on_strings($node, $llop)
         unless ( $node->flavor // '' ) eq 'numeric' || grep { $is_number->($_) } @in;
     my @v = map {
         my $s = $self->_repr_of($_) // $_->stamp // '';
@@ -2864,6 +2866,218 @@ sub _lower_bitop {
         $self->_new_block($ok);
     }
     return $self->{cache}{ $node->id } = $ref;
+}
+
+# _lower_bitop_on_strings($node, 'and'|'or'|'xor'|'not') -> i64: `&` `|` `^`
+# `~` where perl may combine bytes. PERL DOES IT ON BYTES when no operand
+# holds a number -- one never read as a number: an %ENV value, a string
+# literal (a `//` copies whichever it took) -- and on numbers otherwise.
+# Which, is decided here at run time. A numeric read makes a string a number
+# to the op after, and one node may stand for several variables (the
+# producer merges `$ENV{X} // 6` written twice), so each value that may be a
+# string is read by this op alone, outside a loop: no read came first.
+#
+# The i64 is the result's numeric reading; a Coerce to Str of it takes the
+# bytes (`bitstr:` in the cache).
+sub _lower_bitop_on_strings {
+    my ($self, $node, $llop) = @_;
+    my $what = $llop eq 'not' ? '~' : $node->op_str;
+    die "GAP: a bitwise $what that perl may do on strings is not lowered inside a loop -- "
+      . "a pass that read a string as a number makes it a number to the next\n"
+        if ( $self->{_loop_ctx_stack} // [] )->@*;
+    my @in = $llop eq 'not' ? ( $node->inputs->[0] ) : $node->inputs->@[0, 1];
+    my @num = map { $self->_operand_as($_, 'Int', 'a bitwise operand') } @in;
+    my (@is, @str);
+    for my $leaf (map { _bit_leaf($_) } @in) {
+        my ($is, $s) = $self->_bit_string_of($leaf, $node);
+        push @is, $is;
+        push @str, $s;
+    }
+    my $both = $is[0];
+    if (@is > 1) {
+        $both = $self->_fresh;
+        $self->_emit("  $both = and i1 $is[0], $is[1]  ; $what: no number among them?");
+    }
+    my ($ap, $al) = $self->_str_parts($str[0]);
+    my ($bp, $bl) = @str > 1 ? $self->_str_parts($str[1]) : ( $ap, $al );
+    my ($olen, $bytes, $len) = map { $self->_fresh } 1 .. 3;
+    $self->_emit_entry("  $olen = alloca i64  ; $what: bytes made");
+    $self->{$_} = 1 for qw(_need_str_bitop _need_malloc_memcpy);
+    my $code = { and => 0, or => 1, xor => 2, not => 3 }->{$llop};
+    $self->_emit("  $bytes = call i8* \@chalk_str_bitop(i8* $ap, i64 $al, i8* $bp, i64 $bl, i32 $code, i64* $olen)  ; $what on bytes");
+    $self->_emit("  $len = load i64, i64* $olen");
+    my $as_str = $self->_str_value($bytes, len => $len);
+    my $n = $self->_fresh;
+    $self->_emit($llop eq 'not' ? "  $n = xor i64 $num[0], -1  ; ~ on a number"
+                                : "  $n = $llop i64 $num[0], $num[1]  ; $what on numbers");
+    # ONE PAST WHAT AN i64 HOLDS stops the program, as _lower_bitop does,
+    # unless another bitwise op takes it.
+    my $bit = qr/\A(?:Bit(?:And|Or|Xor)|Complement)\z/;
+    if (grep { blessed($_) && $_->operation !~ $bit } ($node->consumers // [])->@*) {
+        my ($big, $num_big, $ok) = map { $self->_fresh } 1 .. 3;
+        $self->_emit("  $big = icmp slt i64 $n, 0  ; unsigned past an i64?");
+        $self->_emit("  $num_big = select i1 $both, i1 false, i1 $big");
+        $self->_emit("  $ok = xor i1 $num_big, true");
+        $self->_stop_unless($ok, "an unsigned bitwise result an i64 cannot hold");
+    }
+    my $n_str  = $self->_emit_coercion($n, 'Int', 'Str', "$what: its number as a string");
+    my $s_num  = $self->_emit_coercion($as_str, 'Str', 'Int', "$what: its bytes as a number");
+    my ($str, $num) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $str = select i1 $both, %Str $as_str, %Str $n_str  ; $what: bytes or a number");
+    $self->_emit("  $num = select i1 $both, i64 $s_num, i64 $n");
+    $self->{cache}{ 'bitstr:' . $node->id } = { is => $both, str => $str };
+    return $self->{cache}{ $node->id } = $num;
+}
+
+# _bit_leaf($n) -> $n under the numeric readings (a Coerce to Int or Num) the
+# producer puts on a bitwise operand: the value perl holds.
+sub _bit_leaf {
+    my ($n) = @_;
+    $n = $n->inputs->[0]
+        while blessed($n) && $n->operation eq 'Coerce' && ( $n->to_repr // '' ) =~ /\A(?:Int|Num)\z/;
+    return $n;
+}
+
+# _bit_string_of($leaf, $op) -> ($is_str_i1, $str): whether perl holds a
+# string with no number in $leaf when bitwise $op reads it, and its bytes.
+# Dies GAP where that is not known.
+sub _bit_string_of {
+    my ($self, $n, $op_node, $inner) = @_;
+    my $op  = $n->operation;
+    my $bit = qr/\A(?:Bit(?:And|Or|Xor)|Complement)\z/;
+    my $stamp = $n->stamp // '';
+    # A NUMBER: not one of the kinds below, and the producer typed it Int.
+    my $kind = $op eq 'Constant' || $op eq 'EnvRead' || ( $op eq 'DefinedOr' && $stamp eq 'Str' )
+            || defined $self->{cache}{ 'bitstr:' . $n->id };
+    if (!$kind) {
+        die "GAP: a bitwise op on what may be a string, from a $op ($stamp), is not lowered -- "
+          . "whether it holds a number is not known\n" unless $stamp eq 'Int';
+        return ( 'false', $self->_emit_coercion($self->lower_value($n), 'Int', 'Str', 'a bitwise number') );
+    }
+    if ($op eq 'Constant' && ( $n->const_type // '' ) ne 'string') {
+        die "GAP: a bitwise op on a " . ( $n->const_type // '?' ) . " constant is not lowered here\n"
+            unless ( $n->const_type // '' ) eq 'integer';
+        return ( 'false', $self->_emit_coercion($self->lower_value($n), 'Int', 'Str', 'a bitwise number') );
+    }
+    # What perl holds here is a copy (a `//` makes one) -- read by nothing else.
+    $self->_bit_read_alone($n, $op_node) unless $inner;
+    if (my $d = $self->{cache}{ 'bitstr:' . $n->id }) { return ( $d->{is}, $d->{str} ) }
+    return ( 'true', $self->lower_value($n) ) if $op eq 'Constant';
+    if ($op eq 'EnvRead') {
+        $self->_bit_env_unread($n);
+        my $s = $self->lower_value($n);
+        return ( $self->_env_defined_bit($n), $s );
+    }
+    # A `//` holds the side it took.
+    my $s = $self->lower_value($n);
+    my ($l, $r) = $n->inputs->@[0, 1];
+    my $took = $self->_env_defined_bit($l)
+        // die "GAP: a bitwise op on a `//` whose left side is not an %ENV read is not lowered\n";
+    my ($li) = $self->_bit_string_of($l, $n, 1);
+    my ($ri) = $self->_bit_string_of($r, $n, 1);
+    my $is = $self->_fresh;
+    $self->_emit("  $is = select i1 $took, i1 $li, i1 $ri  ; //: the side it took a string?");
+    return ( $is, $s );
+}
+
+# _bit_read_alone($n, $op): $n is read by bitwise $op and no other bitwise op,
+# and by nothing that reads it as a number -- else GAP.
+sub _bit_read_alone {
+    my ($self, $n, $op_node) = @_;
+    my $bit = qr/\A(?:Bit(?:And|Or|Xor)|Complement)\z/;
+    my %ops;
+    for my $c (($n->consumers // [])->@*) {
+        next unless blessed($c);
+        my $op = $c->operation;
+        if ($op =~ $bit) { $ops{ $c->id } = 1; next }
+        next if $op eq 'Print';
+        if ($op eq 'Coerce' && ( $c->to_repr // '' ) eq 'Str') { next }
+        if ($op eq 'Coerce' && ( $c->to_repr // '' ) =~ /\A(?:Int|Num)\z/) {
+            my @r = grep { blessed($_) } ($c->consumers // [])->@*;
+            if (!grep { $_->operation !~ $bit } @r) { $ops{ $_->id } = 1 for @r; next }
+        }
+        die "GAP: a bitwise op on what may be a string, which a $op also reads, is not lowered -- "
+          . "a numeric read makes it a number to the op\n";
+    }
+    die "GAP: a bitwise op on what may be a string, which another bitwise op also reads, is not "
+      . "lowered -- that op, done on numbers, makes it a number to this one\n"
+        if grep { $_ ne $op_node->id } keys %ops;
+    return;
+}
+
+# _bit_env_unread($env): no %ENV read of $env's key is read as a number --
+# a numeric read numifies the %ENV value itself.
+sub _bit_env_unread {
+    my ($self, $env) = @_;
+    die "GAP: a bitwise op on an %ENV value is not lowered where the program's nodes are not known\n"
+        unless @Chalk::Target::LLVM::Context::PROGRAM;
+    for my $e (grep { $_->operation eq 'EnvRead' && $_->key eq $env->key } @Chalk::Target::LLVM::Context::PROGRAM) {
+        for my $c (($e->consumers // [])->@*) {
+            next unless blessed($c);
+            my $op = $c->operation;
+            next if $op eq 'DefinedOr' && $c->inputs->[0]->id eq $e->id;
+            next if $op eq 'Print' || ( $op eq 'Coerce' && ( $c->to_repr // '' ) eq 'Str' );
+            die "GAP: a bitwise op on \$ENV{" . $env->key . "}, which a $op reads, is not lowered -- "
+              . "a numeric read makes it a number\n";
+        }
+    }
+    return;
+}
+
+# _str_bitop_lines -> @chalk_str_bitop: perl's string & | ^ ~. & is as long as
+# the shorter, | and ^ the longer (the shorter read as NULs past its end), ~
+# its one operand.
+sub _str_bitop_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_str_bitop} && !$self->{_str_bitop_emitted}++;
+    return ('', <<'END_HELPER');
+define internal i8* @chalk_str_bitop(i8* %a, i64 %al, i8* %b, i64 %bl, i32 %op, i64* %outlen) {
+entry:
+  %zero = alloca i8
+  store i8 0, i8* %zero
+  %lt = icmp slt i64 %al, %bl
+  %min = select i1 %lt, i64 %al, i64 %bl
+  %max = select i1 %lt, i64 %bl, i64 %al
+  %isand = icmp eq i32 %op, 0
+  %isnot = icmp eq i32 %op, 3
+  %n0 = select i1 %isand, i64 %min, i64 %max
+  %n = select i1 %isnot, i64 %al, i64 %n0
+  %sz = add i64 %n, 1
+  %buf = call i8* @malloc(i64 %sz)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i1, %body ]
+  %done = icmp sge i64 %i, %n
+  br i1 %done, label %end, label %body
+body:
+  %ina = icmp slt i64 %i, %al
+  %pa0 = getelementptr inbounds i8, i8* %a, i64 %i
+  %pa = select i1 %ina, i8* %pa0, i8* %zero
+  %x = load i8, i8* %pa
+  %inb = icmp slt i64 %i, %bl
+  %pb0 = getelementptr inbounds i8, i8* %b, i64 %i
+  %pb = select i1 %inb, i8* %pb0, i8* %zero
+  %y = load i8, i8* %pb
+  %rand = and i8 %x, %y
+  %ror = or i8 %x, %y
+  %rxor = xor i8 %x, %y
+  %rnot = xor i8 %x, -1
+  %isor = icmp eq i32 %op, 1
+  %isxor = icmp eq i32 %op, 2
+  %r1 = select i1 %isor, i8 %ror, i8 %rand
+  %r2 = select i1 %isxor, i8 %rxor, i8 %r1
+  %r = select i1 %isnot, i8 %rnot, i8 %r2
+  %po = getelementptr inbounds i8, i8* %buf, i64 %i
+  store i8 %r, i8* %po
+  %i1 = add i64 %i, 1
+  br label %loop
+end:
+  %pe = getelementptr inbounds i8, i8* %buf, i64 %n
+  store i8 0, i8* %pe
+  store i64 %n, i64* %outlen
+  ret i8* %buf
+}
+END_HELPER
 }
 
 # _operand_as($node, $repr, $what) -> $node lowered and coerced to $repr.
@@ -3894,6 +4108,11 @@ sub _lower_coerce {
     # that carry none.
     my $input_ref = $self->lower_value($node->inputs->[0]);
     my $operand   = $node->inputs->[0];
+    # A BITWISE RESULT THAT MAY BE A STRING is read as one where perl's was
+    # (_lower_bitop_on_strings); its i64 is only its numeric reading.
+    if ($to eq 'Str' && defined( my $s = $self->{cache}{ 'bitstr:' . $operand->id } )) {
+        return $self->{cache}{ $node->id } = $s->{str};
+    }
     # `_is_narrowed`, NOT `defined`. Under the every-Value-node-is-stamped
     # invariant a stamp is ALWAYS defined, so `defined` stopped discriminating
     # and this branch began firing for operands whose stamp is `Unknown` --
