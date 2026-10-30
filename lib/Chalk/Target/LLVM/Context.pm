@@ -16999,6 +16999,19 @@ sub _lower_call_direct {
         if (!$@ && !@reads && (my $aa = $self->{_args_read_as_a_list})) {
             $self->{_arg_bind}{ refaddr($aa) } = { ref => $self->_emit_array_of([]), repr => 'Array' };
         }
+        # A SIGNATURE OF A SLURPY ALONE, called with nothing: it is empty.
+        if (!$@ && blessed(my $sl = $self->{_args_slurpy}) && $self->{_args_slurpy}->operation eq 'Parameter') {
+            if (( $sl->sigil // '' ) eq '%') {
+                my $lit = Chalk::IR::Node::HashLiteral->new(id => "slurpy-hash:" . refaddr($node) . ":" . $self->_fresh,
+                    inputs => []);
+                $lit->set_stamp('HashRef');
+                my $hr = $self->_lower_hash_ref($lit);
+                my $h = $self->_fresh;
+                $self->_emit("  $h = bitcast i8* $hr to %Hash*  ; $name: its slurpy hash, empty");
+                $self->{_arg_bind}{ refaddr($sl) } = { ref => $h, repr => 'Hash' };
+            }
+            else { $self->{_arg_bind}{ refaddr($sl) } = { ref => $self->_emit_array_of([]), repr => 'Array' } }
+        }
         die "GAP: direct call to '$name' as `&$name` shifts or writes the \@_ it shares\n"
             if $shared && ( $self->{_args_written} || grep { blessed($_) && $_->operation eq 'Call' } @reads );
         local $self->{_frame_args} = { args => [], refs => [],
@@ -17033,11 +17046,17 @@ sub _lower_call_direct {
         # built from the graph, with `@_` for a placeholder): only the
         # parameters it reads are known, so only those are checked.
         my $unknown = @declared == 1 && $declared[0] eq '@_';
-        @declared = map { "\$p$_" } 0 .. ( @arg_reads ? (sort { $b <=> $a } map { $_->index } @arg_reads)[0] : -1 )
+        @declared = map { "\$p$_" } 0 .. ( @arg_reads ? $#arg_reads : -1 )
             if $unknown;
+        # A SLURPY LAST takes the rest (bound below); anywhere else it is not
+        # lowered.
+        pop @declared if $slurpy && @declared && $declared[-1] =~ /\A[\@%]/;
         die "GAP: direct call to '$name': a signature with a slurpy parameter is not lowered\n"
             if grep { /\A[@%]/ } @declared;
-        if (@args > @declared && !$unknown) {
+        die "GAP: direct call to '$name' passes an odd count to a slurpy hash -- perl dies "
+          . "(Odd name/value argument).\n"
+            if $slurpy && ( $slurpy->sigil // '' ) eq '%' && ( @args - @declared ) % 2;
+        if (@args > @declared && !$unknown && !$slurpy) {
             my $r = $self->_die_into_eval($node, "Too many arguments for subroutine '$name'");
             return $r if defined $r;
             die "GAP: direct call to '$name' passes " . scalar(@args) . " argument(s) to a "
@@ -17182,7 +17201,10 @@ sub _lower_call_direct {
             $repr = 'Hash';
         }
         else { ($ref, $repr) = ($self->_emit_array_of(\@rest), 'Array') }
-        for my $n (_graph_component($graph)) {
+        # A SIGNATURE'S slurpy is its Parameter node, read as it is.
+        $self->{_arg_bind}{ refaddr($slurpy) } = { ref => $ref, repr => $repr }
+            if $slurpy->operation eq 'Parameter';
+        for my $n ($slurpy->can('symbol') ? _graph_component($graph) : ()) {
             next unless blessed($n) && $n->operation eq 'PadAccess'
                 && ( $n->sigil // '' ) eq $sig && ( $n->symbol // '' ) eq ( $slurpy->symbol // '' );
             $self->{_arg_bind}{ refaddr($n) } = { ref => $ref, repr => $repr };
@@ -17817,6 +17839,13 @@ sub _collect_positional_arg_reads {
         # BY INDEX, holes and all: a hole is a parameter the body never
         # reads (`($, $phi)`), and each read one keeps its own position.
         my ($max) = sort { $b <=> $a } keys %params;
+        # A SLURPY LAST (`@rest`, `%opts`) takes every argument past the
+        # scalars, and is no one position: bound by the call to an array (a
+        # hash) of them (_args_slurpy).
+        if (( $params{$max}->sigil // '$' ) =~ /\A[\@%]\z/) {
+            $self->{_args_slurpy} = delete $params{$max};
+            $max--;
+        }
         return map { $params{$_} } 0 .. $max;
     }
 
