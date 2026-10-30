@@ -2653,13 +2653,14 @@ sub _lower_binop_int {
     # is a number of what its operands are, as held here: an Int of Ints, a
     # Num otherwise (a Str operand may be "2.5"). Decided at each lowering.
     if ($repr eq 'Unknown') {
+        # Each operand lowered first: one nothing typed is typed by its lowering.
+        my @lv = map { $self->lower_value($_) } @$inputs[0, 1];
         my @r = map { my $r = $self->_repr_of($_) // $_->stamp // ''; $r eq 'Slot' ? 'Scalar' : $r } @$inputs[0, 1];
         die "GAP: $op nothing typed over " . join(' and ', @r) . " operands is not lowered\n"
             if grep { !/\A(?:Int|Num|Str|Scalar|Boolean|Undef)\z/ } @r;
         $repr = ( grep { !/\A(?:Int|Boolean)\z/ } @r ) ? 'Num' : 'Int';
         $self->{cache}{ 'repr:' . $node->id } = $repr;
-        my @v = map { my $v = $self->lower_value($inputs->[$_]);
-                      $r[$_] eq $repr ? $v : $self->_emit_coercion($v, $r[$_], $repr, "$op operand") } 0, 1;
+        my @v = map { $r[$_] eq $repr ? $lv[$_] : $self->_emit_coercion($lv[$_], $r[$_], $repr, "$op operand") } 0, 1;
         my $ref = $self->_fresh;
         $self->_emit("  $ref = " . _repr_opcode($llvm_op, $repr) . " " . _repr_to_llvm_type($repr)
             . " $v[0], $v[1]  ; $op(nothing typed, as $repr)");
@@ -9594,6 +9595,9 @@ sub _is_memory_phi {
                 || ( $lhs->operation eq 'PadAccess' && $lhs->is_location )
                 || ( $lhs->operation eq 'PostfixDeref' && ($lhs->sigil // '') eq '$' ) );
         }
+        # a list assignment the producer merges as memory: its value is a List
+        # no arm can flatten (`($lo, $u) = ...` in each arm, then a push)
+        return 1 if $in->operation eq 'Assign' && ( $in->stamp // '' ) eq 'List' && $phi->memory;
         # a package scalar's store
         return 1 if $in->operation eq 'EntryWrite';
         # a direct call: an inlined sub may store any of those
@@ -13742,7 +13746,11 @@ sub _arg_binding {
     # frame, for a `\$_[N]` in the callee (_lower_ref).
     my $loc = $arg->operation eq 'PadAccess' && ( $arg->sigil // '$' ) eq '$'
               && ( $arg->shared || $arg->is_location ) ? $self->_location_ptr($arg) : undef;
-    return { ref => $ref, repr => $arg->stamp, node => $arg, loc => $loc };
+    # NOTHING TYPED, it is passed as it was lowered (`$j + 1` of a loop phi
+    # nothing typed is an Int or a Num, _lower_binop_int's choice).
+    my $as = ( $arg->stamp // 'Unknown' ) eq 'Unknown' && $rep ne '' && $rep ne 'Unknown'
+        ? ( $rep eq 'Slot' ? 'Scalar' : $rep ) : $arg->stamp;
+    return { ref => $ref, repr => $as, node => $arg, loc => $loc };
 }
 
 # _static_class_of($node) -> the class a value is an object of, where that is
