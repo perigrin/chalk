@@ -17502,6 +17502,15 @@ sub _lower_inlined_structure {
     my %on_chain;
     for (my $c = $return->control_in; blessed($c); ) {
         last if $on_chain{ refaddr($c) }++;
+        # AN EVAL'S JOIN is a step of the main path: its one input is where
+        # the body ended (a die goes to the eval's catch, no input here).
+        # The walk stopped at it, and a loop-exit read behind it was taken
+        # for an arm's value (pvm 156).
+        if ($c->operation eq 'Region' && !( $c->can('head') && blessed($c->head) )
+                && $c->can('eval_entry') && blessed($c->eval_entry) && $c->inputs->@* == 1) {
+            $c = $c->inputs->[0];
+            next;
+        }
         $c = ($c->operation eq 'Region' && $c->can('head') && blessed($c->head))
            ? $c->head
            : ($c->can('control_in') ? $c->control_in : undef);
