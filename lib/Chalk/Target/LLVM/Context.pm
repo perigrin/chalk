@@ -16698,8 +16698,15 @@ sub _lower_call_direct {
     # would ALSO mis-select the trailing effect as the return value (inputs's
     # LAST element, above). GAP loudly rather than drop or mis-select it.
     my @inputs = $returns[0]->inputs->@*;
+    # A LIST RETURN'S SCALAR READING is inputs[1], its last value (a Coerce of
+    # it, or the value itself): an effect already among the list's values is
+    # not a trailing statement-effect (`sub subs { (S->new("a"), ...) }`).
+    my %listed = map { $_->id => 1 } grep { blessed($_) }
+        ( blessed($inputs[0]) && $inputs[0]->operation eq 'ArrayLiteral' ? $inputs[0]->inputs->@* : () );
+    my $unwrap = sub ($n) { $n = $n->inputs->[0] while blessed($n) && $n->operation eq 'Coerce'; $n };
     my @trailing_effects = grep {
         blessed($_) && $_->can('control_in') && defined $_->control_in
+            && !$listed{ $unwrap->($_)->id }
     } @inputs[ 1 .. $#inputs ];
     die "GAP: direct call to '$name': callee has effect(s) carried as extra "
       . "Return inputs (a trailing void statement-effect) that inlining "
