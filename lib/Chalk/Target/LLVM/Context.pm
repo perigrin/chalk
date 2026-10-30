@@ -1842,6 +1842,13 @@ sub lower_value {
             && exists $self->{cache}{$id}) {
         return $self->{cache}{$id};
     }
+    # AN AGGREGATE A MERGE CHOSE is one container, changed in place: made
+    # again at a later read, an arm's literal was a fresh array and a push
+    # onto the first was lost (`if ($c) { @l = (5) } push @l, 9`).
+    if ($op eq 'TernaryExpr' && ( $node->stamp // '' ) =~ /\A(?:Array|Hash)\z/
+            && exists $self->{cache}{$id}) {
+        return $self->{cache}{$id};
+    }
     if (exists $self->{cache}{$id} && !$self->_reads_mutable_location($node)) {
         return $self->{cache}{$id};
     }
