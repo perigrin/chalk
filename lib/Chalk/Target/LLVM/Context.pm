@@ -18104,6 +18104,19 @@ sub _lower_call_method {
     # is stack garbage read as a value.
     my $param_reprs = $minfo->{param_reprs} // [];
     my @arg_nodes   = @{ $node->inputs }[ 1 .. $#{ $node->inputs } ];
+    # A SLURPY LAST takes the arguments past the scalars, passed as an array.
+    my $slurpy_arr;
+    if ($minfo->{slurpy} && @$param_reprs) {
+        my $n = $#$param_reprs;
+        die "GAP: Call(method) '$method_name' passes " . scalar(@arg_nodes) . " argument(s), too few "
+          . "for its " . $n . " scalar parameter(s) -- perl dies (Too few arguments).\n"
+            if @arg_nodes < $n;
+        die "GAP: Call(method) '$method_name': an argument that flattens into a slurpy is not lowered\n"
+            if grep { ( $_->stamp // '' ) =~ /\A(?:Array|Hash|List)\z/ } @arg_nodes[ $n .. $#arg_nodes ];
+        my @rest = splice @arg_nodes, $n;
+        $slurpy_arr = $self->_emit_array_of(\@rest);
+        push @arg_nodes, undef;
+    }
     if (@arg_nodes != @$param_reprs) {
         die "GAP: Call(method) '$method_name' passes " . scalar(@arg_nodes)
           . " argument(s) but '$class_name'::$method_name declares "
@@ -18114,6 +18127,10 @@ sub _lower_call_method {
     my @call_args;
     for my $i (0 .. $#arg_nodes) {
         my $want = $param_reprs->[$i];
+        if (!defined $arg_nodes[$i]) {
+            push @call_args, Chalk::Target::LLVM::_method_fn_llvm_ret_type($want) . " $slurpy_arr";
+            next;
+        }
         my $got  = $arg_nodes[$i]->stamp // '';
         # AT THE CALLEE'S TYPE, for the same reason the return is: the body is
         # emitted once, at one machine type. A caller that knows a narrower

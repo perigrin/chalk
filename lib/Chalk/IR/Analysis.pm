@@ -2206,6 +2206,13 @@ sub _replay_classes ($classes, $graphs) {
                 my $max = (sort { $a <=> $b } keys %by_index)[-1];
                 @params = map { $by_index{$_} // { index => $_ } } 0 .. $max
                     if defined $max;
+                # A SLURPY ARRAY LAST is one formal more -- the arguments past
+                # the scalars, which the call passes as an array (`method
+                # f(@g)` declared none, and every call refused: pvm 231). Its
+                # record keeps the sigil, which is how the ABI knows it.
+                my ($sl) = grep { ($_->{sigil} // '') eq '@' && defined $_->{index} } $sig->{params}->@*;
+                push @params, { %$sl, index => scalar @params }
+                    if $sl && ($sig->{slurpy} // '') eq '@';
             }
 
             $cls->declare_method($mname,

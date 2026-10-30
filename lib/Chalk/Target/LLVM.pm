@@ -584,7 +584,18 @@ sub _method_param_reprs {
         }
     }
 
-    return [ map { $repr_at{$_} // 'Scalar' } 0 .. $#$declared ];
+    # A SLURPY `@` the body never reads is still the array the call passes.
+    return [ map { $repr_at{$_} // ( ( ref($declared->[$_]) eq 'HASH'
+                                       && ( $declared->[$_]{sigil} // '' ) eq '@' ) ? 'Array' : 'Scalar' ) }
+             0 .. $#$declared ];
+}
+
+# _method_slurpy($m) -> true when the method's last declared parameter is a
+# slurpy array: the call passes the arguments past the scalars as one array.
+sub _method_slurpy {
+    my ($m) = @_;
+    my $d = $m && $m->can('params') && ref($m->params) eq 'ARRAY' ? $m->params : [];
+    return @$d && ref($d->[-1]) eq 'HASH' && ( $d->[-1]{sigil} // '' ) eq '@' ? 1 : 0;
 }
 
 # _graph_all_nodes($g) -> every node belonging to the graph.
@@ -768,6 +779,7 @@ sub _populate_registry_from_mop_class {
                 return_repr => $ret_repr,
                 param_reprs => _method_param_reprs($m),
                 param_index => _method_param_index($m),
+                slurpy      => _method_slurpy($m),
                 vtable_slot => $mslot++,
             };
         }
