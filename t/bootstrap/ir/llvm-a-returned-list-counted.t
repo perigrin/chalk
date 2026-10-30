@@ -40,6 +40,9 @@ sub through_llvm ($src) {
 # (pvm 075, "Length operand has repr=List").
 for my $case (
     [ q{sub collect { my ($n) = @_; return () unless defined $n; my @c = map { "n$_" } 1 .. $n; return @c } my @a = collect(2); my @b = collect(undef); print scalar(@a), " ", scalar(@b), "\n";}, "2 0\n", 'an early empty return beside an array' ],
+    # A LIST LITERAL OF AN ARGUMENT NOTHING TYPED: `return ($n, $n + 1)` stored
+    # its element by the Unknown stamp ("ArrayRef elem[0] has repr=Unknown").
+    [ q{sub pair { my ($n) = @_; return unless $n; return ($n, $n + 1) } my @p = pair(0); my $s = pair(3); my @q = pair(3); print scalar(@p), " $s ", scalar(@q), "\n";}, "0 4 2\n", 'a list of an argument, in list and scalar context' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };

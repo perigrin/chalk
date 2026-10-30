@@ -3927,7 +3927,15 @@ sub _lower_coerce {
     # it is (see lower_value's binding), so its reading is the caller's.
     my $bound_repr = ( $operand->stamp // 'Unknown' ) eq 'Unknown' && $self->_bound_ref($operand)
                    ? $self->_repr_of($operand) : undef;
+    # A CALL MADE FOR A SCALAR is what its inlined value came out as -- the
+    # callee's scalar reading -- whatever its list-shaped stamp says.
+    my $scalar_call = $operand->operation eq 'Call'
+        && ( ( $operand->can('want') ? $operand->want : '' ) // '' ) eq 'scalar'
+        ? $self->{_inline_value_repr}{ $operand->id } : undef;
+    $scalar_call = 'Scalar' if ( $scalar_call // '' ) eq 'Slot';
+    undef $scalar_call if defined $scalar_call && $scalar_call !~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/;
     my $from      = defined $bound_repr ? $bound_repr
+                  : defined $scalar_call ? $scalar_call
                   # Read as its Slot by this lowering (a shift only coerced).
                   : ( $self->{cache}{ 'repr:' . $operand->id } // '' ) eq 'Scalar'
                       && ( $operand->stamp // '' ) eq 'Scalar' ? 'Scalar'
@@ -3940,7 +3948,11 @@ sub _lower_coerce {
                       && ( $node->from_repr // '' ) eq 'Unknown' ) ? 'Scalar'
                   # A merge nothing typed that this lowering resolved from its
                   # arms (a Region phi of scalars) is what it was resolved to.
-                  : ( ( $node->from_repr // '' ) eq 'Unknown'
+                  # ...and so is a list's scalar reading (the producer marks
+                  # it List) of a last operand nothing typed: `return ($n,
+                  # $n + 1)` read for a scalar is that Add, as lowered.
+                  : ( ( ( $node->from_repr // '' ) eq 'Unknown'
+                        || ( ( $node->from_repr // '' ) eq 'List' && ( $operand->stamp // '' ) eq 'Unknown' ) )
                       && defined $self->{cache}{ 'repr:' . $operand->id } )
                       ? $self->{cache}{ 'repr:' . $operand->id }
                   : $node->from_repr;
@@ -10226,6 +10238,11 @@ sub _emit_array_of {
         $self->_emit("  $slot_tag = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_tag  ; ArrayRef: slot[$i] tag ptr");
         $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_pay  ; ArrayRef: slot[$i] payload ptr");
         my $elem_repr = $inputs->[$i]->stamp // '';
+        # NOTHING TYPED, it is what it was lowered as (an argument the caller typed).
+        if ($elem_repr eq 'Unknown') {
+            $elem_repr = $self->_repr_of($inputs->[$i]) // 'Unknown';
+            $elem_repr = 'Scalar' if $elem_repr eq 'Slot';
+        }
         ($elem_ref, $elem_repr) = $self->_miss_kept($inputs->[$i], $elem_ref, $elem_repr);
         # AN UNDEF IS A SLOT WITH ITS DEFINED BIT CLEAR: it needs no payload.
         if ($elem_repr eq 'Undef') {
