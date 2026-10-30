@@ -16379,7 +16379,21 @@ sub _lower_call_new {
                     push @q, $n->inputs->@*;
                 }
             }
-            my $def_ref  = $self->lower_value($def_node);
+            my $def_ref;
+            # A HASH FIELD'S LIST DEFAULT is a hash of its pairs: lowered as the
+            # list it is on the wire, the field held an array, and `$h{s}->@*`
+            # counted 0 (pvm 153).
+            if ($pname =~ /\A%/ && $def_node->operation eq 'ArrayLiteral') {
+                my $lit = Chalk::IR::Node::HashLiteral->new(
+                    id => "field-default-hash:" . refaddr($def_node) . ":" . $self->_fresh,
+                    inputs => [ $def_node->inputs->@* ]);
+                $lit->set_stamp('HashRef');
+                my $hr = $self->_lower_hash_ref($lit);
+                $def_ref = $self->_fresh;
+                $self->_emit("  $def_ref = bitcast i8* $hr to %Hash*  ; field '$pname': its default's pairs");
+                $def_repr = 'Hash';
+            }
+            else { $def_ref = $self->lower_value($def_node) }
             my $def_gep = $self->_fresh;
             $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; default field[$fidx] defined");
             $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' default defined=true");
