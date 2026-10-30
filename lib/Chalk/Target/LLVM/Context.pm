@@ -1773,6 +1773,11 @@ sub lower_value {
             # as that (_repr_of gives a reference binding to its readers).
             return $bound->{ref}
                 if $node->stamp eq 'Object' && ( $bound->{repr} // '' ) =~ /\A(?:Hash|Array|Scalar)Ref\z/;
+            # A SCALAR READ OF A REFERENCE is the reference: _repr_of gives its
+            # readers the caller's reference repr, and boxed here they took a
+            # %Slot for the pointer (`bless { i => $_[1] }` of `new([7])`).
+            return $bound->{ref}
+                if $node->stamp eq 'Scalar' && ( $bound->{repr} // '' ) =~ /Ref\z/;
             if (defined $bound->{repr} && defined $node->stamp
                     && $node->stamp ne $bound->{repr}) {
                 die "GAP: an inlined argument is a $bound->{repr} where the "
