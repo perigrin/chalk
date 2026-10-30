@@ -8235,7 +8235,7 @@ sub _prelower_branch_store_operands {
 # is deliberately NOT pre-lowered -- it may be the loop-Phi (header-defined).
 sub _prelower_loop_store_operands {
     my ($self, $loop_node) = @_;
-    my $body_proj = _find_proj_consumer($loop_node, 0);
+    my $body_proj = _loop_body_start($loop_node);
     return unless defined $body_proj;
     # THE WHOLE BODY: a store in a loop in it, or in an arm, is the body's too
     # -- its aggregate made inside was made again after (older: "0 0;0 0").
@@ -8248,6 +8248,8 @@ sub _prelower_loop_store_operands {
         push @todo, map { _collect_branch_body($_) }
             grep { blessed($_) && $_->operation eq 'Proj' && !( $n->operation eq 'Loop' && $_->index != 0 ) }
             ($n->consumers // [])->@*;
+        push @todo, _collect_branch_body($n)
+            if $n->operation eq 'Loop' && refaddr(_loop_body_start($n) // 0) == refaddr($n);
     }
     for my $node (@body) {
         next unless $node->operation eq 'Assign';
@@ -9311,7 +9313,12 @@ sub _process_loop_node {
     # header's LAST block: one that stringified opened blocks of its own, and
     # the exit's merge names this one as its predecessor.
     my $header_exit_from = $self->_current_block_label;
-    $self->_set_terminator("  br i1 $cond_val_ref, label %$body_label, label %$exit_label  ; Loop: header branch");
+    # A LOOP WITH NO HEADER TEST leaves by its `last`s alone: the header is
+    # no predecessor of the exit, whose merges have an input per break only.
+    my $headless = !_find_proj_consumer($loop_node, 1);
+    $self->_set_terminator($headless
+        ? "  br label %$body_label  ; Loop: no header test (while (1))"
+        : "  br i1 $cond_val_ref, label %$body_label, label %$exit_label  ; Loop: header branch");
 
     # ---- Loop body ----
     $self->_new_block($body_label);
@@ -9467,7 +9474,7 @@ sub _process_loop_node {
         # inputs align 1:1 with these predecessors (the producer builds the Phi
         # over [header-value, break-value...] matching the Region predecessors).
         my @break_blocks = ($loop_ctx->{break_blocks} // [])->@*;
-        my @pred_labels  = ($header_exit_from, @break_blocks);
+        my @pred_labels  = ( ( $headless ? () : $header_exit_from ), @break_blocks);
 
         for my $phi (@live_exit_phis) {
             my $inputs = $phi->inputs;
@@ -9556,6 +9563,11 @@ sub _process_loop_node {
 # header condition (H3 bug).
 sub _lower_loop_condition {
     my ($self, $loop_node) = @_;
+
+    # A LOOP WITH NO HEADER TEST -- `while (1)`, which perl folds away -- has
+    # no exit Proj: it runs until a `last`. Strategy 2 took a body comparison
+    # on its variable for the test (`$s .= "a" if $x < 2` ended the loop).
+    return 'true' unless _find_proj_consumer($loop_node, 1);
 
     # Strategy 1: structural — look for a comparison whose control_in is
     # the loop node. This link is set by the ir-block author via
@@ -9652,11 +9664,19 @@ sub _prelower_aggregates_before {
     return;
 }
 
+# _loop_body_start($loop) -> where its body's control begins: the body Proj
+# (index 0), or -- A LOOP WITH NO HEADER TEST, `while (1)`, which has no
+# Projs -- the Loop itself, which the body's first statement hangs off.
+sub _loop_body_start {
+    my ($loop) = @_;
+    return _find_proj_consumer($loop, 0) // ( _find_proj_consumer($loop, 1) ? undef : $loop );
+}
+
 sub _process_loop_body {
     my ($self, $loop_node, $header_label) = @_;
 
     # Find body nodes: consumers of the body Proj (index 0).
-    my $body_proj = _find_proj_consumer($loop_node, 0);
+    my $body_proj = _loop_body_start($loop_node);
     return unless defined $body_proj;
 
     my @body_nodes = _collect_branch_body($body_proj);
@@ -9706,7 +9726,7 @@ sub _lower_pass_elements {
 # control chain leads back to its body Proj (nested arms and loops too).
 sub _calls_in_body {
     my ($loop) = @_;
-    my $body = _find_proj_consumer($loop, 0) // return ();
+    my $body = _loop_body_start($loop) // return ();
     my (%seen, @calls);
     my @q = ($loop);
     while (defined(my $n = shift @q)) {
@@ -9982,6 +10002,13 @@ sub _collect_branch_body {
     my @body;
     my %visited;
     $visited{owned}{ $proj_node->id } = 1;
+    # A HEADLESS LOOP'S BODY hangs off the Loop itself (_loop_body_start),
+    # which is no statement of it: the walk starts at what it heads.
+    if ($proj_node->operation eq 'Loop') {
+        $visited{ $proj_node->id } = 1;
+        _collect_body_recursive($_, \%visited, \@body) for grep { blessed($_) } ($proj_node->consumers // [])->@*;
+        return @body;
+    }
     _collect_body_recursive($proj_node, \%visited, \@body);
     return @body;
 }
