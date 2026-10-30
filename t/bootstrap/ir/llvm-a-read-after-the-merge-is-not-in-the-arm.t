@@ -42,6 +42,15 @@ sub through_llvm ($src) {
 # its own arm", pvm 216).
 for my $case (
     [ q[sub f { my ($c, @n) = @_; my @l = (1); if ($c) { my @x; push @x, @n; @l = @x } push @l, "}"; return "@l" } print f(1, 2, 3), "|", f(0, 2), "\n";], "2 3 }|1 }\n", 'a join after a push after the merge' ],
+    # ...or reading the merge through values: `ord($c[$k + 1])` with `$k` an Add
+    # of the merge's phi (pvm 169).
+    [ q[sub g { return (ord($_[0]) + 100, 2) }
+        sub f { my @c = split //, $_[0]; my ($lo, $u);
+          if ($c[0] eq 'x') { ($lo, $u) = g($c[1]) } else { ($lo, $u) = (ord($c[0]), 1) }
+          my $k = 0 + $u; my $s = "$lo";
+          if (($c[$k] // '') eq '-') { $s .= "-" . ord($c[$k + 1]) }
+          return $s }
+        print f('a-b'), "|", f('xy-z'), "\n";], "97-98|221-122\n", 'a read of the merge through an Add, in a later if' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };

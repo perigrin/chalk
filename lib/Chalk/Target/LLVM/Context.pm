@@ -9883,6 +9883,19 @@ sub _owned_by_arm {
     # that merge: `keys %h` after a loop that fills %h reads the loop exit's
     # memory phi, and collected into the body it was emitted there, used
     # after the loop where it did not dominate.
+    # ...THROUGH VALUES TOO: `ord($c[$k + 1])` with `$k` an Add of the merge's
+    # phi reads the merge as surely (pvm 169). Unpinned inputs are followed;
+    # a pinned one is the check below, not walked through.
+    my %seen;
+    my @q = grep { blessed($_) } $node->inputs->@*;
+    my @reads;
+    while (defined(my $n = shift @q)) {
+        next if $seen{ refaddr($n) }++;
+        push @reads, $n;
+        push @q, grep { blessed($_) } $n->inputs->@*
+            if $n->operation ne 'Phi' && !( $n->can('control_in') && blessed($n->control_in) )
+               && keys(%seen) < 256;
+    }
     my $after_a_merge = sub {
         grep {
             ( blessed($_) && $_->operation eq 'Phi' && $_->can('region')
@@ -9896,7 +9909,7 @@ sub _owned_by_arm {
                 && $_->control_in->operation eq 'Region'
                 && !$visited->{continues}{ $_->control_in->id }
                 && !$visited->{owned}{ $_->control_in->id } )
-        } $node->inputs->@*;
+        } @reads;
     };
     return ($after_a_merge->() ? 0 : 1) unless $node->can('control_in');
     my $ctrl = $node->control_in;
