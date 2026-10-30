@@ -10554,6 +10554,15 @@ sub _lower_length {
         my (undef, $l) = $self->_str_parts($self->_emit_coercion($slot, 'Scalar', 'Str', 'Length(Scalar)'));
         return $self->{cache}{ $node->id } = $l;
     }
+    # A LIST -- a call returning a merge of lists (`return ()` beside `return
+    # @c`) -- is as long as its elements, built as an array (pvm 075).
+    elsif ($op_repr eq 'List') {
+        my $arr = $self->_emit_flattened_array_of([$operand]);
+        my ($lp, $len) = map { $self->_fresh } 1 .. 2;
+        $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0  ; Length(List): len ptr");
+        $self->_emit("  $len = load i64, i64* $lp  ; Length(List): its elements");
+        return $self->{cache}{ $node->id } = $len;
+    }
     else {
         die "GAP: Length operand has repr=$op_repr; only Array and Str are lowered runtime-free.";
     }
@@ -11045,10 +11054,12 @@ sub _emit_flattened_array_of {
             $b = $b->inputs->[0] while $b->operation eq 'Coerce';
             ( $self->_repr_of($b) // '' ) =~ /\A(?:Int|Num|Boolean)\z/;
         };
+        # AN UNDEF BOUND IS 0: `1 .. $n` with $n bound undef is empty (an
+        # inlining of `return () unless defined $n; ... map {..} 1 .. $n`).
         if ($in->operation eq 'Range'
-                && !grep { ( $self->_repr_of($_) // '' ) ne 'Int' } $in->inputs->@[0, 1]
+                && !grep { ( $self->_repr_of($_) // '' ) !~ /\A(?:Int|Undef)\z/ } $in->inputs->@[0, 1]
                 and grep { $is_number->($_) } $in->inputs->@[0, 1]) {
-            my ($lo, $hi) = map { $self->lower_value($_) } $in->inputs->@[0, 1];
+            my ($lo, $hi) = map { ( $self->_repr_of($_) // '' ) eq 'Undef' ? '0' : $self->lower_value($_) } $in->inputs->@[0, 1];
             my ($head, $body, $done) = map { $self->_fresh_label("range.$_.") } qw(head body done);
             my ($i, $more, $i1) = map { $self->_fresh } 1 .. 3;
             my $from = $self->_current_block_label;
@@ -11871,7 +11882,7 @@ sub _lower_split {
 sub _is_walked_list ($n, $self = undef) {
     return 1 if _is_array_slice($n);
     return blessed($n) && $n->operation eq 'Range'
-        && !grep { !blessed($_) || ( ( $self ? $self->_repr_of($_) : $_->stamp ) // '' ) ne 'Int' } $n->inputs->@[0, 1];
+        && !grep { !blessed($_) || ( ( $self ? $self->_repr_of($_) : $_->stamp ) // '' ) !~ /\A(?:Int|Undef)\z/ } $n->inputs->@[0, 1];   # an undef bound is 0
 }
 
 sub _is_hash_slice ($n) {
