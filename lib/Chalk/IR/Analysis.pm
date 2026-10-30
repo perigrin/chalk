@@ -1368,7 +1368,9 @@ sub _resolve_direct_calls ($graphs, $pkg_methods_only = 0) {
                         && Chalk::Grammar::Perl::TypeLibrary::is_subtype($want, $have))
                     || ($pkg_method && $have eq 'Object');
             }
-            elsif ( _stamp_is_absent($node)
+            # (An Unknown stamp is the producer saying nothing typed it -- no
+            # answer either, for a self-call that cannot be typed but by this.)
+            elsif ( ( _stamp_is_absent($node) || ( $node->stamp // '' ) eq 'Unknown' )
                     && refaddr($callee) == refaddr($graphs->{$gname}) ) {
                 # A SELF-RECURSIVE CALL CONTRIBUTES BOTTOM, NOT ABSENCE.
                 #
@@ -1595,8 +1597,13 @@ sub _seed_direct_call_arg_reprs ($graphs) {
                     # guessing here.
                     my $arg = $args[$i] or next;
                     my $repr = $arg->stamp // next;
+                    # A CALL IN THE CALLEE'S OWN BODY passing what is still
+                    # Unknown (`fib($n - 1)`, untyped because $n is) is the
+                    # same cycle a self call is: deferred, and counted once
+                    # it resolves.
                     $collect->( $params{$i}, $repr,
-                        _arg_is_self_call( $arg, $callee ) );
+                        _arg_is_self_call( $arg, $callee )
+                        || ( $repr eq 'Unknown' && refaddr($graphs->{$gname}) == refaddr($callee) ) );
                 }
                 next;
             }

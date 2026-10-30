@@ -598,6 +598,48 @@ sub _method_slurpy {
     return @$d && ref($d->[-1]) eq 'HASH' && ( $d->[-1]{sigil} // '' ) eq '@' ? 1 : 0;
 }
 
+# _settle_recursive_return($registry, $class, $sinfo): a sub that calls itself
+# and returns what nothing typed (`$n < 2 ? $n : fib($n-1) + fib($n-2)`) is
+# typed by trying: assume it returns R, lower its body (its own calls read R),
+# and keep R only if the body's value comes out R. None does: it stays Unknown,
+# and a call to it is refused.
+sub _settle_recursive_return {
+    my ($registry, $cname, $sinfo) = @_;
+    return if ( $sinfo->{return_repr} // '' ) ne 'Unknown' || $sinfo->{settling};
+    local $sinfo->{settling} = 1;
+    for my $r (qw(Int Num Str)) {
+        $sinfo->{return_repr} = $r;
+        my $got = eval {
+            my $ret  = $sinfo->{body_return};
+            my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($ret);
+            my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($ret, $dom);
+            my $ctx  = Chalk::Target::LLVM::ElaboratedContext->new(elab => $elab, class_registry => $registry);
+            $ctx->configure_as_method_body(class_name => $cname, method_name => $sinfo->{name},
+                has_self => 0, param_index => $sinfo->{param_index} // {});
+            _process_control_chain($ctx, $ret);
+            $ctx->lower_value($sinfo->{body_node});
+            $ctx->_repr_of($sinfo->{body_node});
+        };
+        return if defined $got && $got eq $r;
+    }
+    $sinfo->{return_repr} = 'Unknown';
+    return;
+}
+
+# _sub_calls_itself($sub, $class) -> true when the sub's own graph makes a
+# direct call to it: inlined, it would never stop, so it is a define.
+sub _sub_calls_itself {
+    my ($s, $cname) = @_;
+    my $g = $s->can('graph') ? $s->graph : undef;
+    return 0 unless $g;
+    my $full = $cname . '::' . $s->name;
+    return ( grep {
+        blessed($_) && $_->can('operation') && $_->operation eq 'Call'
+            && ( $_->dispatch_kind // '' ) eq 'direct'
+            && ( ( $_->name // '' ) eq $full || ( $_->name // '' ) eq $s->name )
+    } _graph_all_nodes($g) ) ? 1 : 0;
+}
+
 # _graph_all_nodes($g) -> every node belonging to the graph.
 #
 # Delegates to the loader's enumeration rather than repeating it. An earlier
@@ -748,6 +790,7 @@ sub _populate_registry_from_mop_class {
                 : _require_repr($body_node, "MOP::Sub '${cname}::${sname}' body root")
             ),
             uses_args   => $s->uses_args,
+            recursive   => _sub_calls_itself($s, $cname),
         };
     }
 
@@ -1314,7 +1357,10 @@ sub _emit_class_registry_ir {
         # the REGISTRY carries the metadata -- which is what 1c is for -- and
         # emission stays off.
         my $emit_sub_defines = $ENV{CHALK_EMIT_SUB_DEFINES} ? 1 : 0;
-        for my $sinfo ($emit_sub_defines ? @{ $reg->{subs} // [] } : ()) {
+        # A SUB THAT CALLS ITSELF is the exception: it is never inlined
+        # (_lower_call_direct calls its define), so its body is emitted once.
+        for my $sinfo (grep { $emit_sub_defines || $_->{recursive} } @{ $reg->{subs} // [] }) {
+            _settle_recursive_return($registry, $cname, $sinfo) if $sinfo->{recursive};
             my $sname    = $sinfo->{name};
             my $fn_name  = '@' . $cname . '__' . $sname;
             my $ret_repr = $sinfo->{return_repr};
@@ -1356,8 +1402,9 @@ sub _emit_class_registry_ir {
             # arguments. It refuses a pair it cannot bridge, which is the right
             # answer: returning at the wrong machine type is not diagnosable at
             # run time.
+            # As LOWERED: a body nothing typed is what its lowering made it.
             my $body_repr = ($body_node isa Chalk::IR::Value)
-                          ? ($body_node->stamp // '')
+                          ? ($body_ctx->_repr_of($body_node) // $body_node->stamp // '')
                           : '';
             if ($body_repr ne '' && $body_repr ne $ret_repr) {
                 $body_val = $body_ctx->_emit_coercion(

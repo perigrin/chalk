@@ -7957,12 +7957,36 @@ sub _wire_region_phis_with_preblock {
         }
 
         my ($then_val, $else_val);
+        # A MERGE NOTHING TYPED, an arm of which only says what it is once
+        # lowered (`$n < 2 ? $n : fib($n-1) + fib($n-2)`: the Add), is decided
+        # from the arms as lowered -- read in each arm's own tail, where its
+        # lowering's cache still holds.
+        my %arm_repr;
+        my $rec = ( defined $phi_repr && $phi_repr eq 'Unknown' )
+            ? sub ($n) { my $v = $self->lower_value($n); $arm_repr{ $n->id } = $self->_repr_of($n); $v }
+            : undef;
         ($then_val, $then_label) =
-            $self->_lower_arm_in_tail($inputs->[$then_slot], $then_label, $then_vars, $then_cache);
+            $self->_lower_arm_in_tail($inputs->[$then_slot], $then_label, $then_vars, $then_cache, $rec);
+        ($else_val, $else_label) =
+            $self->_lower_arm_in_tail($inputs->[$else_slot], $else_label, $else_vars, $else_cache, $rec);
+        if ($rec) {
+            my @r = map { $arm_repr{ $inputs->[$_]->id } } $then_slot, $else_slot;
+            if (!grep { !defined || !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot|ArrayRef|HashRef|CodeRef|ScalarRef)\z/ } @r) {
+                $self->{cache}{ 'repr:' . $inputs->[$_]->id } //= $arm_repr{ $inputs->[$_]->id } for $then_slot, $else_slot;
+                $_ = 'Scalar' for grep { $_ eq 'Slot' } @r;
+                # AN INTEGER LITERAL AGAINST A Num is that Num: it converts
+                # exactly, and perl prints 1 and 1.0 alike (`$n <= 1 ? 1 :
+                # $n * fact($n - 1)`).
+                my @lit = map { my $n = $inputs->[$_]; $n->operation eq 'Constant'
+                                && ( $n->const_type // '' ) eq 'integer' && abs($n->value // 0) < 2**53 }
+                          $then_slot, $else_slot;
+                @r = ('Num', 'Num') if "@r" eq 'Int Num' && $lit[0] || "@r" eq 'Num Int' && $lit[1];
+                $phi_repr = $r[0] eq $r[1] ? $r[0] : 'Scalar';
+                $self->{cache}{ 'repr:' . $phi_node->id } = $phi_repr;
+            }
+        }
         ($then_val, $then_label) = $self->_coerce_arm($inputs->[$then_slot], $then_val, $phi_repr,
                                        $then_label, 'Region.Phi.then');
-        ($else_val, $else_label) =
-            $self->_lower_arm_in_tail($inputs->[$else_slot], $else_label, $else_vars, $else_cache);
         ($else_val, $else_label) = $self->_coerce_arm($inputs->[$else_slot], $else_val, $phi_repr,
                                        $else_label, 'Region.Phi.else');
         push @wired, [$phi_node, $then_val, $else_val];
@@ -16792,6 +16816,57 @@ sub _copy_out_written_args {
 # `$_[N]` do not connect to the args in the graph — those GAP loudly rather
 # than miscompile.
 
+# _recursive_sub_info($name) -> the registry entry of a sub that calls itself,
+# by its qualified (or main's bare) name, or undef.
+sub _recursive_sub_info {
+    my ($self, $name) = @_;
+    my ($pkg, $sname) = $name =~ /\A(.*)::([^:]+)\z/ ? ($1, $2) : ('main', $name);
+    my ($s) = grep { ( $_->{name} // '' ) eq $sname && $_->{recursive} }
+        @{ ( $self->{class_registry}{$pkg} // {} )->{subs} // [] };
+    Chalk::Target::LLVM::_settle_recursive_return($self->{class_registry}, $pkg, $s) if $s;
+    return $s;
+}
+
+# _call_sub_define($call, $sub, $name) -> the value of calling the sub's
+# define: each argument at its declared repr, the result at the sub's.
+sub _call_sub_define {
+    my ($self, $node, $sub, $name) = @_;
+    my @args = $node->inputs->@*;
+    pop @args if $node->can('memory_input') && $node->memory_input;
+    my $reprs = $sub->{param_reprs} // [];
+    die "GAP: direct call to '$name' passes " . scalar(@args) . " argument(s) to its define of "
+      . scalar(@$reprs) . " -- not lowered\n" unless @args == @$reprs;
+    my @actual;
+    for my $i (0 .. $#args) {
+        my $want = $reprs->[$i];
+        die "GAP: direct call to '$name': a $want parameter of its define is not lowered\n"
+            unless $want =~ /\A(?:Int|Num|Str|Boolean)\z/;
+        # Lowered first: an argument nothing typed (`$n - 1`) is what it
+        # lowers to.
+        my $ref  = $self->lower_value($args[$i]);
+        my $from = $self->_repr_of($args[$i]) // '';
+        $ref = $self->_emit_coercion($ref, $from, $want, "$name argument $i") if $from ne $want;
+        push @actual, Chalk::Target::LLVM::_method_fn_llvm_ret_type($want) . " $ref";
+    }
+    my $ret = $sub->{return_repr} // '';
+    die "GAP: direct call to '$name': a define returning $ret is not lowered\n"
+        unless $ret =~ /\A(?:Int|Num|Str|Boolean)\z/;
+    my ($pkg) = $name =~ /\A(.*)::[^:]+\z/;
+    my $fn = '@' . ( $pkg // 'main' ) . '__' . $sub->{name};
+    my $r  = $self->_fresh;
+    my $ty = Chalk::Target::LLVM::_method_fn_llvm_ret_type($ret);
+    $self->_emit("  $r = call $ty $fn(" . join(', ', @actual) . ")  ; $name, a sub that calls itself");
+    if ($ret eq 'Str') {
+        $self->{_need_str_type} = 1;
+        my ($p, $l) = ($self->_fresh, $self->_fresh);
+        $self->_emit("  $p = extractvalue %Str $r, 0");
+        $self->_emit("  $l = extractvalue %Str $r, 1");
+        $r = $self->_set_str_len($p, $l);
+    }
+    $self->{cache}{ 'repr:' . $node->id } = $ret;
+    return $self->{cache}{ $node->id } = $r;
+}
+
 sub _lower_call_direct {
     my ($self, $node) = @_;
     # The context the call is made in, which a wantarray in the inlined body
@@ -16840,6 +16915,11 @@ sub _lower_call_direct {
     # legal — only re-entering a callee already on the inline stack is a cycle.
     # Real `define`+`call` emission removes the need for this guard by giving
     # recursion a terminating lowering; until then it GAPs loudly.
+    # A SUB THAT CALLS ITSELF has a define (LLVM.pm emits it): called, not
+    # inlined, here and in its own body.
+    if (!$via && !$shared && (my $sub = $self->_recursive_sub_info($name))) {
+        return $self->_call_sub_define($node, $sub, $name);
+    }
     die "GAP: direct call to '$name' is recursive — inlining is the only "
       . "direct-call mechanism and cannot terminate on a cycle. Real "
       . "define+call emission is required to lower this."
