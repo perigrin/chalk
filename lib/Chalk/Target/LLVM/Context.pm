@@ -5002,6 +5002,23 @@ sub _on_straight_line {
     return 0;
 }
 
+# _lvalue_sub_variable($call) -> the shared scalar PadAccess an argument-less
+# call's sub returns as its whole body (`sub slot :lvalue { $slot }`), or undef.
+sub _lvalue_sub_variable {
+    my ($call) = @_;
+    return undef if grep { blessed($_) } $call->inputs->@*;
+    my $t = $call->can('target') ? $call->target : undef;
+    my $g = blessed($t) && $t->can('graph') ? $t->graph : undef;
+    return undef unless blessed($g) && $g->returns && $g->returns->@* == 1;
+    my $r = $g->returns->[0];
+    return undef unless blessed($r->control_in) && $r->control_in->operation eq 'Start';
+    my $v = $r->inputs->[0];
+    return undef unless blessed($v) && $v->operation eq 'PadAccess' && $v->shared && ( $v->sigil // '' ) eq '$';
+    return undef if grep { blessed($_) && $_->operation !~ /\A(?:Start|MemStart|PadAccess|Return)\z/ }
+        _graph_component($g);
+    return $v;
+}
+
 sub _lower_assign {
     my ($self, $node) = @_;
 
@@ -5099,6 +5116,15 @@ sub _lower_assign {
 
     my $lhs = $node->inputs->[0];
     my $rhs = $node->inputs->[1];
+
+    # A STORE TO AN :lvalue SUB'S CALL is a store to what it returns. Only a
+    # body that returns a file lexical, and does nothing else, is lowered:
+    # the store is to that variable.
+    if (blessed($lhs) && $lhs->operation eq 'Call' && ( $lhs->dispatch_kind // '' ) eq 'direct') {
+        $lhs = _lvalue_sub_variable($lhs)
+            // die "GAP: a store to a call of " . ( $lhs->name // '?' ) . " is not lowered -- only an "
+                 . ":lvalue sub returning a file lexical, and nothing else, is\n";
+    }
 
     my $rhs_ref = $self->lower_value($rhs);
 
