@@ -131,6 +131,8 @@ sub new {
         _need_select            => 0,
         _need_hash_delete       => 0,
         _need_index             => 0,
+        _need_qx                => 0,
+        _need_glob              => 0,
         _need_str_bitop         => 0,
         _need_str_range         => 0,
         _need_localtime         => 0,
@@ -188,6 +190,8 @@ my @NEED_FLAGS = qw(
     _need_select
     _need_hash_delete
     _need_index
+    _need_qx
+    _need_glob
     _need_str_bitop
     _need_str_range
     _need_localtime
@@ -965,6 +969,8 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_bless_lines;
     push @lines, $self->_hash_delete_lines;
     push @lines, $self->_index_lines;
+    push @lines, $self->_qx_lines;
+    push @lines, $self->_glob_lines;
     push @lines, $self->_str_bitop_lines;
     push @lines, $self->_str_range_lines;
     push @lines, $self->_localtime_lines;
@@ -2165,6 +2171,10 @@ sub lower_value {
         return $self->_lower_case_map($node);
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
+            && ($node->name // '') eq 'glob') {
+        return $self->_lower_glob($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
             && ($node->name // '') =~ /\A(?:open|close|readline|eof)\z/) {
         return $self->_lower_handle_op($node);
     }
@@ -2440,8 +2450,7 @@ sub lower_value {
           . "is their negation).";
     }
     elsif ($op eq 'BacktickExpr') {
-        die "GAP: op=BacktickExpr (qx``) is not lowered runtime-free — "
-          . "command execution is a host-process effect (a future host tier).";
+        return $self->_lower_backtick($node);
     }
     elsif ($op eq 'TryCatch') {
         die "GAP: op=TryCatch (try/catch) is not lowered runtime-free yet — "
@@ -10519,6 +10528,10 @@ sub _emit_array_of {
     my ($self, $inputs) = @_;
     return $self->_emit_flattened_array_of($inputs)
         if grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @$inputs;
+    # A glob in a list is its matches (stamped Unknown either way).
+    return $self->_emit_flattened_array_of($inputs)
+        if grep { blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
+                  && ( $_->name // '' ) eq 'glob' } @$inputs;
     return $self->_emit_flattened_array_of($inputs)
         if grep { _returns_nothing_in_a_list($_) } @$inputs;
 
@@ -11429,7 +11442,7 @@ sub _emit_flattened_array_of {
             next;
         }
         if ($in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'builtin'
-                && ( $in->name // '' ) eq 'readline') {
+                && ( $in->name // '' ) =~ /\A(?:readline|glob)\z/) {
             # lowered once, where it stands: read again here it would be empty
             my $lines = $self->lower_value($in);
             $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $lines)  ; list: the lines read");
@@ -12627,6 +12640,206 @@ sub _localtime_lines {
     return () unless $self->{_need_localtime} && !$self->{_localtime_emitted}++;
     return ('', 'declare i64 @time(i64*)', 'declare i8* @localtime_r(i64*, i8*)',
             'declare i64 @strftime(i8*, i64, i8*, i8*)');
+}
+
+# _lower_backtick($node) -> %Str: qx`` / readpipe -- the command run by libc
+# popen, what it printed read back whole (@chalk_qx). libc is the syscall
+# layer print already stands on. perl flushes its own output before the
+# fork, and so does the helper. Its exit status ($?) is not kept: a program
+# that reads $? is refused.
+sub _lower_backtick {
+    my ($self, $node) = @_;
+    die "GAP: qx with \$? read is not lowered -- the command's exit status is not kept\n"
+        if grep { $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq '?' }
+            @Chalk::Target::LLVM::Context::PROGRAM;
+    my $cmd = $self->_operand_as($node->inputs->[0], 'Str', 'qx command');
+    my ($p, $l) = $self->_str_parts($cmd);
+    # NUL-terminated for popen: a Str is counted, not terminated.
+    my ($sz, $z, $end, $olen, $out, $len) = map { $self->_fresh } 1 .. 6;
+    $self->{$_} = 1 for qw(_need_qx _need_malloc_memcpy);
+    $self->_emit("  $sz = add i64 $l, 1");
+    $self->_emit("  $z = call i8* \@malloc(i64 $sz)  ; qx: the command, NUL-terminated");
+    $self->_emit("  call i8* \@memcpy(i8* $z, i8* $p, i64 $l)");
+    $self->_emit("  $end = getelementptr inbounds i8, i8* $z, i64 $l");
+    $self->_emit("  store i8 0, i8* $end");
+    $self->_emit_entry("  $olen = alloca i64  ; qx: bytes read");
+    $self->_emit("  $out = call i8* \@chalk_qx(i8* $z, i64* $olen)  ; qx: run it, read what it printed");
+    $self->_emit("  $len = load i64, i64* $olen");
+    return $self->{cache}{ $node->id } = $self->_set_str_len($out, $len);
+}
+
+# _lower_glob($node) -> %Array*: glob / <*.x> in a list -- the files the
+# pattern matches, through libc glob(3) with perl's File::Glob flags
+# (braces, tilde, the pattern itself when it has no metacharacters), sorted
+# as perl sorts them (case aside, then bytes). In scalar context glob is an
+# iterator, refused; a pattern with whitespace is several patterns to perl,
+# refused (a computed one stops the program, as a value chalk's glob does
+# not model).
+sub _lower_glob {
+    my ($self, $node) = @_;
+    # IN A LIST ONLY -- read by an array literal (`my @f = <*.x>`). The
+    # producer stamps glob Unknown in both contexts; in scalar context it is
+    # an iterator, refused.
+    die "GAP: glob in scalar context (an iterator) is not lowered\n"
+        if ( $node->stamp // '' ) =~ /\A(?:Scalar|Str|Int|Boolean)\z/
+        || grep { blessed($_) && $_->operation ne 'ArrayLiteral' } ($node->consumers // [])->@*;
+    my @in = grep { blessed($_) } $node->inputs->@*;
+    pop @in if $node->can('memory_input') && $node->memory_input;
+    die "GAP: glob of other than one pattern is not lowered\n" unless @in == 1;
+    my $lit = $in[0];
+    $lit = $lit->inputs->[0] while $lit->operation eq 'Coerce';
+    die "GAP: a glob pattern with whitespace is several patterns to perl -- not lowered\n"
+        if $lit->operation eq 'Constant' && ( $lit->value // '' ) =~ /\s/;
+    my $pat = $self->_operand_as($in[0], 'Str', 'glob pattern');
+    my ($p, $l) = $self->_str_parts($pat);
+    $self->{$_} = 1 for qw(_need_glob _need_malloc_memcpy _need_array_append _need_aggregate_types _need_str_type _need_memchr);
+    # A COMPUTED PATTERN with whitespace stops the program (exit 255).
+    my ($sp, $tab, $nl, $ws1, $ws, $ok) = map { $self->_fresh } 1 .. 6;
+    $self->_emit("  $sp = call i8* \@memchr(i8* $p, i32 32, i64 $l)  ; glob: a space?");
+    $self->_emit("  $tab = call i8* \@memchr(i8* $p, i32 9, i64 $l)");
+    $self->_emit("  $nl = call i8* \@memchr(i8* $p, i32 10, i64 $l)");
+    my ($a, $b, $c) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  $a = icmp ne i8* $sp, null");
+    $self->_emit("  $b = icmp ne i8* $tab, null");
+    $self->_emit("  $c = icmp ne i8* $nl, null");
+    $self->_emit("  $ws1 = or i1 $a, $b");
+    $self->_emit("  $ws = or i1 $ws1, $c");
+    $self->_emit("  $ok = xor i1 $ws, true");
+    $self->_stop_unless($ok, "a glob pattern with whitespace (several patterns to perl)");
+    my ($sz, $z, $end) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  $sz = add i64 $l, 1");
+    $self->_emit("  $z = call i8* \@malloc(i64 $sz)  ; glob: the pattern, NUL-terminated");
+    $self->_emit("  call i8* \@memcpy(i8* $z, i8* $p, i64 $l)");
+    $self->_emit("  $end = getelementptr inbounds i8, i8* $z, i64 $l");
+    $self->_emit("  store i8 0, i8* $end");
+    my $acc = $self->_emit_array_of([]);
+    $self->_emit("  call void \@chalk_glob(%Array* $acc, i8* $z)  ; glob: the files it matches");
+    $self->{cache}{ 'repr:' . $node->id } = 'Array';
+    return $self->{cache}{ $node->id } = $acc;
+}
+
+# _glob_lines -> @chalk_glob and its comparator. glibc's flags: NOSORT 4,
+# BRACE 1024, NOMAGIC 2048, TILDE 4096 (7172); glob_t's gl_pathc at 0 and
+# gl_pathv at 8 (x86-64), its 72 bytes allocated as 128.
+sub _glob_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_glob} && !$self->{_glob_emitted}++;
+    my ($SD, $ST, $SP) = map { _slot_idx($_) } qw(defined tag payload);
+    my ($XP, $XL, $XE) = map { _str_idx($_) } qw(ptr len enc);
+    my ($tag, $enc, $size) = (_slot_tag_value('Str'), _str_enc('utf8'), _sizeof_llvm_type('%Str'));
+    return ('', $self->require_strlen_once,
+            'declare i32 @glob(i8*, i32, i8*, i8*)', 'declare i8* @calloc(i64, i64)',
+            'declare void @qsort(i8*, i64, i64, i32 (i8*, i8*)*)',
+            'declare i32 @strcasecmp(i8*, i8*)', 'declare i32 @strcmp(i8*, i8*)',
+            <<"END_HELPER");
+define internal i32 \@chalk_glob_cmp(i8* %a, i8* %b) {
+entry:
+  %pa = bitcast i8* %a to i8**
+  %sa = load i8*, i8** %pa
+  %pb = bitcast i8* %b to i8**
+  %sb = load i8*, i8** %pb
+  %c = call i32 \@strcasecmp(i8* %sa, i8* %sb)
+  %z = icmp eq i32 %c, 0
+  br i1 %z, label %tie, label %out
+tie:
+  %d = call i32 \@strcmp(i8* %sa, i8* %sb)
+  ret i32 %d
+out:
+  ret i32 %c
+}
+
+define internal void \@chalk_glob(%Array* %acc, i8* %pat) {
+entry:
+  %g = call i8* \@calloc(i64 1, i64 128)
+  %r = call i32 \@glob(i8* %pat, i32 7172, i8* null, i8* %g)
+  %ok = icmp eq i32 %r, 0
+  br i1 %ok, label %got, label %done
+got:
+  %pcp = bitcast i8* %g to i64*
+  %n = load i64, i64* %pcp
+  %pvp0 = getelementptr inbounds i8, i8* %g, i64 8
+  %pvp = bitcast i8* %pvp0 to i8***
+  %pv = load i8**, i8*** %pvp
+  %pv8 = bitcast i8** %pv to i8*
+  call void \@qsort(i8* %pv8, i64 %n, i64 8, i32 (i8*, i8*)* \@chalk_glob_cmp)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %got ], [ %i1, %push ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %push, label %done
+push:
+  %ps = getelementptr inbounds i8*, i8** %pv, i64 %i
+  %s = load i8*, i8** %ps
+  %len = call i64 \@strlen(i8* %s)
+  %sp = call i8* \@malloc(i64 $size)
+  %st = bitcast i8* %sp to %Str*
+  %g0 = getelementptr inbounds %Str, %Str* %st, i64 0, i32 $XP
+  store i8* %s, i8** %g0
+  %g1 = getelementptr inbounds %Str, %Str* %st, i64 0, i32 $XL
+  store i64 %len, i64* %g1
+  %g2 = getelementptr inbounds %Str, %Str* %st, i64 0, i32 $XE
+  store i32 $enc, i32* %g2
+  %pi = ptrtoint %Str* %st to i64
+  %s0 = insertvalue %Slot undef, i1 true, $SD
+  %s1 = insertvalue %Slot %s0, i8 $tag, $ST
+  %s2 = insertvalue %Slot %s1, i64 %pi, $SP
+  call void \@chalk_array_push_slot(%Array* %acc, %Slot %s2)
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  ret void
+}
+END_HELPER
+}
+
+# _qx_lines -> @chalk_qx: popen the command, read its output whole into a
+# buffer doubled as it fills, pclose. A command that cannot start reads "".
+sub _qx_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_qx} && !$self->{_qx_emitted}++;
+    return ('', 'declare i8* @popen(i8*, i8*)', 'declare i32 @pclose(i8*)',
+            'declare i64 @fread(i8*, i64, i64, i8*)', 'declare i32 @fflush(i8*)',
+            'declare i8* @realloc(i8*, i64)',
+            '@chalk_qx_mode = private unnamed_addr constant [2 x i8] c"r\\00", align 1',
+            <<'END_HELPER');
+define internal i8* @chalk_qx(i8* %cmd, i64* %outlen) {
+entry:
+  %f0 = call i32 @fflush(i8* null)
+  %mode = getelementptr inbounds [2 x i8], [2 x i8]* @chalk_qx_mode, i64 0, i64 0
+  %fp = call i8* @popen(i8* %cmd, i8* %mode)
+  %isnull = icmp eq i8* %fp, null
+  br i1 %isnull, label %fail, label %start
+fail:
+  store i64 0, i64* %outlen
+  %e = call i8* @malloc(i64 1)
+  store i8 0, i8* %e
+  ret i8* %e
+start:
+  %b0 = call i8* @malloc(i64 4097)
+  br label %loop
+loop:
+  %buf = phi i8* [ %b0, %start ], [ %buf2, %grow ]
+  %cap = phi i64 [ 4096, %start ], [ %cap2, %grow ]
+  %len = phi i64 [ 0, %start ], [ %len1, %grow ]
+  %room = sub i64 %cap, %len
+  %dst = getelementptr inbounds i8, i8* %buf, i64 %len
+  %n = call i64 @fread(i8* %dst, i64 1, i64 %room, i8* %fp)
+  %len1 = add i64 %len, %n
+  %full = icmp eq i64 %len1, %cap
+  br i1 %full, label %grow, label %done
+grow:
+  %cap2 = mul i64 %cap, 2
+  %sz = add i64 %cap2, 1
+  %buf2 = call i8* @realloc(i8* %buf, i64 %sz)
+  br label %loop
+done:
+  %r = call i32 @pclose(i8* %fp)
+  %pe = getelementptr inbounds i8, i8* %buf, i64 %len1
+  store i8 0, i8* %pe
+  store i64 %len1, i64* %outlen
+  ret i8* %buf
+}
+END_HELPER
 }
 
 # _index_lines -> @chalk_index: a scan from the clamped start, memcmp at each
