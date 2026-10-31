@@ -17126,6 +17126,14 @@ sub _call_sub_define {
         $self->_emit("  $l = extractvalue %Str $r, 1");
         $r = $self->_set_str_len($p, $l);
     }
+    # THE CALL HAS THE CALLER'S TYPE: its readers were typed from the call's
+    # stamp, which need not be the define's return (`g($_[0] + 1)` stamped
+    # Num, g's body an Int product; lli refused an i64 in an fadd).
+    my $want = $node->stamp // '';
+    if ($want ne $ret && $want =~ /\A(?:Int|Num|Str|Boolean)\z/) {
+        $r = $self->_emit_coercion($r, $ret, $want, "$name result");
+        $ret = $want;
+    }
     $self->{cache}{ 'repr:' . $node->id } = $ret;
     return $self->{cache}{ $node->id } = $r;
 }

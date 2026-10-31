@@ -59,6 +59,22 @@ for my $case (
     like($ll // '', qr/= call [^\n]*\@main__$sub\(/, "$name: and is called");
 }
 
+# A sub that reads @_ the plain ways -- a list assign from it, leading
+# shifts, or $_[N] -- is called through its define too: B::SoN's graph
+# connects each read to its argument (ArgsSource).
+for my $case (
+    [ q{sub add { my ($x, $y) = @_; return $x + $y } print add(2, 3), " ", add(4, 5), "\n";}, 'a list assign from @_', 'add' ],
+    [ q{sub add { my $x = shift; my $y = shift; return $x + $y } print add(2, 3), "\n";}, 'two shifts', 'add' ],
+    [ q{sub add { return $_[0] + $_[1] } print add(2, 3), "\n";}, '$_[N] reads', 'add' ],
+    [ q{sub hi { my ($who) = @_; return "hi " . $who } print hi("a"), "\n";}, 'a Str argument', 'hi' ],
+) {
+    my ($src, $name, $sub) = @$case;
+    my ($got, $pl, $ll) = eval { through_llvm($src, {}) };
+    is($got, perl_says($pl // write_pl($src), {}), "$name: perl's answer") or diag $@;
+    like($ll // '', qr/^define [^\n]*\@main__$sub\(/m, "$name: $sub is a define");
+    like($ll // '', qr/= call [^\n]*\@main__$sub\(/, "$name: and is called");
+}
+
 # A sub with an optional parameter: a call may pass fewer arguments than its
 # define takes. Perl's answer either way (pvm 030 took a refusal here).
 for my $case (

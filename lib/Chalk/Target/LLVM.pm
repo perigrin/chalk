@@ -627,10 +627,68 @@ sub _try_sub_body {
         my $ctx  = Chalk::Target::LLVM::ElaboratedContext->new(elab => $elab, class_registry => $registry);
         $ctx->configure_as_method_body(class_name => $cname, method_name => $sinfo->{name},
             has_self => 0, param_index => $sinfo->{param_index} // {});
+        _bind_define_args($ctx, $sinfo);
         _process_control_chain($ctx, $ret);
         $ctx->lower_value($sinfo->{body_node});
         $ctx->_repr_of($sinfo->{body_node});
     };
+}
+
+my %_DEFINE_REPR = map { $_ => 1 } qw(Int Num Str Boolean);
+
+# _args_from_reads($sub, $class) -> {nodes => [...], reprs => [...]}, or undef:
+# the sub's reads of @_ -- one `my (...) = @_`, leading shifts, or `$_[N]`s --
+# in argument order, each with the scalar repr it is read as, when they are
+# all a define can bind to its own arguments. The inliner's analysis decides
+# what is a plain read (_collect_positional_arg_reads): one that writes @_,
+# reads it as a list, takes a slurpy or leaves a hole is not.
+sub _args_from_reads {
+    my ($s, $cname) = @_;
+    my $g = $s->can('graph') ? $s->graph : undef;
+    return undef unless $g;
+    my $an = bless {}, 'Chalk::Target::LLVM::Context';
+    my @reads = eval { $an->_collect_positional_arg_reads($g, $cname . '::' . $s->name) };
+    return undef if $@ || !@reads || grep { !blessed($_) } @reads;
+    return undef if $an->{_args_written} || $an->{_args_read_as_a_list}
+        || $an->{_args_slurpy} || $an->{_args_signature};
+    my @reprs;
+    for my $r (@reads) {
+        my $st = $r->stamp // '';
+        # Read through a coercion (`shift` and `$_[N]` are Scalar): the repr
+        # every reader converts it to.
+        if (!$_DEFINE_REPR{$st}) {
+            # Value readers only: the next shift takes this one as its memory,
+            # and a control successor orders after it -- neither reads it.
+            my %to = map { ( $_->operation eq 'Coerce' ? ( $_->to_repr // '' ) : '' ) => 1 }
+                grep { _reads_as_value($_, $r) }
+                grep { blessed($_) } ( $r->can('consumers') ? $r->consumers // [] : [] )->@*;
+            my @to = keys %to;
+            return undef unless @to == 1 && $_DEFINE_REPR{ $to[0] };
+            $st = $to[0];
+        }
+        push @reprs, $st;
+    }
+    return { nodes => \@reads, reprs => \@reprs };
+}
+
+# _reads_as_value($consumer, $node) -> true when $node is one of $consumer's
+# value inputs (not its memory input, not only its control predecessor).
+sub _reads_as_value {
+    my ($c, $n) = @_;
+    my @in = $c->inputs->@*;
+    pop @in if $c->can('memory_input') && $c->memory_input;
+    return scalar grep { blessed($_) && refaddr($_) == refaddr($n) } @in;
+}
+
+# _bind_define_args($ctx, $sinfo): a define body of a sub that reads @_ reads
+# its own arguments there -- each read bound to %argN, as the inliner binds
+# them to a caller's values.
+sub _bind_define_args {
+    my ($ctx, $sinfo) = @_;
+    my $reads = $sinfo->{arg_reads} or return;
+    $ctx->{_arg_bind} = { map {
+        ( refaddr( $reads->[$_] ) => { ref => "%arg$_", repr => $sinfo->{param_reprs}[$_] } )
+    } 0 .. $#$reads };
 }
 
 # _sub_has_define($registry, $class, $sinfo) -> true when calls to the sub are
@@ -639,7 +697,6 @@ sub _try_sub_body {
 # body lowers alone. Decided once, so the emitter and every call site agree --
 # a body both inlined and emitted duplicates its string globals and effects.
 # A sub that calls itself always has one: inlined, it would never stop.
-my %_DEFINE_REPR = map { $_ => 1 } qw(Int Num Str Boolean);
 sub _sub_has_define {
     my ($registry, $cname, $sinfo) = @_;
     return $sinfo->{has_define} if exists $sinfo->{has_define};
@@ -805,7 +862,11 @@ sub _populate_registry_from_mop_class {
         # `uses_args` is exactly the signal for that, which is why the producer
         # records it. Registration resumes for these when arguments are bound
         # at a real call boundary (params-by-default, plan steps 3+5).
-        next if $s->uses_args;
+        # ...unless its reads of @_ are the plain ones a define binds to its
+        # own arguments (_args_from_reads): then it is registered like a
+        # signature sub, and calls to it can be real calls.
+        my $arg_reads = $s->uses_args ? _args_from_reads($s, $cname) : undef;
+        next if $s->uses_args && !$arg_reads;
 
         my $body_node = _method_body_root($s);
         push @{ $registry->{$cname}{subs} }, {
@@ -816,8 +877,9 @@ sub _populate_registry_from_mop_class {
             # signature, per-parameter type from the body graph's Parameter
             # nodes. See _method_param_reprs for why the graph alone cannot
             # answer the arity question.
-            param_reprs => _method_param_reprs($s),
-            param_index => _method_param_index($s),
+            param_reprs => $arg_reads ? $arg_reads->{reprs} : _method_param_reprs($s),
+            param_index => $arg_reads ? {} : _method_param_index($s),
+            arg_reads   => $arg_reads && $arg_reads->{nodes},
             # Qualified: an unqualified name made the GAP ambiguous across
             # classes declaring the same sub name.
             # `return_repr` is a FORCING point: it names a type in the emitted
@@ -1427,6 +1489,7 @@ sub _emit_class_registry_ir {
                 parent_ctx  => $ctx,
                 param_index => $sinfo->{param_index} // {},
             );
+            _bind_define_args($body_ctx, $sinfo);
 
             _process_control_chain($body_ctx, $body_return);
             my $body_val = $body_ctx->lower_value($body_node);
