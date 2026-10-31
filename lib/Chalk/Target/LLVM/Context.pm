@@ -4609,6 +4609,8 @@ sub _lower_padaccess {
         my $ref  = $repr =~ /\A(?:Int|Num|Str|Boolean)\z/
             ? $self->_emit_coercion($slot, 'Scalar', $repr, 'shared lexical ' . $node->name)
             : $slot;
+        # Served as its %Slot, it is read as one (not as the Unknown stamp).
+        $self->{cache}{ 'repr:' . $node->id } = 'Scalar' if $ref eq $slot && $repr eq 'Unknown';
         $self->{cache}{ $node->id } = $ref;
         return $ref;
     }
@@ -4697,6 +4699,13 @@ sub _lower_padaccess {
     my $val_ref = $self->{var_table}{$vd_id};
     unless (defined $val_ref) {
         die "LLVM backend: PadAccess var_table has no entry for VarDecl id=$vd_id";
+    }
+    # A READ NOTHING TYPED is what the variable holds as lowered: the value
+    # an Assign stored (a shift kept as its Slot), or the VarDecl's. Taken
+    # for its static stamp, an untyped read of a Slot was read as an Int.
+    if (( $node->stamp // 'Unknown' ) eq 'Unknown') {
+        my $r = $vd->operation eq 'Assign' ? $self->_repr_of($vd->inputs->[1]) : $self->{_vd_repr}{$vd_id};
+        $self->{cache}{ 'repr:' . $node->id } = $r if defined $r && $r ne 'Unknown';
     }
 
     # PadAccess emits no instructions; it returns the current SSA ref from
@@ -5307,7 +5316,9 @@ sub _lower_assign {
         die "GAP: a store to a shared file lexical " . $lhs->name
           . " that is not a scalar is not lowered\n" unless $lhs->sigil eq '$';
         my $g    = $self->_location_ptr($lhs);
-        my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');
+        # As lowered: a shift kept as its Slot is one, whatever its stamp.
+        my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($self->_repr_of($rhs) // $rhs->stamp // '');
+        $from = 'Scalar' if $from eq 'Slot';
         ($rhs_ref, $from) = $self->_miss_kept($rhs, $rhs_ref, $from);
         die "GAP: a store to shared lexical " . $lhs->name . " of a $from value "
           . "is not lowered\n" unless $from =~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar|Slot|ArrayRef|HashRef|ScalarRef|CodeRef)\z/;
@@ -9346,6 +9357,18 @@ sub _process_loop_node {
     # Loop header: a Proj 0 consumer carries the body Proj, Proj 1 carries
     # the exit Proj.
     my $cond_val_ref = $self->_lower_loop_condition($loop_node);
+
+    # A STATEMENT OF THE HEADER runs with the test, each pass: `while (my $n
+    # = shift @w)` stores to $n off the shift. Lowered only as the test, a
+    # $n kept in memory was never stored to (perl's "<1><2>" printed "<><>").
+    for my $h (grep { blessed($_) && $_->operation !~ /\A(?:Proj|Phi|Region)\z/
+                      && $_->can('control_in') && blessed($_->control_in)
+                      && refaddr($_->control_in) == refaddr($loop_node) } ($loop_node->consumers // [])->@*) {
+        for my $st (grep { blessed($_) && $_->operation eq 'Assign' && blessed($_->control_in)
+                           && refaddr($_->control_in) == refaddr($h) } ($h->consumers // [])->@*) {
+            $self->process_control_node($st) unless exists $self->{cache}{ $st->id };
+        }
+    }
 
     # A CONDITION-mutated slot (`while ($i-- > 0)`) runs its mutation on the
     # failing (N+1th) pass too, so its post-loop value is the Phi back-edge
@@ -15381,13 +15404,17 @@ sub _lower_builtin_shift_pop {
         my $kept = sub ($c) {
             my $op = $c->operation;
             return 1 if $op =~ /\A(?:Coerce|Defined|Num(?:Eq|Ne|Lt|Gt|Le|Ge))\z/;
+            # `my $n = shift` declares $n over the shift: the target of the
+            # Assign below that stores it, not a reading of it.
+            return 1 if $op eq 'PadAccess' && ( $c->sigil // '$' ) eq '$'
+                && grep { blessed($_) && $_->operation eq 'Assign' && refaddr($_->inputs->[0]) == refaddr($c)
+                          && refaddr($_->inputs->[1] // 0) == refaddr($node) } ($c->consumers // [])->@*;
             return 0 unless $op eq 'Assign';
             my ($lhs, $rhs) = $c->inputs->@[0, 1];
-            # ONLY A LOCATION: a plain variable rebinds to the Slot, and a read
-            # of it that nothing typed took it for its Int (`<>` for `<1>`).
+            # A plain variable rebinds to the Slot; its reads nothing typed
+            # say so (_lower_padaccess).
             return blessed($rhs) && refaddr($rhs) == refaddr($node)
-                && blessed($lhs) && $lhs->operation eq 'PadAccess' && ( $lhs->sigil // '$' ) eq '$'
-                && ( $lhs->is_location || $lhs->shared );
+                && blessed($lhs) && $lhs->operation eq 'PadAccess' && ( $lhs->sigil // '$' ) eq '$';
         };
         if (@value_uses && !grep { !$kept->($_) } @value_uses) {
             $node->set_stamp('Scalar');

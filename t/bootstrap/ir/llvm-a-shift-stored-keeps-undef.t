@@ -50,21 +50,14 @@ sub perl_says ($pl, $env) {
 # which an Int holds as 0. Stored as its Slot, the variable keeps undef.
 for my $case (
     [ q{my @w = (3, 4); my $s = ""; while (my $n = shift @w) { $s .= "[$n]" } print "$s\n";}, 'a while over a shift' ],
+    # $n passed to g is kept in memory, and the header's store to it -- off
+    # the shift, in the loop test -- was never made ("<><>" for "<1><2>").
+    [ q{sub g { "<$_[0]>" } sub f { my @w = (1, 2); my $s = ""; while (my $n = shift @w) { $s .= g($n) } $s } print f(), "\n";}, 'pvm 151' ],
     [ q{my @w = (5); my $a = shift @w; my $b = shift @w; print defined $a ? "d" : "u", defined $b ? "d" : "u", " $a\n";}, 'a shift past the end is undef' ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
     is($got, perl_says($pl // write_pl($src), {}), "$name: perl's answer") or diag $@;
-}
-
-# Perl's answer, or refused by name: a plain variable (not kept in memory)
-# rebinds to the Slot, and an untyped read of it took it for an Int -- "<><>"
-# for perl's "<1><2>".
-{
-    my $src = q{sub g { "<$_[0]>" } sub f { my @w = (1, 2); my $s = ""; while (my $n = shift @w) { $s .= g($n) } $s } print f(), "\n";};
-    my ($got, $pl) = eval { through_llvm($src, {}) };
-    if (!defined $got && $@ =~ /GAP/) { pass('pvm 151: refused by name') }
-    else { is($got, perl_says($pl // write_pl($src), {}), "pvm 151: perl's answer") or diag $@ }
 }
 
 sub write_pl ($src) {
