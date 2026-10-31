@@ -134,6 +134,7 @@ sub new {
         _need_index             => 0,
         _need_qx                => 0,
         _need_glob              => 0,
+        _need_unpack_c          => 0,
         _need_str_bitop         => 0,
         _need_str_range         => 0,
         _need_localtime         => 0,
@@ -193,6 +194,7 @@ my @NEED_FLAGS = qw(
     _need_index
     _need_qx
     _need_glob
+    _need_unpack_c
     _need_str_bitop
     _need_str_range
     _need_localtime
@@ -972,6 +974,7 @@ sub render_need_flag_postclass_reemit {
     push @lines, $self->_index_lines;
     push @lines, $self->_qx_lines;
     push @lines, $self->_glob_lines;
+    push @lines, $self->_unpack_c_lines;
     push @lines, $self->_str_bitop_lines;
     push @lines, $self->_str_range_lines;
     push @lines, $self->_localtime_lines;
@@ -2174,6 +2177,10 @@ sub lower_value {
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
             && ($node->name // '') eq 'glob') {
         return $self->_lower_glob($node);
+    }
+    elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
+            && ($node->name // '') eq 'unpack') {
+        return $self->_lower_unpack($node);
     }
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin'
             && ($node->name // '') =~ /\A(?:open|close|readline|eof)\z/) {
@@ -10532,7 +10539,7 @@ sub _emit_array_of {
     # A glob in a list is its matches (stamped Unknown either way).
     return $self->_emit_flattened_array_of($inputs)
         if grep { blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
-                  && ( $_->name // '' ) eq 'glob' } @$inputs;
+                  && ( $_->name // '' ) =~ /\A(?:glob|unpack)\z/ } @$inputs;
     return $self->_emit_flattened_array_of($inputs)
         if grep { _returns_nothing_in_a_list($_) } @$inputs;
 
@@ -11443,7 +11450,7 @@ sub _emit_flattened_array_of {
             next;
         }
         if ($in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'builtin'
-                && ( $in->name // '' ) =~ /\A(?:readline|glob)\z/) {
+                && ( $in->name // '' ) =~ /\A(?:readline|glob|unpack)\z/) {
             # lowered once, where it stands: read again here it would be empty
             my $lines = $self->lower_value($in);
             $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $lines)  ; list: the lines read");
@@ -12717,6 +12724,68 @@ sub _lower_glob {
     $self->_emit("  call void \@chalk_glob(%Array* $acc, i8* $z)  ; glob: the files it matches");
     $self->{cache}{ 'repr:' . $node->id } = 'Array';
     return $self->{cache}{ $node->id } = $acc;
+}
+
+# _lower_unpack($node) -> %Array*: unpack with a constant C template (`C`,
+# `C<n>`, `C*`) in a list -- each byte of the string as a number, up to n or
+# the string's end. Any other template, and scalar context (the first value
+# alone), are refused by name.
+sub _lower_unpack {
+    my ($self, $node) = @_;
+    die "GAP: unpack in scalar context is not lowered\n"
+        if ( $node->stamp // '' ) =~ /\A(?:Scalar|Str|Int|Num|Boolean)\z/
+        || grep { blessed($_) && !( $_->operation eq 'ArrayLiteral'
+                    || ( $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
+                         && ( $_->name // '' ) eq 'join' )
+                    || $_->operation eq 'Loop' ) } ($node->consumers // [])->@*;
+    my @in = grep { blessed($_) } $node->inputs->@*;
+    pop @in if $node->can('memory_input') && $node->memory_input;
+    die "GAP: unpack of other than a template and one string is not lowered\n" unless @in == 2;
+    my $t = $in[0];
+    my ($count) = $t->operation eq 'Constant' && defined $t->value
+        ? $t->value =~ /\AC(\d+|\*)?\z/ : ();
+    die "GAP: unpack with a template other than a constant C, Cn or C* is not lowered\n"
+        unless $t->operation eq 'Constant' && ( $t->value // '' ) =~ /\AC(?:\d+|\*)?\z/;
+    $count = 1 unless defined $count;
+    my ($p, $l) = $self->_str_parts($self->_operand_as($in[1], 'Str', 'unpack string'));
+    $self->{$_} = 1 for qw(_need_unpack_c _need_malloc_memcpy _need_array_append _need_aggregate_types);
+    my $acc = $self->_emit_array_of([]);
+    my $n = $count eq '*' ? $l : $count;
+    $self->_emit("  call void \@chalk_unpack_c(%Array* $acc, i8* $p, i64 $l, i64 $n)  ; unpack C: the bytes");
+    $self->{cache}{ 'repr:' . $node->id } = 'Array';
+    return $self->{cache}{ $node->id } = $acc;
+}
+
+# _unpack_c_lines -> @chalk_unpack_c: push min(n, len) bytes as Int slots.
+sub _unpack_c_lines {
+    my ($self) = @_;
+    return () unless $self->{_need_unpack_c} && !$self->{_unpack_c_emitted}++;
+    my ($SD, $ST, $SP) = map { _slot_idx($_) } qw(defined tag payload);
+    my $tag = _slot_tag_value('Int');
+    return ('', <<"END_HELPER");
+define internal void \@chalk_unpack_c(%Array* %acc, i8* %p, i64 %len, i64 %n) {
+entry:
+  %short = icmp slt i64 %len, %n
+  %m = select i1 %short, i64 %len, i64 %n
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i1, %push ]
+  %more = icmp slt i64 %i, %m
+  br i1 %more, label %push, label %done
+push:
+  %bp = getelementptr inbounds i8, i8* %p, i64 %i
+  %b = load i8, i8* %bp
+  %v = zext i8 %b to i64
+  %s0 = insertvalue %Slot undef, i1 true, $SD
+  %s1 = insertvalue %Slot %s0, i8 $tag, $ST
+  %s2 = insertvalue %Slot %s1, i64 %v, $SP
+  call void \@chalk_array_push_slot(%Array* %acc, %Slot %s2)
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  ret void
+}
+END_HELPER
 }
 
 # _glob_lines -> @chalk_glob and its comparator. glibc's flags: NOSORT 4,
@@ -15224,6 +15293,9 @@ sub _lower_builtin_join {
     $flatten ||= blessed($list_node) && $list_node->operation eq 'Range'
         && grep { $_->operation ne 'Constant' } $list_node->inputs->@[0, 1];
     $flatten ||= _is_array_slice($list_node) || _is_hash_slice($list_node);
+    # An unpack's values (stamped Unknown, built as an array).
+    $flatten ||= blessed($list_node) && $list_node->operation eq 'Call'
+        && ( $list_node->dispatch_kind // '' ) eq 'builtin' && ( $list_node->name // '' ) eq 'unpack';
     # So does a merge of lists (`@a = $c ? (7) : f()`), lowered as the array chosen.
     $flatten ||= $list_node->operation =~ /\A(?:Phi|Repeat)\z/ && ( $list_node->stamp // '' ) eq 'List';
     # So does a sub's list: what its inlined body returned, flattened. Walked
