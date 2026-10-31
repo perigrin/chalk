@@ -34,6 +34,7 @@ use Chalk::IR::NodeFactory;   # is_statement_node() classifier used by the value
 use Chalk::IR::Analysis;      # return_reading_for_want: which of a callee reading a callsite takes
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 use Chalk::IR::Node;   # stamp reads gate on isa Chalk::IR::Node
+use List::Util ();     # min, for the arguments a callee shifts
 
 # Re-export helpers from the main package so unqualified calls in this
 # package resolve correctly (both packages share the same implementation).
@@ -17483,6 +17484,9 @@ sub _lower_call_direct {
     # the arguments flattened (_emit_flattened_array_of): an array, or a
     # list a call returns, is its elements. A hash is not built so.
     my $as_list_only = $args_array && !@arg_reads && !$slurpy && !$written;
+    # After k shifts, the list is the arguments past the k shifted, which must
+    # each be one scalar for the shifts to take them by position.
+    my $list_after = $args_array && !$slurpy && !$written && $self->{_args_list_after_shifts};
     # @_ READ ONLY BY POSITION (no write, slurpy, signature or list read) of an
     # argument that flattens is the arguments flattened, each read the
     # element at its index -- undef past the end.
@@ -17494,7 +17498,8 @@ sub _lower_call_direct {
     my $by_position = @arg_reads && !$args_array && !$slurpy && !$written && !$signature && !$shared
         && ( grep { $flattens->($_) } @args )
         && !grep { ( $_->stamp // '' ) =~ /\A(?:Hash|List)\z/ && !$flattens->($_) } @args;
-    for my $a ( ( @arg_reads || $args_array || $slurpy || $written ) ? @args : () ) {
+    for my $a ( ( @arg_reads || $args_array || $slurpy || $written )
+                ? ( $list_after ? @args[ 0 .. List::Util::min($list_after, scalar @args) - 1 ] : @args ) : () ) {
         my $st = $a->stamp // 'Unknown';
         next if $as_list_only && ( $st eq 'Array' || ( $st eq 'List' && $a->operation eq 'Call' ) );
         next if $by_position;
@@ -17505,7 +17510,7 @@ sub _lower_call_direct {
     }
     # @_ READ AS A LIST is one argument per element: an argument that is
     # itself a list would flatten, which this does not build.
-    if ($args_array && !$as_list_only) {
+    if ($args_array && !$as_list_only && !$list_after) {
         for my $a (@args) {
             die "GAP: direct call to '$name': an argument stamped "
               . ( $a->stamp // 'NONE' ) . " flattens into \@_, which inlining "
@@ -17522,7 +17527,8 @@ sub _lower_call_direct {
     my $flat = $by_position ? $self->_emit_flattened_array_of(\@args) : undef;
     my @arg_refs = $shared ? $shared->{refs}->@*
                  : $by_position ? ()
-                 : map { $_->operation eq 'AnonSub' ? undef : $self->lower_value($_) } @args;
+                 : map { $_->operation eq 'AnonSub' ? undef : $self->lower_value($_) }
+                       ( $list_after ? @args[ 0 .. List::Util::min($list_after, scalar @args) - 1 ] : @args );
     my $shifts = grep { blessed($_) && $_->operation eq 'Call' } @arg_reads;
     die "GAP: direct call to '$name' as `&$name` shifts or writes the \@_ it shares\n"
         if $shared && ( $written || $shifts );
@@ -17611,6 +17617,7 @@ sub _lower_call_direct {
         $self->{_arg_bind}{ refaddr($r) } = { ref => $self->lower_value($d), repr => $d->stamp };
     }
     my $args_arr = !$args_array ? undef
+        : $list_after ? $self->_emit_flattened_array_of([ @args[ List::Util::min($list_after, scalar @args) .. $#args ] ])
         : $as_list_only ? $self->_emit_flattened_array_of(\@args)
         : $self->_emit_array_of(\@args);
     $self->{_arg_bind}{ refaddr($args_array) } = { ref => $args_arr, repr => 'Array' }
@@ -18057,6 +18064,7 @@ sub _collect_positional_arg_reads {
     my %params;       # index => the Parameter node (a DECLARED signature)
     my $args_array;   # @_ itself, when the callee reads it as a list
     $self->{_args_read_as_a_list} = undef;
+    $self->{_args_list_after_shifts} = undef;
     my (%written, $written_src);   # `$_[N] = ...`: N => 1, and @_
     $self->{_args_written} = undef;
     $self->{_args_signature} = 0;
@@ -18216,9 +18224,30 @@ sub _collect_positional_arg_reads {
     }
 
     if ($args_array) {
-        die "GAP: direct call to '$name': callee shifts \@_ and reads it as a "
-          . "list -- the list after a shift is not the call's arguments.\n"
-            if @shifts;
+        # SHIFTS FIRST, THEN THE LIST: `shift; bless {@_}` reads the arguments
+        # past the shifted ones -- when every reader of the list comes after
+        # every shift in control order. A reader with no control position
+        # (or one before a shift) has no such order.
+        if (@shifts) {
+            my %is_shift = map { refaddr($_) => 1 } @shifts;
+            for my $c (grep { blessed($_) && !$is_shift{ refaddr($_) } } $args_array->consumers->@*) {
+                # Before it in control order, or in memory order (`join("-",
+                # @_)` takes the shift as its memory).
+                my %before;
+                for (my $k = $c->can('control_in') ? $c->control_in : undef; blessed($k);
+                     $k = $k->can('control_in') ? $k->control_in : undef) {
+                    last if $before{ refaddr($k) }++;
+                }
+                my $mem = sub ($n) { $n->can('memory_input') && $n->memory_input ? $n->inputs->[-1] : undef };
+                for (my $k = $mem->($c); blessed($k); $k = $mem->($k)) {
+                    last if $before{ refaddr($k) }++;
+                }
+                die "GAP: direct call to '$name': callee shifts \@_ and reads it as a "
+                  . "list -- the list after a shift is not the call's arguments.\n"
+                    if grep { !$before{ refaddr($_) } } @shifts;
+            }
+            $self->{_args_list_after_shifts} = scalar @shifts;
+        }
         $self->{_args_read_as_a_list} = $args_array;
     }
 
