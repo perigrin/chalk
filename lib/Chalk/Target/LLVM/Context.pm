@@ -5510,11 +5510,12 @@ sub _lower_icmp_int {
     my $inputs  = $node->inputs;
     my $lhs_node = $inputs->[0];
     my $rhs_node = $inputs->[1];
-    # An argument nothing typed is what the caller passed (_repr_of).
-    my $lhs_repr = $self->_repr_of($lhs_node);
-    my $rhs_repr = $self->_repr_of($rhs_node);
+    # An argument nothing typed is what the caller passed (_repr_of) -- read
+    # once lowered: a shift boxed to keep its undef says so then.
     my $lhs_ref = $self->lower_value($lhs_node);
     my $rhs_ref = $self->lower_value($rhs_node);
+    my $lhs_repr = $self->_repr_of($lhs_node);
+    my $rhs_repr = $self->_repr_of($rhs_node);
 
     # If BOTH operands are Int, compare as i64 (the fast integer path). If either
     # is Num or Str, perl numifies both and compares as numbers -> coerce each to
@@ -15363,12 +15364,32 @@ sub _lower_builtin_shift_pop {
     # ONLY COERCED (printed, concatenated): read as its Slot, which a Coerce
     # reads by its tag -- undef is "" to a string, 0 to a number.
     if ($repr eq 'Int') {
+        # A VALUE USE reads the shift's value, not its memory version: the
+        # last input of a memory-taking node, and a memory phi, read no value.
         my @value_uses = grep {
             my $c = $_;
-            blessed($c) && $c->operation !~ /\A(?:Region|Proj|If|Loop)\z/
-                && grep { blessed($_) && refaddr($_) == refaddr($node) } $c->inputs->@[ 0 .. ( $c->operation eq 'Coerce' ? 0 : $#{ $c->inputs } - 1 ) ]
+            my @ci = blessed($c) ? $c->inputs->@* : ();
+            my @at = grep { blessed($ci[$_]) && refaddr($ci[$_]) == refaddr($node) } 0 .. $#ci;
+            blessed($c) && $c->operation !~ /\A(?:Region|Proj|If|Loop)\z/ && @at
+                && !( $c->operation eq 'Phi' && _is_memory_phi($c) )
+                && !( @at == 1 && $at[0] == $#ci && @ci > 1
+                      && $c->operation =~ /\A(?:Subscript|Count|Call|Exists|PadAccess|EntryDef|FieldAccess|Phi)\z/ )
         } ($node->consumers // [])->@*;
-        if (@value_uses && !grep { $_->operation ne 'Coerce' } @value_uses) {
+        # ...or stored to a variable kept in memory, whose %Slot keeps the
+        # undef (`while (my $n = shift @w)`), asked defined(), or compared
+        # as a number (a Slot's undef is 0 to one).
+        my $kept = sub ($c) {
+            my $op = $c->operation;
+            return 1 if $op =~ /\A(?:Coerce|Defined|Num(?:Eq|Ne|Lt|Gt|Le|Ge))\z/;
+            return 0 unless $op eq 'Assign';
+            my ($lhs, $rhs) = $c->inputs->@[0, 1];
+            # ONLY A LOCATION: a plain variable rebinds to the Slot, and a read
+            # of it that nothing typed took it for its Int (`<>` for `<1>`).
+            return blessed($rhs) && refaddr($rhs) == refaddr($node)
+                && blessed($lhs) && $lhs->operation eq 'PadAccess' && ( $lhs->sigil // '$' ) eq '$'
+                && ( $lhs->is_location || $lhs->shared );
+        };
+        if (@value_uses && !grep { !$kept->($_) } @value_uses) {
             $node->set_stamp('Scalar');
             $self->{cache}{ 'repr:' . $node->id } = $repr = 'Scalar';
         }
