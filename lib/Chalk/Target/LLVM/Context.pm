@@ -19928,6 +19928,17 @@ sub _lower_entry_write {
     # name already runs that sub, so the assignment has nothing left to do.
     return $self->{cache}{ $node->id } = '0'
         if $value->operation eq 'AnonSub' && $value->glob_bound;
+    # `our @ISA = ("Base")`: the parent the class registry already holds
+    # (B::SoN records it), so method calls resolve through it statically --
+    # the store has nothing left to do. Any other @ISA store or read is
+    # refused (_pkg_aggregate_ptr).
+    if (( $target->sigil // '' ) eq '@' && ( $target->symbol // '' ) eq 'ISA') {
+        my @el = $value->operation eq 'ArrayLiteral' ? grep { blessed($_) } $value->inputs->@* : ();
+        my $parent = ( $self->{class_registry}{ $target->package // 'main' } // {} )->{parent};
+        return $self->{cache}{ $node->id } = '0'
+            if @el == 1 && $el[0]->operation eq 'Constant' && defined $parent
+                && ( $el[0]->value // '' ) eq $parent;
+    }
     # A WHOLE PACKAGE AGGREGATE STORED: its new contents copied over the one
     # every graph holds, in place, and the literal is that aggregate after.
     if (( $target->sigil // '$' ) =~ /\A[@%]\z/) {

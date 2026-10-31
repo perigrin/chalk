@@ -1141,6 +1141,21 @@ sub _attach_call_targets ($graphs, $mop) {
                 # package sub of that name, if it has one (not inherited).
                 ($m) = grep { $_->name eq ( $node->name // '' ) } $cls->subs
                     if !$m && $cls;
+                # ...or its parents' (`use parent`, a constant @ISA). A
+                # `X::SUPER::m` starts at X's parent -- X the package the
+                # call was compiled in.
+                if (!$m) {
+                    my ($want, $start) = ($node->name // '', $cls);
+                    if ($want =~ /\A(.+)::SUPER::(\w+)\z/) {
+                        my $x = $mop->for_class($1);
+                        ($want, $start) = ($2, $x ? $x->superclass : undef);
+                        $m = $start->find_method($want) if $start;
+                    }
+                    else { $start = $cls ? $cls->superclass : undef }
+                    for (my $c = $start; $c && !$m; $c = $c->superclass) {
+                        ($m) = grep { $_->name eq $want } $c->subs;
+                    }
+                }
                 $node->set_target($m) if $m;
                 next;
             }

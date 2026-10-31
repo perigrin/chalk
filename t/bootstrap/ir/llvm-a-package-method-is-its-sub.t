@@ -53,7 +53,9 @@ for my $case (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
-my $err = do { local $@; eval { through_llvm(q{package P { sub m { "p" } } package O { our @ISA = ('P'); sub new { bless {}, shift } } print O->new->m, "\n";}) }; $@ };
-like($err, qr/GAP|LLVM MOP/, 'an inherited method is refused by name');
+# AN INHERITED METHOD resolves through the parent B::SoN records for a
+# constant @ISA (llvm-a-plain-package-inherits.t). It was refused here.
+is(eval { through_llvm(q{package P { sub m { "p" } } package O { our @ISA = ('P'); sub new { bless {}, shift } } print O->new->m, "\n";}) },
+    "p\n", "an inherited method: perl's answer") or diag $@;
 
 done_testing;
