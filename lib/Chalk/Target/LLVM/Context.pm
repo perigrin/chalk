@@ -8966,9 +8966,18 @@ sub close_eval {
     delete $self->{_eval_open_now}{ refaddr($region) };
     # IN LIST CONTEXT a die gives the empty list, not undef: the one value
     # this join carries cannot say that.
+    # THE CALLER'S CONTEXT is the inlined call's: a scalar or void call takes
+    # undef on a die, as a scalar eval does.
+    my $want = $region->eval_want;
+    $want = $self->{_inline_want}
+        if defined $want && $want =~ /\A(?:caller|runtime)\z/ && exists $self->{_inline_want};
+    $want = undef if defined $want && $want =~ /\A(?:scalar|void)\z/;
+    # IN LIST CONTEXT a die gives the empty list, which needs the value
+    # typed as a list for this call's context -- per-context typing in the
+    # analysis, not yet done.
     die "GAP: a block eval in list or caller context that can die is not lowered -- "
       . "it yields the empty list there, not undef\n"
-        if $f->{dies} && defined $region->eval_want;
+        if $f->{dies} && defined $want;
 
     my %normal;
     for my $phi (@phis) {
