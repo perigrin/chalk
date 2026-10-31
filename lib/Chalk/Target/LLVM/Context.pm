@@ -17077,14 +17077,16 @@ sub _copy_out_written_args {
 # `$_[N]` do not connect to the args in the graph — those GAP loudly rather
 # than miscompile.
 
-# _recursive_sub_info($name) -> the registry entry of a sub that calls itself,
-# by its qualified (or main's bare) name, or undef.
+# _recursive_sub_info($name) -> the registry entry of a sub called through
+# its define (Chalk::Target::LLVM::_sub_has_define), by its qualified (or
+# main's bare) name, or undef.
 sub _recursive_sub_info {
     my ($self, $name) = @_;
     my ($pkg, $sname) = $name =~ /\A(.*)::([^:]+)\z/ ? ($1, $2) : ('main', $name);
-    my ($s) = grep { ( $_->{name} // '' ) eq $sname && $_->{recursive} }
+    my ($s) = grep { ( $_->{name} // '' ) eq $sname }
         @{ ( $self->{class_registry}{$pkg} // {} )->{subs} // [] };
-    Chalk::Target::LLVM::_settle_recursive_return($self->{class_registry}, $pkg, $s) if $s;
+    return undef unless $s && Chalk::Target::LLVM::_sub_has_define($self->{class_registry}, $pkg, $s);
+    Chalk::Target::LLVM::_settle_recursive_return($self->{class_registry}, $pkg, $s);
     return $s;
 }
 
@@ -17116,7 +17118,7 @@ sub _call_sub_define {
     my $fn = '@' . ( $pkg // 'main' ) . '__' . $sub->{name};
     my $r  = $self->_fresh;
     my $ty = Chalk::Target::LLVM::_method_fn_llvm_ret_type($ret);
-    $self->_emit("  $r = call $ty $fn(" . join(', ', @actual) . ")  ; $name, a sub that calls itself");
+    $self->_emit("  $r = call $ty $fn(" . join(', ', @actual) . ")  ; $name");
     if ($ret eq 'Str') {
         $self->{_need_str_type} = 1;
         my ($p, $l) = ($self->_fresh, $self->_fresh);
@@ -17178,7 +17180,16 @@ sub _lower_call_direct {
     # recursion a terminating lowering; until then it GAPs loudly.
     # A SUB THAT CALLS ITSELF has a define (LLVM.pm emits it): called, not
     # inlined, here and in its own body.
-    if (!$via && !$shared && (my $sub = $self->_recursive_sub_info($name))) {
+    # IN AN EVAL'S BODY (here, or in a body inlined into one) the call stays
+    # inlined: a die in a define does not unwind to the eval's catch yet.
+    my $in_eval = @{ $self->{_eval_frames} // [] }
+        || ( $node->can('eval_id') && defined $node->eval_id );
+    my $sub = !$via && !$shared && $self->_recursive_sub_info($name);
+    # A call passing the wrong count is perl's arity die (or its refusal),
+    # handled below before any body is lowered.
+    my $argc = scalar(@{ $node->inputs }) - ( $node->can('memory_input') && $node->memory_input ? 1 : 0 );
+    if ($sub && ( !$in_eval || $sub->{recursive} )
+        && ( $sub->{recursive} || $argc == @{ $sub->{param_reprs} // [] } )) {
         return $self->_call_sub_define($node, $sub, $name);
     }
     die "GAP: direct call to '$name' is recursive — inlining is the only "

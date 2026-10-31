@@ -598,32 +598,73 @@ sub _method_slurpy {
     return @$d && ref($d->[-1]) eq 'HASH' && ( $d->[-1]{sigil} // '' ) eq '@' ? 1 : 0;
 }
 
-# _settle_recursive_return($registry, $class, $sinfo): a sub that calls itself
-# and returns what nothing typed (`$n < 2 ? $n : fib($n-1) + fib($n-2)`) is
-# typed by trying: assume it returns R, lower its body (its own calls read R),
-# and keep R only if the body's value comes out R. None does: it stays Unknown,
-# and a call to it is refused.
+# _settle_recursive_return($registry, $class, $sinfo): a sub whose return
+# nothing typed (`$n < 2 ? $n : fib($n-1) + fib($n-2)`) is typed by trying:
+# assume it returns R, lower its body (its own calls read R), and keep R only
+# if the body's value comes out R. None does: it stays Unknown, and a call to
+# it is refused (a sub that calls itself) or inlined (any other).
 sub _settle_recursive_return {
     my ($registry, $cname, $sinfo) = @_;
     return if ( $sinfo->{return_repr} // '' ) ne 'Unknown' || $sinfo->{settling};
     local $sinfo->{settling} = 1;
     for my $r (qw(Int Num Str)) {
         $sinfo->{return_repr} = $r;
-        my $got = eval {
-            my $ret  = $sinfo->{body_return};
-            my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($ret);
-            my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($ret, $dom);
-            my $ctx  = Chalk::Target::LLVM::ElaboratedContext->new(elab => $elab, class_registry => $registry);
-            $ctx->configure_as_method_body(class_name => $cname, method_name => $sinfo->{name},
-                has_self => 0, param_index => $sinfo->{param_index} // {});
-            _process_control_chain($ctx, $ret);
-            $ctx->lower_value($sinfo->{body_node});
-            $ctx->_repr_of($sinfo->{body_node});
-        };
+        my $got = _try_sub_body($registry, $cname, $sinfo);
         return if defined $got && $got eq $r;
     }
     $sinfo->{return_repr} = 'Unknown';
     return;
+}
+
+# _try_sub_body($registry, $class, $sinfo) -> the repr the sub's body lowers
+# to in a context of its own, or undef when it does not lower there.
+sub _try_sub_body {
+    my ($registry, $cname, $sinfo) = @_;
+    return eval {
+        my $ret  = $sinfo->{body_return};
+        my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($ret);
+        my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($ret, $dom);
+        my $ctx  = Chalk::Target::LLVM::ElaboratedContext->new(elab => $elab, class_registry => $registry);
+        $ctx->configure_as_method_body(class_name => $cname, method_name => $sinfo->{name},
+            has_self => 0, param_index => $sinfo->{param_index} // {});
+        _process_control_chain($ctx, $ret);
+        $ctx->lower_value($sinfo->{body_node});
+        $ctx->_repr_of($sinfo->{body_node});
+    };
+}
+
+# _sub_has_define($registry, $class, $sinfo) -> true when calls to the sub are
+# calls to its define (perigrin, 2026-10-31: real calls, not inlining): its
+# parameters and settled return are scalars _call_sub_define passes, and its
+# body lowers alone. Decided once, so the emitter and every call site agree --
+# a body both inlined and emitted duplicates its string globals and effects.
+# A sub that calls itself always has one: inlined, it would never stop.
+my %_DEFINE_REPR = map { $_ => 1 } qw(Int Num Str Boolean);
+sub _sub_has_define {
+    my ($registry, $cname, $sinfo) = @_;
+    return $sinfo->{has_define} if exists $sinfo->{has_define};
+    # Asked again while its own body is tried (two subs calling each other):
+    # assume yes, as _settle_recursive_return assumes its trial type.
+    return 1 if $sinfo->{deciding};
+    local $sinfo->{deciding} = 1;
+    return $sinfo->{has_define} = 1 if $sinfo->{recursive};
+    # An optional parameter: a call may pass fewer arguments than the define
+    # takes, and the default is computed in the body -- inlined, for now.
+    return $sinfo->{has_define} = 0 if $sinfo->{optional};
+    my $ok = !grep { !$_DEFINE_REPR{$_} } @{ $sinfo->{param_reprs} // [] };
+    if ($ok) {
+        _settle_recursive_return($registry, $cname, $sinfo);
+        my $body = $_DEFINE_REPR{ $sinfo->{return_repr} // '' }
+            ? _try_sub_body($registry, $cname, $sinfo) : undef;
+        $ok = defined $body;
+        # A body narrower than its declaration (`$n * 2` is an Int where the
+        # producer declared Num) returns what it computes: callers were typed
+        # from the body, so they read that.
+        $sinfo->{return_repr} = $body
+            if $ok && $_DEFINE_REPR{$body} && $body ne $sinfo->{return_repr}
+            && Chalk::Grammar::Perl::TypeLibrary::is_subtype($body, $sinfo->{return_repr});
+    }
+    return $sinfo->{has_define} = $ok ? 1 : 0;
 }
 
 # _sub_calls_itself($sub, $class) -> true when the sub's own graph makes a
@@ -790,6 +831,7 @@ sub _populate_registry_from_mop_class {
                 : _require_repr($body_node, "MOP::Sub '${cname}::${sname}' body root")
             ),
             uses_args   => $s->uses_args,
+            optional    => ( $s->signature // {} )->{optional} // 0,
             recursive   => _sub_calls_itself($s, $cname),
         };
     }
@@ -1359,8 +1401,8 @@ sub _emit_class_registry_ir {
         my $emit_sub_defines = $ENV{CHALK_EMIT_SUB_DEFINES} ? 1 : 0;
         # A SUB THAT CALLS ITSELF is the exception: it is never inlined
         # (_lower_call_direct calls its define), so its body is emitted once.
-        for my $sinfo (grep { $emit_sub_defines || $_->{recursive} } @{ $reg->{subs} // [] }) {
-            _settle_recursive_return($registry, $cname, $sinfo) if $sinfo->{recursive};
+        for my $sinfo (grep { $emit_sub_defines || _sub_has_define($registry, $cname, $_) } @{ $reg->{subs} // [] }) {
+            _settle_recursive_return($registry, $cname, $sinfo);
             my $sname    = $sinfo->{name};
             my $fn_name  = '@' . $cname . '__' . $sname;
             my $ret_repr = $sinfo->{return_repr};
