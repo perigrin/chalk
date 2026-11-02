@@ -26,6 +26,9 @@ class Chalk::MOP::Sub {
     # params}. `mandatory` counts every positional parameter, named or not --
     # `params` above lists the named ones only.
     field $signature   :param :reader = undef;
+    # The calling context this metaobject's graph is a copy for ('list'), or
+    # undef for the sub's own graph (Serialize::JSON's CONTEXT_COPY).
+    field $context     :param :reader = undef;
     field $graph       :param :reader = Chalk::IR::Graph->new;
     field $factory     :param :reader = Chalk::IR::NodeFactory->new;
     field $body        :param :reader = [];

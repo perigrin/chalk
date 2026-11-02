@@ -47,6 +47,10 @@ sub perl_says ($pl, $env) {
 for my $case (
     [ q{sub w { return eval { die "x\n" if $_[0]; 5 } } my $s = w(1); my $t = w(0);
         print defined $s ? "d" : "u", " $t\n";}, "the caller's context is a scalar" ],
+    # A list-context call runs its sub's list copy (Serialize::JSON
+    # CONTEXT_COPY), whose eval's value is a list: empty on a die.
+    [ q{sub w { return eval { die "x\n" if $_[0]; 5 } } my @r = w(1); my $s = w(1);
+        print scalar(@r), " ", defined $s ? "d" : "u", " ", w(0), "\n";}, 'pvm 091' ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
@@ -56,8 +60,6 @@ for my $case (
 # Perl's answer, or refused by name: a list-context eval that can die needs
 # its value typed as a list for that call's context (per-context typing).
 for my $case (
-    [ q{sub w { return eval { die "x\n" if $_[0]; 5 } } my @r = w(1); my $s = w(1);
-        print scalar(@r), " ", defined $s ? "d" : "u", " ", w(0), "\n";}, 'pvm 091' ],
     [ q{my @r = eval { die "boom\n" if @ARGV == 0; 7 }; print scalar(@r), " $@";}, 'a list eval that dies' ],
     [ q{my @r = eval { die "boom\n" if @ARGV; 7 }; print scalar(@r), " [@r]\n";}, 'a list eval that does not die' ],
 ) {

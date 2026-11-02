@@ -1061,6 +1061,12 @@ sub _stash_changes ($data) {
     return undef;
 }
 
+# _wire_nodes($method_data) -> its wire nodes, whether listed or keyed by id.
+sub _wire_nodes ($m) {
+    my $ns = $m->{nodes} // [];
+    return ref $ns eq 'HASH' ? values %$ns : @$ns;
+}
+
 sub from_json ($json_string) {
     my $data    = JSON::PP->new->decode($json_string);
     # The text after __DATA__ / __END__, which DATA reads (absent: none).
@@ -1135,6 +1141,39 @@ sub from_json ($json_string) {
         $graphs{$name} = _deserialize_graph($data->{methods}{$name});
     }
 
+    # CONTEXT IS A TYPE PARAMETER (perigrin, 2026-10-31): a sub whose value
+    # depends on its caller's context (a node the producer marks `runtime`)
+    # and that some call makes in list context gets a copy of its own for
+    # that context -- its wire graph deserialized again, so nodes, regions
+    # and memory chains are its own. A list-context call targets the copy
+    # (Analysis::_attach_call_targets), and the copy is typed for a list.
+    our %CONTEXT_COPY = ();
+    my %in_list;
+    for my $m (values $data->{methods}->%*) {
+        for my $n (_wire_nodes($m)) {
+            my $f = $n->{fields} // {};
+            $in_list{ $f->{name} } = 1
+                if ( $n->{op} // '' ) eq 'Call' && ( $f->{dispatch_kind} // '' ) eq 'direct'
+                && ( $f->{want} // '' ) eq 'list' && defined $f->{name};
+        }
+    }
+    for my $name (sort keys %in_list) {
+        my $m = $data->{methods}{$name} or next;
+        next unless grep {
+            my $f = $_->{fields} // {};
+            ( $f->{want} // '' ) eq 'runtime' || ( $f->{eval_want} // '' ) eq 'runtime'
+        } _wire_nodes($m);
+        my $key = "$name\@list";
+        $graphs{$key} = _deserialize_graph($m);
+        $CONTEXT_COPY{$name}{list} = $key;
+        # TYPED FOR A LIST: its caller's-context eval is a list eval, whose
+        # value is a list (the empty one on a die).
+        for my $r (grep { $_->operation eq 'Region' && ( $_->eval_want // '' ) eq 'runtime' }
+                   Chalk::IR::Analysis::_all_graph_nodes($graphs{$key})) {
+            $r->set_eval_want('list');
+        }
+    }
+
     # ANALYSIS LIVES IN ITS OWN MODULE, BODIES AND ALL. The passes are not
     # deserialization -- every one takes graphs plus class metadata and none
     # touches the JSON -- so they are in Chalk::IR::Analysis.
@@ -1155,6 +1194,16 @@ sub from_json ($json_string) {
     my $analysed = Chalk::IR::Analysis->run(
         \%graphs, (ref $data->{classes} eq "HASH" ? $data->{classes} : undef));
     @PHASE_GRAPHS = map { [ $_->[0], $analysed->{ $_->[1] } ] } @PHASE_BLOCKS;
+    # A LIST-CONTEXT COPY'S EVAL VALUE IS A LIST: typed after the passes, which
+    # join its arms (a value and undef) to Scalar.
+    for my $key (map { $_->{list} // () } values %CONTEXT_COPY) {
+        for my $r (grep { $_->operation eq 'Region' && ( $_->eval_want // '' ) eq 'list' }
+                   Chalk::IR::Analysis::_all_graph_nodes($analysed->{$key})) {
+            $_->set_stamp('List') for grep {
+                $_->operation eq 'Phi' && blessed($_->region) && $_->region == $r
+            } ($r->consumers // [])->@*;
+        }
+    }
     return $analysed;
 }
 

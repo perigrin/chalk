@@ -1182,6 +1182,18 @@ sub _attach_call_targets ($graphs, $mop) {
                 : ();
 
             if ($sub) {
+                # A LIST-CONTEXT CALL of a sub with a copy for list context
+                # (Serialize::JSON's CONTEXT_COPY) runs that copy.
+                my $copy = ( $Chalk::IR::Serialize::JSON::CONTEXT_COPY{ $node->name // '' } // {} )->{list};
+                if (defined $copy && $graphs->{$copy} && ( $node->can('want') ? $node->want // '' : '' ) eq 'list') {
+                    $sub = $anon{$copy} //= Chalk::MOP::Sub->new(
+                        name => $sub->name, class => $cls, graph => $graphs->{$copy},
+                        params => $sub->params, uses_args => $sub->uses_args,
+                        signature => $sub->signature, return_type => $sub->return_type,
+                        context => 'list');
+                    # The call is this site's alone: typed as the list it is.
+                    $node->set_stamp('List');
+                }
                 $node->set_target($sub);
                 next;
             }

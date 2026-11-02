@@ -8972,16 +8972,24 @@ sub close_eval {
     $want = $self->{_inline_want}
         if defined $want && $want =~ /\A(?:caller|runtime)\z/ && exists $self->{_inline_want};
     $want = undef if defined $want && $want =~ /\A(?:scalar|void)\z/;
-    # IN LIST CONTEXT a die gives the empty list, which needs the value
-    # typed as a list for this call's context -- per-context typing in the
-    # analysis, not yet done.
+    # IN LIST CONTEXT a die gives the empty list: the value is an array, the
+    # body's value as one, the empty one where a die was caught. Only where
+    # the eval's value is typed a list (a list-context copy of its sub, or a
+    # list eval the producer typed so) -- a shared node is not retyped here.
+    my $as_list = $f->{dies} && defined $want && $want eq 'list'
+        && !grep { ( $_->stamp // '' ) !~ /\A(?:List|Array)\z/ } @phis;
     die "GAP: a block eval in list or caller context that can die is not lowered -- "
       . "it yields the empty list there, not undef\n"
-        if $f->{dies} && defined $want;
+        if $f->{dies} && defined $want && !$as_list;
 
     my %normal;
     for my $phi (@phis) {
         my ($v)  = $phi->inputs->[0];
+        if ($as_list) {
+            $normal{ $phi->id } = ( $self->_repr_of($v) // '' ) eq 'Array'
+                ? $raw{ $phi->id } : $self->_emit_array_of([$v]);
+            next;
+        }
         my $to   = $f->{dies} ? 'Scalar' : ($phi->stamp // '');
         die "GAP: a block eval's value is a " . ($phi->stamp // 'untyped')
           . " where a die makes it undef -- only a Scalar holds both\n"
@@ -9002,14 +9010,18 @@ sub close_eval {
         $self->_set_terminator("  br label %$join  ; eval: the body ended");
         $self->_new_block($f->{catch});
         my %caught = map {
-            ( $_->id => $self->_build_slot('false', '0', 'Undef', 'eval: died') )
+            ( $_->id => $as_list ? $self->_emit_array_of([])
+                                 : $self->_build_slot('false', '0', 'Undef', 'eval: died') )
         } @phis;
+        my $from_catch = $self->_current_block_label;
         $self->_set_terminator("  br label %$join  ; eval: a die was caught");
         $self->_new_block($join);
         for my $phi (@phis) {
-            my $r = $self->_fresh;
-            $self->_emit("  $r = phi %Slot [ $normal{ $phi->id }, %$from_body ], "
-              . "[ $caught{ $phi->id }, %$f->{catch} ]  ; eval value");
+            my $r  = $self->_fresh;
+            my $ty = $as_list ? '%Array*' : '%Slot';
+            $self->_emit("  $r = phi $ty [ $normal{ $phi->id }, %$from_body ], "
+              . "[ $caught{ $phi->id }, %$from_catch ]  ; eval value");
+            $self->{cache}{ 'repr:' . $phi->id } = 'Array' if $as_list;
             $self->{cache}{ $phi->id } = $r;
         }
         # A VALUE THE BODY MADE, READ PAST THE JOIN by a later merge (`try {
@@ -14864,6 +14876,13 @@ sub _lower_builtin_sort {
     die "GAP: sort with a custom comparator block is not lowered (only perl's "
       . "FOLDED numeric/string comparators are); got sort_cmp='$cmp'."
         unless $custom || $cmp eq 'numeric' || $cmp eq 'string';
+    # A COMPARATOR THAT CAN DIE: its die was dropped and the sort finished
+    # (`[1 2 3]` where perl dies, or in an eval gives () and sets $@ -- pvm
+    # 092). Refused until a comparator's die reaches its eval or the program.
+    die "GAP: a sort comparator that can die is not lowered\n"
+        if $custom && $custom->can('graph') && $custom->graph
+            && grep { blessed($_) && $_->operation eq 'Unwind' }
+                    Chalk::IR::Analysis::_all_graph_nodes($custom->graph);
 
     my $op_repr = $operand isa Chalk::IR::Node ? ($operand->stamp // '') : '';
 
