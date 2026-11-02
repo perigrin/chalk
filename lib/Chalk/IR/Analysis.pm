@@ -562,6 +562,34 @@ sub infer ($class, $graphs) {
     # Both passes only ever narrow, so this pair converges rather than
     # oscillating: the second call can only act on what the re-stamp moved,
     # and the re-stamp can only move a stamp DOWN a finite lattice.
+    # A SCALAR-CONTEXT CALL THE PRODUCER TYPED A LIST, of a sub whose Return
+    # has a scalar face, is that face's type -- the reading lowering takes
+    # (return_reading_for_want). A bare `return` is undef there, not the
+    # empty list (pvm 144).
+    for my $g (values %graphs) {
+        for my $c (grep {
+            $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'direct'
+                && ( $_->want // '' ) eq 'scalar' && ( $_->stamp // '' ) eq 'List'
+                && blessed($_->target) && $_->target->can('graph') && $_->target->graph
+        } _all_graph_nodes($g)) {
+            my ($ret) = grep { blessed($_) && $_->operation eq 'Return' } $c->target->graph->returns->@*;
+            my $face = $ret && $ret->can('scalar_value') ? $ret->scalar_value : undef;
+            $c->set_stamp($face->stamp) if blessed($face) && !_stamp_is_absent($face) && $face->stamp ne 'List';
+        }
+    }
+
+    # A `//` THE PRODUCER TYPED A LIST over a scalar-context call: once the
+    # call takes its scalar face (_resolve_direct_calls), neither side is a
+    # list, and its value is their join (pvm 144: `scalar(g()) // "u"`).
+    for my $g (values %graphs) {
+        for my $n (grep { $_->operation eq 'DefinedOr' && ( $_->stamp // '' ) eq 'List' }
+                   _all_graph_nodes($g)) {
+            my @in = grep { blessed($_) } $n->inputs->@[0, 1];
+            next unless @in == 2 && !grep { _stamp_is_absent($_) || $_->stamp =~ /\A(?:List|Array|Hash|Unknown)\z/ } @in;
+            $n->set_stamp(Chalk::Grammar::Perl::TypeLibrary::join_types($in[0]->stamp, $in[1]->stamp));
+        }
+    }
+
     _narrow_unknown_coercions(\%graphs);
 
     # THE EXIT INVARIANT -- NOT YET ENFORCED. See
