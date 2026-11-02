@@ -1061,6 +1061,59 @@ sub _stash_changes ($data) {
     return undef;
 }
 
+# _returned_unknown_calls($method_data) -> the ids of the direct calls with no
+# context of their own whose value a Return returns, directly or through a
+# Phi: `return g()` is made in its caller's context.
+sub _returned_unknown_calls ($m) {
+    my %by = map { ( $_->{id} => $_ ) } _wire_nodes($m);
+    my (@out, %seen);
+    my @q = map { ( $_->{inputs} // [] )->[0] // () }
+            grep { ( $_->{op} // '' ) eq 'Return' } values %by;
+    while (defined(my $id = shift @q)) {
+        next if $seen{$id}++;
+        my $n = $by{$id} or next;
+        my $f = $n->{fields} // {};
+        if (( $n->{op} // '' ) eq 'Phi') { push @q, ( $n->{inputs} // [] )->@*; next }
+        push @out, $id
+            if ( $n->{op} // '' ) eq 'Call' && ( $f->{dispatch_kind} // '' ) eq 'direct'
+            && !defined $f->{want};
+    }
+    return @out;
+}
+
+# _returned_context_free_calls($graph) -> the direct calls with no context of
+# their own that its Returns return, directly or through a Phi.
+sub _returned_context_free_calls ($g) {
+    my (@out, %seen);
+    my @q = map { $_->inputs->[0] // () } grep { blessed($_) } ( $g->returns // [] )->@*;
+    while (defined(my $n = shift @q)) {
+        next unless blessed($n) && !$seen{ refaddr($n) }++;
+        if ($n->operation eq 'Phi') { push @q, $n->inputs->@*; next }
+        push @out, $n
+            if $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct'
+            && $n->can('want') && !defined $n->want;
+    }
+    return @out;
+}
+
+# _phis_to_return($graph, $node) -> the Phis between $node and a Return.
+sub _phis_to_return ($g, $node) {
+    my (@out, %seen);
+    my @q = map { $_->inputs->[0] // () } grep { blessed($_) } ( $g->returns // [] )->@*;
+    my %path;
+    my $walk; $walk = sub ($n) {
+        return 0 unless blessed($n);
+        return 1 if refaddr($n) == refaddr($node);
+        return 0 unless $n->operation eq 'Phi' && !$seen{ refaddr($n) }++;
+        my $on = 0;
+        $on |= $walk->($_) for $n->inputs->@*;
+        push @out, $n if $on;
+        return $on;
+    };
+    $walk->($_) for @q;
+    return @out;
+}
+
 # _wire_nodes($method_data) -> its wire nodes, whether listed or keyed by id.
 sub _wire_nodes ($m) {
     my $ns = $m->{nodes} // [];
@@ -1142,35 +1195,62 @@ sub from_json ($json_string) {
     }
 
     # CONTEXT IS A TYPE PARAMETER (perigrin, 2026-10-31): a sub whose value
-    # depends on its caller's context (a node the producer marks `runtime`)
-    # and that some call makes in list context gets a copy of its own for
-    # that context -- its wire graph deserialized again, so nodes, regions
-    # and memory chains are its own. A list-context call targets the copy
-    # (Analysis::_attach_call_targets), and the copy is typed for a list.
+    # depends on its caller's context gets a copy of its own for each context
+    # a call makes it in -- its wire graph deserialized again, so nodes,
+    # regions and memory chains are its own. A call targets its context's
+    # copy (Analysis::_attach_call_targets). Depending on the caller's
+    # context: a node the producer marks `runtime` (an eval), or a returned
+    # call with no context of its own (`return g()`, whose context is f's
+    # caller's, so f's Return has no scalar face).
     our %CONTEXT_COPY = ();
-    my %in_list;
+    # The copies made for a caller's-context eval, whose list-context value
+    # is the eval's list (Analysis types such a call List).
+    our %CONTEXT_COPY_EVAL = ();
+    my %called_in;
     for my $m (values $data->{methods}->%*) {
         for my $n (_wire_nodes($m)) {
             my $f = $n->{fields} // {};
-            $in_list{ $f->{name} } = 1
+            $called_in{ $f->{name} }{ $f->{want} } = 1
                 if ( $n->{op} // '' ) eq 'Call' && ( $f->{dispatch_kind} // '' ) eq 'direct'
-                && ( $f->{want} // '' ) eq 'list' && defined $f->{name};
+                && ( $f->{want} // '' ) =~ /\A(?:list|scalar)\z/ && defined $f->{name};
         }
     }
-    for my $name (sort keys %in_list) {
+    for my $name (sort keys %called_in) {
         my $m = $data->{methods}{$name} or next;
-        next unless grep {
+        my @returned = _returned_unknown_calls($m);
+        my $returned = scalar @returned;
+        # A list copy for a returned call only where its callee returns no
+        # context-free call itself: a chain (ev/od, calling each other) is
+        # left as it is.
+        my %by = map { ( $_->{id} => $_ ) } _wire_nodes($m);
+        my $chain = grep {
+            my $callee = $data->{methods}{ ( $by{$_}{fields} // {} )->{name} // '' };
+            $callee && _returned_unknown_calls($callee)
+        } @returned;
+        my $runtime  = grep {
             my $f = $_->{fields} // {};
             ( $f->{want} // '' ) eq 'runtime' || ( $f->{eval_want} // '' ) eq 'runtime'
         } _wire_nodes($m);
-        my $key = "$name\@list";
-        $graphs{$key} = _deserialize_graph($m);
-        $CONTEXT_COPY{$name}{list} = $key;
-        # TYPED FOR A LIST: its caller's-context eval is a list eval, whose
-        # value is a list (the empty one on a die).
-        for my $r (grep { $_->operation eq 'Region' && ( $_->eval_want // '' ) eq 'runtime' }
-                   Chalk::IR::Analysis::_all_graph_nodes($graphs{$key})) {
-            $r->set_eval_want('list');
+        for my $ctx (sort keys $called_in{$name}->%*) {
+            next unless $runtime || ( $returned && ( $ctx eq 'scalar' || !$chain ) );
+            my $key = "$name\@$ctx";
+            $graphs{$key} = _deserialize_graph($m);
+            $CONTEXT_COPY{$name}{$ctx} = $key;
+            $CONTEXT_COPY_EVAL{$key} = 1 if $runtime;
+            # Its caller's-context eval is an eval in this context.
+            $_->set_eval_want($ctx) for grep {
+                $_->operation eq 'Region' && ( $_->eval_want // '' ) eq 'runtime'
+            } Chalk::IR::Analysis::_all_graph_nodes($graphs{$key});
+            # Its returned call is made in this context, typed afresh by
+            # Analysis from its callee's reading for it -- as are the Phis it
+            # reaches the Return through (the producer typed both a list).
+            for my $c (_returned_context_free_calls($graphs{$key})) {
+                $c->set_want($ctx);
+                next unless $ctx eq 'scalar';
+                $c->set_stamp(undef);
+                $_->set_stamp(undef) for grep { $_->operation eq 'Phi' }
+                    _phis_to_return($graphs{$key}, $c);
+            }
         }
     }
 

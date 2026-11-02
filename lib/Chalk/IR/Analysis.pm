@@ -480,6 +480,15 @@ sub infer ($class, $graphs) {
         # loop just refined.
         _stamp_method_call_reprs(\%graphs, $mop);
     }
+
+    # A PER-CONTEXT COPY'S RETURNED CALL (Serialize::JSON CONTEXT_COPY) is
+    # left untyped by the loader so it is typed here from its callee's face
+    # for its context -- the copies only, so no other graph's typing moves.
+    my %copies = map { $_ => $graphs{$_} } grep { /\@(?:list|scalar)\z/ } keys %graphs;
+    if (%copies) {
+        _resolve_direct_calls(\%copies, 0, 'per context');
+        _seed_and_propagate_reprs(\%graphs);
+    }
     # The loop stamps a Call's result repr in _resolve_direct_calls AFTER the
     # pass's _seed_and_propagate_reprs already ran, so a consumer of the call
     # result (an `$x = foo(5)` Assign) is still untyped when the loop exits. Run
@@ -1182,17 +1191,20 @@ sub _attach_call_targets ($graphs, $mop) {
                 : ();
 
             if ($sub) {
-                # A LIST-CONTEXT CALL of a sub with a copy for list context
-                # (Serialize::JSON's CONTEXT_COPY) runs that copy.
-                my $copy = ( $Chalk::IR::Serialize::JSON::CONTEXT_COPY{ $node->name // '' } // {} )->{list};
-                if (defined $copy && $graphs->{$copy} && ( $node->can('want') ? $node->want // '' : '' ) eq 'list') {
+                # A CALL OF A SUB WITH A COPY FOR ITS CONTEXT (Serialize::JSON's
+                # CONTEXT_COPY) runs that copy.
+                my $want = $node->can('want') ? $node->want // '' : '';
+                my $copy = ( $Chalk::IR::Serialize::JSON::CONTEXT_COPY{ $node->name // '' } // {} )->{$want};
+                if (defined $copy && $graphs->{$copy}) {
                     $sub = $anon{$copy} //= Chalk::MOP::Sub->new(
                         name => $sub->name, class => $cls, graph => $graphs->{$copy},
                         params => $sub->params, uses_args => $sub->uses_args,
                         signature => $sub->signature, return_type => $sub->return_type,
-                        context => 'list');
-                    # The call is this site's alone: typed as the list it is.
-                    $node->set_stamp('List');
+                        context => $want);
+                    # The call is this site's alone: a list-context one is typed
+                    # as the list it is.
+                    $node->set_stamp('List')
+                        if $want eq 'list' && $Chalk::IR::Serialize::JSON::CONTEXT_COPY_EVAL{$copy};
                 }
                 $node->set_target($sub);
                 next;
@@ -1316,7 +1328,7 @@ sub _stamp_is_absent ($node) {
     return !defined $node->stamp;
 }
 
-sub _resolve_direct_calls ($graphs, $pkg_methods_only = 0) {
+sub _resolve_direct_calls ($graphs, $pkg_methods_only = 0, $per_context = 0) {
     for my $gname (sort keys $graphs->%*) {
         for my $node (_all_graph_nodes($graphs->{$gname})) {
             # A PACKAGE SUB CALLED AS A METHOD is a direct call too (its
@@ -1379,11 +1391,19 @@ sub _resolve_direct_calls ($graphs, $pkg_methods_only = 0) {
             # ->value() is inputs[0]. Reading [-1] stamped every
             # list-returning sub's callsites from its SCALAR face --
             # the same bug bson hit in _graph_return_type (7b26a89).
-            my $val = $ret ? $ret->value() : undef;
+            # IN A PER-CONTEXT COPY a scalar-context call takes the scalar face
+            # where the Return has one -- the reading lowering uses
+            # (return_reading_for_want). Elsewhere the list face, as before.
+            my $val = !$ret ? undef
+                : $per_context ? return_reading_for_want($ret, $node->can('want') ? $node->want : undef)
+                : $ret->value();
             # (A package `new` returning a Scalar -- an element, say -- is
             # that, not the Object B::SoN stamped.)
             if ($val && ( _is_narrowed($val->stamp)
-                    || $pkg_method && ( $node->stamp // '' ) eq 'Object' && ( $val->stamp // '' ) eq 'Scalar' )) {
+                    || $pkg_method && ( $node->stamp // '' ) eq 'Object' && ( $val->stamp // '' ) eq 'Scalar'
+                    # A per-context copy's call, left untyped by the loader,
+                    # takes its face's type, Scalar included.
+                    || $per_context && _stamp_is_absent($node) && !_stamp_is_absent($val) && $val->stamp ne 'Unknown' )) {
                 my $have = $node->stamp;
                 my $want = $val->stamp;
                 # B::SoN stamps any `->new` Object, a class's instance; a

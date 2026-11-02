@@ -68,6 +68,9 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # the same call, and its context is a per-use decoration -- the same
     # reasoning that keeps control_in out of the hash (Node.pm:42).
     field $want :param :reader = undef;
+    # A per-context copy of a sub sets its returned call's context: the call
+    # takes its caller's, which the copy is for (Serialize::JSON CONTEXT_COPY).
+    method set_want($w) { $want = $w; return $self }
 
     # `&name` with no parens: the callee runs on the CALLER's @_ rather than
     # a list of its own. In the hash: `&f` and `f()` are different calls.
