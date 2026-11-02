@@ -61,8 +61,9 @@ my $o = L->new; print $o->set, " ", $o->get, "\n";
     is($got, perl_of($src), "perl's answer: " . ( $src =~ s/\n/ /gr )) or diag $@;
 }
 
-# Its value read (pvm 141's methods return it): the count in scalar
-# context, the elements in list context -- refused by name.
+# Its value read (pvm 141's methods return it): the count where every call
+# of the method is scalar, the array where every call is list
+# (llvm-a-method-in-scalar-context-only.t). They were refused here.
 for my $src (
     $hdr . q{class K { field %h = (a => 1, b => 2); field @l = (1, 2, 3);
   method reset_h { %h = () } method reset_l { @l = (9) } method n { scalar(keys %h) . scalar(@l) } }
@@ -70,6 +71,16 @@ my $k = K->new; my $a = $k->reset_h; my @b = $k->reset_l; print $a, scalar(@b), 
 },
     $hdr . q{class K { field %h; method set { %h = (a => 1, a => 2) } }
 print scalar(K->new->set), "\n";
+},
+) {
+    my $got = eval { through_llvm($src) };
+    is($got, perl_of($src), "perl's answer: " . ( $src =~ s/\n/ /gr )) or diag $@;
+}
+
+# Called in both contexts: one function cannot be both -- refused.
+for my $src (
+    $hdr . q{class K { field %h; method set { %h = (a => 1) } }
+my $k = K->new; my $c = $k->set; my @l = $k->set; print "$c ", scalar(@l), "\n";
 },
 ) {
     my $err = do { local $@; eval { through_llvm($src) }; $@ };

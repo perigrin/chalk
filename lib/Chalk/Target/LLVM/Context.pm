@@ -4759,9 +4759,17 @@ sub _lower_field_aggregate_assign {
     ( my $kind = $self->_repr_of($t) ) =~ s/Ref\z//;   # a field holds its aggregate by reference
     # ITS VALUE READ is the list's count in scalar context, the aggregate in
     # list context -- a method returning it has one return type for both.
+    # ...unless every call of this method is scalar (Analysis
+    # %SCALAR_ONLY_METHOD): then its value is the list's count.
+    my $count_read = _value_readers($node) && $self->{_in_method_body}
+        && $Chalk::IR::Analysis::SCALAR_ONLY_METHOD{ ( $self->{_method_class_name} // "" ) . '::' . ( $self->{_method_name} // '' ) };
+    # ...or every call is in list context (%LIST_ONLY_METHOD): then its value
+    # is the field's array, its contents after.
+    my $list_read = _value_readers($node) && $self->{_in_method_body}
+        && $Chalk::IR::Analysis::LIST_ONLY_METHOD{ ( $self->{_method_class_name} // "" ) . '::' . ( $self->{_method_name} // '' ) };
     die "GAP: a list assignment to a field $kind whose value is read is not lowered -- "
       . "perl's is the list's count in scalar context, its elements in list context\n"
-        if _value_readers($node);
+        if _value_readers($node) && !$count_read && !$list_read;
     my $dst = $self->_container_ptr($t, $kind);
     my $src;
     if ($kind eq 'Array') { $src = $self->_emit_flattened_array_of($v) }
@@ -4776,6 +4784,16 @@ sub _lower_field_aggregate_assign {
     my $h = $self->_fresh;
     $self->_emit("  $h = load %$kind, %$kind* $src  ; field $kind assigned: its header");
     $self->_emit("  store %$kind $h, %$kind* $dst  ; ...over the field's own");
+    # READ IN SCALAR CONTEXT: the right side's element count -- of the list
+    # as written, so `(a => 1, a => 3)` is 4 where the hash keeps one key.
+    if ($count_read) {
+        my $list = $kind eq 'Array' ? $src : $self->_emit_flattened_array_of($v);
+        my ($lp, $n) = ($self->_fresh, $self->_fresh);
+        $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $list, i32 0, i32 0  ; the right side's count ptr");
+        $self->_emit("  $n = load i64, i64* $lp  ; a list assignment in scalar context: the right side's count");
+        $self->{cache}{ 'repr:' . $node->id } = 'Int';
+        return $self->{cache}{ $node->id } = $n;
+    }
     $self->{cache}{ 'repr:' . $node->id } = $kind;
     return $self->{cache}{ $node->id } = $dst;
 }

@@ -912,6 +912,14 @@ sub _populate_registry_from_mop_class {
         my $ret_repr  = ( ( $m->return_type // 'Unknown' ) ne 'Unknown' )
             ? $m->return_type
             : _require_repr($body_node, "MOP::Method '$mname' body root");
+        # CALLED ONLY IN SCALAR CONTEXT, a returned list assignment to a field
+        # is its count (Analysis %SCALAR_ONLY_METHOD), not the declared list.
+        $ret_repr = $Chalk::IR::Analysis::SCALAR_ONLY_METHOD{"${cname}::$mname"} ? 'Int' : 'Array'
+            if ( $Chalk::IR::Analysis::SCALAR_ONLY_METHOD{"${cname}::$mname"}
+                 || $Chalk::IR::Analysis::LIST_ONLY_METHOD{"${cname}::$mname"} )
+            && blessed($body_node) && $body_node->operation eq 'Assign'
+            && grep { blessed($_) && $_->operation eq 'FieldAccess'
+                      && ( $_->stamp // "" ) =~ /\A(?:Hash|Array)(?:Ref)?\z/ } $body_node->inputs->[0];
         unless (grep { ($_->{name} // '') eq $mname } @{ $registry->{$cname}{methods} }) {
             # THE SIGNATURE COMES FROM THE BODY GRAPH, not from a wire field.
             # A method's parameters are exactly its Parameter nodes, each
@@ -1408,8 +1416,10 @@ sub _emit_class_registry_ir {
             # `return` is an empty list, and `ret i64` over its %Array* was a
             # module lli rejected.
             elsif ($fn_ret eq '%Array*'
-                   && ( ($body_node isa Chalk::IR::Node) ? ($body_node->stamp // '') : '' )
-                      =~ /\A(?:List|Array)\z/) {
+                   && ( ( ($body_node isa Chalk::IR::Node) ? ($body_node->stamp // '') : '' )
+                          =~ /\A(?:List|Array)\z/
+                        # or lowered as one (a list-only method's field array)
+                        || ( $body_ctx->_repr_of($body_node) // '' ) eq 'Array' )) {
                 push @lines, "  ret %Array* $body_val";
             }
             # `return $self`: the invocant pointer the method was called with

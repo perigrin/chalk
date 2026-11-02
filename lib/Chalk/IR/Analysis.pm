@@ -562,6 +562,40 @@ sub infer ($class, $graphs) {
     # Both passes only ever narrow, so this pair converges rather than
     # oscillating: the second call can only act on what the re-stamp moved,
     # and the re-stamp can only move a stamp DOWN a finite lattice.
+    # A METHOD CALLED ONLY IN SCALAR CONTEXT returns its value for one: a
+    # method is one function, so its value has one type, and when every
+    # call of it is scalar a returned list assignment to a field is the
+    # right side's count (pvm 141: `method reset_h { %h = () }`).
+    # %SCALAR_ONLY_METHOD holds those methods by "Class::name".
+    our %SCALAR_ONLY_METHOD = ();
+    # ...and those called only in list context, whose returned list
+    # assignment to a field Array is that array (its contents after).
+    our %LIST_ONLY_METHOD = ();
+    my %wants;
+    for my $g (values %graphs) {
+        for my $c (grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method'
+                          && defined $_->class_name } _all_graph_nodes($g)) {
+            $wants{ $c->class_name . '::' . ( $c->name // '' ) }{ $c->want // 'unknown' } = 1;
+        }
+    }
+    for my $m (grep { join(',', keys $wants{$_}->%*) =~ /\A(?:scalar|list)\z/ && $graphs{$_} } keys %wants) {
+        my $ctx = join(',', keys $wants{$m}->%*);
+        my ($r) = grep { blessed($_) && $_->operation eq 'Return' } $graphs{$m}->returns->@*;
+        my $v = $r ? $r->inputs->[0] : undef;
+        my ($t) = blessed($v) && $v->operation eq 'Assign' ? grep { blessed($_) && $_->operation eq 'FieldAccess' } $v->inputs->[0] : ();
+        my $agg = $t ? ( $t->stamp // '' ) =~ s/Ref\z//r : '';
+        next unless $agg eq 'Hash' && $ctx eq 'scalar' || $agg eq 'Array';
+        ( $ctx eq 'scalar' ? \%SCALAR_ONLY_METHOD : \%LIST_ONLY_METHOD )->{$m} = 1;
+        # Its calls -- every one in that context -- read the count, or the array.
+        for my $g (values %graphs) {
+            $_->set_stamp($ctx eq 'scalar' ? 'Int' : 'Array') for grep {
+                $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method'
+                    && ( $_->class_name // '' ) . '::' . ( $_->name // '' ) eq $m
+            } _all_graph_nodes($g);
+        }
+
+    }
+
     # A SCALAR-CONTEXT CALL THE PRODUCER TYPED A LIST, of a sub whose Return
     # has a scalar face, is that face's type -- the reading lowering takes
     # (return_reading_for_want). A bare `return` is undef there, not the
