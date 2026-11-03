@@ -49,8 +49,6 @@ sub write_pl ($src) {
     return $pl;
 }
 
-local $ENV{CHALK_T2} = 1;
-
 # Through T2: the module says so, and perl's answer comes out.
 for my $case (
     [ q{print 1 + 2, "\n";}, 'integer arithmetic' ],
@@ -59,6 +57,8 @@ for my $case (
     [ q{my $n = 7; print $n > 3 ? "big" : "small", "\n";}, 'a ?: of strings' ],
     [ q{my $c = $ENV{NOPE} // 1; my $v = $c ? 0.1 + 0.2 : "x"; print $v == 0.3 ? "eq" : "ne", " $v\n";},
       'a Str a Num reaches is boxed (T1 Str, T2 %Slot)' ],
+    [ q{my $d = $ENV{NOPE} // 4; print 1 / $d, "\n";}, 'division' ],
+    [ q{my $s = $ENV{NOPE} // "0"; print $s ? "t" : "f", "\n";}, q{the truth of a string} ],
 ) {
     my ($src, $name) = @$case;
     $LAST_LL = '';
@@ -75,5 +75,6 @@ for my $case (
     is($got, perl_says($pl // write_pl($src), {}), "a sub: perl's answer") or diag $@;
     unlike($LAST_LL, qr/^; chalk T2/m, 'a sub: not T2 (falls back)');
 }
+
 
 done_testing;

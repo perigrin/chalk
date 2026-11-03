@@ -1856,10 +1856,10 @@ sub _process_control_chain {
 sub lower_with_elaboration {
     my ($class, $return_node, $elab, %opts) = @_;
 
-    # T2, SLICE 1 (CHALK_T2=1 until it matches on the corpus): a program it
-    # takes is built as a graph typed in LLVM's types and printed; any other
-    # (undef) is lowered below as before. A phase block is not slice 1's.
-    if ($ENV{CHALK_T2} && !grep { blessed($_->[1]) } @Chalk::IR::Serialize::JSON::PHASE_GRAPHS) {
+    # T2 IS THE ARCHITECTURE (perigrin): a program its slices take is built as
+    # a graph typed in LLVM's types and printed. Any other (undef) is lowered
+    # below, a fallback each slice shrinks. A phase block is not slice 1's.
+    if (!grep { blessed($_->[1]) } @Chalk::IR::Serialize::JSON::PHASE_GRAPHS) {
         require Chalk::Target::LLVM::T2;
         my $ir = Chalk::Target::LLVM::T2->lower_program($return_node);
         return $ir if defined $ir;

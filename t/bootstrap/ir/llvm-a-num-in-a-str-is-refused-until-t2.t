@@ -51,7 +51,9 @@ sub write_pl ($src) {
 # is T2's (perigrin). Until then a numeric read of one is refused, not answered
 # from 15 printed digits: 0.30000000000000004 compared equal to 0.3.
 for my $case (
-    [ q{my $c = $ENV{NOPE} // 1; my $v = $c ? 0.1 + 0.2 : "x"; print $v == 0.3 ? "eq" : "ne", "\n";}, 'a ?: of a number or a string' ],
+    # Out of T2's slices (a sub, a list): the fallback refuses. A top-level
+    # ?: is T2's, which boxes it (t2-slice1-straight-line.t).
+    [ q{sub f { my $c = $_[0]; my $v = $c ? 0.1 + 0.2 : "x"; return $v == 0.3 ? "eq" : "ne" } print f(1), "\n";}, 'a ?: of a number or a string, in a sub' ],
     [ q{my @b = (0.1 + 0.2, "x"); print $b[0] == 0.3 ? "eq" : "ne", "\n";}, 'an element of numbers and strings' ],
 ) {
     my ($src, $name) = @$case;

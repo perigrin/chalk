@@ -1,5 +1,5 @@
-# ABOUTME: T2 for LLVM, slice 1 -- a straight-line program built as a new graph typed in
-# ABOUTME: LLVM's types (the repr chosen once, here), then printed. Out of scope: undef.
+# ABOUTME: T2 for LLVM -- a program built as a new graph typed in LLVM's types (the repr
+# ABOUTME: chosen once, here), then printed. Slice 1: straight-line. Out of scope: undef.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -35,8 +35,9 @@ package Chalk::Target::LLVM::T2;
 
 use Scalar::Util qw(blessed refaddr);
 
-my %SCALAR = (Int => 'i64', Num => 'double', Str => '%Str', Boolean => 'i1');
-my %ARITH  = (Add => 'add', Subtract => 'sub', Multiply => 'mul', Divide => 'div');
+# Undef and a Scalar nothing narrowed are each a %Slot: its tag says which.
+my %SCALAR = (Int => 'i64', Num => 'double', Str => '%Str', Boolean => 'i1', Undef => '%Slot', Scalar => '%Slot');
+my %ARITH  = (Add => 'add', Subtract => 'sub', Multiply => 'mul');
 my %CMP    = (NumLt => 'lt', NumGt => 'gt', NumLe => 'le', NumGe => 'ge', NumEq => 'eq', NumNe => 'ne');
 
 sub _n { Chalk::Target::LLVM::T2::Node->new(@_) }
@@ -115,16 +116,31 @@ sub _value {
     my $ty = $b->type_of($v);
     if ($op eq 'Constant') {
         my $c = $v->value;
+        return $b->emit(op => 'Undef', type => '%Slot') if $ty eq '%Slot';
         return $b->emit(op => 'Const', type => $ty, attr => { value => $c }) if $ty ne '%Str';
         $b->{strs}{$c} //= scalar keys %{ $b->{strs} };
         return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => $c, id => $b->{strs}{$c} });
     }
     if ($op eq 'Coerce') {
+        # TO Undef IS NOT A CONVERSION: undef has no value to convert into, and
+        # boxing the value would keep it.
+        out('a coercion to Undef') if ( $v->stamp // '' ) eq 'Undef'; # static type
         return $b->as($b->value($v->inputs->[0]), $ty);
+    }
+    if ($op eq 'Divide') {
+        # A DIVISION T1 TYPED Int is T1's error (7/2 is 3.5): not truncated here.
+        out('a Divide typed Int') if $ty eq 'i64';
+        # PERL DIVIDES AS NUMBERS and dies on a zero divisor, naming where.
+        my $msg = "Illegal division by zero at " . ( $v->can('file') && $v->file // '-' )
+                 . " line " . ( $v->can('line') && $v->line // 0 ) . ".\n";
+        $b->{strs}{$msg} //= scalar keys %{ $b->{strs} };
+        my $q = $b->emit(op => 'Div', type => 'double',
+            inputs => [ map { $b->as($b->value($_), 'double') } $v->inputs->@[0, 1] ],
+            attr => { msg => $msg, id => $b->{strs}{$msg} });
+        return $b->as($q, $ty);
     }
     if (my $a = $ARITH{$op}) {
         my @in = map { $b->as($b->value($_), $ty) } $v->inputs->@[0, 1];
-        out("integer $op") if $ty eq 'i64' && $a eq 'div';
         return $b->emit(op => 'Arith', type => $ty, inputs => \@in, attr => { op => $a });
     }
     if (my $c = $CMP{$op}) {
@@ -187,6 +203,18 @@ package Chalk::Target::LLVM::T2::Printer;
 
 use Scalar::Util qw(refaddr);
 
+# THE CONVERSIONS T2 HAS, from>to: the builder asks here before it makes one
+# (a program needing another falls back), the printer prints from it.
+our %CONVERT = (
+    'i64>double' => 'sitofp', 'i64>%Str' => 't2_i64_str', 'double>%Str' => 't2_num_str',
+    '%Str>double' => 't2_str_num', 'i1>%Str' => 't2_bool_str', 'i64>%Slot' => 't2_box_i64',
+    'double>%Slot' => 't2_box_num', '%Str>%Slot' => 't2_box_str', '%Slot>double' => 't2_slot_num',
+    '%Slot>%Str' => 't2_slot_str', 'i1>i64' => 'zext', 'i1>double' => 't2_bool_num',
+    '%Slot>i64' => 't2_slot_i64', '%Str>i64' => 't2_str_i64', 'double>i64' => 'fptosi',
+    'i64>i1' => 't2_truth_i64', 'double>i1' => 't2_truth_num', '%Str>i1' => 't2_truth_str',
+    '%Slot>i1' => 't2_truth_slot', 'i1>%Slot' => 't2_box_bool',
+);
+
 # The printer names each node, then writes one line (or a runtime call) per
 # node. It chooses nothing: every type is already on the node.
 sub print_module {
@@ -243,6 +271,11 @@ sub _line {
         $o = 'fcmp une' if $t eq 'double' && $a{op} eq 'ne';
         return "$nm = $o $t " . $in[0]->name . ', ' . $in[1]->name;
     }
+    return "$nm = call %Slot \@t2_slot(i8 0, i64 0)" if $op eq 'Undef';
+    if ($op eq 'Div') {
+        my $len = do { use bytes; length $a{msg} };
+        return "$nm = call double \@t2_div(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
+    }
     return "$nm = call %Str \@t2_concat(" . $arg->(@in) . ')' if $op eq 'Concat';
     return "call void \@t2_print(" . $arg->(@in) . ')' if $op eq 'Print';
     return "$nm = call i1 \@t2_defined(" . $arg->(@in) . ')' if $op eq 'Defined';
@@ -251,14 +284,7 @@ sub _line {
         return "$nm = call i1 \@$f{ $in[0]->type }(" . $arg->(@in) . ')';
     }
     if ($op eq 'Convert') {
-        my %f = (
-            'i64>double' => 'sitofp', 'i64>%Str' => 't2_i64_str', 'double>%Str' => 't2_num_str',
-            '%Str>double' => 't2_str_num', 'i1>%Str' => 't2_bool_str', 'i64>%Slot' => 't2_box_i64',
-            'double>%Slot' => 't2_box_num', '%Str>%Slot' => 't2_box_str', '%Slot>double' => 't2_slot_num',
-            '%Slot>%Str' => 't2_slot_str', 'i1>i64' => 'zext', 'i1>double' => 't2_bool_num',
-            '%Slot>i64' => 't2_slot_i64', '%Str>i64' => 't2_str_i64', 'double>i64' => 'fptosi',
-        );
-        my $f = $f{"$a{from}>$ty"} // die "T2: no conversion $a{from} -> $ty";
+        my $f = $CONVERT{"$a{from}>$ty"} // die "T2: no conversion $a{from} -> $ty";
         return "$nm = $f $a{from} " . $in[0]->name . " to $ty" if $f =~ /\A(?:sitofp|zext|fptosi)\z/;
         return "$nm = call $ty \@$f(" . $arg->(@in) . ')';
     }
@@ -268,7 +294,13 @@ sub _line {
     die "T2: cannot print $op";
 }
 
-sub _double { my $v = 0 + shift; my $h = unpack('H16', pack('d>', $v)); return '0x' . uc $h }
+# A double's bits: a hex pattern as given (0x7FF0000000000000 is +Inf), else
+# the value's -- which numifies "Inf" and "NaN" as perl does.
+sub _double {
+    my $v = shift;
+    return uc($v) =~ s/^0X/0x/r if $v =~ /\A0x[0-9a-f]{16}\z/i;
+    return '0x' . uc unpack('H16', pack('d>', 0 + $v));
+}
 
 # The runtime a slice-1 module calls: %Str is { i8*, i64 }; %Slot is a tag
 # (0 undef, 1 Int, 2 Num, 3 Str) and an i64 payload (a Num's bits, a Str's
@@ -276,20 +308,20 @@ sub _double { my $v = 0 + shift; my $h = unpack('H16', pack('d>', $v)); return '
 sub _prelude { return <<'LL' }
 %Str = type { i8*, i64 }
 %Slot = type { i8, i64 }
-declare i32 @printf(i8*, ...)
 declare i32 @snprintf(i8*, i64, i8*, ...)
 declare i8* @malloc(i64)
 declare i8* @memcpy(i8*, i8*, i64)
 declare i8* @getenv(i8*)
 declare i64 @strlen(i8*)
 declare double @strtod(i8*, i8**)
-@fmt_s = private unnamed_addr constant [5 x i8] c"%.*s\00"
+declare i64 @write(i32, i8*, i64)
 @fmt_g = private unnamed_addr constant [6 x i8] c"%.15g\00"
 @fmt_d = private unnamed_addr constant [4 x i8] c"%ld\00"
 @lit_inf = private unnamed_addr constant [4 x i8] c"Inf\00"
 @lit_ninf = private unnamed_addr constant [5 x i8] c"-Inf\00"
 @lit_nan = private unnamed_addr constant [4 x i8] c"NaN\00"
 @lit_one = private unnamed_addr constant [2 x i8] c"1\00"
+@lit_zero = private unnamed_addr constant [2 x i8] c"0\00"
 define internal %Str @t2_str(i8* %p, i64 %n) {
   %a = insertvalue %Str undef, i8* %p, 0
   %b = insertvalue %Str %a, i64 %n, 1
@@ -298,9 +330,7 @@ define internal %Str @t2_str(i8* %p, i64 %n) {
 define internal void @t2_print(%Str %s) {
   %p = extractvalue %Str %s, 0
   %n = extractvalue %Str %s, 1
-  %n32 = trunc i64 %n to i32
-  %f = getelementptr [5 x i8], [5 x i8]* @fmt_s, i64 0, i64 0
-  call i32 (i8*, ...) @printf(i8* %f, i32 %n32, i8* %p)
+  call i64 @write(i32 1, i8* %p, i64 %n)
   ret void
 }
 define internal %Str @t2_concat(%Str %x, %Str %y) {
@@ -350,6 +380,13 @@ isninf:
   %rm = call %Str @t2_str(i8* %pm, i64 4)
   ret %Str %rm
 finite:
+  %zero = fcmp oeq double %v, 0.0
+  br i1 %zero, label %iszero, label %nonzero
+iszero:
+  %pz = getelementptr [2 x i8], [2 x i8]* @lit_zero, i64 0, i64 0
+  %rz = call %Str @t2_str(i8* %pz, i64 1)
+  ret %Str %rz
+nonzero:
   %buf = call i8* @malloc(i64 32)
   %f = getelementptr [6 x i8], [6 x i8]* @fmt_g, i64 0, i64 0
   %n32 = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 32, i8* %f, double %v)
@@ -418,6 +455,30 @@ set:
   %s = call %Str @t2_str(i8* %v, i64 %n)
   %b = call %Slot @t2_box_str(%Str %s)
   ret %Slot %b
+}
+define internal %Slot @t2_box_bool(i1 %b) {
+entry:
+  br i1 %b, label %t, label %f
+t:
+  %one = call %Slot @t2_box_i64(i64 1)
+  ret %Slot %one
+f:
+  %e = call %Str @t2_str(i8* null, i64 0)
+  %no = call %Slot @t2_box_str(%Str %e)
+  ret %Slot %no
+}
+declare void @exit(i32)
+define internal double @t2_div(double %x, double %y, i8* %msg, i64 %n) {
+entry:
+  %z = fcmp oeq double %y, 0.0
+  br i1 %z, label %die, label %ok
+die:
+  call i64 @write(i32 2, i8* %msg, i64 %n)
+  call void @exit(i32 255)
+  unreachable
+ok:
+  %q = fdiv double %x, %y
+  ret double %q
 }
 define internal i1 @t2_defined(%Slot %s) {
   %t = extractvalue %Slot %s, 0

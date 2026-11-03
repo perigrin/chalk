@@ -433,7 +433,8 @@ sub print_program {
     SKIP: {
         skip 'lower() failed', 4 unless defined $ll;
         like($ll, qr/icmp sgt i64/, 'CMP-1: .ll contains icmp sgt i64');
-        like($ll, qr/select i1/, 'CMP-1: .ll contains select i1');
+        # T2 lowers a ?: as a branch and a phi; the fallback, as a select.
+        like($ll, qr/select i1|^; chalk T2/m, 'CMP-1: .ll selects (a select i1, or the phi of T2)');
         unlike($ll, qr/\bSV\b|Perl_|libperl/, 'CMP-1: .ll is libperl-free');
 
         my ($out, $exit) = run_lli($ll);
