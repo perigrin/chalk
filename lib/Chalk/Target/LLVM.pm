@@ -1897,6 +1897,8 @@ sub lower_with_elaboration {
     }
     # Each anonymous sub's node, by name: a closure called directly finds
     # its cells there.
+    local %Chalk::Target::LLVM::Context::CLOSURE_DEFINE;
+    local @Chalk::Target::LLVM::Context::CLOSURE_DEFINES;
     local %Chalk::Target::LLVM::Context::ANON_SUBS = map { ( $_->name // '' ) => $_ }
         grep { $_->operation eq 'AnonSub' } Chalk::Target::LLVM::Context::_program_nodes($return_node);
     # Whether the program selects a handle, before any print lowers.
@@ -2015,6 +2017,8 @@ sub lower_with_elaboration {
     # flag it set is invisible to render_need_flag_prologue, which ran before
     # any body lowered.
     push @lines, @end_lines;
+    # Closures that call themselves, defined as the main line called them.
+    push @lines, @Chalk::Target::LLVM::Context::CLOSURE_DEFINES;
     push @lines, $ctx->render_need_flag_postclass_reemit($result_repr);
 
     push @lines, '';

@@ -33,4 +33,7 @@ class Chalk::IR::Node::CellWrite :isa(Chalk::IR::Value) {
     # another class's identity_kind, and lapse the moment a CellWrite takes a
     # memory input that is not per-call.
     sub identity_kind { 'per_call' }
+    # FIXED: a store to a captured variable is a statement of its arm, on the
+    # control chain (%STATEMENT_EFFECT_OPS).
+    method is_fixed() { return true }
 }

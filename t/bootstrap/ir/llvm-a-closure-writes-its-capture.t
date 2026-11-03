@@ -61,6 +61,9 @@ for my $case (
     # A READ BEFORE A STORE is the value before it: `$k++` returns the old $k.
     [ 'my $k = 1; my $f = sub { return $k++ }; my $a = $f->(); my $b = $f->(); print "$a $b $k\n";',
       'a post-increment of a capture returns the old value' ],
+    # A STORE IN AN ARM is a statement of that arm: dropped, $t stayed 0.
+    [ 'my $t = 0; my $f = sub { if ($_[0]) { $t = 5 } return 1 }; $f->(1); print "$t\n";',
+      'a closure writes its capture in an arm' ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };

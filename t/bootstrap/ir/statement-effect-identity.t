@@ -21,6 +21,7 @@ subtest 'STATEMENT_EFFECT_OPS table is the shared contract' => sub {
         Assign CompoundAssign RegexSubst TryCatch Call
         RegexMatch Match NotMatch BacktickExpr Print
         EntryWrite Delete ElemRestore LocalAlias Transliterate
+        CellWrite
     );
     is_deeply(
         { map { $_ => 1 } keys %Chalk::IR::NodeFactory::STATEMENT_EFFECT_OPS },

@@ -188,7 +188,10 @@ class Chalk::IR::NodeFactory {
         Assign CompoundAssign RegexSubst TryCatch Call
         RegexMatch Match NotMatch BacktickExpr Print
         EntryWrite Delete ElemRestore LocalAlias Transliterate
+        CellWrite
     );
+    # CellWrite: a store to a captured variable is a statement of its arm --
+    # left out, an arm's `$t = 5` in a closure was dropped (printed 0).
 
     # %ALLOC_OPS is DELETED. It named ArrayRef/HashRef as per-call because each
     # occurrence ALLOCATES — `[1,2]` and `[1,2]` are two distinct arrays, and

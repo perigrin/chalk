@@ -2188,6 +2188,19 @@ sub lower_value {
     }
     elsif ($op eq 'CellWrite') {
         my ($cell, $v) = $node->inputs->@[0, 1];
+        # A VARIABLE GIVEN ITS ONE SUB (`my $w; $w = sub {...}`) holds a
+        # CodeRef: calls through it are resolved statically (_code_in_cell),
+        # and the tag is what a call made before the store finds missing.
+        if (blessed($v) && $v->operation eq 'AnonSub') {
+            die "GAP: a code reference used as a value -- not called where it is made -- is not lowered\n"
+                unless blessed( my $held = _code_in_cell($cell) );
+            my $ptr = $self->_cell_ptr_here($cell);
+            my ($s0, $s1) = ($self->_fresh, $self->_fresh);
+            $self->_emit("  $s0 = insertvalue %Slot zeroinitializer, i1 true, " . _slot_idx('defined') . "  ; " . $v->name);
+            $self->_emit("  $s1 = insertvalue %Slot $s0, i8 " . _slot_tag_value('CodeRef') . ", " . _slot_idx('tag') . "  ; a CodeRef");
+            $self->_emit("  store %Slot $s1, %Slot* $ptr  ; the variable holds its sub");
+            return $self->{cache}{ $node->id } = $s1;
+        }
         my $ptr = $self->_cell_storage($cell);
         # LOWERED FIRST: a value nothing typed records what it was lowered to
         # (the repr seam), and asked before, it was Unknown -- stored as an
@@ -11126,6 +11139,12 @@ our $READS_ERROR;
 # B::SoN calls directly (its Call names the sub, not the node with its cells).
 our %ANON_SUBS;
 
+# A CLOSURE THAT CALLS ITSELF is a define (_closure_define), emitted once:
+# %CLOSURE_DEFINE is its function name by closure name, @CLOSURE_DEFINES the
+# lines Target::LLVM emits with the module.
+our %CLOSURE_DEFINE;
+our @CLOSURE_DEFINES;
+
 # @PROGRAM: every node of the program (_program_nodes of its Return).
 our @PROGRAM;
 
@@ -14290,6 +14309,32 @@ sub _lower_call_indirect {
         return $r if defined $r;
         die "GAP: a call of what ->can found, on what is not a blessed reference, is not lowered\n";
     }
+    # A VARIABLE HOLDING ITS ONE SUB (_code_in_cell), read through its cell:
+    # that sub, once the store has made it a CodeRef (before, perl dies). One
+    # that calls itself is a define; any other is inlined, its cells where
+    # this code runs.
+    if (blessed( my $cell = $self->_cell_of_read($callee) )) {
+        if (blessed( my $held = _code_in_cell($cell) )) {
+            die "GAP: a call through a variable that may not hold its sub yet, inside a block "
+              . "eval, is not lowered -- perl's message there names the file and line\n"
+                if ($self->{_eval_frames} // [])->@*;
+            my $slot = $self->_fresh;
+            $self->_emit("  $slot = load %Slot, %Slot* " . $self->_cell_ptr_here($cell) . "  ; the code " . ( $cell->cell_name // '' ) . " holds");
+            my $tag = $self->_slot_tag_of($slot);
+            my ($z, $die, $ok) = ($self->_fresh, $self->_fresh_label('nocode'), $self->_fresh_label('code'));
+            $self->_emit("  $z = icmp ne i8 $tag, " . _slot_tag_value('CodeRef') . "  ; not its sub yet?");
+            $self->{_need_exit} = 1;
+            $self->_set_terminator("  br i1 $z, label %$die, label %$ok");
+            $self->_new_block($die);
+            $self->_emit("  call void \@exit(i32 255)  ; perl dies: not a CODE reference");
+            $self->_set_terminator("  unreachable");
+            $self->_new_block($ok);
+            return $self->_call_closure_define($node, $held, \@args) if _closure_calls_itself($held);
+            $self->{_cell_slots}{ refaddr($_) } = $self->_cell_ptr_here($_) for grep { blessed($_) } $held->inputs->@*;
+            $self->{_call_via} = { name => $held->name, target => $held->sub, args => \@args, anon => $held };
+            return $self->_lower_call_direct($node);
+        }
+    }
     my $anon = $self->_static_code_of($callee);
     # A FILE LEXICAL HOLDING ONE SUB (_code_of_shared) runs it -- once the
     # store has: before it, the variable is undef and perl dies.
@@ -14453,10 +14498,163 @@ sub _cell_variable {
         return undef unless blessed($mem);
         my $v = $mem->inputs->[0];
         return $v if blessed($v) && $v->operation eq 'PadAccess' && $v->is_location && $v->name eq $want;
-        return undef unless $mem->operation =~ /\A(?:Assign|EntryWrite|Call)\z/;
+        # Another variable's cell, made just before, is a step too (two captures),
+        # as is a location read, whose input is the memory it reads at.
+        return undef unless $mem->operation =~ /\A(?:Assign|EntryWrite|Call|MakeCell|PadAccess)\z/;
         ($mem) = grep { blessed($_) && $_->operation ne 'Constant' } reverse $mem->inputs->@*;
     }
     return undef;
+}
+
+# _cell_of_read($n) -> the MakeCell a CellRead reads: its own cell, or --
+# inside a closure's define -- the maker's cell its CellParam stands for.
+sub _cell_of_read {
+    my ($self, $n) = @_;
+    return undef unless blessed($n) && $n->operation eq 'CellRead';
+    my $c = $n->inputs->[0];
+    return undef unless blessed($c);
+    return $c if $c->operation eq 'MakeCell';
+    return undef unless $c->operation eq 'CellParam' && blessed( my $a = $self->{_closure_anon} );
+    return ( grep { blessed($_) } $a->inputs->@* )[ $c->index ];
+}
+
+# _code_in_cell($cell) -> the one AnonSub a variable is ever given: made
+# undef, stored that sub once by its frame, written by no closure. Else undef.
+sub _code_in_cell {
+    my ($cell) = @_;
+    return undef unless blessed($cell) && $cell->operation eq 'MakeCell' && !$cell->captured_written;
+    my $init = $cell->inputs->[0];
+    return undef unless blessed($init) && ( $init->stamp // '' ) eq 'Undef'; # static type
+    # Distinct: a store is the cell's consumer twice, as its cell and its memory.
+    my %seen;
+    my @w = grep { blessed($_) && $_->operation eq 'CellWrite' && refaddr( $_->inputs->[0] ) == refaddr($cell)
+                   && !$seen{ refaddr($_) }++ }
+        ( $cell->consumers // [] )->@*;
+    return undef unless @w == 1 && blessed( $w[0]->inputs->[1] ) && $w[0]->inputs->[1]->operation eq 'AnonSub';
+    return $w[0]->inputs->[1];
+}
+
+# _closure_calls_itself($anon) -> true when the closure calls, through one of
+# its cells, the sub that cell holds -- itself. Inlined, it would never stop.
+sub _closure_calls_itself {
+    my ($anon) = @_;
+    my $g = blessed($anon->sub) && $anon->sub->can('graph') ? $anon->sub->graph : undef;
+    return 0 unless $g;
+    my @cells = grep { blessed($_) } $anon->inputs->@*;
+    for my $c (grep { blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'indirect' } _graph_component($g)) {
+        my $code = $c->inputs->[0];
+        next unless blessed($code) && $code->operation eq 'CellRead';
+        my $p = $code->inputs->[0];
+        next unless blessed($p) && $p->operation eq 'CellParam';
+        my $held = _code_in_cell( $cells[ $p->index ] );
+        return 1 if blessed($held) && refaddr($held) == refaddr($anon);
+    }
+    return 0;
+}
+
+# _cell_ptr_here($cell) -> the %Slot* of a maker's cell, from where this code
+# runs: inside that closure's define, the pointer it was passed; else the
+# variable's location in this frame.
+sub _cell_ptr_here {
+    my ($self, $cell) = @_;
+    if (blessed( my $a = $self->{_closure_anon} )) {
+        my @cells = grep { blessed($_) } $a->inputs->@*;
+        for my $i (0 .. $#cells) { return "%cell$i" if refaddr( $cells[$i] ) == refaddr($cell) }
+    }
+    return $self->_cell_storage($cell);
+}
+
+# _closure_define($anon) -> the function a closure that calls itself is, its
+# define emitted once onto @CLOSURE_DEFINES: `%Slot (%Slot* cells, %Slot args)`.
+# Boxed throughout, so a return that depends on the recursion needs no trial
+# type: callers take the %Slot to what they read. Its arguments are the plain
+# @_ reads a define binds (shifts, `$_[N]`); its cells, the variables it
+# captured, by pointer.
+sub _closure_define {
+    my ($self, $anon) = @_;
+    my $name = $anon->name // die "GAP: a closure with no name is not lowered\n";
+    return $CLOSURE_DEFINE{$name}{fn} if $CLOSURE_DEFINE{$name};
+    ( my $id = $name ) =~ s/\W+/_/g;
+    my $fn = "\@closure__$id";
+    my $g = $anon->sub->graph;
+    my $ret = $g->returns->[0] // die "GAP: closure '$name' has no return\n";
+    my $an = bless {}, ref $self;
+    my @reads = eval { $an->_collect_positional_arg_reads($g, $name) };
+    die "GAP: a closure that calls itself, reading \@_ other than by shifts and \$_[N], is not lowered\n"
+        if $@ || grep { !blessed($_) } @reads
+        or $an->{_args_written} || $an->{_args_read_as_a_list} || $an->{_args_slurpy} || $an->{_args_signature};
+    my @cells = grep { blessed($_) } $anon->inputs->@*;
+    # Named before the body lowers: its own call inside finds it.
+    $CLOSURE_DEFINE{$name} = { fn => $fn, nargs => scalar @reads };
+
+    require Chalk::IR::Schedule::Dominators;
+    require Chalk::IR::Schedule::Elaborate;
+    require Chalk::Target::LLVM::ElaboratedContext;
+    my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($ret);
+    my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($ret, $dom);
+    my $b = Chalk::Target::LLVM::ElaboratedContext->new(elab => $elab, class_registry => $self->{class_registry});
+    $b->configure_as_method_body(class_name => 'main', method_name => "closure_$id",
+        has_self => 0, parent_ctx => $self, class_registry => $self->{class_registry});
+    $b->{mop} = $self->{mop};
+    $b->{_closure_anon} = $anon;
+    $b->{_arg_bind} = {
+        ( map { ( 'cell:' . refaddr($_) => '%cell' . $_->index ) }
+          grep { blessed($_) && $_->operation eq 'CellParam' } _graph_component($g) ),
+        ( map { ( refaddr( $reads[$_] ) => { ref => "%arg$_", repr => 'Scalar' } ) } 0 .. $#reads ),
+    };
+    Chalk::Target::LLVM::_process_control_chain($b, $ret);
+    my $v = $ret->inputs->[0];
+    my $val;
+    if (blessed($v)) {
+        $val = $b->lower_value($v);
+        my $from = $b->_repr_of($v) // $v->stamp // ''; # static type
+        $from = 'Scalar' if $from eq 'Slot';
+        die "GAP: closure '$name' returns a $from -- a closure that calls itself returns a scalar\n"
+            unless $from =~ /\A(?:Scalar|Int|Num|Str|Boolean|Undef)\z/;
+        $val = $b->_emit_coercion($val, $from, 'Scalar', "closure $name return") if $from ne 'Scalar';
+    }
+    my $decl = join ', ', ( map { "%Slot* %cell$_" } 0 .. $#cells ), ( map { "%Slot %arg$_" } 0 .. $#reads );
+    push @CLOSURE_DEFINES,
+        "define internal %Slot $fn($decl) {  ; closure $name, which calls itself",
+        'entry:',
+        $b->render_blocks(1),
+        '  ret %Slot ' . ( $val // 'zeroinitializer' ),
+        '}', '',
+        $b->render_str_globals;
+    $self->absorb_need_flags_from($b);
+    return $fn;
+}
+
+# _call_closure_define($node, $anon, \@args) -> a call of that define: its
+# cells from where this code runs, each argument boxed (one not passed is
+# undef), and its %Slot taken to what the call reads.
+sub _call_closure_define {
+    my ($self, $node, $anon, $args) = @_;
+    my $fn = $self->_closure_define($anon);
+    my $nargs = $CLOSURE_DEFINE{ $anon->name }{nargs};
+    my @pass = map { "%Slot* " . $self->_cell_ptr_here($_) } grep { blessed($_) } $anon->inputs->@*;
+    for my $i (0 .. $#$args) {
+        my $a = $args->[$i];
+        die "GAP: a closure that calls itself, passed a list, is not lowered\n"
+            if ( $a->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/;   # static type
+        my $v = $self->lower_value($a);
+        next if $i >= $nargs;   # lowered for its effects; the body never reads it
+        my $from = $self->_repr_of($a) // $a->stamp // ''; # static type
+        $from = 'Scalar' if $from eq 'Slot';
+        $v = $self->_emit_coercion($v, $from, 'Scalar', 'closure argument') if $from ne 'Scalar';
+        push @pass, "%Slot $v";
+    }
+    push @pass, '%Slot zeroinitializer' for scalar(@$args) .. $nargs - 1;
+    my $res = $self->_fresh;
+    $self->_emit("  $res = call %Slot $fn(" . join(', ', @pass) . ")  ; " . $anon->name);
+    my $to = $node->stamp // ''; # static type
+    if ($to =~ /\A(?:Int|Num|Str|Boolean)\z/) {
+        $res = $self->_emit_coercion($res, 'Scalar', $to, 'closure result');
+    }
+    else {
+        $self->{cache}{ 'repr:' . $node->id } = 'Scalar';
+    }
+    return $self->{cache}{ $node->id } = $res;
 }
 
 # _arg_binding($arg, $ref) -> what a callee's argument read is bound to. An
