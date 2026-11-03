@@ -14552,6 +14552,32 @@ sub _closure_calls_itself {
     return 0;
 }
 
+# _closure_called_only_in_void($anon) -> true when every call through the
+# variable holding it -- in its maker and in itself -- is made in void
+# context, so its value is never read. A call of no known context is not.
+sub _closure_called_only_in_void {
+    my ($anon) = @_;
+    my @cells = grep { blessed($_) } $anon->inputs->@*;
+    my ($i) = grep { my $h = _code_in_cell( $cells[$_] ); blessed($h) && refaddr($h) == refaddr($anon) } 0 .. $#cells;
+    return 0 unless defined $i;
+    my $g = $anon->sub->graph;
+    my %seen;
+    my @reads = grep { blessed($_) && $_->operation eq 'CellRead' && !$seen{ refaddr($_) }++ } (
+        ( $cells[$i]->consumers // [] )->@*,
+        ( map { ( $_->consumers // [] )->@* }
+          grep { blessed($_) && $_->operation eq 'CellParam' && $_->index == $i } _graph_component($g) ),
+    );
+    my %is_read = map { ( refaddr($_) => 1 ) } @reads;
+    my %call_seen;
+    my @calls = grep { my $c = $_; blessed($c) && $c->operation eq 'Call' && blessed( $c->inputs->[0] )
+                       && $is_read{ refaddr( $c->inputs->[0] ) } && !$call_seen{ refaddr($c) }++ }
+                map { ( $_->consumers // [] )->@* } @reads;
+    # Any other use of the variable (`return $w`, `print $w`) is a read of it,
+    # not a call -- the value question does not arise there, but one is not
+    # a void call either.
+    return @calls && !grep { ( $_->want // '' ) ne 'void' } @calls;
+}
+
 # _cell_ptr_here($cell) -> the %Slot* of a maker's cell, from where this code
 # runs: inside that closure's define, the pointer it was passed; else the
 # variable's location in this frame.
@@ -14580,12 +14606,21 @@ sub _closure_define {
     my $ret = $g->returns->[0] // die "GAP: closure '$name' has no return\n";
     my $an = bless {}, ref $self;
     my @reads = eval { $an->_collect_positional_arg_reads($g, $name) };
-    die "GAP: a closure that calls itself, reading \@_ other than by shifts and \$_[N], is not lowered\n"
+    die "GAP: a closure that calls itself, reading \@_ other than by shifts, \$_[N] or a signature, is not lowered\n"
         if $@ || grep { !blessed($_) } @reads
-        or $an->{_args_written} || $an->{_args_read_as_a_list} || $an->{_args_slurpy} || $an->{_args_signature};
+        or $an->{_args_written} || $an->{_args_read_as_a_list} || $an->{_args_slurpy};
+    # A SIGNATURE (`sub ($node)`) binds its parameters as the shifts are, and
+    # perl dies on a call of another arity: each call is checked against it
+    # (_call_closure_define). An optional one is left to a later step.
+    my $sig = $an->{_args_signature};
+    if ($sig) {
+        my $decl = $anon->sub->can('signature') ? $anon->sub->signature // {} : {};
+        die "GAP: a closure that calls itself, with an optional signature parameter, is not lowered\n"
+            if $decl->{optional} || ( $decl->{mandatory} // scalar @reads ) != @reads;
+    }
     my @cells = grep { blessed($_) } $anon->inputs->@*;
     # Named before the body lowers: its own call inside finds it.
-    $CLOSURE_DEFINE{$name} = { fn => $fn, nargs => scalar @reads };
+    $CLOSURE_DEFINE{$name} = { fn => $fn, nargs => scalar @reads, signature => $sig };
 
     require Chalk::IR::Schedule::Dominators;
     require Chalk::IR::Schedule::Elaborate;
@@ -14605,7 +14640,10 @@ sub _closure_define {
     Chalk::Target::LLVM::_process_control_chain($b, $ret);
     my $v = $ret->inputs->[0];
     my $val;
-    if (blessed($v)) {
+    # A VALUE NO CALL READS is not made: every call through its variable is in
+    # void context, so a body ending in a loop or a bare `return` (a list) is
+    # undef to every caller (pvm 135).
+    if (blessed($v) && !_closure_called_only_in_void($anon)) {
         $val = $b->lower_value($v);
         my $from = $b->_repr_of($v) // $v->stamp // ''; # static type
         $from = 'Scalar' if $from eq 'Slot';
@@ -14632,6 +14670,9 @@ sub _call_closure_define {
     my ($self, $node, $anon, $args) = @_;
     my $fn = $self->_closure_define($anon);
     my $nargs = $CLOSURE_DEFINE{ $anon->name }{nargs};
+    die "GAP: a call of a closure with a signature of $nargs, passing " . scalar(@$args)
+      . " (perl dies: too many or too few arguments), is not lowered\n"
+        if $CLOSURE_DEFINE{ $anon->name }{signature} && @$args != $nargs;
     my @pass = map { "%Slot* " . $self->_cell_ptr_here($_) } grep { blessed($_) } $anon->inputs->@*;
     for my $i (0 .. $#$args) {
         my $a = $args->[$i];

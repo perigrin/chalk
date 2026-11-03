@@ -57,10 +57,23 @@ for my $case (
     # (A bare `return` makes its value a list: refused by name for now.)
     [ 'my $t = 0; my $w; $w = sub { my $n = shift; return 0 if $n <= 0; $t = $t + $n; $w->($n - 1) }; $w->(4); print "$t\n";',
       'writing another capture as it recurses' ],
+    # A signature binds its parameter as a shift does.
+    [ 'use v5.38; my $w; $w = sub ($n) { return $n <= 0 ? 0 : $n + $w->($n - 1) }; print $w->(3), "\n";',
+      'with a signature' ],
+    # Called only in void context, its value (a loop's) is never made (pvm 135).
+    [ q{use v5.38; sub collect ($tree, $dv) { my $walk; $walk = sub ($node) { return unless ref $node; $dv->{$node->{name}} //= 1 if exists $node->{name}; for my $k ($node->{kids}->@*) { $walk->($k) } }; $walk->($tree); return join ",", sort keys %$dv } print collect({ kids => [{ name => 'a', kids => [] }, { name => 'b', kids => [{ name => 'a', kids => [] }] }] }, { z => 0 }), "\n";},
+      'called only in void context (pvm 135)' ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
     is($got, perl_says($pl // write_pl($src), {}), "$name: perl's answer") or diag $@;
+}
+
+# Perl dies on a call of another arity than the signature: refused by name.
+{
+    my $src = 'use v5.38; my $w; $w = sub ($n) { return $n <= 0 ? 0 : $w->($n - 1, 1) }; print $w->(3), "\n";';
+    eval { through_llvm($src, {}) };
+    like($@, qr/GAP: .*signature/, 'a call of another arity than the signature: refused');
 }
 
 done_testing;
