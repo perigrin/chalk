@@ -56,7 +56,7 @@ package Chalk::Target::LLVM::T2::Builder;
 
 use Scalar::Util qw(blessed refaddr);
 
-sub out { die "T2: out of slice 1 ($_[0])\n" }
+sub out { die "T2: out of its slices ($_[0])\n" }
 
 sub new_block {
     my ($b, $label) = @_;
@@ -72,23 +72,121 @@ sub emit {
     return $n;
 }
 
-# The program: its control chain from Start, Print by Print, to its Return.
+# The program: its control chain walked forward from Start to its Return.
 sub build {
     my ($b, $ret) = @_;
     out('no Return') unless blessed($ret) && $ret->operation eq 'Return';
+    # Back to Start: through a merge's Region and a loop's exit Proj.
+    my $start = $ret;
+    for (1 .. 100_000) {
+        last if $start->operation eq 'Start';
+        $start = $start->can('control_in') && blessed($start->control_in) ? $start->control_in
+               : $start->operation =~ /\A(?:Region|Proj)\z/ ? $start->inputs->[0]
+               : out('no way back to Start from ' . $start->operation);
+    }
+    $b->{ret} = $ret;
     $b->new_block('entry');
-    my @chain;
-    for (my $n = $ret->control_in; blessed($n); $n = $n->can('control_in') ? $n->control_in : undef) {
-        unshift @chain, $n;
-    }
-    out('the chain does not start at Start') unless @chain && $chain[0]->operation eq 'Start';
-    shift @chain;
-    for my $s (@chain) {
-        out($s->operation) unless $s->operation eq 'Print';
-        # One print of each argument, in order (perl prints the list).
-        $b->emit(op => 'Print', type => 'void', inputs => [ $b->as($b->value($_), '%Str') ]) for $s->inputs->@*;
-    }
+    $b->walk($start);
     $b->{cur}{term} = [ 'ret' ];
+}
+
+# successors($ctl) -> the nodes whose control is $ctl, each once.
+sub successors {
+    my ($ctl) = @_;
+    my %seen;
+    return grep { blessed($_) && $_->can('control_in') && blessed($_->control_in)
+                  && refaddr($_->control_in) == refaddr($ctl) && !$seen{ refaddr($_) }++ }
+           ( $ctl->consumers // [] )->@*;
+}
+
+# walk($ctl): the statements after $ctl, in order, to a Return or the end of
+# a body. A statement of a kind T2 does not have makes the program fall back:
+# skipped, its effect would be lost.
+sub walk {
+    my ($b, $ctl) = @_;
+    while (1) {
+        my @s = successors($ctl);
+        # ONLY THE PROGRAM'S Return ends it: another hung on the same control is
+        # not this program's (a graph built over an earlier one).
+        @s = grep { $_->operation ne 'Return' || refaddr($_) == refaddr($b->{ret}) } @s;
+        return unless @s;
+        out('a control node with ' . scalar(@s) . ' successors') if @s > 1;
+        my $s = $s[0];
+        my $op = $s->operation;
+        return if $op eq 'Return';
+        if ($op eq 'Print') {
+            # One print of each argument, in order (perl prints the list).
+            $b->emit(op => 'Print', type => 'void', inputs => [ $b->as($b->value($_), '%Str') ]) for $s->inputs->@*;
+            $ctl = $s;
+        }
+        elsif ($op eq 'Loop') { $ctl = $b->loop($s) }
+        else { out("a statement $op") }
+    }
+}
+
+# loop($Loop) -> the control node the program continues from: a header of
+# phis (each its initial value, then the body's) and the condition, a body
+# walked forward back to the header, and an exit.
+sub loop {
+    my ($b, $L) = @_;
+    my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } successors_by_input($L);
+    my ($bodyp, $exitp) = @proj{0, 1};
+    out('a loop without a body and an exit') unless $bodyp && $exitp;
+    my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($L)
+                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $L->consumers // [] )->@*;
+    my %seen;
+    @phis = grep { !$seen{ refaddr($_) }++ } @phis;
+    my @cond = grep { $_->operation !~ /\A(?:Phi|Proj)\z/ } successors($L);
+    out('a loop condition that is not one value') unless @cond == 1;
+    out('a loop phi with other than two ways in') if grep { scalar( @{ $_->inputs } ) != 2 } @phis;
+
+    my $pre = $b->{cur};
+    my @init = map { $b->as($b->value($_->inputs->[0]), $b->loop_type($_)) } @phis;
+    my $pre_end = $b->{cur};
+    my $head = $b->new_block('loop');
+    $pre_end->{term} = [ 'br', $head ];
+    # THE PHI IS MADE NOW, ITS BACK EDGE WHEN THE BODY IS: the body reads it.
+    my @t2 = map {
+        my $p = $b->emit(op => 'Phi', type => $b->loop_type($phis[$_]), inputs => [ $init[$_] ], attr => { from => [$pre_end] });
+        $b->{memo}{ refaddr( $phis[$_] ) } = $p;
+    } 0 .. $#phis;
+    my $cond = $b->truth($b->value($cond[0]));
+    my $head_end = $b->{cur};
+    my $body = $b->new_block('body');
+    my @back;
+    {
+        # A value made in the body is the body's: not seen after the loop.
+        local $b->{memo} = { %{ $b->{memo} } };
+        $b->walk($bodyp);
+        @back = map { $b->as($b->value($phis[$_]->inputs->[1]), $t2[$_]->type) } 0 .. $#phis;
+    }
+    my $body_end = $b->{cur};
+    $body_end->{term} = [ 'br', $head ];
+    for my $i (0 .. $#t2) {
+        push @{ $t2[$i]->inputs }, $back[$i];
+        push @{ $t2[$i]->attr->{from} }, $body_end;
+    }
+    my $exit = $b->new_block('exit');
+    $head_end->{term} = [ 'condbr', $cond, $body, $exit ];
+    my ($region) = grep { $_->operation eq 'Region' } ( $exitp->consumers // [] )->@*;
+    return $region // $exitp;
+}
+
+# successors_by_input($n) -> the nodes that take $n as an input (a Loop's Projs).
+sub successors_by_input {
+    my ($n) = @_;
+    my %seen;
+    return grep { blessed($_) && grep({ blessed($_) && refaddr($_) == refaddr($n) } $_->inputs->@*) && !$seen{ refaddr($_) }++ }
+           ( $n->consumers // [] )->@*;
+}
+
+# A LOOP PHI'S TYPE: its stamp, except a Str one, which a Num may reach on a
+# later pass -- boxed, as a merge of differing arms is.
+sub loop_type {
+    my ($b, $phi) = @_;
+    my $st = $phi->stamp // ''; # static type
+    return '%Slot' if $st eq 'Str';
+    return $SCALAR{$st} // out("a loop phi stamped $st");
 }
 
 # The T2 type a T1 value is, decided once.
@@ -139,6 +237,16 @@ sub _value {
             attr => { msg => $msg, id => $b->{strs}{$msg} });
         return $b->as($q, $ty);
     }
+    if ($op eq 'Modulo') {
+        # PERL'S % IS OF INTEGERS, its sign the right side's, and dies on zero.
+        out('a % not typed Int') unless $ty eq 'i64';
+        my $msg = "Illegal modulus zero at " . ( $v->can('file') && $v->file // '-' )
+                 . " line " . ( $v->can('line') && $v->line // 0 ) . ".\n";
+        $b->{strs}{$msg} //= scalar keys %{ $b->{strs} };
+        return $b->emit(op => 'Mod', type => 'i64',
+            inputs => [ map { $b->as($b->value($_), 'i64') } $v->inputs->@[0, 1] ],
+            attr => { msg => $msg, id => $b->{strs}{$msg} });
+    }
     if (my $a = $ARITH{$op}) {
         my @in = map { $b->as($b->value($_), $ty) } $v->inputs->@[0, 1];
         return $b->emit(op => 'Arith', type => $ty, inputs => \@in, attr => { op => $a });
@@ -170,11 +278,16 @@ sub _value {
             ($then, $else) = ($lhs, $v->inputs->[1]);
         }
         my $from = $b->{cur};
+        # A VALUE MADE IN AN ARM IS THE ARM'S: it does not dominate the join, so
+        # it is not seen after it (each arm gets the memo as it was before).
         my $tb = $b->new_block('then');
-        my $tv = $b->as( blessed($then) && $then->isa('Chalk::Target::LLVM::T2::Node') ? $then : $b->value($then), $ty );
+        my ($tv, $ev);
+        { local $b->{memo} = { %{ $b->{memo} } };
+          $tv = $b->as( blessed($then) && $then->isa('Chalk::Target::LLVM::T2::Node') ? $then : $b->value($then), $ty ); }
         my $tend = $b->{cur};
         my $eb = $b->new_block('else');
-        my $ev = $b->as($b->value($else), $ty);
+        { local $b->{memo} = { %{ $b->{memo} } };
+          $ev = $b->as($b->value($else), $ty); }
         my $eend = $b->{cur};
         my $jb = $b->new_block('join');
         $from->{term} = [ 'condbr', $cond, $tb, $eb ];
@@ -218,16 +331,17 @@ our %CONVERT = (
 # The printer names each node, then writes one line (or a runtime call) per
 # node. It chooses nothing: every type is already on the node.
 sub print_module {
-    my ($b) = @_;
+    my ($bld) = @_;   # not $b: sort below uses $a and $b
     my $i = 0;
-    $_->set_name('%v' . $i++) for map { @{ $_->{nodes} } } @{ $b->{blocks} };
-    my @L = ('; chalk T2 (slice 1): a graph typed in LLVM types, printed', _prelude());
-    for my $s (sort { $b->{strs}{$a} <=> $b->{strs}{$b} } keys %{ $b->{strs} }) {
+    $_->set_name('%v' . $i++) for map { @{ $_->{nodes} } } @{ $bld->{blocks} };
+    my @L = ('; chalk T2: a graph typed in LLVM types, printed', _prelude());
+    my $strs = $bld->{strs};
+    for my $s (sort { $strs->{$a} <=> $strs->{$b} } keys %$strs) {
         my $len = do { use bytes; length $s };
-        push @L, sprintf('@s%d = private unnamed_addr constant [%d x i8] c"%s\00"', $b->{strs}{$s}, $len + 1, _c($s));
+        push @L, sprintf('@s%d = private unnamed_addr constant [%d x i8] c"%s\00"', $strs->{$s}, $len + 1, _c($s));
     }
     push @L, 'define i32 @main() {';
-    for my $blk (@{ $b->{blocks} }) {
+    for my $blk (@{ $bld->{blocks} }) {
         push @L, "$blk->{label}:";
         push @L, map { '  ' . _line($_) } @{ $blk->{nodes} };
         my ($k, @t) = @{ $blk->{term} // ['ret'] };
@@ -272,6 +386,10 @@ sub _line {
         return "$nm = $o $t " . $in[0]->name . ', ' . $in[1]->name;
     }
     return "$nm = call %Slot \@t2_slot(i8 0, i64 0)" if $op eq 'Undef';
+    if ($op eq 'Mod') {
+        my $len = do { use bytes; length $a{msg} };
+        return "$nm = call i64 \@t2_mod(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
+    }
     if ($op eq 'Div') {
         my $len = do { use bytes; length $a{msg} };
         return "$nm = call double \@t2_div(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
@@ -479,6 +597,25 @@ die:
 ok:
   %q = fdiv double %x, %y
   ret double %q
+}
+define internal i64 @t2_mod(i64 %x, i64 %y, i8* %msg, i64 %n) {
+entry:
+  %z = icmp eq i64 %y, 0
+  br i1 %z, label %die, label %ok
+die:
+  call i64 @write(i32 2, i8* %msg, i64 %n)
+  call void @exit(i32 255)
+  unreachable
+ok:
+  %r = srem i64 %x, %y
+  %rnz = icmp ne i64 %r, 0
+  %rneg = icmp slt i64 %r, 0
+  %yneg = icmp slt i64 %y, 0
+  %diff = xor i1 %rneg, %yneg
+  %fix = and i1 %rnz, %diff
+  %r2 = add i64 %r, %y
+  %res = select i1 %fix, i64 %r2, i64 %r
+  ret i64 %res
 }
 define internal i1 @t2_defined(%Slot %s) {
   %t = extractvalue %Slot %s, 0
