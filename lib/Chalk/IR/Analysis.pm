@@ -2865,11 +2865,6 @@ sub _element_repr ($container) {
     # AN ELEMENT IS A SCALAR (perigrin: `$a[0]`, `$h{k}` start with `$`):
     # elements nothing typed join to Unknown, the lattice top, but the read
     # is bounded -- at least Scalar (pvm 143).
-    # NUMBERS AMONG STRINGS ARE EACH WHAT THEY ARE. The join of Num and Str
-    # is Str, and read as one a Num is its 15 printed digits, not the number
-    # (`(0.1 + 0.2, "x")`: the element would equal 0.3). Each element keeps its
-    # own tag, and a read takes it as a Scalar (pvm 002).
-    return 'Scalar' if $uniq{Num} && $uniq{Str};
     my $j = _join_repr(@reprs);
     return $j eq 'Unknown' ? 'Scalar' : $j;
 }

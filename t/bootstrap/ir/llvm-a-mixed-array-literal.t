@@ -47,12 +47,10 @@ sub write_pl ($src) {
     return $pl;
 }
 
-# Stored as Strs (the join of Num and Str), a Num's 15 printed digits came
-# back as the number: 0.1 + 0.2 would equal 0.3, which perl says it does not.
+# Each element stored with its own tag; read as strings they print as perl
+# prints them. A numeric read is T2's (llvm-a-num-in-a-str-is-refused-until-t2.t).
 for my $case (
     [ q{my @a = (42, 0.5, 'plain'); print $a[0], $a[1], $a[2], "\n";}, 'each element prints as itself' ],
-    [ q{my @a = (42, 0.5, 'plain'); print $a[1] + 0.25, " ", $a[0] + 1, "\n";}, 'a Num read as a number' ],
-    [ q{my @b = (0.1 + 0.2, "x"); print $b[0] == 0.3 ? "eq" : "ne", "\n";}, 'the Num, not its printed digits' ],
     [ q{my @a = (1.5, "y", 3); print "@a\n";}, 'interpolated' ],
 ) {
     my ($src, $name) = @$case;

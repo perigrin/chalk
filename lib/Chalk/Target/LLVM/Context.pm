@@ -1567,6 +1567,38 @@ sub _refuse_an_in_place_write_to_a_location {
     }
 }
 
+# _boxed_str($n) -> true for a merge (Phi, ?:, //) T1 types Str that a Num
+# reaches, through merges of Str. T1 is right: Num joined with Str is Str. Its
+# REPR is not %Str, which holds a Num's 15 printed digits -- `$c ? 0.1 + 0.2 :
+# "x"` then equalled 0.3. T2 boxes it, each arm keeping its tag (perigrin:
+# "T1 (Str) and T2 (Boxed %Str possibly narrowed after further analysis)").
+sub _boxed_str {
+    my ($n) = @_;
+    my $merge = qr/\A(?:Phi|TernaryExpr|DefinedOr)\z/;
+    # AN ELEMENT OF A LITERAL holding a Num and typed Str is one, too.
+    if (blessed($n) && $n->can('operation') && $n->operation eq 'Subscript'
+            && ( $n->stamp // '' ) eq 'Str' # static type
+            && blessed( my $c = $n->inputs->[0] )) {
+        return ( $c->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/
+                 && grep { blessed($_) && ( $_->stamp // '' ) eq 'Num' } $c->inputs->@* ) ? 1 : 0; # static type
+    }
+    return 0 unless blessed($n) && $n->can('operation') && $n->operation =~ $merge
+        && ( $n->stamp // '' ) eq 'Str'; # static type
+    my %seen;
+    my @q = ($n);
+    while (defined( my $m = shift @q )) {
+        next if $seen{ refaddr($m) }++;
+        my @arms = grep { blessed($_) } $m->inputs->@*;
+        shift @arms if $m->operation eq 'TernaryExpr';
+        for my $a (@arms) {
+            my $s = $a->stamp // ''; # static type
+            return 1 if $s eq 'Num';
+            push @q, $a if $s eq 'Str' && $a->can('operation') && $a->operation =~ $merge;
+        }
+    }
+    return 0;
+}
+
 # _as_phi_reading($ref, $value_node, $phi, $what) -> $ref as the phi's repr
 #
 # A LOOP PHI'S TWO VALUES ARE READ AS THE PHI IS. `my $s = 0` carried
@@ -4153,6 +4185,12 @@ sub _lower_coerce {
     # with type 'i64' but expected '%Slot'". The operand's own representation
     # is the truth at emission time; from_repr is the fallback for operands
     # that carry none.
+    # A NUMBER READ FROM A Str A Num REACHES (_boxed_str) is T2's: its repr
+    # must box the Num, and %Str holds only its printed digits
+    # (0.30000000000000004 read back as 0.3). Refused until T2 chooses it.
+    die "GAP: a number read from a Str merge or list element that a Num reaches is not "
+      . "lowered -- T2 boxes it (perigrin: T1 Str, T2 boxed)\n"
+        if $to =~ /\A(?:Num|Int|Boolean)\z/ && _boxed_str($node->inputs->[0]);
     my $input_ref = $self->lower_value($node->inputs->[0]);
     my $operand   = $node->inputs->[0];
     # A BITWISE RESULT THAT MAY BE A STRING is read as one where perl's was
