@@ -5012,7 +5012,7 @@ sub _lower_stash_key {
         ? $self->_emit_coercion($self->_set_str_len($self->_str_const_parts("*main::$key", 'a stash entry')),
             'Str', 'Scalar', 'a stash entry')
         : $self->_build_slot('false', '0', 'Undef', 'a stash entry: not there');
-    $node->set_stamp('Scalar') if ( $node->stamp // 'Unknown' ) eq 'Unknown';
+    $node->set_stamp('Scalar') if ( $node->stamp // 'Unknown' ) eq 'Unknown';  # static type
     $self->{cache}{"repr:$id"} = 'Scalar';
     return $self->{cache}{$id} = $slot;
 }
@@ -5078,7 +5078,7 @@ sub _lower_assign {
             my ($v) = grep { blessed($_) } $lhs->inputs->@*;
             die "GAP: a store to pos() of what is not a variable a scalar m//g matches is not lowered\n"
                 unless blessed($v) && $v->operation eq 'PadAccess' && $POS_VARS{ $v->name } && $self->_pos_var_ok($v);
-            my $from = $self->_repr_of($val) // $val->stamp // '';
+            my $from = $self->_repr_of($val) // $val->stamp // '';  # static type
             die "GAP: a store to pos() of a $from value is not lowered\n" unless $from eq 'Int';
             my $n = $self->lower_value($val);
             $self->_emit("  store i64 $n, i64* " . $self->_pos_cell($v) . "  ; pos() = ...");
@@ -5318,7 +5318,7 @@ sub _lower_assign {
     if (defined $lhs && $lhs->can('operation') && $lhs->operation eq 'PostfixDeref'
             && ($lhs->sigil // '') eq '$') {
         my $ptr  = $self->_scalar_ref_target($lhs->inputs->[0]);
-        my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');
+        my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');  # static type
         my $boxed = $from =~ /\A(?:Scalar|Slot)\z/ ? $rhs_ref
                   : $from =~ /\A(?:Int|Num|Str|Boolean)\z/
                       ? $self->_emit_coercion($rhs_ref, $from, 'Scalar', 'store through $$ref')
@@ -5338,7 +5338,7 @@ sub _lower_assign {
         # names it.
         if ($lhs->sigil =~ /\A[@%]\z/) {
             my $ty  = $lhs->sigil eq '@' ? '%Array' : '%Hash';
-            my $rs  = $rhs->stamp // '';
+            my $rs  = $rhs->stamp // '';  # static type
             die "GAP: a whole shared " . $lhs->name . " assigned from a $rs is not lowered\n"
                 unless $rs eq ( $ty eq '%Array' ? 'Array' : 'Hash' );
             my $src = $rhs->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/
@@ -5354,7 +5354,7 @@ sub _lower_assign {
           . " that is not a scalar is not lowered\n" unless $lhs->sigil eq '$';
         my $g    = $self->_location_ptr($lhs);
         # As lowered: a shift kept as its Slot is one, whatever its stamp.
-        my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($self->_repr_of($rhs) // $rhs->stamp // '');
+        my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($self->_repr_of($rhs) // $rhs->stamp // '');  # static type
         $from = 'Scalar' if $from eq 'Slot';
         ($rhs_ref, $from) = $self->_miss_kept($rhs, $rhs_ref, $from);
         die "GAP: a store to shared lexical " . $lhs->name . " of a $from value "
@@ -5470,7 +5470,7 @@ sub _coerce_ref_to_num {
 sub _lower_num_cmp {
     my ($self, $node) = @_;
     my ($l, $r) = $node->inputs->@[0, 1];
-    my ($lr, $rr) = map { $_->stamp // '' } $l, $r;
+    my ($lr, $rr) = map { $_->stamp // '' } $l, $r;  # static type
     my ($lv, $rv) = map { $self->lower_value($_) } $l, $r;
     my ($gt, $lt) = map { $self->_fresh } 1 .. 2;
     if ($lr eq 'Int' && $rr eq 'Int') {
@@ -5548,7 +5548,7 @@ sub _lower_str_order {
 sub _lower_icmp_int {
     my ($self, $node) = @_;
 
-    my $repr = $node->stamp;
+    my $repr = $self->_repr_of($node);
     my $op   = $node->operation;
 
     if (defined $repr && $repr eq 'Scalar') {
@@ -5625,7 +5625,7 @@ sub _lower_icmp_int {
 # any other repr (Num, aggregate) is a loud GAP.
 sub _str_compare_operand {
     my ($self, $input, $op, $side) = @_;
-    my $repr = $self->_repr_of($input) // $input->stamp // '';
+    my $repr = $self->_repr_of($input) // $input->stamp // '';  # static type
     my $ref  = $self->lower_value($input);
     return $ref if $repr eq 'Str';
     # A SCALAR IS STRINGIFIED BY ITS TAG -- the Coerce the producer would
@@ -5647,7 +5647,7 @@ sub _lower_str_compare {
     my ($self, $node, $is_eq) = @_;
 
     my $op = $node->operation;
-    my $repr = $node->stamp;
+    my $repr = $self->_repr_of($node);
     if (defined $repr && $repr eq 'Scalar') {
         die "$op with repr=Scalar reached LLVM backend — cannot lower runtime-free.";
     }
@@ -5725,7 +5725,7 @@ sub _lower_ternary_by_slot {
         $self->_new_block($label);
         my %before = map { $_ => 1 } keys %{ $self->{cache} };
         my $ref  = $self->lower_value($n);
-        my $from = $n->operation eq 'Print' ? 'Boolean' : ($n->stamp // '');
+        my $from = $n->operation eq 'Print' ? 'Boolean' : ($n->stamp // '');  # static type
         ($ref, $from) = $self->_miss_kept($n, $ref, $from);
         my $slot = $self->_slot_of_value($n, $ref, '?: arm');
         push @in, "[ $slot, %" . $self->_current_block_label . " ]";
@@ -5741,7 +5741,7 @@ sub _lower_ternary_by_slot {
 sub _lower_ternary {
     my ($self, $node) = @_;
 
-    my $repr = $node->stamp;
+    my $repr = $node->stamp;  # static type
     my $op   = $node->operation;
 
     return $self->_lower_ternary_by_slot($node) if defined $repr && $repr eq 'Scalar';
@@ -5779,7 +5779,7 @@ sub _lower_ternary {
     # BOTH ARMS ARRAYS (`for ($c ? @$x : ())`): the list is the taken arm's
     # array itself, as perl's is (its elements aliased), and the other arm
     # is never made -- branched, each arm lowered in its own block.
-    if (( $true_node->stamp // '' ) eq 'Array' && ( $fals_node->stamp // '' ) eq 'Array') {
+    if (( $self->_repr_of($true_node) // '' ) eq 'Array' && ( $self->_repr_of($fals_node) // '' ) eq 'Array') {
         my ($tl, $fl, $end) = map { $self->_fresh_label("tern.$_.") } qw(t f end);
         $self->_set_terminator("  br i1 $cond_ref, label %$tl, label %$fl  ; ?: (Array)");
         my @in;
@@ -5964,7 +5964,7 @@ sub _shortcircuit_phi_repr {
 sub _shortcircuit_operand_repr {
     my ($self, $node, $seen) = @_;
     $seen //= {};
-    my $r = $self->_repr_of($node) // $node->stamp;
+    my $r = $self->_repr_of($node) // $node->stamp;  # static type
     # A METHOD CALL NOTHING TYPED is typed once lowered: a run-time dispatch
     # is a Scalar, and an inlined one is boxed to it after (_held_as).
     return 'Scalar' if ( $r // '' ) eq 'Unknown' && $node->operation eq 'Call'
@@ -5981,7 +5981,7 @@ sub _shortcircuit_operand_repr {
 # short-circuit decided before lowering it, from the repr it was lowered as.
 sub _held_as {
     my ($self, $ref, $node, $predicted, $what) = @_;
-    my $actual = $self->_repr_of($node) // $node->stamp // '';
+    my $actual = $self->_repr_of($node) // $node->stamp // '';  # static type
     $actual = 'Scalar' if $actual eq 'Slot';
     return $ref if !defined $predicted || $actual eq $predicted || $actual eq 'Unknown';
     return $self->_emit_coercion($ref, $actual, $predicted, $what);
@@ -6004,7 +6004,7 @@ sub _short_circuit_at_merge {
     my $reg = $if->can('region') ? $if->region : undef;
     my $m   = blessed($reg) ? $self->{_if_merge_at}{ $reg->id } : undef;
     return undef unless $m;
-    my ($lr, $rr) = map { my $r = $self->_repr_of($_) // $_->stamp // ''; $r eq 'Slot' ? 'Scalar' : $r } $lhs, $rhs;
+    my ($lr, $rr) = map { my $r = $self->_repr_of($_) // $_->stamp // ''; $r eq 'Slot' ? 'Scalar' : $r } $lhs, $rhs;  # static type
     die "GAP: an " . $node->operation . " whose right side ran in an if arm, its sides a $lr and a $rr, is not lowered\n"
         unless $lr eq $rr && $lr =~ /\A(?:Int|Num|Str|Boolean|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/;
     my ($rlab, $llab) = $p->index == 0 ? @$m{qw(then else)} : @$m{qw(else then)};
@@ -6020,7 +6020,7 @@ sub _short_circuit_at_merge {
 sub _lower_and {
     my ($self, $node) = @_;
 
-    my $repr = $node->stamp;
+    my $repr = $node->stamp;  # static type
     # NO Scalar REFUSAL HERE ANY MORE. It predated `Scalar` having a machine
     # type: it does now (%Slot), `_emit_coercion` boxes any narrowed reading
     # into one, and `_emit_read_slot_as` reads it back by tag. What was
@@ -6138,7 +6138,7 @@ sub _lower_and {
 sub _lower_or {
     my ($self, $node) = @_;
 
-    my $repr = $node->stamp;
+    my $repr = $node->stamp;  # static type
     # NO Scalar REFUSAL HERE ANY MORE. It predated `Scalar` having a machine
     # type: it does now (%Slot), `_emit_coercion` boxes any narrowed reading
     # into one, and `_emit_read_slot_as` reads it back by tag. What was
@@ -6312,7 +6312,7 @@ sub _subscript_slot {
     # saw a later store (`$c ? $h{a} : 8` after `g($h{a})` wrote 5).
     return $self->{cache}{"slot:$id"} if exists $self->{cache}{"slot:$id"};
     my ($had, $c) = (exists $self->{cache}{$id}, $self->{cache}{$id});
-    my $old = $node->stamp;
+    my $old = $node->stamp;  # static type
     $node->set_stamp('Slot');
     my $slot = eval { $self->_lower_subscript($node) };
     my $err  = $@;
@@ -6327,7 +6327,7 @@ sub _subscript_slot {
 # only on the undef path, is brought to that repr too.
 sub _lower_defined_or_by_slot {
     my ($self, $node, $slot, $to) = @_;
-    $to //= $node->stamp // 'Scalar';
+    $to //= $node->stamp // 'Scalar';  # static type
     $to = 'Scalar' if $to eq 'Slot';
     my $def  = $self->_slot_defined_bit($slot);
     my $lval = $to eq 'Scalar' ? $slot : $self->_emit_coercion($slot, 'Scalar', $to, '// lhs');
@@ -6339,7 +6339,7 @@ sub _lower_defined_or_by_slot {
     # WHAT THE ARM MAKES STAYS IN THE ARM: cached past it, a second `//` over
     # the same node took a value its own arm does not dominate (pvm 213).
     my $rval = do { local $self->{cache} = { $self->{cache}->%* }; $self->lower_value($rhs) };
-    my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');
+    my $from = $rhs->operation eq 'Print' ? 'Boolean' : ($rhs->stamp // '');  # static type
     if ($from ne $to) {
         $rval = $from eq 'Undef' && $to eq 'Scalar'
             ? $self->_build_slot('false', '0', 'Undef', '// rhs')
@@ -6358,7 +6358,7 @@ sub _lower_defined_or_by_slot {
 sub _lower_defined_or {
     my ($self, $node) = @_;
 
-    my $repr = $node->stamp;
+    my $repr = $node->stamp;  # static type
     # NO Scalar REFUSAL. Like the And/Or guards this mirrored, it predated
     # Scalar having a machine type -- it has one (%Slot), and the phi machinery
     # below already handles an aggregate result (it emits `undef` for the
@@ -6462,8 +6462,8 @@ sub _lower_defined_or {
     # any other, its unboxing would open blocks before this branch. Its phi
     # operand was left empty, and lli rejected the module.
     die "GAP: a `//` over a Scalar whose result is a "
-      . ( $node->stamp // 'NONE' ) . " is not lowered -- only a Scalar\n"
-        if $lhs_repr eq 'Scalar' && ( $node->stamp // '' ) ne 'Scalar';
+      . ( $node->stamp // 'NONE' ) . " is not lowered -- only a Scalar\n"  # static type
+        if $lhs_repr eq 'Scalar' && ( $node->stamp // '' ) ne 'Scalar';  # static type
 
     # Allocate block labels.
     my $undef_label = $self->_fresh_label('dor.undef.');
@@ -6500,8 +6500,8 @@ sub _lower_defined_or {
     #
     # Pinned class-wide by t/bootstrap/ir/a-stamp-question-is-not-a-class-question.t
     # so a third occurrence fails a test rather than a program.
-    my $rhs_repr_now = $rhs_node isa Chalk::IR::Node ? $rhs_node->stamp : undef;
-    my $node_repr_early = $node->stamp;
+    my $rhs_repr_now = $rhs_node isa Chalk::IR::Node ? $rhs_node->stamp : undef;  # static type
+    my $node_repr_early = $node->stamp;  # static type
     if (defined $rhs_repr_now && defined $node_repr_early
             && $rhs_repr_now ne $node_repr_early
             && $node_repr_early ne 'Slot') {
@@ -7668,7 +7668,7 @@ sub _freeze_memory_reads {
         # ...LEFT WHERE IT IS USED, it is recorded: a store through a reference
         # (which may be the same aggregate) refuses while one is pending -- a
         # direct call storing through its argument versions no memory here.
-        my $by_tag = sub ($n) { blessed($n) && ( $self->_repr_of($n) // $n->stamp // '' ) =~ /\A(?:Scalar|Slot|Unknown)\z/ };
+        my $by_tag = sub ($n) { blessed($n) && ( $self->_repr_of($n) // $n->stamp // '' ) =~ /\A(?:Scalar|Slot|Unknown)\z/ };  # static type
         my $through_tag = $by_tag->($c->inputs->[0])
             || ( blessed($c->inputs->[0]) && $c->inputs->[0]->operation eq 'PostfixDeref' && $by_tag->($c->inputs->[0]->inputs->[0]) );
         # AT A LOOP'S BODY START every such read waits: hoisted to the start of
@@ -7687,7 +7687,7 @@ sub _freeze_memory_reads {
         # ...and as its whole Slot, for a user that keeps a miss its narrowed
         # reading drops (_miss_kept, _subscript_slot).
         $self->{cache}{ 'slot:' . $c->id } = $self->_subscript_slot($c)
-            if $c->operation eq 'Subscript' && ( $c->stamp // '' ) !~ /\A(?:Scalar|Slot)\z/
+            if $c->operation eq 'Subscript' && ( $self->_repr_of($c) // '' ) !~ /\A(?:Scalar|Slot)\z/
             && !( $self->{_arg_bind} && $self->{_arg_bind}{ refaddr($c) } );   # a bound read is the caller's value
     }
 }
@@ -7928,7 +7928,7 @@ sub _wire_region_phis_with_preblock {
         # which is exactly where _lower_arm_in_tail leaves the emitter. Doing
         # it in pass 2 (next to the phi) would reference each arm from the
         # merge block, which is invalid IR rather than a wrong answer.
-        my $phi_repr = $phi_node->stamp;
+        my $phi_repr = $phi_node->stamp;  # static type
         # A MERGE NOTHING TYPED whose arms are scalars -- one an inlined
         # argument, known only here (`return "none" unless $k` falls off
         # with $k) -- is what they are; held as this lowering's (_lower_and).
@@ -8314,7 +8314,7 @@ sub _prelower_branch_store_operands {
             # Lowered lazily inside the arm, `push @a, 3 if $n; scalar(@a)`
             # read a value the arm does not dominate and lli rejected it.
             my ($array) = grep {
-                blessed($_) && ( ($_->stamp // '') =~ /\AArray(?:Ref)?\z/
+                blessed($_) && ( ($self->_repr_of($_) // '') =~ /\AArray(?:Ref)?\z/
                     || $_->operation eq 'ArrayLiteral' )
             } $node->inputs->@*;
             next unless defined $array;
@@ -8425,7 +8425,7 @@ sub _prelower_loop_drain_operands {
             # drained value is off the return path); match _lower_builtin_shift_pop.
             my ($array) = grep {
                 my $op  = blessed($_) ? $_->operation : '';
-                my $rep = (blessed($_) && $_->stamp) // '';
+                my $rep = (blessed($_) && $self->_repr_of($_)) // '';
                 $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
                     || $rep eq 'Array' || $rep eq 'ArrayRef'
             } $n->inputs->@*;
@@ -8742,7 +8742,7 @@ sub _phi_input_along {
 sub _jump_merge_value {
     my ($self, $phi, $in, $what) = @_;
     my $v = $self->lower_value($in);
-    return ( $phi->stamp // '' ) eq 'Unknown'
+    return ( $phi->stamp // '' ) eq 'Unknown'  # static type
         ? [ $v, $self->_repr_of($in) // '' ]
         : $self->_as_phi_reading($v, $in, $phi, $what);
 }
@@ -8764,7 +8764,7 @@ sub _close_jump_merge {
     # A MERGE NOTHING TYPED is what its arms are: one repr, or a Scalar each
     # arm is boxed to in its own block, before the branch that ends it.
     my $here = $self->{current_idx};
-    for my $phi (grep { ( $_->stamp // '' ) eq 'Unknown' } _merge_phis($j->{region})) {
+    for my $phi (grep { ( $_->stamp // '' ) eq 'Unknown' } _merge_phis($j->{region})) {  # static type
         delete $self->{_unbuilt_jump_phi}{ $phi->id };   # this close's call, not an earlier inlining's
         my @r = map { $_->{vals}{ $phi->id }[1] } @preds;
         # AN ARM THAT IS NOT A SCALAR -- a bare `return`'s empty list, the
@@ -8997,7 +8997,7 @@ sub close_eval {
     # the eval's value is typed a list (a list-context copy of its sub, or a
     # list eval the producer typed so) -- a shared node is not retyped here.
     my $as_list = $f->{dies} && defined $want && $want eq 'list'
-        && !grep { ( $_->stamp // '' ) !~ /\A(?:List|Array)\z/ } @phis;
+        && !grep { ( $_->stamp // '' ) !~ /\A(?:List|Array)\z/ } @phis;  # static type
     die "GAP: a block eval in list or caller context that can die is not lowered -- "
       . "it yields the empty list there, not undef\n"
         if $f->{dies} && defined $want && !$as_list;
@@ -9010,11 +9010,11 @@ sub close_eval {
                 ? $raw{ $phi->id } : $self->_emit_array_of([$v]);
             next;
         }
-        my $to   = $f->{dies} ? 'Scalar' : ($phi->stamp // '');
+        my $to   = $f->{dies} ? 'Scalar' : ($phi->stamp // '');  # static type
         die "GAP: a block eval's value is a " . ($phi->stamp // 'untyped')
           . " where a die makes it undef -- only a Scalar holds both\n"
-            if $f->{dies} && ($phi->stamp // '') ne 'Scalar';
-        my $from = $v->stamp // '';
+            if $f->{dies} && ($phi->stamp // '') ne 'Scalar';  # static type
+        my $from = $v->stamp // '';  # static type
         my $ref  = $raw{ $phi->id };
         $ref = $self->_emit_coercion($ref, $from, $to, 'eval value') if $from ne $to;
         $normal{ $phi->id } = $ref;
@@ -9153,7 +9153,7 @@ sub _die_message {
     my $msg;
     for my $p (@parts) {
         my $ref  = $self->lower_value($p);
-        my $from = $p->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($p) // $p->stamp // '' );
+        my $from = $p->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($p) // $p->stamp // '' );  # static type
         $from = 'Scalar' if $from eq 'Slot';
         $ref = $self->_emit_coercion($ref, $from, 'Str', 'die message') if $from ne 'Str';
         $msg = defined $msg ? $self->_emit_str_append($msg, $ref, 'die: its arguments joined') : $ref;
@@ -9313,7 +9313,7 @@ sub _process_loop_node {
         # typed, known only here -- is what its two values are: one scalar
         # repr, or a Scalar both are boxed to (the if-merge's rule).
         # Decided at each lowering: inlined again, its arguments differ.
-        if (( $phi_node->stamp // '' ) eq 'Unknown') {
+        if (( $phi_node->stamp // '' ) eq 'Unknown') {  # static type
             delete $self->{cache}{ 'repr:' . $phi_node->id };
             # The back-edge: what reaches it through merges nothing typed
             # (the arms of the body's ifs), the loop phi itself left out.
@@ -9323,15 +9323,15 @@ sub _process_loop_node {
                 while (defined(my $n = shift @q)) {
                     next unless blessed($n) && !$seen{ refaddr($n) }++;
                     next if refaddr($n) == refaddr($phi_node);
-                    if ($n->operation eq 'Phi' && ( $n->stamp // '' ) eq 'Unknown' && !_is_memory_phi($n)) {
+                    if ($n->operation eq 'Phi' && ( $n->stamp // '' ) eq 'Unknown' && !_is_memory_phi($n)) {  # static type
                         push @q, $n->inputs->@*;
                         next;
                     }
                     # ARITHMETIC NOTHING TYPED is a number whatever it reads:
                     # a Num, as a Str operand ("2.5") may make it (pvm 326).
-                    push @back, ( ( $n->stamp // '' ) eq 'Unknown'
+                    push @back, ( ( $n->stamp // '' ) eq 'Unknown'  # static type
                                   && $n->operation =~ /\A(?:Add|Subtract|Multiply|Divide|Negate)\z/ )
-                        ? 'Num' : $n->stamp // '';
+                        ? 'Num' : $n->stamp // '';  # static type
                 }
             }
             my @r = ( $self->_repr_of($inputs->[0]) // '', @back ? @back : ('') );
@@ -9351,11 +9351,11 @@ sub _process_loop_node {
             # The merges nothing typed its back-edge comes through (a latch
             # where `next` arms meet) carry the same variable: read as it is.
             if (defined( my $lr = $self->{cache}{ 'repr:' . $phi_node->id }
-                    // ( ( $phi_node->stamp // '' ) =~ /\A(?:Array|Hash)\z/ ? $phi_node->stamp : undef ) )) {
+                    // ( ( $phi_node->stamp // '' ) =~ /\A(?:Array|Hash)\z/ ? $phi_node->stamp : undef ) )) {  # static type
                 my (@q, %seen) = ($inputs->[1]);
                 while (defined(my $n = shift @q)) {
                     next unless blessed($n) && !$seen{ refaddr($n) }++ && refaddr($n) != refaddr($phi_node);
-                    next unless $n->operation eq 'Phi' && ( $n->stamp // '' ) eq 'Unknown' && !_is_memory_phi($n);
+                    next unless $n->operation eq 'Phi' && ( $n->stamp // '' ) eq 'Unknown' && !_is_memory_phi($n);  # static type
                     $self->{cache}{ 'repr:' . $n->id } = $lr;
                     push @q, $n->inputs->@*;
                 }
@@ -9712,7 +9712,7 @@ sub _lower_loop_condition {
         # the loop: the header's condition, not a body comparison.
         next unless exists $ICMP_PREDICATE{ $c->operation }
             || ( blessed($c->control_in) && refaddr($c->control_in) == refaddr($loop_node)
-                 && ( $c->stamp // '' ) eq 'Boolean' );
+                 && ( $c->stamp // '' ) eq 'Boolean' );  # static type
         return $self->lower_value($c);
     }
 
@@ -9768,7 +9768,7 @@ sub _prelower_aggregates_before {
             # An Array or Hash, not a reference: `[...]` / `{...}` is a new
             # one each time it is evaluated (`push @r, [0]` in a loop).
             push @lits, $in if $in->operation =~ /\A(?:ArrayLiteral|HashLiteral|HashRef)\z/
-                && ( $in->stamp // '' ) =~ /\A(?:Array|Hash)\z/
+                && ( $in->stamp // '' ) =~ /\A(?:Array|Hash)\z/  # static type
                 && !( $in->can('control_in') && blessed($in->control_in) );
         }
         push @q, grep { blessed($_) } ($n->consumers // [])->@*;
@@ -9897,7 +9897,7 @@ sub _callee_moves_elements {
             elsif (_callee_moves_elements($n, $seen)) { return 1 }
         }
         return 1 if $op eq 'Assign' && grep {
-            blessed($_) && $_->can('stamp') && ( $_->stamp // '' ) eq 'Array'
+            blessed($_) && $_->can('stamp') && ( $_->stamp // '' ) eq 'Array'  # static type
         } $n->inputs->@*;
     }
     return 0;
@@ -9987,7 +9987,7 @@ sub _is_memory_phi {
         }
         # a list assignment the producer merges as memory: its value is a List
         # no arm can flatten (`($lo, $u) = ...` in each arm, then a push)
-        return 1 if $in->operation eq 'Assign' && ( $in->stamp // '' ) eq 'List' && $phi->memory;
+        return 1 if $in->operation eq 'Assign' && ( $in->stamp // '' ) eq 'List' && $phi->memory;  # static type
         # a package scalar's store
         return 1 if $in->operation eq 'EntryWrite';
         # a direct call: an inlined sub may store any of those

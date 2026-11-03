@@ -12,7 +12,7 @@ use Test::More;
 # Not counted: set_stamp, comments, a line that builds a die or warn
 # message, and a read marked `# static type` -- one that deliberately asks
 # what the analysis said rather than how the value is held.
-my $CEILING = 159;
+my $CEILING = 110;
 
 open my $fh, '<', 'lib/Chalk/Target/LLVM/Context.pm' or die $!;
 my ($n, @where) = (0);
