@@ -15168,7 +15168,7 @@ sub _lower_builtin_keys {
     my ($operand) = grep { blessed($_) } $node->inputs->@*;
     die "GAP: keys expects a hash operand." unless defined $operand;
 
-    my $op_repr = $operand isa Chalk::IR::Node ? ($operand->stamp // '') : '';
+    my $op_repr = $operand isa Chalk::IR::Node ? ($self->_repr_of($operand) // '') : '';
     die "GAP: keys over an operand with repr=" . ($op_repr || 'NONE')
       . " — only a Hash or HashRef has a key list to read."
         unless $op_repr eq 'Hash' || $op_repr eq 'HashRef';
@@ -15189,7 +15189,7 @@ sub _lower_builtin_keys {
     # consumer of an Int-stamped Call expects an i64 and got an %Array*
     # ("'%tmp_42' defined with type '%Array*' but expected 'i64'"). Materialising
     # a list nobody asked for is also the work perl skips here.
-    my $repr = $node isa Chalk::IR::Node ? ($node->stamp // '') : '';
+    my $repr = $node isa Chalk::IR::Node ? ($node->stamp // '') : ''; # static type
     if ($repr eq 'Int') {
         $self->{cache}{$node->id} = $cnt;
         return $cnt;
@@ -15335,7 +15335,7 @@ sub _lower_builtin_join {
     # SCALARS FLATTENED INTO THE CALL -- `"@a"` over a literal arrives as
     # join($", 1, 2) -- is its own static element list.
     # One that holds an array (`"@{[sort keys %h]} z"`) flattens at run time.
-    my $flatten = @more && grep { ( $_->stamp // '' ) !~ /\A(?:Int|Num|Str|Boolean)\z/ } $list_node, @more;
+    my $flatten = @more && grep { ( $self->_repr_of($_) // '' ) !~ /\A(?:Int|Num|Str|Boolean)\z/ } $list_node, @more;
     # So does a range whose bounds the program computes (`"@c"` over
     # `my @c = (1 .. $n)` is a join over the Range itself).
     $flatten ||= blessed($list_node) && $list_node->operation eq 'Range'
@@ -15345,19 +15345,19 @@ sub _lower_builtin_join {
     $flatten ||= blessed($list_node) && $list_node->operation eq 'Call'
         && ( $list_node->dispatch_kind // '' ) eq 'builtin' && ( $list_node->name // '' ) eq 'unpack';
     # So does a merge of lists (`@a = $c ? (7) : f()`), lowered as the array chosen.
-    $flatten ||= $list_node->operation =~ /\A(?:Phi|Repeat)\z/ && ( $list_node->stamp // '' ) eq 'List';
+    $flatten ||= $list_node->operation =~ /\A(?:Phi|Repeat)\z/ && ( $self->_repr_of($list_node) // '' ) eq 'List';
     # So does a sub's list: what its inlined body returned, flattened. Walked
     # statically through the callee's Return, an element lowered as the array.
     # (Its stamp may be the sub's scalar reading after Analysis; the call's
     # `want` is what says it yields a list here.)
     $flatten ||= $list_node->operation eq 'Call' && ( $list_node->dispatch_kind // '' ) eq 'direct'
-        && ( ( $list_node->stamp // '' ) eq 'List'
+        && ( ( $list_node->stamp // '' ) eq 'List' # static type
              || ( $list_node->can('want') && ( $list_node->want // '' ) eq 'list' ) );
     my $elements = $flatten ? undef
         : @more ? [ $list_node, @more ]
         # ONE SCALAR is a list of itself: `my @l = (1); "@l"` arrives as
         # join($", 1).
-        : ( $list_node->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/ ? [$list_node]
+        : ( $self->_repr_of($list_node) // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/ ? [$list_node]
         # A LIST READ AFTER IT WAS WRITTEN has no static elements: its
         # declaration said empty, and a push since made it 2 4 6 -- read as
         # the declaration, "@r" printed "". It is walked at run time.
@@ -15371,7 +15371,7 @@ sub _lower_builtin_join {
     my $sep_ref = $self->lower_value($default_sep // $sep_node);
     my $sep_repr = $default_sep ? 'Str'
                  : ($sep_node isa Chalk::IR::Value)
-                 ? $sep_node->stamp : undef;
+                 ? $sep_node->stamp : undef; # static type
     $sep_ref = $self->_emit_coercion($sep_ref, $sep_repr, 'Str', 'join separator')
         if defined $sep_repr && $sep_repr ne 'Str';
 
@@ -15384,7 +15384,7 @@ sub _lower_builtin_join {
         return $self->{cache}{ $node->id } = $self->_emit_join_loop(undef, $sep_ref,
             $self->_emit_flattened_array_of([ $list_node, @more ])) if $flatten;
         my $repr = $list_node isa Chalk::IR::Value
-                 ? ($list_node->stamp // '') : '';
+                 ? ($self->_repr_of($list_node) // '') : '';
         die "GAP: join over an operand with repr=" . ($repr || 'NONE')
           . " — a runtime-arity join needs a materialised Array to walk."
             unless $repr eq 'Array' || $repr eq 'ArrayRef';
@@ -15400,7 +15400,7 @@ sub _lower_builtin_join {
         my $el      = $elements->[$i];
         my $el_ref  = $self->lower_value($el);
         my $el_repr = ($el isa Chalk::IR::Value)
-                    ? $el->stamp : undef;
+                    ? $el->stamp : undef; # static type
         $el_ref = $self->_emit_coercion($el_ref, $el_repr, 'Str', "join element[$i]")
             if defined $el_repr && $el_repr ne 'Str';
 
@@ -15589,7 +15589,7 @@ sub _static_list_elements {
     # An array among them (`my @r = $c ? @a : @b`) is its elements, not one.
     if ($op eq 'ArrayLiteral') {
         my @in = grep { blessed($_) } $node->inputs->@*;
-        return undef if grep { ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @in;
+        return undef if grep { ( $self->_repr_of($_) // '' ) =~ /\A(?:Array|List|Hash)\z/ } @in;
         return \@in;
     }
 
@@ -15629,7 +15629,7 @@ sub _lower_builtin_push {
     my ($array, @values) = @in;
     die "GAP: push onto a " . (($array && $array->stamp) // 'NONE')
       . " is not lowered -- only an Array\n"
-        unless $array && ( ( $array->stamp // '' ) eq 'Array'
+        unless $array && ( ( $self->_repr_of($array) // '' ) eq 'Array'
             # ...or an array field, which the object holds by reference
             || ( $array->operation eq 'FieldAccess' && ( $self->_repr_of($array) // '' ) eq 'ArrayRef' ) );
     _seed_container_repr($array) unless $array->operation eq 'FieldAccess';
@@ -15639,7 +15639,7 @@ sub _lower_builtin_push {
         # undef, or a reference (boxed with its tag), is appended as its Slot.
         # ...and an argument nothing typed, as what the caller passed.
         if (( $self->_repr_of($v) // '' ) =~ /\A(?:Scalar|Slot|Undef|ArrayRef|HashRef|CodeRef|ScalarRef|Object)\z/
-                || ( ( $v->stamp // 'Unknown' ) eq 'Unknown' && ( $self->_repr_of($v) // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/ )) {
+                || ( ( $v->stamp // 'Unknown' ) eq 'Unknown' && ( $self->_repr_of($v) // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/ )) { # static type
             $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy);
             my $slot = $self->_slot_of_value($v, $self->lower_value($v), 'push');
             $self->_emit("  call void \@chalk_array_push_slot(%Array* $acc, %Slot $slot)  ; push: a value by its tag");
@@ -15653,7 +15653,7 @@ sub _lower_builtin_push {
             next;
         }
         die "GAP: push of a " . ($v->stamp // 'NONE') . " value is not lowered\n"
-            unless ( $v->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/;
+            unless ( $self->_repr_of($v) // '' ) =~ /\A(?:Int|Num|Str|Boolean)\z/;
         $self->_emit_append_one($acc, $v);
     }
     my ($len_ptr, $len) = ($self->_fresh, $self->_fresh);
@@ -15673,12 +15673,12 @@ sub _lower_builtin_unshift {
     pop @in if $node->can('memory_input') && $node->memory_input;
     my ($array, @values) = @in;
     die "GAP: unshift onto a " . (($array && $array->stamp) // 'NONE') . " is not lowered -- only an Array\n"
-        unless $array && ( $array->stamp // '' ) eq 'Array';
+        unless $array && ( $self->_repr_of($array) // '' ) eq 'Array';
     _seed_container_repr($array);
     my $acc = $self->_container_ptr($array, 'Array');
     my $tmp = $self->_emit_array_of([]);
     for my $v (@values) {
-        my $r = $self->_repr_of($v) // $v->stamp // '';
+        my $r = $self->_repr_of($v) // $v->stamp // ''; # static type
         if ($r eq 'Array') {
             my $src = $self->_container_ptr($v, 'Array');
             $self->_emit("  call void \@chalk_array_append_all(%Array* $tmp, %Array* $src)  ; unshift: an array's elements");
@@ -15708,7 +15708,7 @@ sub _lower_builtin_shift_pop {
     my $name = $node->name;   # 'shift' or 'pop'
     # No fallback: the die below already rejects everything but Int, so a
     # guessed 'Int' only made the message name a repr the node never had.
-    my $repr = $node->stamp;
+    my $repr = $node->stamp; # static type
     # A Scalar element is its whole Slot -- an @ARGV element, say -- and an
     # empty array gives an undefined one.
     die "GAP: $name element repr=" . ($repr // 'NONE (undef)')
@@ -15783,7 +15783,7 @@ sub _lower_builtin_shift_pop {
     # (e.g. `while (shift @q) { ... }` where the drained value is unused).
     my ($array) = grep {
         my $op   = blessed($_) ? $_->operation : '';
-        my $repr = (blessed($_) && $_->stamp) // '';
+        my $repr = (blessed($_) && $self->_repr_of($_)) // '';
         $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
             || $repr eq 'Array' || $repr eq 'ArrayRef'
     } $node->inputs->@*;
@@ -15870,7 +15870,7 @@ sub _lower_builtin_shift_pop {
 sub _hash_key_str {
     my ($self, $key) = @_;
     my $ref  = $self->lower_value($key);
-    my $from = $key->operation eq 'Print' ? 'Boolean' : ($self->_repr_of($key) // $key->stamp // '');
+    my $from = $key->operation eq 'Print' ? 'Boolean' : ($self->_repr_of($key) // $key->stamp // ''); # static type
     return $ref if $from eq 'Str';
     $from = 'Scalar' if $from eq 'Slot';
     return $self->_emit_coercion($ref, $from, 'Str', 'hash key');
@@ -16039,7 +16039,7 @@ sub _lower_postfix_deref {
         my $ptr  = $self->_scalar_ref_target($node->inputs->[0]);
         my $slot = $self->_fresh;
         $self->_emit("  $slot = load %Slot, %Slot* $ptr  ; \$\$ref: read");
-        my $repr = $node->stamp // 'Scalar';
+        my $repr = $node->stamp // 'Scalar'; # static type
         my $ref  = $repr =~ /\A(?:Int|Num|Str|Boolean)\z/
             ? $self->_emit_coercion($slot, 'Scalar', $repr, '$$ref') : $slot;
         $self->{cache}{ $node->id } = $ref;
@@ -16056,7 +16056,7 @@ sub _scalar_ref_target {
     # A SCALAR HOLDING A REFERENCE: its Slot's payload, when its tag says
     # ScalarRef. Anything else is refused at run time (perl dies too: "Not a
     # SCALAR reference").
-    if (($ref_node->stamp // '') =~ /\A(?:Scalar|Slot)\z/) {
+    if (($self->_repr_of($ref_node) // '') =~ /\A(?:Scalar|Slot)\z/) {
         my $s   = $self->lower_value($ref_node);
         my $tag = $self->_slot_tag_of($s);
         my $ok  = $self->_fresh;
@@ -16075,7 +16075,7 @@ sub _scalar_ref_target {
         return $ptr;
     }
     die "GAP: a scalar deref of a " . ($ref_node->stamp // 'NONE') . " is not lowered\n"
-        unless ($ref_node->stamp // '') eq 'ScalarRef';
+        unless ($self->_repr_of($ref_node) // '') eq 'ScalarRef';
     my $r   = $self->lower_value($ref_node);
     my $ptr = $self->_fresh;
     $self->_emit("  $ptr = bitcast i8* $r to %Slot*  ; ScalarRef -> %Slot*");
@@ -16106,7 +16106,7 @@ sub _lower_ref {
         $self->_emit("  $ref = bitcast %Slot* $b->{loc} to i8*  ; \\\$_[N]: the caller's variable");
         return $ref;
     }
-    my $xs = $x->stamp // '';
+    my $xs = $self->_repr_of($x) // '';
     my ($ptr, $ty);
     if ($xs eq 'Array' || $xs eq 'Hash') {
         $ty  = $xs eq 'Array' ? '%Array*' : '%Hash*';
@@ -16260,7 +16260,7 @@ sub _lower_reftype {
         die "GAP: ref() of a GlobRef where the program blesses a glob is not lowered\n"
             if grep {
                 $_->operation eq 'Call' && ( $_->name // '' ) eq 'bless'
-                    && grep { blessed($_) && ( $_->stamp // '' ) eq 'GlobRef' } $_->inputs->@*
+                    && grep { blessed($_) && ( $_->stamp // '' ) eq 'GlobRef' } $_->inputs->@* # static type
             } @PROGRAM;
         my ($p, $l) = $self->_str_const_parts('GLOB', 'ref(): GLOB');
         $ref = $self->_set_str_len($p, $l);
@@ -16653,7 +16653,7 @@ sub _store_field_payload {
 # exits 255, as perl dies. () where $obj is no shape this reads.
 sub _dispatch_invocant {
     my ($self, $obj) = @_;
-    my $rs = $self->_repr_of($obj) // $obj->stamp // '';
+    my $rs = $self->_repr_of($obj) // $obj->stamp // ''; # static type
     # A CLASS NAMED BY A STRING (a tie's): its sub of that name.
     my ($is, $cp, $cl);
     if ($rs eq 'Str') {
@@ -16768,7 +16768,7 @@ sub _lower_runtime_dispatch {
                 if $from =~ /\A(?:Array|List|Hash)\z/;
             # The call's value is read as the call is typed (it took its
             # callee's type where it had none).
-            $from = $node->stamp if ( $node->stamp // 'Unknown' ) ne 'Unknown';
+            $from = $node->stamp if ( $node->stamp // 'Unknown' ) ne 'Unknown'; # static type
             $from eq 'Scalar' ? $r
               : $from eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', 'dispatch: undef')
               : $self->_emit_coercion($r, $from, 'Scalar', "dispatch: ${cname}::$name");
@@ -16785,7 +16785,7 @@ sub _lower_runtime_dispatch {
     $self->_emit("  $res = phi %Slot " . join(', ', @in) . "  ; dispatch: its value");
     # READ AS THE CALL IS TYPED: Analysis may have typed it from a sub's
     # return (a Str), and its consumers read that.
-    my $st = $opt{as} // $node->stamp // 'Unknown';
+    my $st = $opt{as} // $node->stamp // 'Unknown'; # static type
     if ($st eq 'Unknown') { $node->set_stamp('Scalar'); $st = 'Scalar' }
     if ($st ne 'Scalar') {
         die "GAP: a method ('$name') on a run-time class read as a $st is not lowered\n"
@@ -16815,7 +16815,7 @@ sub _lower_class_method_by_tag {
     my $cls = Chalk::IR::Analysis::_the_class_with($mop, $name)
         // die "GAP: a method ('$name') on an object known only at run time, where the program has "
               . "more than one `class` (or a package sub $name), is not lowered\n";
-    my $rs = $self->_repr_of($obj) // $obj->stamp // '';
+    my $rs = $self->_repr_of($obj) // $obj->stamp // ''; # static type
     return undef unless $rs eq 'Scalar';
     $self->_refuse_inside_eval("a method on what may not be an object");
     my $slot = $self->lower_value($obj);
@@ -16837,7 +16837,7 @@ sub _lower_class_method_by_tag {
 sub _lower_method_on_non_object {
     my ($self, $node, $obj) = @_;
     return undef unless blessed($obj);
-    my $rs = $obj->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($obj) // $obj->stamp // '' );
+    my $rs = $obj->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($obj) // $obj->stamp // '' ); # static type
     my $location = $obj->operation eq 'PadAccess' && $obj->is_location;
     my $plain = $rs =~ /\A(?:Int|Num|Str|Boolean|Undef)\z/;
     return undef unless $plain || $rs eq 'Scalar' || ( $rs eq 'Unknown' && $location );
@@ -17033,7 +17033,7 @@ sub _lower_call_new {
             (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
         # A default of undef is no default: the cell starts undefined.
         my $undef_default = $finfo->{has_default} && blessed($finfo->{default_node})
-            && ($finfo->{default_node}->stamp // '') eq 'Undef';
+            && ($finfo->{default_node}->stamp // '') eq 'Undef'; # static type
         if ($finfo->{has_default} && !$undef_default) {
             my $def_node = $finfo->{default_node};
             # has_default promises a default value node. If it is missing the MOP
@@ -17250,7 +17250,7 @@ sub _call_sub_define {
     # THE CALL HAS THE CALLER'S TYPE: its readers were typed from the call's
     # stamp, which need not be the define's return (`g($_[0] + 1)` stamped
     # Num, g's body an Int product; lli refused an i64 in an fadd).
-    my $want = $node->stamp // '';
+    my $want = $node->stamp // ''; # static type
     if ($want ne $ret && $want =~ /\A(?:Int|Num|Str|Boolean)\z/) {
         $r = $self->_emit_coercion($r, $ret, $want, "$name result");
         $ret = $want;
@@ -17415,7 +17415,7 @@ sub _lower_call_direct {
             ? $self->_lower_inlined_structure($returns[0], $void ? undef : $value)
             : $self->_lower_inlined_effects_then_value(\@effect_chain, $void ? undef : $value);
         return '0' if $void;
-        my $from = $value->operation eq 'Print' ? 'Boolean' : ($self->{_inlined_value_repr} // $value->stamp // '');
+        my $from = $value->operation eq 'Print' ? 'Boolean' : ($self->{_inlined_value_repr} // $value->stamp // ''); # static type
         # What the inlined value IS, for a list that flattens it
         # (_emit_flattened_array_of): an Array, or one scalar.
         $self->{_inline_value_repr}{ $node->id } = $from;
@@ -17427,7 +17427,7 @@ sub _lower_call_direct {
         # An UNDEF too: its value is its defined bit, which `defined` of the
         # call reads -- left Unknown, it answered "always defined".
         $node->set_stamp($from)
-            if ( $node->stamp // 'Unknown' ) eq 'Unknown'
+            if ( $node->stamp // 'Unknown' ) eq 'Unknown' # static type
             && $from =~ /\A(?:Scalar|Int|Num|Str|Boolean|Undef|ArrayRef|HashRef|CodeRef|ScalarRef)\z/;
         # A SCALAR-CONTEXT CALL STAMPED AS A LIST reads its callee's scalar
         # reading, which is what was lowered: `sub g { return }` gives undef
@@ -17435,9 +17435,9 @@ sub _lower_call_direct {
         # 7cbb3220).
         $node->set_stamp($from)
             if ($want // '') eq 'scalar'
-            && ( $node->stamp // '' ) =~ /\A(?:List|Array)\z/
+            && ( $node->stamp // '' ) =~ /\A(?:List|Array)\z/ # static type
             && $from =~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/;
-        my $to   = $node->stamp // '';
+        my $to   = $node->stamp // ''; # static type
         # Between SCALAR readings only: a list callee's Array value is what a
         # List-stamped call already reads, and has no arrow to coerce along.
         state %scalar = map { $_ => 1 } qw(Int Num Str Boolean Scalar Slot Undef);
@@ -17611,16 +17611,16 @@ sub _lower_call_direct {
     # argument that flattens is the arguments flattened, each read the
     # element at its index -- undef past the end.
     my $flattens = sub ($a) {
-        my $st = $a->stamp // 'Unknown';
+        my $st = $a->stamp // 'Unknown'; # static type
         return $st eq 'Array' || ( $st eq 'List' && $a->operation eq 'Call' )
             || ( $st eq 'Unknown' && $a->operation eq 'Call' && ( $a->can('want') ? $a->want // '' : '' ) eq 'list' );
     };
     my $by_position = @arg_reads && !$args_array && !$slurpy && !$written && !$signature && !$shared
         && ( grep { $flattens->($_) } @args )
-        && !grep { ( $_->stamp // '' ) =~ /\A(?:Hash|List)\z/ && !$flattens->($_) } @args;
+        && !grep { ( $_->stamp // '' ) =~ /\A(?:Hash|List)\z/ && !$flattens->($_) } @args; # static type
     for my $a ( ( @arg_reads || $args_array || $slurpy || $written )
                 ? ( $list_after ? @args[ 0 .. List::Util::min($list_after, scalar @args) - 1 ] : @args ) : () ) {
-        my $st = $a->stamp // 'Unknown';
+        my $st = $a->stamp // 'Unknown'; # static type
         next if $as_list_only && ( $st eq 'Array' || ( $st eq 'List' && $a->operation eq 'Call' ) );
         next if $by_position;
         die "GAP: direct call to '$name': an argument stamped $st flattens into \@_, "
@@ -17633,9 +17633,9 @@ sub _lower_call_direct {
     if ($args_array && !$as_list_only && !$list_after) {
         for my $a (@args) {
             die "GAP: direct call to '$name': an argument stamped "
-              . ( $a->stamp // 'NONE' ) . " flattens into \@_, which inlining "
+              . ( $a->stamp // 'NONE' ) . " flattens into \@_, which inlining " # static type
               . "does not build.\n"
-                unless ( $a->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean|Scalar|Undef|ArrayRef|HashRef|CodeRef|ScalarRef|Object)\z/;
+                unless ( $a->stamp // '' ) =~ /\A(?:Int|Num|Str|Boolean|Scalar|Undef|ArrayRef|HashRef|CodeRef|ScalarRef|Object)\z/; # static type
         }
     }
 
@@ -17683,7 +17683,7 @@ sub _lower_call_direct {
         elsif ($by_position) {
             # Read as the read's own repr where it has one, as an element read is.
             my $slot = $self->_emit_array_slot_at($flat, $i);
-            my $st   = $r->stamp // 'Scalar';
+            my $st   = $r->stamp // 'Scalar'; # static type
             $self->{_arg_bind}{ refaddr($r) } = $st =~ /\A(?:Scalar|Unknown|Slot)\z/
                 ? { ref => $slot, repr => 'Scalar' }
                 : { ref => $self->_slot_as_reading($slot, $st, "$name: argument $i"), repr => $st };
@@ -17734,7 +17734,7 @@ sub _lower_call_direct {
             $self->{_arg_bind}{ refaddr($r) } = { ref => $self->_build_slot('false', '0', 'Undef', "$name: not passed"), repr => 'Scalar' };
             next;
         }
-        $self->{_arg_bind}{ refaddr($r) } = { ref => $self->lower_value($d), repr => $d->stamp };
+        $self->{_arg_bind}{ refaddr($r) } = { ref => $self->lower_value($d), repr => $d->stamp }; # static type
     }
     my $args_arr = !$args_array ? undef
         : $list_after ? $self->_emit_flattened_array_of([ @args[ List::Util::min($list_after, scalar @args) .. $#args ] ])
@@ -18656,7 +18656,7 @@ sub _lower_call_method {
           . "for its " . $n . " scalar parameter(s) -- perl dies (Too few arguments).\n"
             if @arg_nodes < $n;
         die "GAP: Call(method) '$method_name': an argument that flattens into a slurpy is not lowered\n"
-            if grep { ( $_->stamp // '' ) =~ /\A(?:Array|Hash|List)\z/ } @arg_nodes[ $n .. $#arg_nodes ];
+            if grep { ( $_->stamp // '' ) =~ /\A(?:Array|Hash|List)\z/ } @arg_nodes[ $n .. $#arg_nodes ]; # static type
         my @rest = splice @arg_nodes, $n;
         $slurpy_arr = $self->_emit_array_of(\@rest);
         push @arg_nodes, undef;
@@ -18675,7 +18675,7 @@ sub _lower_call_method {
             push @call_args, Chalk::Target::LLVM::_method_fn_llvm_ret_type($want) . " $slurpy_arr";
             next;
         }
-        my $got  = $arg_nodes[$i]->stamp // '';
+        my $got  = $arg_nodes[$i]->stamp // ''; # static type
         # AT THE CALLEE'S TYPE, for the same reason the return is: the body is
         # emitted once, at one machine type. A caller that knows a narrower
         # type still has to hand over the declared one.
@@ -18736,11 +18736,11 @@ sub _lower_call_method {
         # here rather than caching a %Slot where an i64 is expected. The
         # refinement is honoured at the boundary, not by calling at the
         # narrower type: the callee has ONE emitted body at ONE machine type.
-        if ($abi_repr eq 'Scalar' && ($node->stamp // '') ne 'Scalar') {
+        if ($abi_repr eq 'Scalar' && ($node->stamp // '') ne 'Scalar') { # static type
             my $pay = $self->_fresh;
             my $mi_pay = _slot_idx('payload');
             $self->_emit("  $pay = extractvalue %Slot $result, $mi_pay  ; Call(method) $method_name: Slot payload -> "
-                       . ($node->stamp // '?'));
+                       . ($node->stamp // '?')); # static type
 
             # A STR PAYLOAD IS A POINTER TO THE BOXED STR, not the value.
             # Every other narrowed reading (Int, Num, Boolean) IS the payload
@@ -18748,7 +18748,7 @@ sub _lower_call_method {
             # wrong here -- the consumer would read a heap address as a string.
             # Unpacked the same way the field read does: one encoding, read the
             # same way wherever it is met.
-            if (($node->stamp // '') eq 'Str') {
+            if (($node->stamp // '') eq 'Str') { # static type
                 $self->{_need_str_type} = 1;
                 my $pair = $self->_fresh;
                 $self->_emit("  $pair = inttoptr i64 $pay to %Str*  ; Call(method) $method_name: payload -> %Str*");
@@ -18766,13 +18766,13 @@ sub _lower_call_method {
             }
             # A Num is read by the cell's tag: the payload word is an i64, and
             # the callee may have tagged it Int.
-            if (($node->stamp // '') eq 'Num') {
+            if (($node->stamp // '') eq 'Num') { # static type
                 return $self->{cache}{ $node->id } =
                     $self->_emit_read_slot_as($result, 'Num', "Call(method) $method_name");
             }
             # A BOOLEAN IS AN i1, the payload an i64: a method returning
             # print's 1 handed its consumer the word where a bit was wanted.
-            if (($node->stamp // '') eq 'Boolean') {
+            if (($node->stamp // '') eq 'Boolean') { # static type
                 my $bit = $self->_fresh;
                 $self->_emit("  $bit = icmp ne i64 $pay, 0  ; Call(method) $method_name: payload -> i1");
                 $pay = $bit;
@@ -19631,7 +19631,7 @@ sub _lower_pos {
     $self->_emit("  $s0 = insertvalue %Slot undef, i1 $def, " . _slot_idx('defined'));
     $self->_emit("  $s1 = insertvalue %Slot $s0, i8 " . _slot_tag_value('Int') . ", " . _slot_idx('tag'));
     $self->_emit("  $s2 = insertvalue %Slot $s1, i64 $p, " . _slot_idx('payload'));
-    my $to = $self->_repr_of($node) // $node->stamp // 'Scalar';
+    my $to = $self->_repr_of($node) // $node->stamp // 'Scalar'; # static type
     return $self->{cache}{ $node->id } = $to =~ /\A(?:Scalar|Slot|Unknown)\z/ ? $s2
         : $self->_emit_coercion($s2, 'Scalar', $to, 'pos()');
 }
@@ -19951,7 +19951,7 @@ sub _store_package_scalar {
     my ($self, $target, $value, $ref) = @_;
     die "GAP: a store to the package variable " . ($target->sigil // '?') . $target->symbol
       . " that is not a scalar is not lowered\n" unless ($target->sigil // '$') eq '$';
-    my $from = $value->operation eq 'Print' ? 'Boolean' : ($value->stamp // '');
+    my $from = $value->operation eq 'Print' ? 'Boolean' : ($value->stamp // ''); # static type
     ($ref, $from) = $self->_miss_kept($value, $ref, $from);
     my $boxed = $from =~ /\A(?:Scalar|Slot)\z/ ? $ref
               : $from eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', 'store to $' . $target->symbol)
@@ -20005,7 +20005,7 @@ sub _lower_entry_write {
         my $ty  = $sg eq '@' ? '%Array' : '%Hash';
         my $src = $sg eq '@' ? $self->_lower_array_ref($value) : $self->_lower_hash_ref($value);
         die "GAP: a package aggregate's contents that are not an aggregate are not lowered\n"
-            unless ( $value->stamp // '' ) eq ( $sg eq '@' ? 'Array' : 'Hash' );
+            unless ( $self->_repr_of($value) // '' ) eq ( $sg eq '@' ? 'Array' : 'Hash' );
         my $dst = $self->_pkg_aggregate_ptr($sg, $pk, $sy);
         my $v   = $self->_fresh;
         $self->_emit("  $v = load $ty, $ty* $src  ; the new contents");
@@ -20116,7 +20116,7 @@ sub _lower_regex_subst {
     # read as one, by its tag. Taken apart as a %Str, lli rejected it.
     my $subj_ref = $self->lower_value($subj_node);
     $subj_ref = $self->_emit_coercion($subj_ref, 'Scalar', 'Str', 's/// subject')
-        if ( $subj_node->stamp // '' ) eq 'Scalar';
+        if ( $subj_node->stamp // '' ) eq 'Scalar'; # static type
     my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($subj_ref);
     my $subj_len  = $subj_len_tracked
         // die "GAP: RegexSubst subject (ref=$subj_ptr) has no tracked length — "
@@ -20334,7 +20334,7 @@ sub _lower_regex_subst_count {
     $self->lower_value($subst);
     my $cnt = $self->{_subst_count}{ $subst->id }
         // die "GAP: the count of an s/// not lowered here is not lowered\n";
-    my $to = $node->stamp // 'Str';
+    my $to = $node->stamp // 'Str'; # static type
     return $self->{cache}{ $node->id } = $cnt if $to eq 'Int';
     die "GAP: an s/// count read as a $to is not lowered\n" unless $to eq 'Str';
     my ($np, $nl) = $self->_str_parts($self->_emit_int_to_str($cnt));
@@ -20402,7 +20402,7 @@ sub _lower_print {
     }
     for my $arg (@args) {
         next unless defined $arg;
-        my $repr = $arg->stamp;
+        my $repr = $arg->stamp; # static type
         my $ref  = $self->_print_arg($arg);
 
         if (defined $repr && $repr eq 'Str') {
@@ -20472,7 +20472,7 @@ sub _lower_print_to_handle {
 sub _print_strs {
     my ($self, @args) = @_;
     return map {
-        my $r = ( $_->stamp // '' );
+        my $r = ( $self->_repr_of($_) // '' );
         die "GAP: Print of a $r arg to a handle -- Print takes Str\n" unless $r eq 'Str';
         $self->_print_arg($_);
     } grep { blessed($_) } @args;
