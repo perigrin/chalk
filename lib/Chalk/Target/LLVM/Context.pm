@@ -10444,7 +10444,7 @@ sub _lower_list_append {
     # the collector); without the name, a Boolean last input still is.
     my $gate_node;
     if (@rest && ( ( $node->can('collector') && ($node->collector // '') eq 'grep' )
-                   || ($rest[-1]->stamp // '') eq 'Boolean' )) {
+                   || ($rest[-1]->stamp // '') eq 'Boolean' )) { # static type
         $gate_node = pop @rest;
     }
 
@@ -10455,7 +10455,7 @@ sub _lower_list_append {
         my $gate = $self->lower_value($gate_node);
         # As lowered: a short-circuit nothing typed is typed by its lowering.
         my $gr   = $gate_node->operation eq 'Print' ? 'Boolean'
-                 : ( ( $gate_node->stamp // '' ) eq 'Unknown' ? $self->_repr_of($gate_node) : undef ) // $gate_node->stamp // '';
+                 : ( ( $gate_node->stamp // '' ) eq 'Unknown' ? $self->_repr_of($gate_node) : undef ) // $gate_node->stamp // ''; # static type
         $gr = 'Scalar' if $gr eq 'Slot';
         $gate = $self->_emit_coercion($gate, $gr, 'Boolean', 'grep test') if $gr ne 'Boolean';
         $self->_set_terminator("  br i1 $gate, label %$body_label, label %$cont_label  ; ListAppend: predicate gate");
@@ -10541,7 +10541,7 @@ sub _emit_append_one {
     $self->_emit("  $slots = load %Slot*, %Slot** $elm_ptr  ; ListAppend: slots (post-grow)");
 
     my $elem_ref  = $self->lower_value($elem_node);
-    my $elem_repr = $elem_node->stamp // '';
+    my $elem_repr = $elem_node->stamp // ''; # static type
 
     # AN ELEMENT THAT IS A SCALAR is its Slot, tag and defined bit as they
     # are -- an undef a map yields stays undef.
@@ -10576,7 +10576,7 @@ sub _emit_append_one {
 sub _emit_array_of {
     my ($self, $inputs) = @_;
     return $self->_emit_flattened_array_of($inputs)
-        if grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @$inputs;
+        if grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @$inputs; # static type
     # A glob in a list is its matches (stamped Unknown either way).
     return $self->_emit_flattened_array_of($inputs)
         if grep { blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
@@ -10602,7 +10602,7 @@ sub _emit_array_of {
     # INTS AMONG STRS ARE STORED AS STRS, for the same reason: stringifying
     # an integer is exact, and `(1, "x")` read the 1 as a string pointer.
     # A Num among Strs is not -- its 15 digits are not the number.
-    my %numeric = map { ( $_->stamp // '' ) => 1 } grep { blessed($_) } @$inputs;
+    my %numeric = map { ( $_->stamp // '' ) => 1 } grep { blessed($_) } @$inputs; # static type
     die "GAP: an array literal of Num and Str elements is not lowered -- read "
       . "as Str, its Nums would lose digits\n" if $numeric{Num} && $numeric{Str};
     my $as_num  = $numeric{Num} && $numeric{Int};
@@ -10619,7 +10619,7 @@ sub _emit_array_of {
         $self->_emit("  $slot_def = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_def  ; ArrayRef: slot[$i] defined ptr");
         $self->_emit("  $slot_tag = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_tag  ; ArrayRef: slot[$i] tag ptr");
         $self->_emit("  $slot_pay = getelementptr inbounds %Slot, %Slot* $slots, i64 $i, i32 $gi_pay  ; ArrayRef: slot[$i] payload ptr");
-        my $elem_repr = $inputs->[$i]->stamp // '';
+        my $elem_repr = $inputs->[$i]->stamp // ''; # static type
         # NOTHING TYPED, it is what it was lowered as (an argument the caller typed).
         if ($elem_repr eq 'Unknown') {
             $elem_repr = $self->_repr_of($inputs->[$i]) // 'Unknown';
@@ -10698,7 +10698,7 @@ sub _lower_array_ref {
     # Fixing it in _container_ptr instead -- by unboxing for `Array` too --
     # was WRONG and broke the five genuine-reference cases in
     # llvm-array-hash.t, which have nothing to unbox.
-    my $repr = $node->stamp // 'ArrayRef';
+    my $repr = $node->stamp // 'ArrayRef'; # static type
     if ($repr eq 'Array') {
         $self->{cache}{ $node->id } = $arr;
         return $arr;
@@ -10724,7 +10724,7 @@ sub _lower_hash_from_pairs {
     $self->_emit("  $hash = bitcast i8* $hb to %Hash*");
     $self->_emit("  store %Hash zeroinitializer, %Hash* $hash  ; empty: no entries, grown on insert");
     my $undef_tag = _slot_tag_value('Undef');
-    if (!grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Hash|Array|List)\z/ } @in) {
+    if (!grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Hash|Array|List)\z/ } @in) { # static type
         for (my $i = 0; $i < @in; $i += 2) {
             my ($kp, $kl) = $self->_str_parts($self->_hash_key_str($in[$i]));
             my @v = $i + 1 < @in
@@ -10769,7 +10769,7 @@ sub _lower_hash_from_pairs {
         $self->_set_terminator("  br label %$head");
         $self->_new_block($done);
     }
-    return $self->{cache}{ $node->id } = $hash if ( $node->stamp // 'HashRef' ) eq 'Hash';
+    return $self->{cache}{ $node->id } = $hash if ( $node->stamp // 'HashRef' ) eq 'Hash'; # static type
     my $ref = $self->_fresh;
     $self->_emit("  $ref = bitcast %Hash* $hash to i8*  ; hash from pairs, as a reference");
     return $self->{cache}{ $node->id } = $ref;
@@ -10788,10 +10788,10 @@ sub _lower_hash_ref {
     my $inputs = $node->inputs;
     # A HASH SPREAD IN IT (`{ %a }`) is a copy of that hash. Counted as pairs,
     # `{ %a }` was half a pair.
-    my $flattens = grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Hash|Array|List)\z/ } @$inputs;
-    if ($flattens && @$inputs == 1 && ( $inputs->[0]->stamp // '' ) eq 'Hash') {
+    my $flattens = grep { blessed($_) && ( $_->stamp // '' ) =~ /\A(?:Hash|Array|List)\z/ } @$inputs; # static type
+    if ($flattens && @$inputs == 1 && ( $inputs->[0]->stamp // '' ) eq 'Hash') { # static type
         my $copy = $self->_emit_aggregate_copy($self->_container_ptr($inputs->[0], 'Hash'), 'Hash');
-        return $self->{cache}{ $node->id } = $copy if ( $node->stamp // '' ) eq 'Hash';
+        return $self->{cache}{ $node->id } = $copy if ( $node->stamp // '' ) eq 'Hash'; # static type
         my $ref = $self->_fresh;
         $self->_emit("  $ref = bitcast %Hash* $copy to i8*  ; { %h }: a copy, as a reference");
         return $self->{cache}{ $node->id } = $ref;
@@ -10874,7 +10874,7 @@ sub _lower_hash_ref {
     # BOX ONLY WHEN THE NODE IS A REF -- the twin of the %Array case above.
     # A `HashRef` OPERATION spells both `{a=>1}` (repr=HashRef, boxed i8*) and
     # a plain lexical `my %h = (...)` (repr=Hash, an unboxed %Hash*).
-    my $hrepr = $node->stamp // 'HashRef';
+    my $hrepr = $node->stamp // 'HashRef'; # static type
     if ($hrepr eq 'Hash') {
         $self->{cache}{ $node->id } = $hash;
         return $hash;
@@ -11067,7 +11067,7 @@ sub _lower_local_alias {
     # fresh scalar holding it, as perl's does.
     my $in  = $node->inputs->[0];
     my $ptr;
-    if (($in->stamp // '') =~ /\A(?:ScalarRef|Scalar|Slot)\z/) {
+    if (($self->_repr_of($in) // '') =~ /\A(?:ScalarRef|Scalar|Slot)\z/) {
         $ptr = $self->_scalar_ref_target($in);
     }
     else {
@@ -11136,7 +11136,7 @@ sub _lower_case_map {
     my ($self, $node) = @_;
     my ($in) = grep { blessed($_) } $node->inputs->@*;
     die "GAP: " . $node->name . " with no operand (\$_) is not lowered\n" unless $in;
-    my $from = $in->operation eq 'Print' ? 'Boolean' : ($self->_repr_of($in) // $in->stamp // '');
+    my $from = $in->operation eq 'Print' ? 'Boolean' : ($self->_repr_of($in) // $in->stamp // ''); # static type
     my $ref  = $self->lower_value($in);
     $from = 'Scalar' if $from eq 'Slot';
     $ref  = $self->_emit_coercion($ref, $from, 'Str', $node->name . ' operand') unless $from eq 'Str';
@@ -11217,7 +11217,7 @@ sub _lower_substr {
     die "GAP: substr with " . scalar(@in) . " arguments (a replacement) is not lowered\n"
         unless @in == 2 || @in == 3;
     my $s    = $in[0];
-    my $from = $self->_repr_of($s) // $s->stamp // '';
+    my $from = $self->_repr_of($s) // $s->stamp // ''; # static type
     $from = 'Scalar' if $from eq 'Slot';
     my $ref  = $self->lower_value($s);
     $ref = $self->_emit_coercion($ref, $from, 'Str', 'substr string') unless $from eq 'Str';
@@ -11240,14 +11240,14 @@ sub _lower_substr {
 # becomes what is before it, the replacement, and what is after it (pvm 338).
 sub _lower_substr_replace {
     my ($self, $node, $var, $offn, $lenn, $repn) = @_;
-    my $from = $self->_repr_of($var) // $var->stamp // '';
+    my $from = $self->_repr_of($var) // $var->stamp // ''; # static type
     $from = 'Scalar' if $from eq 'Slot' || $from eq 'Unknown';
     my $ref = $self->lower_value($var);
     $ref = $self->_emit_coercion($ref, $from, 'Str', 'substr string') unless $from eq 'Str';
     my ($p, $l) = $self->_str_parts($ref);
     my $off = $self->_index_i64($offn);
     my $len = $self->_index_i64($lenn);
-    my $rfrom = $self->_repr_of($repn) // $repn->stamp // '';
+    my $rfrom = $self->_repr_of($repn) // $repn->stamp // ''; # static type
     my $rep = $self->lower_value($repn);
     $rep = $self->_emit_coercion($rep, $rfrom, 'Str', 'substr replacement') unless $rfrom eq 'Str';
     $self->{$_} = 1 for qw(_need_substr_helper _need_malloc_memcpy _need_exit _need_str_type);
@@ -11267,7 +11267,7 @@ sub _lower_substr_replace {
     my $boxed = $self->_emit_coercion($new, 'Str', 'Scalar', 'substr: the new string');
     $self->_emit("  store %Slot $boxed, %Slot* " . $self->_location_ptr($var) . "  ; substr: " . $var->name . " replaced in place");
     my $part = $self->_set_str_len($out, $n);
-    my $to = $node->stamp // 'Str';
+    my $to = $node->stamp // 'Str'; # static type
     return $self->{cache}{ $node->id } = $to eq 'Str' ? $part : $self->_emit_coercion($part, 'Str', $to, 'substr');
 }
 
@@ -11409,7 +11409,7 @@ sub _emit_flattened_array_of {
     $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy _need_aggregate_types);
     my $acc = $self->_emit_array_of([]);
     for my $in (@$inputs) {
-        my $s = $in->stamp // '';
+        my $s = $in->stamp // ''; # static type
         # A merge of lists was lowered as the chosen array.
         if (( $self->{cache}{ 'repr:' . $in->id } // '' ) eq 'Array' && exists $self->{cache}{ $in->id }) {
             $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $self->{cache}{ $in->id })  ; list: the chosen list");
@@ -11481,7 +11481,7 @@ sub _emit_flattened_array_of {
         # A RANGE OF STRINGS counts by perl's magic increment (pvm 372).
         my $is_string = sub ($b) {
             $b = $b->inputs->[0] while $b->operation eq 'Coerce';
-            ( $b->stamp // '' ) eq 'Str' ? $b : undef;
+            ( $b->stamp // '' ) eq 'Str' ? $b : undef; # static type
         };
         if ($in->operation eq 'Range'
                 && !grep { !$is_string->($_) } $in->inputs->@[0, 1]) {
@@ -11662,7 +11662,7 @@ sub _handle_cell {
         };
     }
     die "GAP: a filehandle that is not a lexical `my \$fh` is not lowered\n"
-        unless blessed($fh) && $fh->operation eq 'PadAccess' && ( $fh->stamp // '' ) eq 'GlobRef';
+        unless blessed($fh) && $fh->operation eq 'PadAccess' && ( $fh->stamp // '' ) eq 'GlobRef'; # static type
     # ONE PER SUB: inlined subs share this function, and each sub's `my $fh`
     # is its own. The subs being inlined name the one this is (recursion is
     # refused, so the set is the stack).
@@ -11761,7 +11761,7 @@ sub _lower_handle_op {
         return $r;
     }
     # readline in a list: every line left, as an array.
-    if (( $node->stamp // '' ) =~ /\A(?:List|Array)\z/) {
+    if (( $node->stamp // '' ) =~ /\A(?:List|Array)\z/) { # static type
         $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy _need_aggregate_types);
         my $acc = $self->_emit_array_of([]);
         $self->_emit_lines_left_into($acc, $cell);
@@ -11769,7 +11769,7 @@ sub _lower_handle_op {
     }
     # In scalar context: the next line, or undef.
     die "GAP: readline whose result is a " . ( $node->stamp // 'Unknown' ) . " is not lowered\n"
-        unless ( $node->stamp // '' ) eq 'Scalar';
+        unless ( $node->stamp // '' ) eq 'Scalar'; # static type
     my ($slot) = $self->_emit_next_line($h);
     return $self->{cache}{ $node->id } = $slot;
 }
@@ -11845,13 +11845,13 @@ sub _lower_reverse {
     pop @in if $node->can('memory_input') && $node->memory_input;
     # None in a list is an empty list; none in scalar context reverses $_.
     die "GAP: scalar reverse with no arguments (of \$_) is not lowered\n"
-        unless @in || ( $node->stamp // '' ) ne 'Str';
+        unless @in || ( $node->stamp // '' ) ne 'Str'; # static type
     $self->{$_} = 1 for qw(_need_array_append _need_malloc_memcpy _need_aggregate_types);
     my $src = $self->_emit_flattened_array_of(\@in);
     my ($lp, $len, $ep, $el) = map { $self->_fresh } 1 .. 4;
     $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $src, i32 0, i32 0  ; reverse: len ptr");
     $self->_emit("  $len = load i64, i64* $lp");
-    if (( $node->stamp // '' ) eq 'Str') {
+    if (( $node->stamp // '' ) eq 'Str') { # static type
         my $str = $self->_emit_join_loop(undef, $self->_empty_str_ref('reverse: no separator'), $src);
         my ($p, $l) = $self->_str_parts($str);
         my ($buf, $nul, $i, $more, $j, $from_p, $c, $hi, $to_p, $i1) = map { $self->_fresh } 1 .. 10;
@@ -11889,7 +11889,7 @@ sub _lower_reverse {
         return $self->{cache}{ $node->id } = $self->_set_str_len($buf, $l);
     }
     die "GAP: reverse whose result is a " . ( $node->stamp // 'Unknown' ) . " is not lowered\n"
-        unless ( $node->stamp // '' ) =~ /\A(?:List|Array)\z/;
+        unless ( $node->stamp // '' ) =~ /\A(?:List|Array)\z/; # static type
     $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $src, i32 0, i32 2");
     $self->_emit("  $el = load %Slot*, %Slot** $ep  ; reverse: the elements");
     my $acc = $self->_emit_array_of([]);
@@ -11924,7 +11924,7 @@ sub _lower_sprintf {
     die "GAP: sprintf whose format is not a constant string is not lowered\n"
         unless blessed($fmt) && $fmt->operation eq 'Constant' && ( $fmt->const_type // '' ) eq 'string';
     die "GAP: sprintf of a list that flattens is not lowered\n"
-        if grep { ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @args;
+        if grep { ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @args; # static type
     my $text = $fmt->value // '';
     $self->{$_} = 1 for qw(_need_snprintf _need_malloc_memcpy);
     my $acc = $self->_empty_str_ref('sprintf: so far');
@@ -11938,7 +11938,7 @@ sub _lower_sprintf {
         return shift @args;
     };
     my $as = sub ($arg, $to) {
-        my $from = $arg->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($arg) // $arg->stamp // '' );
+        my $from = $arg->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($arg) // $arg->stamp // '' ); # static type
         my $v = $self->lower_value($arg);
         return $from eq $to ? $v : $self->_emit_coercion($v, $from, $to, "sprintf %-arg");
     };
@@ -12063,7 +12063,7 @@ sub _lower_formline {
             my $spec = $1 // '';
             my $w = 1 + length $spec;
             my $arg = $take->();
-            my $from = $arg->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($arg) // $arg->stamp // '' );
+            my $from = $arg->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($arg) // $arg->stamp // '' ); # static type
             if ($spec =~ /#/) {
                 my $d = $spec =~ /\.(#+)\z/ ? length $1 : 0;
                 die "GAP: a number field over a $from value, which may be undef, is not lowered\n"
@@ -12139,7 +12139,7 @@ sub _lower_split {
     my ($self, $node) = @_;
     my ($pat, $str, $lim) = grep { blessed($_) } $node->inputs->@*;
     die "GAP: split whose result is a " . ( $node->stamp // 'Unknown' ) . " (scalar context) is not lowered\n"
-        unless ( $node->stamp // '' ) =~ /\A(?:List|Array)\z/;
+        unless ( $node->stamp // '' ) =~ /\A(?:List|Array)\z/; # static type
     die "GAP: split with no string (of \$_) is not lowered\n" unless blessed($str);
     die "GAP: split with a limit is not lowered\n"
         if blessed($lim) && !( $lim->operation eq 'Constant' && ( $lim->value // '' ) eq '0' );
@@ -12152,7 +12152,7 @@ sub _lower_split {
              : ( $pat->const_type // '' ) eq 'regex' && $pv eq ''  ? 'chars'
              : ( $pat->const_type // '' ) eq 'regex' && $pv !~ /[\\^\$.|?*+()\[\]{}]/ ? 'literal'
              : die "GAP: split by the regex /$pv/ is not lowered -- only a literal separator, \" \" or //\n";
-    my $from = $self->_repr_of($str) // $str->stamp // '';
+    my $from = $self->_repr_of($str) // $str->stamp // ''; # static type
     my $sv = $self->lower_value($str);
     $sv = $self->_emit_coercion($sv, $from, 'Str', 'split: the string') if $from ne 'Str';
     my ($sp, $sl) = $self->_str_parts($sv);
@@ -12281,7 +12281,7 @@ sub _lower_split {
 sub _is_walked_list ($n, $self = undef) {
     return 1 if _is_array_slice($n);
     return blessed($n) && $n->operation eq 'Range'
-        && !grep { !blessed($_) || ( ( $self ? $self->_repr_of($_) : $_->stamp ) // '' ) !~ /\A(?:Int|Undef)\z/ } $n->inputs->@[0, 1];   # an undef bound is 0
+        && !grep { !blessed($_) || ( ( $self ? $self->_repr_of($_) : $_->stamp ) // '' ) !~ /\A(?:Int|Undef)\z/ } $n->inputs->@[0, 1];   # an undef bound is 0 # static type
 }
 
 sub _is_hash_slice ($n) {
@@ -12297,7 +12297,7 @@ sub _emit_hash_slice_into {
     my @keys = grep { blessed($_) } $slice->inputs->@*;
     my $src  = pop @keys;
     die "GAP: a hash slice whose keys are a list (\@h{\@k}) is not lowered\n"
-        if grep { ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @keys;
+        if grep { ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ } @keys; # static type
     my $hash = $self->_container_ptr($src, 'Hash');
     for my $k (@keys) {
         my $slot = $self->_emit_hash_slot_of($hash, $k);
@@ -12481,7 +12481,7 @@ sub _lower_blessed {
     my $s = $self->_emit_coercion($self->_set_str_len($np, $nl), 'Str', 'Scalar', 'blessed(): the class');
     my $r = $self->_fresh;
     $self->_emit("  $r = select i1 $is, %Slot $s, %Slot $undef  ; blessed()");
-    my $to = $self->_repr_of($node) // $node->stamp // 'Scalar';
+    my $to = $self->_repr_of($node) // $node->stamp // 'Scalar'; # static type
     return $self->{cache}{ $node->id } = $to =~ /\A(?:Scalar|Slot|Unknown)\z/ ? $r
         : $self->_emit_coercion($r, 'Scalar', $to, 'blessed()');
 }
@@ -12496,7 +12496,7 @@ sub _lower_chomp {
     die "GAP: the value of chop (the character it took) is not lowered\n"
         if $node->operation eq 'ChompValue' && $kind ne 'chomp';
     my ($in) = grep { blessed($_) } $node->inputs->@*;
-    my $from = $self->_repr_of($in) // $in->stamp // '';
+    my $from = $self->_repr_of($in) // $in->stamp // ''; # static type
     my $v = $self->lower_value($in);
     $v = $self->_emit_coercion($v, $from, 'Str', "$kind: the string") if $from ne 'Str';
     my ($p, $l) = $self->_str_parts($v);
@@ -12511,7 +12511,7 @@ sub _lower_chomp {
     else                    { $self->_emit("  $take = and i1 $nz, true  ; chop: a character at the end?") }
     if ($node->operation eq 'ChompValue') {
         $self->_emit("  $n = zext i1 $take to i64  ; chomp: how many it took");
-        my $to = $node->stamp // 'Int';
+        my $to = $node->stamp // 'Int'; # static type
         return $self->{cache}{ $node->id } = $to eq 'Int' ? $n : $self->_emit_coercion($n, 'Int', $to, 'chomp');
     }
     $self->_emit("  $nl2 = select i1 $take, i64 $lm1, i64 $l  ; $kind: the new length");
@@ -12571,20 +12571,20 @@ sub _lower_index {
     pop @in if $node->can('memory_input') && $node->memory_input;
     die "GAP: index with " . scalar(@in) . " arguments is not lowered\n" unless @in == 2 || @in == 3;
     my @str = map {
-        my $from = $self->_repr_of($_) // $_->stamp // '';
+        my $from = $self->_repr_of($_) // $_->stamp // ''; # static type
         my $v = $self->lower_value($_);
         [ $self->_str_parts($from eq 'Str' ? $v : $self->_emit_coercion($v, $from, 'Str', 'index: a string')) ];
     } @in[0, 1];
     my $pos = '0';
     if (@in == 3) {
-        my $from = $self->_repr_of($in[2]) // $in[2]->stamp // '';
+        my $from = $self->_repr_of($in[2]) // $in[2]->stamp // ''; # static type
         my $v = $self->lower_value($in[2]);
         $pos = $from eq 'Int' ? $v : $self->_emit_coercion($v, $from, 'Int', 'index: the position');
     }
     $self->{$_} = 1 for qw(_need_index _need_memcmp);
     my $r = $self->_fresh;
     $self->_emit("  $r = call i64 \@chalk_index(i8* $str[0][0], i64 $str[0][1], i8* $str[1][0], i64 $str[1][1], i64 $pos)  ; index");
-    my $to = $node->stamp // 'Int';
+    my $to = $node->stamp // 'Int'; # static type
     return $self->{cache}{ $node->id } = $to eq 'Int' ? $r : $self->_emit_coercion($r, 'Int', $to, 'index');
 }
 
@@ -12594,7 +12594,7 @@ sub _lower_index {
 sub _lower_chr {
     my ($self, $node) = @_;
     my ($in) = grep { blessed($_) } $node->inputs->@*;
-    my $from = $self->_repr_of($in) // $in->stamp // '';
+    my $from = $self->_repr_of($in) // $in->stamp // ''; # static type
     my $v = $self->lower_value($in);
     $v = $self->_emit_coercion($v, $from, 'Int', 'chr: the code') if $from ne 'Int';
     $self->{$_} = 1 for qw(_need_exit _need_malloc_memcpy);
@@ -12619,7 +12619,7 @@ sub _lower_chr {
 sub _lower_ord {
     my ($self, $node) = @_;
     my ($in) = grep { blessed($_) } $node->inputs->@*;
-    my $from = $self->_repr_of($in) // $in->stamp // '';
+    my $from = $self->_repr_of($in) // $in->stamp // ''; # static type
     my $v = $self->lower_value($in);
     $v = $self->_emit_coercion($v, $from, 'Str', 'ord: the string') if $from ne 'Str';
     my ($p, $l) = $self->_str_parts($v);
@@ -12634,7 +12634,7 @@ sub _lower_ord {
     $self->_set_terminator("  br label %$join");
     $self->_new_block($join);
     $self->_emit("  $r = phi i64 [ 0, %$from_lbl ], [ $z, %$rd ]  ; ord");
-    my $to = $node->stamp // 'Int';
+    my $to = $node->stamp // 'Int'; # static type
     return $self->{cache}{ $node->id } = $to eq 'Int' ? $r : $self->_emit_coercion($r, 'Int', $to, 'ord');
 }
 
@@ -12661,7 +12661,7 @@ sub _lower_localtime {
     $self->_emit("  store i64 $t, i64* $tp");
     $self->_emit("  $tmp = bitcast [16 x i32]* $tm to i8*");
     $self->_emit("  $u = call i8* \@localtime_r(i64* $tp, i8* $tmp)");
-    my $to = $node->stamp // '';
+    my $to = $node->stamp // ''; # static type
     if ($to eq 'List' || $to eq 'Array') {
         my $acc = $self->_emit_array_of([]);
         for my $i (0 .. 8) {
@@ -12730,7 +12730,7 @@ sub _lower_glob {
     # producer stamps glob Unknown in both contexts; in scalar context it is
     # an iterator, refused.
     die "GAP: glob in scalar context (an iterator) is not lowered\n"
-        if ( $node->stamp // '' ) =~ /\A(?:Scalar|Str|Int|Boolean)\z/
+        if ( $node->stamp // '' ) =~ /\A(?:Scalar|Str|Int|Boolean)\z/ # static type
         || grep { blessed($_) && $_->operation ne 'ArrayLiteral' } ($node->consumers // [])->@*;
     my @in = grep { blessed($_) } $node->inputs->@*;
     pop @in if $node->can('memory_input') && $node->memory_input;
@@ -12774,7 +12774,7 @@ sub _lower_glob {
 sub _lower_unpack {
     my ($self, $node) = @_;
     die "GAP: unpack in scalar context is not lowered\n"
-        if ( $node->stamp // '' ) =~ /\A(?:Scalar|Str|Int|Num|Boolean)\z/
+        if ( $node->stamp // '' ) =~ /\A(?:Scalar|Str|Int|Num|Boolean)\z/ # static type
         || grep { blessed($_) && !( $_->operation eq 'ArrayLiteral'
                     || ( $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
                          && ( $_->name // '' ) eq 'join' )
@@ -13443,7 +13443,7 @@ END_HELPER
 sub _lower_increment {
     my ($self, $node) = @_;
     my $in   = $node->inputs->[0];
-    my $from = $in->operation eq 'Print' ? 'Boolean' : ($in->stamp // '');
+    my $from = $in->operation eq 'Print' ? 'Boolean' : ($in->stamp // ''); # static type
     my $ref  = $self->lower_value($in);
     my $slot = $from =~ /\A(?:Scalar|Slot)\z/ ? $ref
              : $from eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', '++ operand')
@@ -13454,7 +13454,7 @@ sub _lower_increment {
                            _need_exit _need_str_type _need_str_to_num_helper);
     my $r = $self->_fresh;
     $self->_emit("  $r = call %Slot \@chalk_slot_inc(%Slot $slot)  ; ++");
-    my $to = $node->stamp // 'Scalar';
+    my $to = $node->stamp // 'Scalar'; # static type
     return $self->{cache}{ $node->id } = $to =~ /\A(?:Scalar|Slot|Unknown)\z/ ? $r
         : $self->_emit_coercion($r, 'Scalar', $to, '++ result');
 }
@@ -14253,7 +14253,7 @@ sub _lower_can_as_truth {
     my $res = $self->_fresh;
     $self->_emit("  $res = phi i1 " . join(', ', @in) . "  ; can: has it");
     $self->{cache}{ 'repr:' . $node->id } = 'Boolean';
-    $node->set_stamp('Boolean') if ( $node->stamp // 'Unknown' ) eq 'Unknown';
+    $node->set_stamp('Boolean') if ( $node->stamp // 'Unknown' ) eq 'Unknown'; # static type
     return $self->{cache}{ $node->id } = $res;
 }
 
@@ -14449,8 +14449,8 @@ sub _arg_binding {
               && ( $arg->shared || $arg->is_location ) ? $self->_location_ptr($arg) : undef;
     # NOTHING TYPED, it is passed as it was lowered (`$j + 1` of a loop phi
     # nothing typed is an Int or a Num, _lower_binop_int's choice).
-    my $as = ( $arg->stamp // 'Unknown' ) eq 'Unknown' && $rep ne '' && $rep ne 'Unknown'
-        ? ( $rep eq 'Slot' ? 'Scalar' : $rep ) : $arg->stamp;
+    my $as = ( $arg->stamp // 'Unknown' ) eq 'Unknown' && $rep ne '' && $rep ne 'Unknown' # static type
+        ? ( $rep eq 'Slot' ? 'Scalar' : $rep ) : $arg->stamp; # static type
     return { ref => $ref, repr => $as, node => $arg, loc => $loc };
 }
 
@@ -14808,7 +14808,7 @@ sub _lower_array_read {
 # The seed is a FALLBACK, never an override: a committed repr survives, since
 # `Array` and `ArrayRef` take different container-pointer paths.
 sub _seed_container_repr ($array) {
-    my $repr = $array->stamp;
+    my $repr = $array->stamp; # static type
     return if defined $repr && $repr ne 'Unknown';
     return unless $array->operation eq 'ArrayLiteral';
     $array->set_stamp('ArrayRef');
@@ -14904,7 +14904,7 @@ sub _lower_builtin_sort {
             && grep { blessed($_) && $_->operation eq 'Unwind' }
                     Chalk::IR::Analysis::_all_graph_nodes($custom->graph);
 
-    my $op_repr = $operand isa Chalk::IR::Node ? ($operand->stamp // '') : '';
+    my $op_repr = $operand isa Chalk::IR::Node ? ($operand->stamp // '') : ''; # static type
 
     # TWO OPERAND SHAPES REACH HERE, and the difference is perl's, not ours.
     # `sort keys %h` passes ONE aggregate (the keys Call, stamped List and
