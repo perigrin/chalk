@@ -2066,6 +2066,10 @@ sub lower_value {
             && defined $node->name && $node->name =~ /\A(?:keys|values)\z/) {
         return $self->_lower_builtin_keys($node);
     }
+    elsif ($op eq 'Call' && $node->can('dispatch_kind') && ($node->dispatch_kind // '') eq 'builtin'
+            && ( $node->name // '' ) eq 'each') {
+        return $self->_lower_builtin_each($node);
+    }
     # Call(builtin, join): the separator plus the list's elements, in order.
     # Lowerable only when the list argument's ARITY IS STATIC -- see
     # _lower_builtin_join, which refuses otherwise rather than guessing a count.
@@ -10604,7 +10608,7 @@ sub _emit_array_of {
     # A glob in a list is its matches (stamped Unknown either way).
     return $self->_emit_flattened_array_of($inputs)
         if grep { blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
-                  && ( $_->name // '' ) =~ /\A(?:glob|unpack)\z/ } @$inputs;
+                  && ( $_->name // '' ) =~ /\A(?:glob|unpack|each)\z/ } @$inputs;
     return $self->_emit_flattened_array_of($inputs)
         if grep { _returns_nothing_in_a_list($_) } @$inputs;
 
@@ -15436,6 +15440,127 @@ sub _slot_field_ptr {
     return $p;
 }
 
+# _each_cell($hash) -> the i64* holding where `each` is in a named hash
+# variable that some `each` in the program walks, or undef for any other.
+# One per variable, made at entry (0, the start), as a pos() cell is.
+sub _each_cell {
+    my ($self, $h) = @_;
+    return undef unless blessed($h) && $h->operation eq 'HashLiteral' && defined $h->symbol;
+    my $name = $h->symbol;
+    my $walked = $self->{_each_walked}{$name} //= scalar grep {
+        $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'each'
+            && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'HashLiteral'
+            && ( $_->inputs->[0]->symbol // '' ) eq $name
+    } @PROGRAM, values %{ $self->{_each_seen} // {} };
+    return undef unless $walked;
+    my $key = join(',', sort keys %{ $self->{_inlining} // {} }) . "|%$name";
+    return $self->{_each_cells}{$key} //= do {
+        my $c = $self->_fresh;
+        $self->_emit_entry("  $c = alloca i64  ; each %$name: where it is");
+        $self->_emit_entry("  store i64 0, i64* $c  ; each %$name: the start");
+        $c;
+    };
+}
+
+# _lower_builtin_each($node) -> one entry of a hash per call: in list context
+# an %Array of (key, value), in scalar context the key -- then, past the
+# last, the empty list (undef) once, and the iterator is back at the start.
+# Entries in insertion order, as keys gives them (_lower_builtin_keys says
+# why perl's own order is not reproduced).
+sub _lower_builtin_each {
+    my ($self, $node) = @_;
+    my ($h) = $node->inputs->@*;
+    $self->{_each_seen}{ refaddr($node) } = $node;
+    die "GAP: each of what is not a named hash variable is not lowered -- its iterator "
+      . "belongs to the hash it names\n" unless defined( my $cell = $self->_each_cell($h) );
+    # keys AND values RESET IT, so each must know where they run. B::SoN leaves
+    # them off the control chain (pure), and an unordered reset is not lowered.
+    die "GAP: each over a hash whose keys or values is not ordered among its calls (it resets "
+      . "the iterator) is not lowered\n"
+        if grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
+                  && ( $_->name // '' ) =~ /\A(?:keys|values)\z/ && !( $_->can('control_in') && $_->control_in )
+                  && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->operation // '' ) eq 'HashLiteral'
+                  && ( $_->inputs->[0]->symbol // '' ) eq $h->symbol } @PROGRAM;
+    $self->{_need_aggregate_types} = 1;
+    $self->{_need_malloc_memcpy}   = 1;
+    my $hash = $self->_container_ptr($h, 'Hash');
+    my $list = ( $node->want // '' ) eq 'list';
+    my ($cp, $cnt, $ep, $entries, $i, $more) = map { $self->_fresh } 1 .. 6;
+    $self->_emit("  $cp = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 0  ; each: count ptr");
+    $self->_emit("  $cnt = load i64, i64* $cp  ; each: count");
+    $self->_emit("  $ep = getelementptr inbounds %Hash, %Hash* $hash, i32 0, i32 2  ; each: entries ptr");
+    $self->_emit("  $entries = load %HashEntry*, %HashEntry** $ep  ; each: entries");
+    $self->_emit("  $i = load i64, i64* $cell  ; each: where it is");
+    $self->_emit("  $more = icmp slt i64 $i, $cnt  ; each: an entry left?");
+    my ($have, $none, $join) = map { $self->_fresh_label("each_$_") } qw(have none join);
+    $self->_set_terminator("  br i1 $more, label %$have, label %$none");
+
+    $self->_new_block($have);
+    my ($e, $kpp, $klp, $kp, $kl, $i1) = map { $self->_fresh } 1 .. 6;
+    $self->_emit("  $e = getelementptr inbounds %HashEntry, %HashEntry* $entries, i64 $i  ; each: entry[i]");
+    $self->_emit("  $kpp = getelementptr inbounds %HashEntry, %HashEntry* $e, i32 0, i32 " . _he_idx('key_ptr'));
+    $self->_emit("  $klp = getelementptr inbounds %HashEntry, %HashEntry* $e, i32 0, i32 " . _he_idx('key_len'));
+    $self->_emit("  $kp = load i8*, i8** $kpp  ; each: key ptr");
+    $self->_emit("  $kl = load i64, i64* $klp  ; each: key len");
+    my $kpay = $self->_box_payload($self->_set_str_len($kp, $kl), 'Str', 'each: key');
+    my ($k0, $k1, $key) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  $k0 = insertvalue %Slot zeroinitializer, i1 true, " . _slot_idx('defined') . "  ; each: the key");
+    $self->_emit("  $k1 = insertvalue %Slot $k0, i8 " . _slot_tag_value('Str') . ", " . _slot_idx('tag'));
+    $self->_emit("  $key = insertvalue %Slot $k1, i64 $kpay, " . _slot_idx('payload'));
+    $self->_emit("  $i1 = add i64 $i, 1");
+    $self->_emit("  store i64 $i1, i64* $cell  ; each: on to the next");
+    my $val;
+    if ($list) {
+        my ($vdp, $vtp, $vpp, $vd, $vt, $vp, $v0, $v1) = map { $self->_fresh } 1 .. 8;
+        $self->_emit("  $vdp = getelementptr inbounds %HashEntry, %HashEntry* $e, i32 0, i32 " . _he_idx('val_def'));
+        $self->_emit("  $vtp = getelementptr inbounds %HashEntry, %HashEntry* $e, i32 0, i32 " . _he_idx('val_tag'));
+        $self->_emit("  $vpp = getelementptr inbounds %HashEntry, %HashEntry* $e, i32 0, i32 " . _he_idx('val_pay'));
+        $self->_emit("  $vd = load i1, i1* $vdp  ; each: value defined");
+        $self->_emit("  $vt = load i8, i8* $vtp  ; each: value tag");
+        $self->_emit("  $vp = load i64, i64* $vpp  ; each: value payload");
+        $self->_emit("  $v0 = insertvalue %Slot zeroinitializer, i1 $vd, " . _slot_idx('defined') . "  ; each: the value");
+        $self->_emit("  $v1 = insertvalue %Slot $v0, i8 $vt, " . _slot_idx('tag'));
+        $val = $self->_fresh;
+        $self->_emit("  $val = insertvalue %Slot $v1, i64 $vp, " . _slot_idx('payload'));
+    }
+    my $have_end = $self->_current_block_label;
+    $self->_set_terminator("  br label %$join");
+
+    $self->_new_block($none);
+    $self->_emit("  store i64 0, i64* $cell  ; each: past the last -- back to the start");
+    $self->_set_terminator("  br label %$join");
+
+    $self->_new_block($join);
+    if (!$list) {
+        my $r = $self->_fresh;
+        $self->_emit("  $r = phi %Slot [ $key, %$have_end ], [ zeroinitializer, %$none ]  ; each: the key, or undef");
+        $self->{cache}{ 'repr:' . $node->id } = 'Scalar';
+        return $self->{cache}{ $node->id } = $r;
+    }
+    my ($n, $kslot, $vslot) = map { $self->_fresh } 1 .. 3;
+    $self->_emit("  $n = phi i64 [ 2, %$have_end ], [ 0, %$none ]  ; each: (key, value) or ()");
+    $self->_emit("  $kslot = phi %Slot [ $key, %$have_end ], [ zeroinitializer, %$none ]");
+    $self->_emit("  $vslot = phi %Slot [ $val, %$have_end ], [ zeroinitializer, %$none ]");
+    # An %Array of two slots, $n of them in use: (key, value), or ().
+    my ($buf, $slots, $s0, $s1, $raw, $arr, $lp, $capp, $dp) = map { $self->_fresh } 1 .. 9;
+    $self->_emit("  $buf = call i8* \@malloc(i64 " . _sizeof_times('%Slot', 2) . ")  ; each: two slots");
+    $self->_emit("  $slots = bitcast i8* $buf to %Slot*");
+    $self->_emit("  $s0 = getelementptr inbounds %Slot, %Slot* $slots, i64 0");
+    $self->_emit("  store %Slot $kslot, %Slot* $s0  ; each: the key");
+    $self->_emit("  $s1 = getelementptr inbounds %Slot, %Slot* $slots, i64 1");
+    $self->_emit("  store %Slot $vslot, %Slot* $s1  ; each: the value");
+    $self->_emit("  $raw = call i8* \@malloc(i64 " . _sizeof_llvm_type('%Array') . ")  ; each: %Array header");
+    $self->_emit("  $arr = bitcast i8* $raw to %Array*");
+    $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 0");
+    $self->_emit("  store i64 $n, i64* $lp  ; each: len 2 or 0");
+    $self->_emit("  $capp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 1");
+    $self->_emit("  store i64 2, i64* $capp");
+    $self->_emit("  $dp = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2");
+    $self->_emit("  store %Slot* $slots, %Slot** $dp");
+    $self->{cache}{ 'repr:' . $node->id } = 'Array';
+    return $self->{cache}{ $node->id } = $arr;
+}
+
 sub _lower_builtin_keys {
     my ($self, $node) = @_;
     $self->{_need_aggregate_types} = 1;
@@ -15450,6 +15575,12 @@ sub _lower_builtin_keys {
         unless $op_repr eq 'Hash' || $op_repr eq 'HashRef';
 
     my $hash = $self->_container_ptr($operand, 'Hash');
+
+    # keys AND values RESET a hash's each iterator (perl: "calling keys
+    # resets the iterator").
+    if (defined( my $cell = $self->_each_cell($operand) )) {
+        $self->_emit("  store i64 0, i64* $cell  ; keys: each starts over");
+    }
 
     # count = hash->count (field 0)
     my ($cnt_ptr, $cnt) = ($self->_fresh, $self->_fresh);
