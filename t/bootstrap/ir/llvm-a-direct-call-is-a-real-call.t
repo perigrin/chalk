@@ -55,8 +55,8 @@ for my $case (
     my ($src, $name, $sub) = @$case;
     my ($got, $pl, $ll) = eval { through_llvm($src, {}) };
     is($got, perl_says($pl // write_pl($src), {}), "$name: perl's answer") or diag $@;
-    like($ll // '', qr/^define [^\n]*\@main__$sub\(/m, "$name: $sub is a define");
-    like($ll // '', qr/= call [^\n]*\@main__$sub\(/, "$name: and is called");
+    like($ll // '', qr/^define [^\n]*\@(?:f_)?main_+$sub\(/m, "$name: $sub is a define");
+    like($ll // '', qr/= call [^\n]*\@(?:f_)?main_+$sub\(/, "$name: and is called");
 }
 
 # A sub that reads @_ the plain ways -- a list assign from it, leading
@@ -71,8 +71,8 @@ for my $case (
     my ($src, $name, $sub) = @$case;
     my ($got, $pl, $ll) = eval { through_llvm($src, {}) };
     is($got, perl_says($pl // write_pl($src), {}), "$name: perl's answer") or diag $@;
-    like($ll // '', qr/^define [^\n]*\@main__$sub\(/m, "$name: $sub is a define");
-    like($ll // '', qr/= call [^\n]*\@main__$sub\(/, "$name: and is called");
+    like($ll // '', qr/^define [^\n]*\@(?:f_)?main_+$sub\(/m, "$name: $sub is a define");
+    like($ll // '', qr/= call [^\n]*\@(?:f_)?main_+$sub\(/, "$name: and is called");
 }
 
 # A sub with an optional parameter: a call may pass fewer arguments than its

@@ -67,13 +67,13 @@ for my $case (
     like($LAST_LL, qr/^; chalk T2/m, "$name: lowered through T2");
 }
 
-# Out of the slice's scope: today's lowering, unchanged.
+# Out of T2's slices (an array): the fallback, unchanged.
 {
-    my $src = q{sub f { return $_[0] * 2 } print f(21), "\n";};
+    my $src = q{my @a = (21, 2); print $a[0] * $a[1], "\n";};
     $LAST_LL = '';
     my ($got, $pl) = eval { through_llvm($src, {}) };
-    is($got, perl_says($pl // write_pl($src), {}), "a sub: perl's answer") or diag $@;
-    unlike($LAST_LL, qr/^; chalk T2/m, 'a sub: not T2 (falls back)');
+    is($got, perl_says($pl // write_pl($src), {}), "an array: perl's answer") or diag $@;
+    unlike($LAST_LL, qr/^; chalk T2/m, 'an array: not T2 (falls back)');
 }
 
 
