@@ -10630,11 +10630,12 @@ sub _emit_array_of {
     # INTS AMONG STRS ARE STORED AS STRS, for the same reason: stringifying
     # an integer is exact, and `(1, "x")` read the 1 as a string pointer.
     # A Num among Strs is not -- its 15 digits are not the number.
+    # NUMS AND STRS TOGETHER are each stored as what they are: a read of one
+    # is a Scalar (Analysis::_element_repr), taken by its tag.
     my %numeric = map { ( $_->stamp // '' ) => 1 } grep { blessed($_) } @$inputs; # static type
-    die "GAP: an array literal of Num and Str elements is not lowered -- read "
-      . "as Str, its Nums would lose digits\n" if $numeric{Num} && $numeric{Str};
-    my $as_num  = $numeric{Num} && $numeric{Int};
-    my $as_str  = $numeric{Str} && $numeric{Int};
+    my $mixed   = $numeric{Num} && $numeric{Str};
+    my $as_num  = !$mixed && $numeric{Num} && $numeric{Int};
+    my $as_str  = !$mixed && $numeric{Str} && $numeric{Int};
 
     # Store each element as a defined slot {i1=true, i64=value}.
     for my $i (0 .. $n - 1) {
