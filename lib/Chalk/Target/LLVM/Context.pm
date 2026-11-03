@@ -2189,16 +2189,26 @@ sub lower_value {
     elsif ($op eq 'CellWrite') {
         my ($cell, $v) = $node->inputs->@[0, 1];
         my $ptr = $self->_cell_storage($cell);
-        my $from = $self->_repr_of($v) // $v->stamp // ''; # static type
+        # LOWERED FIRST: a value nothing typed records what it was lowered to
+        # (the repr seam), and asked before, it was Unknown -- stored as an
+        # opaque 0 (`$x = $x + 1` in a closure).
         my $val = $self->lower_value($v);
+        my $from = $self->_repr_of($v) // $v->stamp // ''; # static type
         $val = $self->_emit_coercion($val, $from, 'Scalar', 'store to a captured variable') if $from ne 'Scalar';
         $self->_emit("  store %Slot $val, %Slot* $ptr  ; store to a captured variable");
         return $self->{cache}{ $node->id } = $val;
     }
-    elsif ($op eq 'CellRead' && blessed($node->inputs->[0]) && $node->inputs->[0]->operation eq 'MakeCell') {
+    elsif ($op eq 'CellRead' && blessed($node->inputs->[0])
+           && ( $node->inputs->[0]->operation eq 'MakeCell' || $node->inputs->[0]->operation eq 'CellParam' )) {
+        # A READ AFTER A STORE TO THE CELL is made after it: the store is its
+        # memory input, lowered (once) before the load.
+        my $mem = $node->inputs->[1];
+        $self->lower_value($mem) if blessed($mem) && $mem->operation eq 'CellWrite';
         my $slot = $self->_fresh;
         $self->_emit("  $slot = load %Slot, %Slot* " . $self->_cell_storage($node->inputs->[0]) . "  ; read a captured variable");
-        return $slot;
+        # CACHED: one read is one load. Loaded again where a later use asks, a
+        # read made before a store saw the store (`return $k++` gave the new $k).
+        return $self->{cache}{ $node->id } = $slot;   # a %Slot: _repr_of says Scalar
     }
     elsif ($op eq 'AnonSub') {
         die "GAP: a code reference used as a value -- not called where it is made -- is not lowered\n";
@@ -3361,11 +3371,12 @@ sub _lower_concat {
     my $inputs  = $node->inputs;
     my $lhs_val = $self->lower_value($inputs->[0]);
     my $rhs_val = $self->lower_value($inputs->[1]);
-    # AN OPERAND NOTHING TYPED is what it was lowered as: `$b // 'u'` of an
-    # argument held as a Scalar is a %Slot, read here as a %Str.
+    # AN OPERAND is what it was lowered as (_repr_of): `$b // 'u'` of an
+    # argument held as a Scalar is a %Slot, read here as a %Str. Not only one
+    # nothing typed: an inlined call is restamped to its callee's value
+    # (a closure's cell read, a Scalar) once lowered.
     for my $side ([ \$lhs_val, $inputs->[0] ], [ \$rhs_val, $inputs->[1] ]) {
         my ($v, $in) = @$side;
-        next unless ( $in->stamp // 'Unknown' ) eq 'Unknown'; # static type
         my $r = $self->_repr_of($in) // '';
         $r = 'Scalar' if $r eq 'Slot';
         $$v = $self->_emit_coercion($$v, $r, 'Str', 'Concat operand')
@@ -14361,12 +14372,16 @@ sub _static_code_of {
 # _bind_captures($graph, $name, $anon): bind each CellRead in a closure's
 # graph to a load of the variable its cell holds -- the location of that
 # name in the frame that made it, found through the cell's memory version.
-# A closure that writes a capture, or one whose cells are not known, is
-# refused.
+# One that writes a capture has its cells bound to those locations instead,
+# and reads and writes go through them where they are (_cell_storage). One
+# whose cells are not known is refused.
 sub _bind_captures {
     my ($self, $graph, $name, $anon) = @_;
-    my @reads = grep { blessed($_) && $_->operation eq 'CellRead' } _graph_component($graph);
-    my @writes = grep { blessed($_) && $_->operation eq 'CellWrite' } _graph_component($graph);
+    # A CAPTURE IS A CELL PARAMETER. A frame's own MakeCell (`my $w; $w =
+    # sub {...}` writes $w's cell) is its variable, lowered where it is made.
+    my $captured = sub ($n) { my $c = $n->inputs->[0]; blessed($c) && $c->operation eq 'CellParam' };
+    my @reads = grep { blessed($_) && $_->operation eq 'CellRead' && $captured->($_) } _graph_component($graph);
+    my @writes = grep { blessed($_) && $_->operation eq 'CellWrite' && $captured->($_) } _graph_component($graph);
     # A CELL USED BUT THROUGH A CELL READ OR WRITE is a shape not known here:
     # B::SoN spells `$t += 1` on a capture as Coerce(CellParam) + 1 -- the
     # cell's reference read as a number, and no write. Lowered, $t never
@@ -14378,13 +14393,12 @@ sub _bind_captures {
                     ($p->consumers // [])->@*;
     }
     return unless @reads || @writes;
-    die "GAP: a closure ('$name') that writes what it captured is not lowered\n" if @writes;
     my $via_anon = defined $anon;
     $anon //= $ANON_SUBS{$name};
     die "GAP: a closure ('$name') whose cells are not known here is not lowered\n" unless blessed($anon);
     my @cells = grep { blessed($_) } $anon->inputs->@*;
-    for my $r (@reads) {
-        my $param = $r->inputs->[0];
+    # THE VARIABLE'S LOCATION, in the frame that made the closure.
+    my $where = sub ($param) {
         my $cell  = blessed($param) && $param->can('index') ? $cells[ $param->index ] : undef;
         my $var   = $cell ? _cell_variable($cell) : undef;
         die "GAP: a closure ('$name') capture whose variable is not a location here is not lowered\n"
@@ -14394,6 +14408,19 @@ sub _bind_captures {
         my $ptr = $via_anon ? $self->{_cell_slots}{ refaddr($cell) } : $self->_location_ptr($var);
         die "GAP: a closure ('$name') passed down whose cells were not found where it was made\n"
             unless defined $ptr;
+        return ($ptr, $var);
+    };
+    # ONE THAT WRITES reads each capture where the read is, after the store
+    # before it: a load made on entry would miss `$x = $x + 1; return $x`.
+    if (@writes) {
+        for my $n (@reads, @writes) {
+            my $param = $n->inputs->[0];
+            ( $self->{_arg_bind}{ 'cell:' . refaddr($param) } ) = $where->($param);
+        }
+        return;
+    }
+    for my $r (@reads) {
+        my ($ptr, $var) = $where->($r->inputs->[0]);
         my $slot = $self->_fresh;
         $self->_emit("  $slot = load %Slot, %Slot* $ptr  ; closure: " . $var->name);
         $self->{_arg_bind}{ refaddr($r) } = { ref => $slot, repr => 'Scalar', node => $var };
@@ -14405,6 +14432,12 @@ sub _bind_captures {
 # location. Refused when it is not one.
 sub _cell_storage {
     my ($self, $cell) = @_;
+    # A CLOSURE'S CELL PARAMETER is the location _bind_captures bound it to.
+    if (blessed($cell) && $cell->operation eq 'CellParam') {
+        my $ptr = ( $self->{_arg_bind} // {} )->{ 'cell:' . refaddr($cell) };
+        die "GAP: a captured variable whose cell is not bound here is not lowered\n" unless defined $ptr;
+        return $ptr;
+    }
     my $var = blessed($cell) && $cell->operation eq 'MakeCell' ? _cell_variable($cell) : undef;
     die "GAP: a captured variable that is not a location here is not lowered\n" unless $var;
     return $self->_location_ptr($var);   # this frame's: each inline of the maker has its own
@@ -14484,6 +14517,10 @@ sub _static_class_of {
 sub _repr_of {
     my ($self, $n) = @_;
     return $self->{cache}{ 'repr:' . $n->id } if blessed($n) && exists $self->{cache}{ 'repr:' . $n->id };
+    # A CELL READ lowered as a load is its cell's %Slot, whatever the analysis
+    # typed it; one bound to an entry load (_bind_captures) is that binding's.
+    return 'Scalar' if blessed($n) && $n->operation eq 'CellRead'
+        && !( $self->{_arg_bind} && $self->{_arg_bind}{ refaddr($n) } );
     # A LOCATION READ NOTHING TYPED is its %Slot (_lower_padaccess).
     return 'Scalar' if blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '$' ) eq '$'
         && ( $n->stamp // 'Unknown' ) eq 'Unknown' && ( $n->is_location || $n->shared )
@@ -17415,7 +17452,9 @@ sub _lower_call_direct {
             ? $self->_lower_inlined_structure($returns[0], $void ? undef : $value)
             : $self->_lower_inlined_effects_then_value(\@effect_chain, $void ? undef : $value);
         return '0' if $void;
-        my $from = $value->operation eq 'Print' ? 'Boolean' : ($self->{_inlined_value_repr} // $value->stamp // ''); # static type
+        # What it was LOWERED to (_repr_of): a captured variable read is its
+        # cell's %Slot whatever the analysis typed it.
+        my $from = $value->operation eq 'Print' ? 'Boolean' : ($self->{_inlined_value_repr} // $self->_repr_of($value) // '');
         # What the inlined value IS, for a list that flattens it
         # (_emit_flattened_array_of): an Array, or one scalar.
         $self->{_inline_value_repr}{ $node->id } = $from;

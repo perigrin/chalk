@@ -44,17 +44,17 @@ for my $c (
     [ q{my $k = 3; my $f = sub { $k }; $k = 4; print $f->(), "\n";},                                    "4\n",  'the capture as it is when called' ],
     [ q{use v5.42; sub walk ($cb) { join ",", grep { defined } map { $cb->($_) } (1, 2, 3) } sub only ($want) { walk(sub ($n) { $n == $want ? $n : undef }) } print only(2), only(3), "\n";}, "23\n", 'a callback over a parameter' ],
     [ q{use v5.36; sub w ($cb) { my $k = "in"; $cb->() } sub m2 { my $k = "out"; w(sub { $k }) } print m2(), "\n";}, "out\n", 'its own $k, not the callee\'s' ],
+    # A closure writes its capture: the variable itself (was refused).
+    [ q{my $k = 1; my $f = sub { $k++ }; $f->(); print "$k\n";},                                   "2\n",  'a closure that writes its capture' ],
 ) {
     my ($src, $want, $name) = @$c;
     my $got = eval { through_llvm($src) };
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
-# REFUSED by name: a code reference used other than by a call, and a closure
-# that writes what it captured.
+# REFUSED by name: a code reference used other than by a call.
 for my $c (
     [ q{sub mk { return sub { 1 } } my $f = mk(); print $f->(), "\n";}, 'a code reference that leaves where it is made' ],
-    [ q{my $k = 1; my $f = sub { $k++ }; $f->(); print "$k\n";},      'a closure that writes its capture' ],
 ) {
     my ($src, $name) = @$c;
     eval { through_llvm($src) };
