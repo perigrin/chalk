@@ -2862,7 +2862,11 @@ sub _element_repr ($container) {
     if (keys %uniq == 1 && ($reprs[0] eq 'ArrayRef' || $reprs[0] eq 'HashRef')) {
         return $reprs[0];
     }
-    return _join_repr(@reprs);
+    # AN ELEMENT IS A SCALAR (perigrin: `$a[0]`, `$h{k}` start with `$`):
+    # elements nothing typed join to Unknown, the lattice top, but the read
+    # is bounded -- at least Scalar (pvm 143).
+    my $j = _join_repr(@reprs);
+    return $j eq 'Unknown' ? 'Scalar' : $j;
 }
 
 # THE ELEMENT-STORE WALK, shared by the two functions below.
@@ -2975,6 +2979,7 @@ sub _static_miss ($container, $index) {
             my $r  = $_ isa Chalk::IR::Node ? ($_->stamp // '') : '';
             $op eq 'ArrayLiteral' || $op eq 'HashLiteral'
                 || $r eq 'List' || $r eq 'Array' || $r eq 'Hash'
+                || $r eq 'Unknown'   # an untyped call (unpack) may return many
                 || ($op eq 'Slice' || $op eq 'ExpressionList'
                     || $op eq 'ListAppend' || $op eq 'ListAssign');
         }
