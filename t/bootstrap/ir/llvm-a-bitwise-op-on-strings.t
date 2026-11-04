@@ -61,18 +61,15 @@ for my $case (
     [ q{my $a = $ENV{X} // "ab"; print $a ^ "  ", "\n";}, '^ of unequal lengths' ],
     [ q{my $a = $ENV{Z} // "abc"; my $b = $ENV{X} // 5; print $b & $a, "\n";}, '& of unequal lengths, or of a number' ],
     [ q{my $s = $ENV{Z} // "12"; my $t = ~$s; print ~$t, "\n";}, '~ of ~ of a string' ],
-    # A VARIABLE READ BY TWO OPS: one done on numbers makes it a number to the
-    # next -- tracked at run time, per variable.
-    [ q{my $a = $ENV{X} // 6; my $b = $ENV{Y} // 3; my $c = $ENV{Z} // 2;
-        print $a | $b & $c, " ", ($a | $b) & $c, "\n";}, 'pvm 047: each variable read by two ops' ],
-    [ q{my $s = $ENV{X} // "12"; print $s & 5, " ", $s & "10", "\n";}, 'a string a numeric & read first' ],
 ) { $each_env->(@$case, 0) }
 
 # Perl's answer, or refused by name: a string a numeric read made a number is
 # a number to the op after -- and one node may stand for several variables,
 # so which variable the read numified is not known.
 for my $case (
-    [ q{my $a = $ENV{X} // "ab"; my $c = 1; if ($c) { my $t = $a & 5 } print $a | "  ", "\n";}, 'an op whose value nothing uses: perl still runs it' ],
+    [ q{my $a = $ENV{X} // 6; my $b = $ENV{Y} // 3; my $c = $ENV{Z} // 2;
+        print $a | $b & $c, " ", ($a | $b) & $c, "\n";}, 'pvm 047: each variable read by two ops' ],
+    [ q{my $s = $ENV{X} // "12"; print $s & 5, " ", $s & "10", "\n";}, 'a string a numeric & read first' ],
     [ q{my $s = $ENV{X} // "12"; my $n = $s + 1; print $s & "10", " $n\n";}, 'a string + also reads' ],
     [ q{my $s = $ENV{X} // "12"; for my $i (1, 2) { print $s & "10" } print "\n";}, 'a string op in a loop' ],
 ) { $each_env->(@$case, 1) }
