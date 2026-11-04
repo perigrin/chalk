@@ -71,6 +71,9 @@ for my $case (
         print $a | $b & $c, " ", ($a | $b) & $c, "\n";}, 'pvm 047: each variable read by two ops' ],
     [ q{my $s = $ENV{X} // "12"; print $s & 5, " ", $s & "10", "\n";}, 'a string a numeric & read first' ],
     [ q{my $s = $ENV{X} // "12"; my $n = $s + 1; print $s & "10", " $n\n";}, 'a string + also reads' ],
+    # TWO STATEMENTS, used in the other order: perl ran $x's op first (2026-11-04,
+    # a numified flag lowered in use order printed 10 4 for perl's 8 4).
+    [ q{my $s = $ENV{X} // "12"; my $x = $s & 5; my $y = $s & "10"; print "$y $x\n";}, 'two ops in two statements, used in the other order' ],
     [ q{my $s = $ENV{X} // "12"; for my $i (1, 2) { print $s & "10" } print "\n";}, 'a string op in a loop' ],
 ) { $each_env->(@$case, 1) }
 
