@@ -19380,6 +19380,7 @@ sub _compile_regex_pattern {
     my @atoms;
     my @paren_stack;   # open-group cap indices (undef = non-capturing)
     my $ngroups = 0;   # capture group counter
+    my $ncode = 0;     # `(?{ ... })` blocks, numbered in pattern order
     my @chars = split //, $pattern;
     my $i = 0;
     while ($i <= $#chars) {
@@ -19481,6 +19482,13 @@ sub _compile_regex_pattern {
                 $cap = undef;     # non-capturing
                 $i += 3;
             }
+            # A CODE BLOCK runs where matching passes it: a zero-width atom,
+            # numbered -- its body is the match's code_bodies entry.
+            elsif (($chars[$i+1] // '') eq '?' && ($chars[$i+2] // '') eq '{') {
+                push @atoms, { kind => 'code', n => $ncode++ };
+                $i = _regex_code_block_end(\@chars, $i + 3);
+                next;
+            }
             elsif (($chars[$i+1] // '') eq '?') {
                 die "GAP: regex (?...) construct (lookaround/modifier/code) in "
                   . "pattern '$pattern' not supported";
@@ -19517,6 +19525,8 @@ sub _compile_regex_pattern {
                 if $atom->{kind} eq 'gclose';
             die "GAP: regex quantifier '$c' directly after '(' in pattern '$pattern'"
                 if $atom->{kind} eq 'gopen';
+            die "GAP: a quantified regex code block in pattern '$pattern'\n"
+                if $atom->{kind} eq 'code';
             die "GAP: double quantifier on one atom in pattern '$pattern' "
               . "(non-greedy *? +? ?? not yet supported)"
                 if exists $atom->{min};
@@ -19561,7 +19571,39 @@ sub _compile_regex_pattern {
         anchored_start => $anchored_start,
         anchored_end   => $anchored_end,
         ngroups        => $ngroups,
+        ncode          => $ncode,
     };
+}
+
+# _regex_code_block_end(\@chars, $k) -> the index just past the `})` closing a
+# `(?{` block whose code starts at $k. Braces nest; a quoted string's are
+# text (`length("}}}")`), as perl's parser reads them.
+# $RX_CODE_BODIES: the body names of the match being lowered, for its
+# pattern's `(?{ ... })` atoms (_emit_regex_seq).
+our $RX_CODE_BODIES;
+
+# _rx_code_fn($name) -> the LLVM function a code block body is lowered to,
+# numbered as matches first call it; Chalk::Target::LLVM emits each one.
+our %RX_CODE_FN;
+sub _rx_code_fn { my ($name) = @_; return $RX_CODE_FN{$name} //= '@chalk_rxcode_' . scalar(keys %RX_CODE_FN) }
+
+sub _regex_code_block_end {
+    my ($chars, $k) = @_;
+    my $depth = 1;
+    while ($k < @$chars) {
+        my $c = $chars->[$k];
+        if ($c eq '"' || $c eq "'") {
+            my $q = $c;
+            for ($k++; $k < @$chars && $chars->[$k] ne $q; $k++) { $k++ if $chars->[$k] eq '\\' }
+        }
+        elsif ($c eq '{') { $depth++ }
+        elsif ($c eq '}' && !--$depth) {
+            die "GAP: a regex code block not closed by })\n" unless ( $chars->[ $k + 1 ] // '' ) eq ')';
+            return $k + 2;
+        }
+        $k++;
+    }
+    die "GAP: a regex code block that is not closed\n";
 }
 
 # _emit_atom_predicate($self, $atom, $byte_ref, $label) -> $i1_ref
@@ -19681,6 +19723,15 @@ sub _emit_regex_seq {
     }
 
     my $atom  = $atoms->[$idx];
+
+    # A CODE BLOCK IS ZERO-WIDTH here: its pattern is all literal, and perl
+    # finds the whole literal before running any of it -- one attempt, where
+    # the literal first occurs -- so it runs on the hit (_emit_regex_matcher),
+    # not on each start a slide tries. Any other pattern is refused there.
+    if ($atom->{kind} eq 'code') {
+        $self->_emit_regex_seq($atoms, $idx + 1, $pos_ref, $ctx);
+        return;
+    }
 
     # Capture-group boundary markers (T4): zero-width — record the current
     # position SSA as the group's start/end and continue. The records go into
@@ -19816,6 +19867,12 @@ sub _emit_regex_matcher {
 
     my @atoms    = $compiled->{atoms}->@*;
     my $anch_s   = $compiled->{anchored_start};
+    # HOW OFTEN A CODE BLOCK RUNS IS PERL'S OPTIMIZER'S: it searches for a
+    # pattern's fixed text before trying a start, and runs a block on each try
+    # that reaches it. Only an all-literal pattern is one try, at the text.
+    die "GAP: a regex code block in a pattern that is not all literal -- how often it runs is perl's optimizer's\n"
+        if ( grep { $_->{kind} eq 'code' } @atoms )
+        && grep { $_->{kind} !~ /\A(?:lit|code|gopen|gclose)\z/ || defined $_->{min} } @atoms;
     my $anch_e   = $compiled->{anchored_end};
     my $ngroups  = $compiled->{ngroups} // 0;
 
@@ -19824,7 +19881,7 @@ sub _emit_regex_matcher {
     # room check; quantified atoms may consume more.
     my $min_len = 0;
     for my $a (@atoms) {
-        next if $a->{kind} eq 'gopen' || $a->{kind} eq 'gclose';
+        next if $a->{kind} =~ /\A(?:gopen|gclose|code)\z/;   # zero-width
         $min_len += ($a->{min} // 1);
     }
 
@@ -19939,6 +19996,13 @@ sub _emit_regex_matcher {
 
     # Hit / miss feed the end-block phis.
     $self->_new_block($lbl_hit);
+    # A LITERAL PATTERN'S CODE BLOCKS RUN ON THE HIT, once each, in order:
+    # perl finds the whole literal before running any of it (_emit_regex_seq).
+    for my $code (grep { $_->{kind} eq 'code' } @atoms) {
+        my $name = ( $RX_CODE_BODIES // [] )->[ $code->{n} ]
+            // die "GAP: a regex code block whose body B::SoN did not give (a pattern built at runtime, an s/// or a split)\n";
+        $self->_emit("  call void " . _rx_code_fn($name) . "()  ; (?{ ... }) of a literal pattern: once, on the hit");
+    }
     $self->_set_terminator("  br label \%$lbl_end");
     $self->_new_block($lbl_miss);
     $self->_set_terminator("  br label \%$lbl_end");
@@ -19973,6 +20037,7 @@ sub _emit_regex_matcher {
 # _lower_regex_match($node) -> $llvm_ref (i1 matched?)
 sub _lower_regex_match {
     my ($self, $node) = @_;
+    local $RX_CODE_BODIES = $node->code_bodies;
 
     my $subj_node = $node->inputs->[0];
     my $repr      = _require_repr($node, 'RegexMatch');
@@ -19980,12 +20045,7 @@ sub _lower_regex_match {
     # Lower the subject to its i8* pointer and obtain its byte length -- read
     # as a string from what it is: an argument nothing typed may be the
     # caller's undef (""), a number, or a Scalar.
-    my $subj_from = $subj_node->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($subj_node) // '' );
-    $subj_from = 'Scalar' if $subj_from eq 'Slot';
-    my $subj_val = $self->lower_value($subj_node);
-    $subj_val = $self->_emit_coercion($subj_val, $subj_from, 'Str', 'RegexMatch subject')
-        if $subj_from =~ /\A(?:Int|Num|Boolean|Undef|Scalar)\z/;
-    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($subj_val);
+    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($self->_regex_subject_str($subj_node, 'RegexMatch'));
     my $subj_len  = $subj_len_tracked
         // die "GAP: RegexMatch subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";
@@ -20095,8 +20155,21 @@ sub _lower_pos {
 # inlines the same matcher RegexMatch uses. A qr value that cannot be resolved
 # statically (e.g. flowing through vars/containers the resolver cannot walk)
 # is a loud GAP — a matcher-function ABI is only built if that need is real.
+# _regex_subject_str($subj_node, $tag) -> the subject of a match as a Str: read
+# as a string from what it is -- an argument nothing typed may be the caller's
+# undef (""), a number, or a Scalar (a variable kept in memory).
+sub _regex_subject_str {
+    my ($self, $subj_node, $tag) = @_;
+    my $from = $subj_node->operation eq 'Print' ? 'Boolean' : ( $self->_repr_of($subj_node) // '' );
+    $from = 'Scalar' if $from eq 'Slot';
+    my $v = $self->lower_value($subj_node);
+    return $from =~ /\A(?:Int|Num|Boolean|Undef|Scalar)\z/
+        ? $self->_emit_coercion($v, $from, 'Str', "$tag subject") : $v;
+}
+
 sub _lower_match_apply {
     my ($self, $node) = @_;
+    local $RX_CODE_BODIES = $node->code_bodies;
 
     my $subj_node = $node->inputs->[0];
     my $qr_node   = $node->inputs->[1];
@@ -20128,7 +20201,7 @@ sub _lower_match_apply {
             unless defined $flags;
     }
 
-    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($self->lower_value($subj_node));
+    my ($subj_ptr, $subj_len_tracked) = $self->_str_parts($self->_regex_subject_str($subj_node, 'Match'));
     my $subj_len = $subj_len_tracked
         // die "GAP: Match subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";

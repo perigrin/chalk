@@ -1855,6 +1855,8 @@ sub _process_control_chain {
 # backend places phis using the dominator-tree scoped value map.
 sub lower_with_elaboration {
     my ($class, $return_node, $elab, %opts) = @_;
+    # The regex code block bodies this lowering's matches call (see below).
+    local %Chalk::Target::LLVM::Context::RX_CODE_FN = ();
 
     # T2 IS THE ARCHITECTURE (perigrin): a program its slices take is built as
     # a graph typed in LLVM's types and printed. Any other (undef) is lowered
@@ -1964,6 +1966,25 @@ sub lower_with_elaboration {
             'entry:', $ectx->render_blocks(1), '  ret void', '}', '';
         $ctx->absorb_need_flags_from($ectx);
         push @end_lines, $ectx->render_str_globals;
+    }
+    # A REGEX CODE BLOCK'S BODY is a function its match calls each time
+    # matching passes the block (_emit_regex_seq), lowered as an END body is:
+    # its own context, the module's globals. One may name another's.
+    my %rx_done;
+    while (my @todo = grep { !$rx_done{$_}++ } sort keys %Chalk::Target::LLVM::Context::RX_CODE_FN) {
+        for my $name (@todo) {
+            my $fn = $Chalk::Target::LLVM::Context::RX_CODE_FN{$name};
+            my $g = $Chalk::IR::Serialize::JSON::CODE_GRAPHS{$name}
+                // die "GAP: a regex code block whose body B::SoN did not give ($name)\n";
+            my $ectx = Chalk::Target::LLVM::Context->new;
+            $ectx->configure_as_method_body(class_name => 'main', method_name => $name =~ s/\W+/_/gr,
+                has_self => 0, parent_ctx => $ctx, class_registry => $class_registry);
+            _process_control_chain($ectx, $g->returns->[0]);
+            push @end_lines, "define internal void $fn() {  ; $name",
+                'entry:', $ectx->render_blocks(1), '  ret void', '}', '';
+            $ctx->absorb_need_flags_from($ectx);
+            push @end_lines, $ectx->render_str_globals;
+        }
     }
     # ONE PLACE RUNS THEM, once: @chalk_ends, called before @main returns and
     # by @chalk_exit, which every exit in the module calls instead of exit(3)

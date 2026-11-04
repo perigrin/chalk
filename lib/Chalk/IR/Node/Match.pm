@@ -18,7 +18,10 @@ class Chalk::IR::Node::Match :isa(Chalk::IR::Node::BinOp) {
     # whose flags no qr// carries. undef: not sent. In the hash: /b/ and /b/i
     # are different matches.
     field $flags :param :reader = undef;
+    # The bodies of its qr's `(?{ ... })` blocks, in pattern order.
+    field $code_bodies :param :reader = undef;
     method content_hash() {
-        return join('|', 'Match', "flags=" . ( $flags // '-' ), $self->_serialize_inputs());
+        return join('|', 'Match', "flags=" . ( $flags // '-' ),
+            ( $code_bodies ? "code=" . join(',', @$code_bodies) : () ), $self->_serialize_inputs());
     }
 }

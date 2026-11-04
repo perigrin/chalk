@@ -200,6 +200,7 @@ sub _extract_fields ($node, $id_remap) {
         return {
             pattern => $node->pattern,
             flags   => $node->flags,
+            ( $node->code_bodies ? ( code_bodies => [ $node->code_bodies->@* ] ) : () ),
         };
     }
     if ($op eq 'RegexSubst') {
@@ -218,8 +219,9 @@ sub _extract_fields ($node, $id_remap) {
     if ($op eq 'VarDecl') {
         return { scope => $node->scope };
     }
-    if ($op eq 'Match' && defined $node->flags) {
-        return { flags => $node->flags };
+    if ($op eq 'Match' && ( defined $node->flags || $node->code_bodies )) {
+        return { ( defined $node->flags ? ( flags => $node->flags ) : () ),
+                 ( $node->code_bodies ? ( code_bodies => [ $node->code_bodies->@* ] ) : () ) };
     }
     if ($op eq 'Coerce') {
         return {
@@ -756,6 +758,7 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'RegexMatch') {
             $args{pattern} = $fields->{pattern} // '';
             $args{flags}   = $fields->{flags}   // '';
+            $args{code_bodies} = $fields->{code_bodies} if ref $fields->{code_bodies} eq 'ARRAY';
         }
         elsif ($op eq 'RegexSubst') {
             $args{pattern}     = $fields->{pattern}     // '';
@@ -785,6 +788,7 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'Match') {
             $args{flags} = $fields->{flags} if defined $fields->{flags};
+            $args{code_bodies} = $fields->{code_bodies} if ref $fields->{code_bodies} eq 'ARRAY';
         }
         elsif ($op eq 'Transliterate') {
             $args{$_} = $fields->{$_} // '' for qw(from to flags);
@@ -1141,6 +1145,7 @@ sub from_json ($json_string) {
     # before its main line and an END after it (pvm 258).
     our @PHASE_BLOCKS = ();
     our @PHASE_GRAPHS = ();
+    our %CODE_GRAPHS = ();
     my $phase_n = 0;
     # Each sub's prototype, by its full name: prototype(\&f) reads it. A sub
     # the program defines with none is there, undef.
@@ -1274,6 +1279,9 @@ sub from_json ($json_string) {
     my $analysed = Chalk::IR::Analysis->run(
         \%graphs, (ref $data->{classes} eq "HASH" ? $data->{classes} : undef));
     @PHASE_GRAPHS = map { [ $_->[0], $analysed->{ $_->[1] } ] } @PHASE_BLOCKS;
+    # REGEX CODE BLOCK BODIES, by the name a match carries (code_bodies): the
+    # lowering makes each a function the matcher calls.
+    %CODE_GRAPHS = map { ( $_ => $analysed->{$_} ) } grep { /::__REGEXCODE__:/ } keys %$analysed;
     # A LIST-CONTEXT COPY'S EVAL VALUE IS A LIST: typed after the passes, which
     # join its arms (a value and undef) to Scalar.
     for my $key (map { $_->{list} // () } values %CONTEXT_COPY) {
