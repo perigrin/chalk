@@ -51,13 +51,12 @@ sub write_pl ($src) {
 # is T2's (perigrin). Until then a numeric read of one is refused, not answered
 # from 15 printed digits: 0.30000000000000004 compared equal to 0.3.
 for my $case (
-    # Out of T2's slices (a list): the fallback refuses. A ?: -- in a sub
-    # too -- is T2's, which boxes it (t2-slice1, t2-slice3).
+    # T2 (slice 4) keeps each element a %Slot: the Num stays a Num.
     [ q{my @b = (0.1 + 0.2, "x"); print $b[0] == 0.3 ? "eq" : "ne", "\n";}, 'an element of numbers and strings' ],
 ) {
     my ($src, $name) = @$case;
-    my ($got) = eval { through_llvm($src, {}) };
-    like($@, qr/GAP: .*T2/, "$name, read as a number: refused by name") or diag "got: " . ($got // 'undef');
+    my ($got, $pl) = eval { through_llvm($src, {}) };
+    is($got, perl_says($pl // write_pl($src), {}), "$name, read as a number: perl's answer (T2 boxes the Num)") or diag $@;
 }
 
 # Read as a string, the same values are right: perl prints 15 digits too.

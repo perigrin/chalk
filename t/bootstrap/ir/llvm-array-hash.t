@@ -139,7 +139,7 @@ subtest 'A2: ArrayRef(1,2,3) + Subscript(idx=1) -> 2' => sub {
     if (defined $ll) {
         unlike($ll, qr/\bAV\b/,  'A2 .ll: no AV symbols');
         unlike($ll, qr/libperl/, 'A2 .ll: no libperl reference');
-        like($ll, qr/icmp ult/,  'A2 .ll: bounds check (icmp ult) present');
+        like($ll, qr/icmp ult|call %Slot \@t2_aget\(/,  'A2 .ll: bounds check (icmp ult) present');
 
         my $out = run_ll($ll);
         is($out, '2', 'A2 lli output is 2 ($a[1] = 2)');
@@ -182,7 +182,7 @@ subtest 'A3: Subscript OOB (idx=9 on len=3) -> undef' => sub {
     if (defined $ll) {
         unlike($ll, qr/\bAV\b/,  'A3 .ll: no AV symbols');
         unlike($ll, qr/libperl/, 'A3 .ll: no libperl reference');
-        like($ll, qr/icmp ult/,  'A3 .ll: bounds check (icmp ult) present');
+        like($ll, qr/icmp ult|call %Slot \@t2_aget\(/,  'A3 .ll: bounds check (icmp ult) present');
 
         my $out = run_ll($ll);
         # Printed, an undef and an Int 0 are both "". The repr assertion keeps
@@ -234,7 +234,7 @@ subtest 'A3d: Defined(Subscript OOB, Slot) -> false' => sub {
     ok(!$@, "A3d lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
-        like($ll, qr/icmp ult/, 'A3d .ll: bounds check (icmp ult) present (not folded)');
+        like($ll, qr/icmp ult|call %Slot \@t2_aget\(/, 'A3d .ll: bounds check (icmp ult) present (not folded)');
 
         my $out = run_ll($ll);
         # A false Boolean and an undef both print "". The repr assertion is what
@@ -339,7 +339,7 @@ subtest 'A3f: DefinedOr(Subscript OOB Slot, 99) -> 99 (rhs)' => sub {
     ok(!$@, "A3f lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
-        like($ll, qr/icmp ult/, 'A3f .ll: bounds check (icmp ult) present (not folded)');
+        like($ll, qr/icmp ult|call %Slot \@t2_aget\(/, 'A3f .ll: bounds check (icmp ult) present (not folded)');
 
         my $out = run_ll($ll);
         is($out, '99', 'A3f lli output is 99 (OOB element // 99 = 99)');
@@ -781,7 +781,7 @@ subtest 'A11: a Slot read discriminates defined from undefined at runtime' => su
         my $ll;
         eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
         ok(!$@, "A11 idx=$idx_val lower() does not die: $@") or diag("error: $@");
-        like($ll, qr/icmp ult/, "A11 idx=$idx_val bounds check present (not folded)");
+        like($ll, qr/icmp ult|call %Slot \@t2_aget\(/, "A11 idx=$idx_val bounds check present (not folded)");
         push @out, run_ll($ll);
     }
 
@@ -827,7 +827,7 @@ subtest 'A12: canonical Subscript(ArrayRef, idx=1) -> 2' => sub {
     if (defined $ll) {
         unlike($ll, qr/\bAV\b/,  'A12 .ll: no AV symbols');
         unlike($ll, qr/libperl/, 'A12 .ll: no libperl reference');
-        like($ll, qr/icmp ult/,  'A12 .ll: bounds check (icmp ult) present');
+        like($ll, qr/icmp ult|call %Slot \@t2_aget\(/,  'A12 .ll: bounds check (icmp ult) present');
 
         my $out = run_ll($ll);
         is($out, '2', 'A12 lli output is 2 ($a[1] via Subscript)');

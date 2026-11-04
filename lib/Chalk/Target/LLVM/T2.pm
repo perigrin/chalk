@@ -86,7 +86,9 @@ sub build {
     }
     $b->{ret} = $ret;
     $b->{passed} = [ _memstarts($ret, 1) ];
+    $b->index_readers(_own_nodes($ret));
     $b->new_block('entry');
+    $b->make_constant_arrays(_own_nodes($ret));
     $b->walk($start);
     $b->{cur}{term} = [ 'ret' ];
 }
@@ -122,6 +124,11 @@ sub walk {
         }
         elsif ($op eq 'Loop') { $ctl = $b->loop($s) }
         elsif ($op eq 'If')   { $ctl = $b->if_stmt($s) }
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:push|shift|pop)\z/) {
+            $b->array_stmt($s);
+            push @{ $b->{passed} }, $s;
+            $ctl = $s;
+        }
         elsif ($op eq 'Assign') { $b->assign($s); push @{ $b->{passed} }, $s; $ctl = $s }
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands.
@@ -157,15 +164,62 @@ sub location {
 sub reads_before {
     my ($b, $version) = @_;
     return unless blessed($version);
-    my %seen;
-    for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' && $_->is_location && !$seen{ refaddr($_) }++ }
-               ( $version->consumers // [] )->@*) {
-        # EVERY ONE, the store's own target too: B::SoN makes one node of a
-        # variable at one version, so `my $x = $i; $i = 5` reads the very node
-        # it stores to -- and a node's consumers need not list every value use,
-        # so whether it is read cannot be told. A load nothing uses costs nothing.
-        $b->value($r);
+    # EVERY READ AT IT -- a variable's, an element's, a count -- from the
+    # function's own index (readers): a node's consumers need not list every
+    # value use, and B::SoN makes one node of a variable at one version, so
+    # `my $x = $i; $i = 5` reads the very node it stores to. A read nothing
+    # uses costs nothing.
+    # A READ IN A LOOP OR AN ARM -- one that needs a phi not yet made, `$a[$i]`
+    # in a foreach -- is made in its place: it is there, not here, it is read.
+    $b->value($_) for grep { !$b->_needs_unmade_phi($_, {}) } @{ $b->{readers}{ refaddr($version) } // [] };
+}
+
+sub _needs_unmade_phi {
+    my ($b, $n, $seen) = @_;
+    return 0 unless blessed($n) && $n->can('operation') && !$seen->{ refaddr($n) }++;
+    return 0 if $b->{memo}{ refaddr($n) } || _is_version($n);
+    return 1 if $n->operation eq 'Phi';
+    return scalar grep { $b->_needs_unmade_phi($_, $seen) } $n->inputs->@*;
+}
+
+# _is_version($n) -> true for a memory version: MemStart, a store, a call made
+# as a statement, a memory phi.
+sub _is_version {
+    my ($n) = @_;
+    return 0 unless blessed($n) && $n->can('operation');
+    my $op = $n->operation;
+    return 1 if $op eq 'MemStart' || $op eq 'Assign';
+    return 1 if $op eq 'Call' && $n->can('control_in') && blessed($n->control_in);
+    return $op eq 'Phi' && Chalk::Target::LLVM::Context::_is_memory_phi($n) ? 1 : 0;
+}
+
+# _memory_input($n) -> the memory version a read reads at: its MEMORY input,
+# not any input -- a statement call is a version and a value, and reading its
+# value is not reading memory (taken so, fact's recursive call was made before
+# its if: unbounded). Each op says where its memory input is.
+sub _memory_input {
+    my ($n) = @_;
+    my $op = $n->operation;
+    my @in = $n->inputs->@*;
+    return $in[0] if $op eq 'PadAccess' && $n->is_location;
+    return $in[2] if $op eq 'Subscript';
+    return $in[1] if $op eq 'Count' || $op eq 'PostfixDeref';
+    return $in[-1] if $op eq 'Call' && $n->can('memory_input') && $n->memory_input;
+    return undef;
+}
+
+# index_readers(@nodes): each memory version's reads -- the nodes, not on the
+# control chain, that take it as an input -- found from the inputs.
+sub index_readers {
+    my ($b, @nodes) = @_;
+    my %r;
+    for my $n (@nodes) {
+        next if $n->can('control_in') && blessed($n->control_in);
+        next if $n->operation =~ /\A(?:Phi|Region|Proj|Start|Return|MemStart)\z/;
+        my $m = _memory_input($n);
+        push @{ $r{ refaddr($m) } }, $n if _is_version($m);
     }
+    $b->{readers} = \%r;
 }
 
 # assign($Assign): a store of one value into a variable kept in memory.
@@ -174,10 +228,122 @@ sub assign {
     out('a list assignment') if $s->can('targets') && defined $s->targets;
     out('a local') if $s->can('local') && $s->local;
     my ($target, $v) = $s->inputs->@[0, 1];
+    return $b->element_store($target, $v, $s) if blessed($target) && $target->operation eq 'Subscript';
     my $ptr = $b->location($target);
     $b->reads_before($target->inputs->[0]);
     my $val = $b->as($b->value($v), '%Slot');
     $b->emit(op => 'Store', type => 'void', inputs => [ $val, $ptr ]);
+}
+
+# make_constant_arrays(@nodes): an array whose literal holds only constants
+# (`my @a = (1, 2)`, `my @a`) is made in the entry block -- first made where it
+# was first used, in a loop body it was made again each pass.
+sub make_constant_arrays {
+    my ($b, @nodes) = @_;
+    for my $lit (grep { $_->operation eq 'ArrayLiteral' } @nodes) {
+        next if grep { !( blessed($_) && $_->operation eq 'Constant' ) } $lit->inputs->@*;
+        $b->value($lit);
+    }
+}
+
+# array_value($v, $op) -> the T2 node of an array, or of a read of one; undef
+# for what is not.
+sub array_value {
+    my ($b, $v, $op) = @_;
+    my @in = $v->inputs->@*;
+    if ($op eq 'ArrayLiteral') {
+        # ONE NOT MADE AT ENTRY, needed in an arm or a loop body, would be made
+        # there -- again each pass, and gone after.
+        out('an array first made in an arm or a loop body') if $b->{depth};
+        my $a = $b->emit(op => 'NewArray', type => '%Array*');
+        for my $e (@in) {
+            out('a list in an array literal') if ( $e->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
+            $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($e), '%Slot') ]);
+        }
+        return $a;
+    }
+    return $b->array_of($in[0]) if $op eq 'PostfixDeref';
+    return $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($in[0]) ]) if $op eq 'Count';
+    if ($op eq 'Subscript') {
+        out('a hash element') unless ( $v->can('kind') ? $v->kind // 'array' : 'array' ) eq 'array';
+        return $b->emit(op => 'AGet', type => '%Slot', inputs => [ $b->array_of($in[0]), $b->as($b->value($in[1]), 'i64') ]);
+    }
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin') {
+        my $name = $v->name // '';
+        if ($name eq 'shift' || $name eq 'pop') {
+            return $b->emit(op => $name eq 'shift' ? 'AShift' : 'APop', type => '%Slot', inputs => [ $b->array_of($in[0]) ]);
+        }
+        if ($name eq 'join') {
+            my @args = @in;
+            pop @args if $v->can('memory_input') && $v->memory_input;
+            my ($sep, @list) = @args;
+            # ONE ARRAY is joined as it is; scalars (an array literal folded to
+            # its elements, `"@a"`) go into a fresh array first.
+            my $arr = ( @list == 1 && $list[0]->operation =~ /\A(?:ArrayLiteral|PostfixDeref)\z/ ) ? $b->array_of($list[0]) : do {
+                my $t = $b->emit(op => 'NewArray', type => '%Array*');
+                for my $e (@list) {
+                    out('a join of a list') if ( $e->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
+                    $b->emit(op => 'APush', type => 'void', inputs => [ $t, $b->as($b->value($e), '%Slot') ]);
+                }
+                $t;
+            };
+            return $b->emit(op => 'Join', type => '%Str', inputs => [ $b->as($b->value($sep), '%Str'), $arr ]);
+        }
+    }
+    if ($op eq 'EntryDef' && ( $v->symbol // '' ) eq '"') {
+        # $" IS " " until written: a program that writes it is not T2's yet.
+        out('$" written') if $b->{writes_list_sep} //= scalar grep {
+            $_->operation =~ /\A(?:EntryWrite|LocalAlias)\z/ && grep { blessed($_) && $_->can('symbol') && ( $_->symbol // '' ) eq '"' } ( $_, $_->inputs->@* )
+        } Chalk::Target::LLVM::Context::_program_nodes( $b->{ret} );
+        $b->{strs}{' '} //= scalar keys %{ $b->{strs} };
+        return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => ' ', id => $b->{strs}{' '} });
+    }
+    return undef;
+}
+
+# array_of($n) -> the %Array* a T1 node names (an ArrayLiteral, a deref of one).
+sub array_of {
+    my ($b, $n) = @_;
+    out('an array that is not a `my` array') unless blessed($n) && $n->operation =~ /\A(?:ArrayLiteral|PostfixDeref)\z/;
+    my $a = $b->value($n);
+    out('not an array') unless $a->type eq '%Array*';
+    return $a;
+}
+
+# array_stmt($Call): push, or a shift or pop whose value is not used, in its
+# place -- after every read the array's version had.
+sub array_stmt {
+    my ($b, $s) = @_;
+    $b->reads_before($_) for @{ $b->{passed} };
+    my @in = $s->inputs->@*;
+    pop @in if $s->can('memory_input') && $s->memory_input;
+    if ($s->name eq 'push') {
+        my ($arr, @vals) = @in;
+        my $a = $b->array_of($arr);
+        for my $e (@vals) {
+            out('a push of a list') if ( $e->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
+            $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($e), '%Slot') ]);
+        }
+        return;
+    }
+    $b->value($s);   # shift, pop: made here, its value memoized for its reader
+}
+
+# element_store($Subscript, $value): `$a[i] = v`, the array growing to i.
+sub element_store {
+    my ($b, $target, $v, $s) = @_;
+    out('a hash element store') unless ( $target->can('kind') ? $target->kind // 'array' : 'array' ) eq 'array';
+    $b->reads_before($_) for @{ $b->{passed} };
+    my ($arr, $idx) = $target->inputs->@[0, 1];
+    $b->emit(op => 'ASet', type => 'void',
+        inputs => [ $b->array_of($arr), $b->as($b->value($idx), 'i64'), $b->as($b->value($v), '%Slot') ],
+        attr => do {
+            # PERL DIES on a store before the start, naming the subscript and where.
+            my ($at) = grep { $_->can('line') && defined $_->line } $s, $target;
+            my $msg = $at ? " at " . ( $at->file // '-' ) . " line " . $at->line . ".\n" : ".\n";   # no site from B::SoN yet
+            $b->{strs}{$msg} //= scalar keys %{ $b->{strs} };
+            +{ msg => $msg, id => $b->{strs}{$msg} };
+        });
 }
 
 # if_stmt($If) -> the Region the program continues from: the condition, each
@@ -198,6 +364,7 @@ sub if_stmt {
         my $blk = $b->new_block($i ? 'else' : 'then');
         $blk{$i} = $blk;
         local $b->{memo} = { %{ $b->{memo} } };   # an arm's values are the arm's
+        local $b->{depth} = ( $b->{depth} // 0 ) + 1;
         $end{$i} = $b->walk($proj{$i});
         # The arm's memo is kept: its phi inputs are read from it (a call made
         # in the arm is that value, not made again).
@@ -290,6 +457,9 @@ sub func {
     local $b->{args} = { map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads };
     local $b->{ret} = $ret;
     local $b->{passed} = [ grep { $_->operation eq 'MemStart' } Chalk::Target::LLVM::Context::_graph_component($g) ];
+    local $b->{readers};
+    $b->index_readers(Chalk::Target::LLVM::Context::_graph_component($g));
+    local $b->{depth} = 0;
     my $start = $ret;
     for (1 .. 100_000) {
         last if $start->operation eq 'Start';
@@ -298,6 +468,7 @@ sub func {
                : out("no way back to Start in $name");
     }
     $b->new_block('entry');
+    $b->make_constant_arrays(Chalk::Target::LLVM::Context::_graph_component($g));
     $b->walk($start);
     my $v = $ret->inputs->[0];
     my $r = blessed($v) ? $b->as($b->value($v), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
@@ -353,6 +524,7 @@ sub loop {
     {
         # A value made in the body is the body's: not seen after the loop.
         local $b->{memo} = { %{ $b->{memo} } };
+        local $b->{depth} = ( $b->{depth} // 0 ) + 1;
         $b->walk($bodyp);
         @back = map { $b->as($b->value($phis[$_]->inputs->[1]), $t2[$_]->type) } 0 .. $#phis;
     }
@@ -365,6 +537,8 @@ sub loop {
     my $exit = $b->new_block('exit');
     $head_end->{term} = [ 'condbr', $cond, $body, $exit ];
     my ($region) = grep { $_->operation eq 'Region' } ( $exitp->consumers // [] )->@*;
+    # THE EXIT'S MEMORY is a version too: a read at it, before a store after.
+    push @{ $b->{passed} }, _memory_phis($region) if $region;
     return $region // $exitp;
 }
 
@@ -377,9 +551,9 @@ sub _memory_phis {
            grep { blessed($_) } ( $m->consumers // [] )->@*;
 }
 
-# _memstarts($ret) -> the program's own MemStart: those of the subs it calls
-# are theirs.
-sub _memstarts {
+# _own_nodes($ret) -> the program's own nodes: those of the subs it calls are
+# theirs.
+sub _own_nodes {
     my ($ret) = @_;
     my @all = Chalk::Target::LLVM::Context::_program_nodes($ret);
     my %callee;
@@ -388,8 +562,9 @@ sub _memstarts {
         next unless $t->can('graph') && $t->graph;
         $callee{ refaddr($_) } = 1 for Chalk::Target::LLVM::Context::_graph_component($t->graph);
     }
-    return grep { $_->operation eq 'MemStart' && !$callee{ refaddr($_) } } @all;
+    return grep { !$callee{ refaddr($_) } } @all;
 }
+sub _memstarts { return grep { $_->operation eq 'MemStart' } _own_nodes($_[0]) }
 
 # successors_by_input($n) -> the nodes that take $n as an input (a Loop's Projs).
 sub successors_by_input {
@@ -412,6 +587,14 @@ sub type_of {
     # T1 types them per call site (add(2,3) Int, though add(0.5,1) is 1.5),
     # so in T2 each is a %Slot, read by its tag.
     return '%Slot' if $b->{args}{ refaddr($v) };
+    # AN ARRAY is an %Array of %Slot, by pointer; a count of it an i64, an
+    # element a %Slot (it holds what was stored, by its tag).
+    return '%Array*' if $op eq 'ArrayLiteral' || $op eq 'PostfixDeref';
+    return 'i64' if $op eq 'Count';
+    return '%Slot' if $op eq 'Subscript';
+    return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
+    return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
+    return '%Str' if $op eq 'EntryDef';
     return '%Slot' if $op eq 'PadAccess' && $v->is_location;
     return '%Slot' if $op eq 'Increment' || $op eq 'Decrement';
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'direct';
@@ -449,6 +632,10 @@ sub _value {
     # earlier, before a store that replaces its version: reads_before).
     if ($op eq 'PadAccess' && $v->is_location) {
         return $b->as($b->emit(op => 'Load', type => '%Slot', inputs => [ $b->location($v) ]), $ty);
+    }
+    if (my $arr = $b->array_value($v, $op)) { return $arr }
+    if ($op eq 'Defined') {
+        return $b->emit(op => 'Defined', type => 'i1', inputs => [ $b->as($b->value($v->inputs->[0]), '%Slot') ]);
     }
     if ($op eq 'Increment' || $op eq 'Decrement') {
         # perl's ++ (a string's magic increment too) and --, on a scalar.
@@ -664,6 +851,14 @@ sub _line {
         return "$nm = call double \@t2_div(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
     }
     return "$nm = call %Str \@t2_concat(" . $arg->(@in) . ')' if $op eq 'Concat';
+    return "$nm = call %Array* \@t2_new_array()" if $op eq 'NewArray';
+    return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
+    if ($op eq 'ASet') {
+        my $len = do { use bytes; length $a{msg} };
+        return "call void \@t2_aset(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
+    }
+    my %aop = (ALen => 'i64 @t2_alen', AGet => '%Slot @t2_aget', AShift => '%Slot @t2_ashift', APop => '%Slot @t2_apop', Join => '%Str @t2_join');
+    return "$nm = call $aop{$op}(" . $arg->(@in) . ')' if $aop{$op};
     return "call void \@t2_print(" . $arg->(@in) . ')' if $op eq 'Print';
     return "$nm = call i1 \@t2_defined(" . $arg->(@in) . ')' if $op eq 'Defined';
     if ($op eq 'Truth') {
@@ -1242,6 +1437,177 @@ str:
 undef:
   %e = call %Str @t2_str(i8* null, i64 0)
   ret %Str %e
+}
+
+; %Array: { len, cap, elements } -- a `my @a`, its elements %Slot.
+%Array = type { i64, i64, %Slot* }
+declare i8* @realloc(i8*, i64)
+declare i8* @memmove(i8*, i8*, i64)
+define internal %Array* @t2_new_array() {
+  %m = call i8* @malloc(i64 24)
+  %a = bitcast i8* %m to %Array*
+  store %Array zeroinitializer, %Array* %a
+  ret %Array* %a
+}
+define internal i64 @t2_alen(%Array* %a) {
+  %lp = getelementptr %Array, %Array* %a, i32 0, i32 0
+  %n = load i64, i64* %lp
+  ret i64 %n
+}
+; t2_agrow(a, n): room for n elements, the new ones undef.
+define internal void @t2_agrow(%Array* %a, i64 %n) {
+entry:
+  %cp = getelementptr %Array, %Array* %a, i32 0, i32 1
+  %cap = load i64, i64* %cp
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %fits = icmp sle i64 %n, %cap
+  br i1 %fits, label %fill, label %grow
+grow:
+  %c2 = mul i64 %cap, 2
+  %big = icmp sgt i64 %c2, %n
+  %c3 = select i1 %big, i64 %c2, i64 %n
+  %c4 = add i64 %c3, 4
+  %bytes = mul i64 %c4, 16
+  %old = load %Slot*, %Slot** %ep
+  %o8 = bitcast %Slot* %old to i8*
+  %new8 = call i8* @realloc(i8* %o8, i64 %bytes)
+  %new = bitcast i8* %new8 to %Slot*
+  store %Slot* %new, %Slot** %ep
+  store i64 %c4, i64* %cp
+  br label %fill
+fill:
+  %lp = getelementptr %Array, %Array* %a, i32 0, i32 0
+  %len = load i64, i64* %lp
+  %els = load %Slot*, %Slot** %ep
+  br label %loop
+loop:
+  %i = phi i64 [ %len, %fill ], [ %i1, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %p = getelementptr %Slot, %Slot* %els, i64 %i
+  store %Slot zeroinitializer, %Slot* %p
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  %longer = icmp sgt i64 %n, %len
+  %nl = select i1 %longer, i64 %n, i64 %len
+  store i64 %nl, i64* %lp
+  ret void
+}
+define internal void @t2_apush(%Array* %a, %Slot %v) {
+  %n = call i64 @t2_alen(%Array* %a)
+  %n1 = add i64 %n, 1
+  call void @t2_agrow(%Array* %a, i64 %n1)
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  %p = getelementptr %Slot, %Slot* %els, i64 %n
+  store %Slot %v, %Slot* %p
+  ret void
+}
+define internal %Slot @t2_aget(%Array* %a, i64 %i) {
+entry:
+  %n = call i64 @t2_alen(%Array* %a)
+  %neg = icmp slt i64 %i, 0
+  %fromend = add i64 %i, %n
+  %j = select i1 %neg, i64 %fromend, i64 %i
+  %lo = icmp slt i64 %j, 0
+  %hi = icmp sge i64 %j, %n
+  %out = or i1 %lo, %hi
+  br i1 %out, label %undef, label %get
+get:
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  %p = getelementptr %Slot, %Slot* %els, i64 %j
+  %v = load %Slot, %Slot* %p
+  ret %Slot %v
+undef:
+  ret %Slot zeroinitializer
+}
+@lit_aset = private unnamed_addr constant [64 x i8] c"Modification of non-creatable array value attempted, subscript \00"
+define internal void @t2_aset(%Array* %a, i64 %i, %Slot %v, i8* %at, i64 %atn) {
+entry:
+  %n = call i64 @t2_alen(%Array* %a)
+  %neg = icmp slt i64 %i, 0
+  %fromend = add i64 %i, %n
+  %j = select i1 %neg, i64 %fromend, i64 %i
+  %lo = icmp slt i64 %j, 0
+  br i1 %lo, label %die, label %set
+set:
+  %j1 = add i64 %j, 1
+  call void @t2_agrow(%Array* %a, i64 %j1)
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  %p = getelementptr %Slot, %Slot* %els, i64 %j
+  store %Slot %v, %Slot* %p
+  ret void
+die:
+  %m = getelementptr [64 x i8], [64 x i8]* @lit_aset, i64 0, i64 0
+  call i64 @write(i32 2, i8* %m, i64 63)
+  %is = call %Str @t2_i64_str(i64 %i)
+  %ip = extractvalue %Str %is, 0
+  %in = extractvalue %Str %is, 1
+  call i64 @write(i32 2, i8* %ip, i64 %in)
+  call i64 @write(i32 2, i8* %at, i64 %atn)
+  call void @exit(i32 255)
+  unreachable
+}
+define internal %Slot @t2_apop(%Array* %a) {
+entry:
+  %n = call i64 @t2_alen(%Array* %a)
+  %empty = icmp eq i64 %n, 0
+  br i1 %empty, label %undef, label %pop
+pop:
+  %n1 = sub i64 %n, 1
+  %v = call %Slot @t2_aget(%Array* %a, i64 %n1)
+  %lp = getelementptr %Array, %Array* %a, i32 0, i32 0
+  store i64 %n1, i64* %lp
+  ret %Slot %v
+undef:
+  ret %Slot zeroinitializer
+}
+define internal %Slot @t2_ashift(%Array* %a) {
+entry:
+  %n = call i64 @t2_alen(%Array* %a)
+  %empty = icmp eq i64 %n, 0
+  br i1 %empty, label %undef, label %shift
+shift:
+  %v = call %Slot @t2_aget(%Array* %a, i64 0)
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  %d = bitcast %Slot* %els to i8*
+  %s1 = getelementptr %Slot, %Slot* %els, i64 1
+  %s = bitcast %Slot* %s1 to i8*
+  %n1 = sub i64 %n, 1
+  %bytes = mul i64 %n1, 16
+  call i8* @memmove(i8* %d, i8* %s, i64 %bytes)
+  %lp = getelementptr %Array, %Array* %a, i32 0, i32 0
+  store i64 %n1, i64* %lp
+  ret %Slot %v
+undef:
+  ret %Slot zeroinitializer
+}
+define internal %Str @t2_join(%Str %sep, %Array* %a) {
+entry:
+  %n = call i64 @t2_alen(%Array* %a)
+  %e = call %Str @t2_str(i8* null, i64 0)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i1, %body ]
+  %acc = phi %Str [ %e, %entry ], [ %acc2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %first = icmp eq i64 %i, 0
+  %pre = call %Str @t2_concat(%Str %acc, %Str %sep)
+  %acc1 = select i1 %first, %Str %acc, %Str %pre
+  %v = call %Slot @t2_aget(%Array* %a, i64 %i)
+  %vs = call %Str @t2_slot_str(%Slot %v)
+  %acc2 = call %Str @t2_concat(%Str %acc1, %Str %vs)
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  ret %Str %acc
 }
 define internal i1 @t2_truth_i64(i64 %v) {
   %b = icmp ne i64 %v, 0
