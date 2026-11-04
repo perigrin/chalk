@@ -130,6 +130,9 @@ sub walk {
             $ctl = $s;
         }
         elsif ($op eq 'Assign') { $b->assign($s); push @{ $b->{passed} }, $s; $ctl = $s }
+        # A `my @a` PINNED WHERE IT RUNS (B::SoN pins one in a loop body or an
+        # arm): a fresh array there, each time control reaches it.
+        elsif ($op eq 'ArrayLiteral' && ( $s->stamp // '' ) eq 'Array') { $b->value($s); $ctl = $s }   # static type
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands.
         elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || ( $s->dispatch_kind // '' ) eq 'direct' )) {
@@ -238,9 +241,13 @@ sub assign {
 # make_constant_arrays(@nodes): an array whose literal holds only constants
 # (`my @a = (1, 2)`, `my @a`) is made in the entry block -- first made where it
 # was first used, in a loop body it was made again each pass.
+# _pinned($n) -> true for a node on the control chain.
+sub _pinned { my ($n) = @_; return $n->can('control_in') && blessed($n->control_in) ? 1 : 0 }
+
 sub make_constant_arrays {
     my ($b, @nodes) = @_;
     for my $lit (grep { $_->operation eq 'ArrayLiteral' } @nodes) {
+        next if _pinned($lit);   # a `my @a` pinned where it runs: made there
         next if grep { !( blessed($_) && $_->operation eq 'Constant' ) } $lit->inputs->@*;
         $b->value($lit);
     }
@@ -254,7 +261,7 @@ sub array_value {
     if ($op eq 'ArrayLiteral') {
         # ONE NOT MADE AT ENTRY, needed in an arm or a loop body, would be made
         # there -- again each pass, and gone after.
-        out('an array first made in an arm or a loop body') if $b->{depth};
+        out('an array first made in an arm or a loop body') if $b->{depth} && !_pinned($v);
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
         for my $e (@in) {
             out('a list in an array literal') if ( $e->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type

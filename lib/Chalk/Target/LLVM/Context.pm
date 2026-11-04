@@ -8519,6 +8519,9 @@ sub _prelower_loop_drain_operands {
                   . "that use (pre-loop scalar/element read, push re-fill, or a "
                   . "second drain); not yet lowered.";
             }
+            # A `my @a` PINNED IN THE BODY is a fresh array each pass, made where
+            # it stands: built once here, it kept every pass's pushes.
+            next if $array->can('control_in') && blessed($array->control_in);
             $self->lower_value($array);
         }
     }

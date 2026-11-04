@@ -57,6 +57,9 @@ for my $case (
     [ q{my @a = (1, 2); $a[1] = 9; $a[3] = 4; print "$a[1] ", scalar(@a), defined $a[2] ? "d" : "u", "\n";}, 'element stores, the array growing' ],
     [ q{my @a = ("x", 1.5, 2); print "@a\n";}, 'interpolated' ],
     [ q{my @a = (1, 2); for my $v (@a) { $v = $v * 10 } my $s = $a[0]; $a[0] = 6; print "$s $a[0]\n";}, 'a read after a loop, then a store' ],
+    [ q{for my $i (1 .. 2) { my @o; push @o, $i; print scalar(@o), "\n" }}, 'a bare my @o in a loop body, fresh each pass' ],
+    [ q{for my $i (1 .. 2) { my @o = (7); push @o, $i; print scalar(@o), " $o[-1]\n" }}, 'a my @o = (...) in a loop body, fresh each pass' ],
+    [ q{my $t = 0; for my $i (1 .. 3) { if ($i > 1) { my @o = ($i); push @o, 1; $t = $t + scalar(@o) } } print "$t\n";}, 'a my @o in an arm' ],
 ) {
     my ($src, $name) = @$case;
     $LAST_LL = '';
