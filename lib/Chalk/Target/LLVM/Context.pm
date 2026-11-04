@@ -1641,6 +1641,8 @@ sub _is_memory_version {
     return 1 if $op =~ /\A(?:MemStart|Assign|Call|RegexSubst|Transliterate|EntryWrite|CellWrite|Delete|ElemRestore)\z/;
     # an m//g writes pos(), so B::SoN versions memory at it
     return 1 if $op eq 'RegexMatch' && ( $node->flags // '' ) =~ /g/;
+    # a match whose `(?{ ... })` blocks run writes what they write
+    return 1 if $op =~ /\A(?:RegexMatch|Match)\z/ && $node->can('code_bodies') && $node->code_bodies;
     return $op eq 'Phi' && _is_memory_phi($node) ? 1 : 0;
 }
 
@@ -7349,7 +7351,9 @@ sub process_control_node {
         $self->_freeze_memory_reads($node)
             if $op eq 'Assign' || $op eq 'RegexSubst' || $op eq 'EntryWrite' || $op eq 'Delete' || $op eq 'ElemRestore'
             || $self->_is_array_mutating_call($node)
-            || ($op eq 'Call' && ($node->dispatch_kind // '') eq 'direct');
+            || ($op eq 'Call' && ($node->dispatch_kind // '') eq 'direct')
+            # A MATCH WHOSE CODE BLOCKS RUN stores what they store.
+            || ( $op =~ /\A(?:RegexMatch|Match)\z/ && $node->can('code_bodies') && $node->code_bodies );
     }
     elsif ($op eq 'Unwind') {
         # A MAINLINE `die` — one not inside an if/else arm. Its Unwind sits
@@ -19589,6 +19593,12 @@ sub _rx_code_fn { my ($name) = @_; return $RX_CODE_FN{$name} //= '@chalk_rxcode_
 
 sub _regex_code_block_end {
     my ($chars, $k) = @_;
+    # A QUOTE-LIKE OP (q(...), qq{}, m//, s///, tr), A COMMENT OR A HEREDOC can
+    # hold a `})` this scan would take for the end: refused, not misread.
+    my $rest = join '', @$chars[ $k .. $#$chars ];
+    die "GAP: a regex code block with a quote-like op, a comment or a heredoc is not lowered"
+      . " -- where it ends is not found by braces and quotes\n"
+        if $rest =~ /(?<![\w\$\@%&*>"'-])(?:q[qwr]?|m|s|tr|y)\s*[^\w\s=,;)]/ || $rest =~ /#|<</;
     my $depth = 1;
     while ($k < @$chars) {
         my $c = $chars->[$k];

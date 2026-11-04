@@ -62,6 +62,13 @@ for my $case (
     # never on a miss, however many starts a slide would try.
     [ q{my $t = 0; my $s = "aab"; $s =~ /a(?{ $t = $t + 1 })b/; print "$t\n";}, 'a literal pattern: one run, at the literal' ],
     [ q{my $t = 0; my $s = "xay"; my $h = $s =~ /a(?{ $t = $t + 1 })b/ ? 1 : 0; print "$h $t\n";}, 'a literal pattern that misses: no run' ],
+    # A MATCH WHOSE BLOCK RUNS IS A NEW VERSION OF WHAT THE BLOCK WRITES: a read
+    # after it is made there, not past a later store (review, 2026-11-04).
+    [ q{my $t = 0; my $s = "ab"; $s =~ /a(?{ $t = 1 })/; my $u = $t + 1; $s =~ /a(?{ $t = 10 })/; print "$t $u\n";}, 'a read between two blocks' ],
+    [ q{my $t = 0; my $s = "ab"; $s =~ /a(?{ $t = 1 })/; my $u = $t + 1; $t = 7; print "$t $u\n";}, 'a read before a later store' ],
+    [ q{my $t = 0; my $s = "ab"; my $r = qr/a(?{ $t = $t + 1 })/; $s =~ $r; my $u = $t * 10; $s =~ $r; print "$t $u\n";}, 'a read between two qr matches' ],
+    [ q{my @a = (1); my $s = "ab"; $s =~ /a(?{ push @a, 2 })/; my $n = scalar(@a); push @a, 3; print "$n\n";}, 'a count before a later push' ],
+    [ q{my $t = "x"; my $s = "ab"; if ($s =~ /a(?{ $t = "y" })/) { my $old = $t; $t = "z"; print "$old\n" }}, 'a read in the arm the match guards' ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
@@ -73,6 +80,13 @@ for my $src (q{my $t = 0; my $s = "azax"; $s =~ /a(?{ $t = $t + 1 })[xy]/; print
               q{my $t = 0; my $s = "aaab"; $s =~ /a+(?{ $t = $t + 1 })b/; print "$t\n";}) {
     my ($got) = eval { through_llvm($src, {}) };
     like($@, qr/GAP: a regex code block in a pattern that is not all literal/, "refused by name: $src") or diag "got: " . ($got // 'undef');
+}
+
+# A BLOCK'S END IS FOUND BY BRACES AND QUOTES; a quote-like op (q(...)) can
+# hide a `})` -- refused, not misread (review, 2026-11-04).
+for my $src (q|my $t = ""; my $s = "ab"; my $h = $s =~ /a(?{ $t = join q(}), "(" })b/ ? 1 : 0; print "$h [$t]\n";|) {
+    my ($got) = eval { through_llvm($src, {}) };
+    like($@, qr/GAP: a regex code block with a quote-like op/, "refused by name: $src") or diag "got: " . ($got // 'undef');
 }
 
 done_testing;
