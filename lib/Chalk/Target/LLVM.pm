@@ -1886,6 +1886,8 @@ sub lower_with_elaboration {
         class_registry => $class_registry);
     # The MOP itself, for a method whose class only an inlined call site knows.
     $ctx->{mop} = $opts{mop};
+    # The program's Return: a check over all of its nodes (_bit_read_alone).
+    $ctx->{_program_return} = $return_node;
 
     # Classes require %Slot (for fields) and malloc (for New).
     # Set these flags early so the prologue emits them even before body lowering.

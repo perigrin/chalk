@@ -1858,6 +1858,13 @@ sub lower_value {
     my $id = $node->id();
     my $op = $node->operation();
     _refuse_an_in_place_write_to_a_location($node, $op);
+    # A PINNED BITWISE OR SHIFT OP RAN ONCE, at its statement: a later use reads
+    # what it made there. Re-lowered at the use (it is pure over a read), it ran
+    # again -- after a later op had numified its operand.
+    if (my $made = ( $self->{_pinned_made} // {} )->{$id}) {
+        $self->{cache}{$_} = $made->{$_} for keys %$made;
+        return $made->{$id};
+    }
     # Memory-SSA: a Subscript with a memory input (inputs[2]) that has already
     # been frozen (_freeze_memory_reads emitted it at its memory version's
     # control position) is served from the cache -- its memory input fixes its
@@ -2938,8 +2945,15 @@ sub _lower_bitop {
     } @in;
     my $ref = $self->_fresh;
     $self->_emit("  $ref = $llop i64 $v[0], $v[1]  ; " . $node->op_str);
-    unless (grep { blessed($_) && $_->operation =~ /\ABit(?:And|Or|Xor)\z/ } ($node->consumers // [])->@*
-            and !grep { blessed($_) && $_->operation !~ /\ABit(?:And|Or|Xor)\z/ } ($node->consumers // [])->@*) {
+    # DONE ON NUMBERS, it numified each variable it read (_bit_numified_slot).
+    for my $leaf (grep { blessed($_) && $_->operation =~ /\A(?:EnvRead|DefinedOr)\z/ } map { _bit_leaf($_) } @in) {
+        $self->_emit("  store i1 true, i1* " . $self->_bit_numified_slot($leaf) . "  ; " . $node->op_str . " made it a number");
+    }
+    # ITS VALUE'S USERS -- not the next statement, which names a pinned op by
+    # its control_in.
+    my @users = _value_users($node);
+    unless (grep { $_->operation =~ /\ABit(?:And|Or|Xor)\z/ } @users
+            and !grep { $_->operation !~ /\ABit(?:And|Or|Xor)\z/ } @users) {
         $self->_refuse_inside_eval("a bitwise result past what an integer holds");
         my ($big, $stop, $ok) = ($self->_fresh, $self->_fresh_label('bit.big.'), $self->_fresh_label('bit.ok.'));
         $self->_emit("  $big = icmp slt i64 $ref, 0  ; unsigned past an i64?");
@@ -2998,7 +3012,7 @@ sub _lower_bitop_on_strings {
     # ONE PAST WHAT AN i64 HOLDS stops the program, as _lower_bitop does,
     # unless another bitwise op takes it.
     my $bit = qr/\A(?:Bit(?:And|Or|Xor)|Complement)\z/;
-    if (grep { blessed($_) && $_->operation !~ $bit } ($node->consumers // [])->@*) {
+    if (grep { $_->operation !~ $bit } _value_users($node)) {
         my ($big, $num_big, $ok) = map { $self->_fresh } 1 .. 3;
         $self->_emit("  $big = icmp slt i64 $n, 0  ; unsigned past an i64?");
         $self->_emit("  $num_big = select i1 $both, i1 false, i1 $big");
@@ -3011,7 +3025,23 @@ sub _lower_bitop_on_strings {
     $self->_emit("  $str = select i1 $both, %Str $as_str, %Str $n_str  ; $what: bytes or a number");
     $self->_emit("  $num = select i1 $both, i64 $s_num, i64 $n");
     $self->{cache}{ 'bitstr:' . $node->id } = { is => $both, str => $str };
+    # DONE ON NUMBERS, it numified each variable it read: a later op reads a number.
+    for my $leaf (grep { blessed($_) && $_->operation =~ /\A(?:EnvRead|DefinedOr)\z/ } map { _bit_leaf($_) } @in) {
+        my $slot = $self->_bit_numified_slot($leaf);
+        my ($was, $num_op, $now) = map { $self->_fresh } 1 .. 3;
+        $self->_emit("  $was = load i1, i1* $slot");
+        $self->_emit("  $num_op = xor i1 $both, true  ; $what done on numbers?");
+        $self->_emit("  $now = or i1 $was, $num_op");
+        $self->_emit("  store i1 $now, i1* $slot");
+    }
     return $self->{cache}{ $node->id } = $num;
+}
+
+# _value_users($n) -> the consumers of $n that read its VALUE (have it among
+# their inputs), not those that follow it on the control chain.
+sub _value_users {
+    my ($n) = @_;
+    return grep { blessed($_) && grep { blessed($_) && $_ == $n } $_->inputs->@* } ( $n->consumers // [] )->@*;
 }
 
 # _bit_leaf($n) -> $n under the numeric readings (a Coerce to Int or Num) the
@@ -3032,7 +3062,10 @@ sub _bit_string_of {
     my $bit = qr/\A(?:Bit(?:And|Or|Xor)|Complement)\z/;
     my $stamp = $n->stamp // ''; # static type
     # A NUMBER: not one of the kinds below, and the producer typed it Int.
+    # AN @ARGV ELEMENT given is a string, as an %ENV value is; read inside a `//`.
+    return ( 'true', undef ) if $inner && _argv_element($n);
     my $kind = $op eq 'Constant' || $op eq 'EnvRead' || ( $op eq 'DefinedOr' && $stamp eq 'Str' )
+            || ( $op eq 'DefinedOr' && _argv_element($n->inputs->[0]) )
             || defined $self->{cache}{ 'bitstr:' . $n->id };
     if (!$kind) {
         die "GAP: a bitwise op on what may be a string, from a $op ($stamp), is not lowered -- "
@@ -3048,45 +3081,103 @@ sub _bit_string_of {
     $self->_bit_read_alone($n, $op_node) unless $inner;
     if (my $d = $self->{cache}{ 'bitstr:' . $n->id }) { return ( $d->{is}, $d->{str} ) }
     return ( 'true', $self->lower_value($n) ) if $op eq 'Constant';
+    my ($is, $s);
     if ($op eq 'EnvRead') {
         $self->_bit_env_unread($n);
-        my $s = $self->lower_value($n);
-        return ( $self->_env_defined_bit($n), $s );
+        $s  = $self->lower_value($n);
+        $is = $self->_env_defined_bit($n);
     }
-    # A `//` holds the side it took.
-    my $s = $self->lower_value($n);
-    my ($l, $r) = $n->inputs->@[0, 1];
-    my $took = $self->_env_defined_bit($l)
-        // die "GAP: a bitwise op on a `//` whose left side is not an %ENV read is not lowered\n";
-    my ($li) = $self->_bit_string_of($l, $n, 1);
-    my ($ri) = $self->_bit_string_of($r, $n, 1);
-    my $is = $self->_fresh;
-    $self->_emit("  $is = select i1 $took, i1 $li, i1 $ri  ; //: the side it took a string?");
-    return ( $is, $s );
+    else {
+        # A `//` holds the side it took.
+        $s = $self->lower_value($n);
+        my ($l, $r) = $n->inputs->@[0, 1];
+        my $took = $self->_env_defined_bit($l)
+            // ( _argv_element($l) ? $self->_slot_defined_bit($self->lower_value($l)) : undef )
+            // die "GAP: a bitwise op on a `//` whose left side is not an %ENV read is not lowered\n";
+        # HELD AS A SCALAR (an @ARGV element or a number): its bytes are its string.
+        $s = $self->_emit_coercion($s, 'Scalar', 'Str', 'a bitwise operand\'s bytes')
+            if ( $self->_repr_of($n) // $n->stamp // '' ) =~ /\A(?:Scalar|Slot)\z/;   # static type
+        my ($li) = $self->_bit_string_of($l, $n, 1);
+        my ($ri) = $self->_bit_string_of($r, $n, 1);
+        $is = $self->_fresh;
+        $self->_emit("  $is = select i1 $took, i1 $li, i1 $ri  ; //: the side it took a string?");
+    }
+    return ( $is, $s ) if $inner;
+    # A STRING AN OP DID ON NUMBERS IS A NUMBER to every op after it: perl
+    # numified it there. Whether one has is known only when it runs.
+    my ($was, $still) = map { $self->_fresh } 1 .. 2;
+    $self->_emit("  $was = load i1, i1* " . $self->_bit_numified_slot($n) . "  ; an op made it a number?");
+    $self->_emit("  $still = select i1 $was, i1 false, i1 $is  ; still a string?");
+    return ( $still, $s );
+}
+
+# _bit_readers_of($leaf) -> every bitwise or shift op of the program reading
+# $leaf, directly or through a numeric Coerce -- found by scanning inputs.
+sub _bit_readers_of {
+    my ($self, $leaf) = @_;
+    my $ret = $self->{_program_return} or return ();
+    my $all = $self->{_bit_all_nodes} //= [ _program_nodes($ret) ];
+    my $is = sub ($x) { blessed($x) && ( $x == $leaf || ( $x->operation eq 'Coerce' && ( $x->to_repr // '' ) =~ /\A(?:Int|Num)\z/ && blessed($x->inputs->[0]) && $x->inputs->[0] == $leaf ) ) };
+    return grep { $_->operation =~ /\A(?:Bit(?:And|Or|Xor)|Complement|LeftShift|RightShift)\z/ && grep { $is->($_) } $_->inputs->@* } @$all;
+}
+
+# _bit_numified_slot($leaf) -> the i1* that says an earlier bitwise op read
+# $leaf as a number (perl numifies a string it does a numeric op on).
+sub _bit_numified_slot {
+    my ($self, $n) = @_;
+    return $self->{_bit_numified}{ $n->id } //= do {
+        my $slot = $self->_fresh;
+        $self->_emit_entry("  $slot = alloca i1  ; numified by a bitwise op?");
+        $self->_emit_entry("  store i1 false, i1* $slot");
+        $slot;
+    };
+}
+
+# _argv_element($n) -> true for `$ARGV[N]` read where the program never
+# writes @ARGV: what the command line gave, a string, or undef.
+sub _argv_element {
+    my ($n) = @_;
+    return 0 unless blessed($n) && $n->operation eq 'Subscript';
+    my $a = $n->inputs->[0];
+    return 0 unless blessed($a) && $a->operation eq 'EntryDef' && ( $a->symbol // '' ) eq 'ARGV' && ( $a->sigil // '' ) eq '@';
+    for my $c (grep { blessed($_) } ( $a->consumers // [] )->@*) {
+        return 0 unless $c->operation =~ /\A(?:Subscript|Count)\z/;
+        return 0 if grep { blessed($_) && $_->operation eq 'Assign' && $_->inputs->[0] == $c } ( $c->consumers // [] )->@*;
+    }
+    return 1;
 }
 
 # _bit_read_alone($n, $op): $n is read by bitwise $op and no other bitwise op,
 # and by nothing that reads it as a number -- else GAP.
 sub _bit_read_alone {
     my ($self, $n, $op_node) = @_;
-    my $bit = qr/\A(?:Bit(?:And|Or|Xor)|Complement)\z/;
+    # A SHIFT reads it as a number too: pinned, it numifies it in order.
+    my $bit = qr/\A(?:Bit(?:And|Or|Xor)|Complement|LeftShift|RightShift)\z/;
     my %ops;
     for my $c (($n->consumers // [])->@*) {
         next unless blessed($c);
         my $op = $c->operation;
-        if ($op =~ $bit) { $ops{ $c->id } = 1; next }
+        if ($op =~ $bit) { $ops{ $c->id } = $c; next }
         next if $op eq 'Print';
         if ($op eq 'Coerce' && ( $c->to_repr // '' ) eq 'Str') { next }
         if ($op eq 'Coerce' && ( $c->to_repr // '' ) =~ /\A(?:Int|Num)\z/) {
             my @r = grep { blessed($_) } ($c->consumers // [])->@*;
-            if (!grep { $_->operation !~ $bit } @r) { $ops{ $_->id } = 1 for @r; next }
+            if (!grep { $_->operation !~ $bit } @r) { $ops{ $_->id } = $_ for @r; next }
         }
         die "GAP: a bitwise op on what may be a string, which a $op also reads, is not lowered -- "
           . "a numeric read makes it a number to the op\n";
     }
+    # ANOTHER BITWISE OR SHIFT OP READING IT is tracked at run time
+    # (_bit_numified_slot) -- in the order perl runs them, which holds only when
+    # each is pinned to its statement (B::SoN pins one on the main walk; one in
+    # a loop body or an arm floats, and is lowered where it is used). Found by
+    # the INPUTS of the whole program: a consumer list may miss a reader (`<<`
+    # and `~` sharing a Coerce listed only `~`).
+    my @readers = $self->_bit_readers_of($n);
     die "GAP: a bitwise op on what may be a string, which another bitwise op also reads, is not "
-      . "lowered -- that op, done on numbers, makes it a number to this one\n"
-        if grep { $_ ne $op_node->id } keys %ops;
+      . "lowered -- that op, done on numbers, makes it a number to this one, and they are not both "
+      . "pinned where perl runs them\n"
+        if @readers > 1 && grep { !( $_->can('control_in') && blessed($_->control_in) ) } @readers;
     return;
 }
 
@@ -3306,6 +3397,11 @@ sub _lower_repeat {
 sub _lower_shift {
     my ($self, $node, $llop) = @_;
     my ($a, $c) = map { $self->_operand_as($_, 'Int', $node->op_str) } $node->inputs->@[0, 1];
+    # A SHIFT IS DONE ON NUMBERS: it numifies a string variable it reads, for a
+    # later bitwise op (_bit_numified_slot) -- $a << 1 then ~$a.
+    for my $leaf (grep { blessed($_) && $_->operation =~ /\A(?:EnvRead|DefinedOr)\z/ } map { _bit_leaf($_) } $node->inputs->@[0, 1]) {
+        $self->_emit("  store i1 true, i1* " . $self->_bit_numified_slot($leaf) . "  ; " . $node->op_str . " made it a number");
+    }
     my ($ok_a, $ok_c, $ok) = map { $self->_fresh } 1 .. 3;
     $self->_emit("  $ok_a = icmp sge i64 $a, 0");
     $self->_emit("  $ok_c = icmp sge i64 $c, 0");
@@ -7407,6 +7503,13 @@ sub process_control_node {
     # A STORE TO A CAPTURED VARIABLE goes to its cell -- its location.
     # Dropped here before, unseen: CellWrite is neither a statement node nor
     # fixed, so `$k = 4` after a closure over $k was lost.
+    # A BITWISE OR SHIFT OP ON WHAT MAY BE A STRING, pinned by B::SoN where perl
+    # runs it: it numifies that string there, before a later op reads it.
+    elsif ($op =~ /\A(?:Bit(?:And|Or|Xor)|Complement|LeftShift|RightShift)\z/) {
+        $self->lower_value($node);
+        my $id = $node->id;
+        $self->{_pinned_made}{$id} = { map { exists $self->{cache}{$_} ? ( $_ => $self->{cache}{$_} ) : () } $id, "bitstr:$id", "repr:$id" };
+    }
     elsif ($op eq 'CellWrite') {
         $self->lower_value($node);
     }

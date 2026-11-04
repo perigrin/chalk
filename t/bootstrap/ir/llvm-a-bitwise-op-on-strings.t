@@ -61,15 +61,24 @@ for my $case (
     [ q{my $a = $ENV{X} // "ab"; print $a ^ "  ", "\n";}, '^ of unequal lengths' ],
     [ q{my $a = $ENV{Z} // "abc"; my $b = $ENV{X} // 5; print $b & $a, "\n";}, '& of unequal lengths, or of a number' ],
     [ q{my $s = $ENV{Z} // "12"; my $t = ~$s; print ~$t, "\n";}, '~ of ~ of a string' ],
+    # AN @ARGV ELEMENT is a string when given -- here never, so its default.
+    [ q{my $a = $ARGV[0] // 6; my $b = $ARGV[1] // 3; print $a & $b, " ", $a | $b, "\n";}, '@ARGV elements, or their defaults' ],
+    # A SHIFT AFTER IT, and the op's value used after the shift: the op ran at its
+    # statement, before the shift numified $a (re-lowered at its use, it was not).
+    [ q{my $a = $ENV{X} // "ab"; my $b = $ENV{Z} // "c"; my $bits = $a & $b; my $s = $a << 1; print "bits [$bits] $s\n";}, 'an op, then a shift, then its value' ],
+    [ q{my $a = $ENV{X} // 6; my $s = $a << 1; my $c = ~$a & 255; print "$s $c\n";}, 'a shift numifies for a later ~' ],
+    # A VARIABLE READ BY TWO OPS: one done on numbers makes it a number to the
+    # next -- tracked at run time, per variable.
+    [ q{my $a = $ENV{X} // 6; my $b = $ENV{Y} // 3; my $c = $ENV{Z} // 2;
+        print $a | $b & $c, " ", ($a | $b) & $c, "\n";}, 'pvm 047: each variable read by two ops' ],
+    [ q{my $s = $ENV{X} // "12"; print $s & 5, " ", $s & "10", "\n";}, 'a string a numeric & read first' ],
 ) { $each_env->(@$case, 0) }
 
 # Perl's answer, or refused by name: a string a numeric read made a number is
 # a number to the op after -- and one node may stand for several variables,
 # so which variable the read numified is not known.
 for my $case (
-    [ q{my $a = $ENV{X} // 6; my $b = $ENV{Y} // 3; my $c = $ENV{Z} // 2;
-        print $a | $b & $c, " ", ($a | $b) & $c, "\n";}, 'pvm 047: each variable read by two ops' ],
-    [ q{my $s = $ENV{X} // "12"; print $s & 5, " ", $s & "10", "\n";}, 'a string a numeric & read first' ],
+    [ q{my $a = $ENV{X} // "ab"; my $c = 1; if ($c) { my $t = $a & 5 } print $a | "  ", "\n";}, 'an op whose value nothing uses: perl still runs it' ],
     [ q{my $s = $ENV{X} // "12"; my $n = $s + 1; print $s & "10", " $n\n";}, 'a string + also reads' ],
     # TWO STATEMENTS, used in the other order: perl ran $x's op first (2026-11-04,
     # a numified flag lowered in use order printed 10 4 for perl's 8 4).
