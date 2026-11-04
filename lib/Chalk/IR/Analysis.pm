@@ -409,7 +409,6 @@ sub infer ($class, $graphs) {
     _attach_glob_bound_subs(\%graphs, $mop);
     _attach_autoload(\%graphs, $mop);
     _attach_formats(\%graphs, $mop);
-    _attach_evals(\%graphs, $mop);
     _type_calls_through_named_refs(\%graphs, $mop);
     _type_calls_returning_self(\%graphs);
 
@@ -1048,23 +1047,6 @@ sub _attach_formats ($graphs, $mop) {
         $n->set_target($sub{$name} //= Chalk::MOP::Sub->new(
             name => $name, class => $mop->for_class('main'),
             graph => $graphs->{$name}, params => ['@_'], uses_args => true));
-    }
-    return;
-}
-
-# _attach_evals($graphs, $mop): an eval of a constant string is B::SoN's
-# direct call of the body it compiled, `<enclosing>::__EVAL__:N`, which names
-# no sub: its graph shares the lexicals it names with the program by name.
-sub _attach_evals ($graphs, $mop) {
-    my %sub;
-    for my $n (map { _all_graph_nodes($graphs->{$_}) } sort keys $graphs->%*) {
-        next unless $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct'
-            && !defined $n->target;
-        my $name = $n->name // '';
-        next unless $name =~ /::__EVAL__:\d+\z/ && $graphs->{$name};
-        $n->set_target($sub{$name} //= Chalk::MOP::Sub->new(
-            name => $name, class => $mop->for_class('main'),
-            graph => $graphs->{$name}, params => [], uses_args => false));
     }
     return;
 }
