@@ -50,6 +50,9 @@ for my $case (
     # A SLOT CARRIES ITS DEFINED BIT. `defined` over a Scalar answered true
     # unread, and an unassigned shared `my $k` was "def".
     [ q{my $k; sub f { return defined($k) ? "def" : "undef" } print f(), "\n"; $k = 1; print f(), "\n";}, "undef\ndef\n", 'defined over a shared lexical, before and after a store' ],
+    # WHAT ANOTHER GRAPH STORED: the program stored a number, the sub a string
+    # -- read as the program's Int, it printed 0 (review 2, 2026-11-04).
+    [ q{my $x = 3; sub g { $x = "abc" } g(); print "$x\n"; my $y = $x * 2;}, "abc\n", 'a string a sub stores where the program stored a number' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };

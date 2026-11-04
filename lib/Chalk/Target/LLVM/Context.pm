@@ -2802,6 +2802,11 @@ sub _lower_as_repr {
     # its SSA value is an integer one. This mirrors _lower_as_double, which
     # sitofp'd exactly this case.
     $orep //= _repr_is_float($want) ? 'Int' : $want;
+    # A STRING OR A SCALAR IS NUMIFIED, not cast: its machine type is a struct,
+    # and `sitofp %Str` is invalid IR (a shared lexical a block stored "x" in).
+    if ( $orep =~ /\A(?:Str|Scalar|Slot)\z/ && $want =~ /\A(?:Int|Num)\z/ ) {
+        return $self->_emit_coercion($ref, $orep eq 'Slot' ? 'Scalar' : $orep, $want, "$orep operand of $want arithmetic");
+    }
 
     my $conv_op = _repr_convert_op($orep, $want) or return $ref;
     my $from_ty = _repr_to_llvm_type($orep);

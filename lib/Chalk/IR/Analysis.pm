@@ -411,6 +411,7 @@ sub infer ($class, $graphs) {
     _attach_formats(\%graphs, $mop);
     _type_calls_through_named_refs(\%graphs, $mop);
     _type_calls_returning_self(\%graphs);
+    _widen_shared_scalar_reads(\%graphs);
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
     # through computed + aggregate-read nodes for EVERY graph (class or not).
@@ -1047,6 +1048,30 @@ sub _attach_formats ($graphs, $mop) {
         $n->set_target($sub{$name} //= Chalk::MOP::Sub->new(
             name => $name, class => $mop->for_class('main'),
             graph => $graphs->{$name}, params => ['@_'], uses_args => true));
+    }
+    return;
+}
+
+# _widen_shared_scalar_reads($graphs): a file lexical shared by name is one
+# variable in every graph that names it, holding whatever was last stored --
+# by any of them. B::SoN types a read from the stores IT sees in its own
+# graph: the program's `my $x = 3` made a read Int though a sub (or a regex
+# code block) stored "abc" (it printed 0). Each shared scalar read takes the
+# join of its own type and every store into that name, from any graph.
+sub _widen_shared_scalar_reads ($graphs) {
+    my @all = map { _all_graph_nodes($graphs->{$_}) } sort keys $graphs->%*;
+    my %stored;
+    for my $n (grep { $_->operation eq 'Assign' } @all) {
+        my ($t, $v) = $n->inputs->@[0, 1];
+        next unless blessed($t) && $t->operation eq 'PadAccess' && $t->shared
+            && ( $t->sigil // '' ) eq '$' && blessed($v);
+        push @{ $stored{ $t->symbol } }, $v->stamp // 'Unknown';   # static type
+    }
+    for my $n (grep { $_->operation eq 'PadAccess' && $_->shared && ( $_->sigil // '' ) eq '$' } @all) {
+        my $kinds = $stored{ $n->symbol } or next;
+        my $own = $n->stamp // 'Unknown';   # static type
+        my $j = _join_repr($own, @$kinds);
+        $n->set_stamp($j) if defined $j && $j ne $own;
     }
     return;
 }

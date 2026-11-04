@@ -69,6 +69,14 @@ for my $case (
     [ q{my $t = 0; my $s = "ab"; my $r = qr/a(?{ $t = $t + 1 })/; $s =~ $r; my $u = $t * 10; $s =~ $r; print "$t $u\n";}, 'a read between two qr matches' ],
     [ q{my @a = (1); my $s = "ab"; $s =~ /a(?{ push @a, 2 })/; my $n = scalar(@a); push @a, 3; print "$n\n";}, 'a count before a later push' ],
     [ q{my $t = "x"; my $s = "ab"; if ($s =~ /a(?{ $t = "y" })/) { my $old = $t; $t = "z"; print "$old\n" }}, 'a read in the arm the match guards' ],
+    # A BLOCK WRITES WHAT THE EXPRESSION AROUND IT READS: perl's stack holds
+    # the variable, so a read before the match sees the block's write; a
+    # string it stores is a string; its integers stay integers (review 2).
+    [ q{my $n = 1; my $s = "ab"; my $r = $n + ($s =~ /a(?{ $n *= 3 })b/); print "$r $n\n";}, 'a read before the match, in its expression' ],
+    [ q{my $n = 1; my $s = "ab"; print $n, ($s =~ /a(?{ $n = 7 })b/), "\n";}, 'a print list read before the match' ],
+    [ q{my $x = 3; my $t = "ab"; $t =~ /a(?{ $x = "abc" })b/; print "$x\n"; my $y = $x * 2;}, 'a string the block stores' ],
+    [ q{my $n = 0; my $t = "ab"; $t =~ /a(?{ $n = $n + 1.5 })b/; $t =~ /a(?{ $n = $n . "x" })b/; print "$n\n";}, 'a number, then a string, the blocks store' ],
+    [ q{my $n = 0; "aab" =~ /a(?{ $n++ })(?{ $n += 10 })b/; print "$n\n";}, 'a ++ and a += in two blocks' ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
@@ -87,6 +95,16 @@ for my $src (q{my $t = 0; my $s = "azax"; $s =~ /a(?{ $t = $t + 1 })[xy]/; print
 for my $src (q|my $t = ""; my $s = "ab"; my $h = $s =~ /a(?{ $t = join q(}), "(" })b/ ? 1 : 0; print "$h [$t]\n";|) {
     my ($got) = eval { through_llvm($src, {}) };
     like($@, qr/GAP: a regex code block with a quote-like op/, "refused by name: $src") or diag "got: " . ($got // 'undef');
+}
+
+# KNOWN, NOT YET: arithmetic on a shared file lexical is done as a double, in a
+# block as in a named sub (`my $x = 2**53+1; sub g { $x + 0 }` is wrong at
+# a9628f32 too): an integer past 2**53 loses digits.
+TODO: {
+    local $TODO = 'Scalar arithmetic on a shared lexical goes through a double';
+    my $src = q{my $x = 9007199254740993; my $s = "ab"; my $r; $s =~ /a(?{ $r = $x + 0 })b/; print "$r\n";};
+    my ($got, $pl) = eval { through_llvm($src, {}) };
+    is($got, perl_says($pl // write_pl($src), {}), 'an integer past 2**53 the block adds');
 }
 
 done_testing;
