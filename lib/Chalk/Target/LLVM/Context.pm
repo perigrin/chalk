@@ -8926,8 +8926,14 @@ sub _record_break_block {
         # What is lowered for it belongs to this arm: not served to another.
         my %cached_before = map { $_ => 1 } keys %{ $self->{cache} };
         for my $phi (_latch_phis($ctx->{latch_loop})) {
-            my @v = map { $_->[1] } grep { blessed($_->[0]) && $_->[0]->id eq $proj->id }
-                _latch_paths($phi, $phi->region);
+            my @paths = _latch_paths($phi, $phi->region);
+            my @v = map { $_->[1] } grep { blessed($_->[0]) && $_->[0]->id eq $proj->id } @paths;
+            # A `next` AFTER A LOOP in the arm comes along that loop's exit
+            # Region, not the arm's Proj: its control leads back to the Proj
+            # through the loop (pvm 205).
+            @v = map { $_->[1] } grep { blessed($_->[0]) && $_->[0]->operation ne 'Proj'
+                                        && ( _arm_proj_of($_->[0]) // 0 ) == refaddr($proj) } @paths
+                unless @v;
             die "GAP: a latch Phi without one input from a `next` arm is not lowered\n" unless @v == 1;
             $vals{ $phi->id } = $self->_as_phi_reading($self->lower_value($v[0]),
                 $v[0], $phi, 'next: what the pass carries');
@@ -9082,6 +9088,19 @@ sub _is_latch_region {
         && refaddr($r->head) == refaddr($loop)
         && !grep { blessed($_) && $_->operation eq 'Proj' && ($_->index // -1) == 1
                    && blessed($_->inputs->[0]) && refaddr($_->inputs->[0]) == refaddr($loop) } $r->inputs->@*;
+}
+
+# _arm_proj_of($node) -> refaddr of the Proj its control leads back to: a
+# Region through its head, anything else through its control_in.
+sub _arm_proj_of {
+    my ($n) = @_;
+    my %seen;
+    while (blessed($n) && !$seen{ refaddr($n) }++) {
+        return refaddr($n) if $n->operation eq 'Proj';
+        $n = $n->operation eq 'Region' && $n->can('head') && blessed($n->head) ? $n->head
+           : $n->can('control_in') ? $n->control_in : undef;
+    }
+    return undef;
 }
 
 # _latch_paths($value, $region) -> ([pred, value_node], ...): what reaches
@@ -9746,11 +9765,17 @@ sub _process_loop_node {
     if (defined $loop_ctx->{latch_label}) {
         my @preds = ($loop_ctx->{latch_preds} // [])->@*;
         my %arm   = map { $_->{proj}->id => 1 } @preds;
+        # A path along a loop's exit inside a `next` arm is that arm's (pvm 205).
+        my %arm_ref = map { refaddr($_->{proj}) => 1 } @preds;
+        my $of_arm = sub ($pred) {
+            blessed($pred) && ( $arm{ $pred->id }
+                || $pred->operation ne 'Proj' && $arm_ref{ _arm_proj_of($pred) // 0 } );
+        };
         my $open  = !defined $self->{blocks}[ $self->{current_idx} ]{terminator};
         # EVERY PATH AN ARM (the last if's arms both go to the latch): the block
         # after it has no predecessor, and brings nothing to the latch.
         if ($open && _latch_phis($loop_node) && !grep {
-                !( blessed($_->[0]) && $arm{ $_->[0]->id } )
+                !$of_arm->($_->[0])
             } map { _latch_paths($_, $_->region) } _latch_phis($loop_node)) {
             $self->_set_terminator("  unreachable  ; every path of the pass left by a next");
             $open = 0;
@@ -9758,7 +9783,7 @@ sub _process_loop_node {
         my %fall;
         for my $phi (_latch_phis($loop_node)) {
             my @paths = _latch_paths($phi, $phi->region);
-            my @rest  = grep { !( blessed($_->[0]) && $arm{ $_->[0]->id } ) } @paths;
+            my @rest  = grep { !$of_arm->($_->[0]) } @paths;
             die "GAP: a latch Phi whose inputs do not pair with its `next` arms and the "
               . "body's end is not lowered\n"
                 unless @rest == ($open ? 1 : 0) && @paths == @preds + @rest;
@@ -18663,8 +18688,13 @@ sub _lower_inlined_structure {
             my $r = $n->can('region') ? $n->region : undef;
             # In an arm, an if's merge -- or a loop's exit, the loop being in
             # that arm too -- is lowered there, before the value that reads it.
+            # A LOOP'S EXIT, the loop on the main chain: the chain reached the
+            # loop through a `next`'s merge, not this region, but what follows
+            # the loop is dominated by its exit (pvm 205).
             die $arm_value
                 unless blessed($r) && ( $on_chain{ refaddr($r) } || $r->operation eq 'Loop'
+                    || ( $r->can('head') && blessed($r->head) && $r->head->operation eq 'Loop'
+                         && $on_chain{ refaddr($r->head) } )
                     || ( $in_arm && $r->can('head') && blessed($r->head)
                          && $r->head->operation =~ /\A(?:If|Loop)\z/ ) );
             # A LOOP ON THE MAIN CHAIN carries its phi in its header, which
