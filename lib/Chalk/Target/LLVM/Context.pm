@@ -11871,6 +11871,27 @@ sub _emit_flattened_array_of {
             $self->_new_block($done);
             next;
         }
+        # A ?: OF LISTS (`$c ? @$x : ($y)`) is the taken arm's elements, made
+        # in that arm's block (pvm 225).
+        if ($s eq 'List' && $in->operation eq 'TernaryExpr') {
+            my ($c, @arms) = $in->inputs->@*;
+            my $cond = $self->_ensure_i1($self->lower_value($c),
+                $self->_repr_of($c) // _require_repr($c, 'TernaryExpr.condition'));
+            my ($tl, $fl, $end) = map { $self->_fresh_label("tlist.$_.") } qw(t f end);
+            $self->_set_terminator("  br i1 $cond, label %$tl, label %$fl  ; list: ?: of lists");
+            for my $arm ([$tl, $arms[0]], [$fl, $arms[1]]) {
+                $self->_new_block($arm->[0]);
+                my %before = map { $_ => 1 } keys %{ $self->{cache} };
+                my $n = $arm->[1];
+                my $one = $self->_emit_flattened_array_of(
+                    $n->operation eq 'ArrayLiteral' ? [ $n->inputs->@* ] : [$n]);
+                $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $one)  ; list: the arm's elements");
+                $self->_set_terminator("  br label %$end");
+                delete @{ $self->{cache} }{ grep { !$before{$_} } keys %{ $self->{cache} } };
+            }
+            $self->_new_block($end);
+            next;
+        }
         die "GAP: a list with a $s in it is not lowered -- it would flatten, and "
           . "only an array does here\n" if $s eq 'List';
         my $v = $self->_slot_of_value($in, $self->lower_value($in), 'list element');
