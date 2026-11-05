@@ -17457,8 +17457,10 @@ sub _lower_runtime_dispatch {
             # The call's value is read as the call is typed (it took its
             # callee's type where it had none).
             $from = $node->stamp if ( $node->stamp // 'Unknown' ) ne 'Unknown'; # static type
+            # CALLED FOR NOTHING, its value nothing typed: no value to merge (pvm 198).
             $from eq 'Scalar' ? $r
-              : $from eq 'Undef' ? $self->_build_slot('false', '0', 'Undef', 'dispatch: undef')
+              : $from eq 'Undef' || ( $from eq '' && ( $node->want // '' ) eq 'void' )
+                ? $self->_build_slot('false', '0', 'Undef', 'dispatch: undef')
               : $self->_emit_coercion($r, $from, 'Scalar', "dispatch: ${cname}::$name");
         };
         push @in, "[ $v, %" . $self->_current_block_label . " ]";
