@@ -4371,7 +4371,7 @@ sub _lower_coerce {
     # callee's scalar reading -- whatever its list-shaped stamp says.
     my $scalar_call = $operand->operation eq 'Call'
         && ( ( $operand->can('want') ? $operand->want : '' ) // '' ) eq 'scalar'
-        ? $self->{_inline_value_repr}{ $operand->id } : undef;
+        ? $self->{_inline_value_repr}{ refaddr($operand) } : undef;
     $scalar_call = 'Scalar' if ( $scalar_call // '' ) eq 'Slot';
     undef $scalar_call if defined $scalar_call && $scalar_call !~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/;
     my $from      = defined $bound_repr ? $bound_repr
@@ -11718,7 +11718,7 @@ sub _emit_flattened_array_of {
         # scalar is one element.
         if ($s eq 'List' && $in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'direct') {
             my $r    = $self->lower_value($in);
-            my $from = $self->{_inline_value_repr}{ $in->id } // '';
+            my $from = $self->{_inline_value_repr}{ refaddr($in) } // '';
             if ($from eq 'Array') {
                 $self->_emit("  call void \@chalk_array_append_all(%Array* $acc, %Array* $r)  ; list: a sub's array");
                 next;
@@ -15222,6 +15222,12 @@ sub _lower_subscript {
     my $container = $self->_unwrap_ref_container($node->inputs->[0]);
     my $container_repr = $self->_repr_of($container)
         // _require_repr($container, 'Subscript.container');
+    # NOTHING TYPED IT before it was made (a method's value): made, it is
+    # what its lowering made it (pvm 175).
+    if ($container_repr eq 'Unknown') {
+        $self->lower_value($container);
+        $container_repr = $self->_repr_of($container) // 'Unknown';
+    }
     $container_repr = 'Array' if $container_repr eq 'List' && _is_walked_list($container, $self);   # the list made once
     # A container read by its tag: the read says which kind it is.
     if ($container_repr =~ /\A(?:Scalar|Slot)\z/ && ($node->can('kind') ? $node->kind // '' : '') =~ /\A(array|hash)\z/) {
@@ -15601,7 +15607,7 @@ sub _emit_sort_block_out_of_order {
     $self->{_call_via} = { name => $sub->name, target => $sub, args => [] };
     my $r = $self->_lower_call_direct($node);
     delete $self->{cache}{ $node->id };   # the block's value, not the sort's
-    my $from = $self->{_inline_value_repr}{ $node->id } // '';
+    my $from = $self->{_inline_value_repr}{ refaddr($node) } // '';
     die "GAP: a sort block whose value is a " . ( $from || 'NONE' ) . " is not lowered\n"
         unless $from =~ /\A(?:Int|Num|Boolean|Scalar|Str)\z/;
     my $num = $from eq 'Num' ? $r : $self->_emit_coercion($r, $from, 'Num', 'sort block: its answer');
@@ -17445,7 +17451,7 @@ sub _lower_runtime_dispatch {
             local $self->{cache} = { $self->{cache}->%* };
             $self->{_call_via} = { name => "${cname}::$name", target => $sub, args => [@args] };
             my $r = $self->_lower_call_direct($node);
-            my $from = $self->{_inline_value_repr}{ $node->id } // '';
+            my $from = $self->{_inline_value_repr}{ refaddr($node) } // '';
             die "GAP: a method ('$name') on a run-time class whose ${cname}::$name returns a list is not lowered\n"
                 if $from =~ /\A(?:Array|List|Hash)\z/;
             # The call's value is read as the call is typed (it took its
@@ -17474,7 +17480,7 @@ sub _lower_runtime_dispatch {
             unless _keeps_value('Scalar', $st);
         $res = $self->_emit_coercion($res, 'Scalar', $st, "dispatch: read as $st");
     }
-    $self->{_inline_value_repr}{ $node->id } = $st;
+    $self->{_inline_value_repr}{ refaddr($node) } = $st;
     return $self->{cache}{ $node->id } = $res;
 }
 
@@ -18238,7 +18244,7 @@ sub _lower_call_direct {
         my $from = $value->operation eq 'Print' ? 'Boolean' : ($self->{_inlined_value_repr} // $self->_repr_of($value) // '');
         # What the inlined value IS, for a list that flattens it
         # (_emit_flattened_array_of): an Array, or one scalar.
-        $self->{_inline_value_repr}{ $node->id } = $from;
+        $self->{_inline_value_repr}{ refaddr($node) } = $from;
         # A CALL NOTHING TYPED RETURNS WHAT ITS CALLEE DOES. A sub returning
         # a shared lexical returns a Scalar (that lexical's Slot); the call to
         # it, stamped Unknown, is that Scalar -- this call node is this call
@@ -18834,6 +18840,9 @@ sub _lower_inlined_structure {
     local $self->{_local_slots}          = {};
     local $self->{_graph_entry_idx}      = $self->{current_idx};
     local $self->{_branch_guarded_store} = 0;
+    # A READ LEFT WAITING in the callee is the callee's, gone with its cache:
+    # kept past it, a later store in the caller found it never made (pvm 175).
+    local $self->{_pending_tag_reads}    = { %{ $self->{_pending_tag_reads} // {} } };
     local $self->{_loop_ctx_stack}       = [];
     local $self->{_jump_merges}          = {};
     Chalk::Target::LLVM::_process_control_chain($self, $return);
@@ -18914,6 +18923,9 @@ sub _lower_inlined_effects_then_value {
     local $self->{cache}         = {};
     local $self->{_past_a_died_eval} = {};   # keyed by id, as {cache} is
     local $self->{_frozen_reads} = {};   # keyed by id, as {cache} is
+    # and the reads it leaves waiting are the callee's, as in
+    # _lower_inlined_structure (pvm 175)
+    local $self->{_pending_tag_reads} = { %{ $self->{_pending_tag_reads} // {} } };
     local $self->{_empty_arrays} = {};   # the callee's `my @a`, fresh per call
     local $self->{_local_slots}  = {};   # and its `my $x` kept in memory
     local $self->{_graph_entry_idx} = $self->{current_idx};
