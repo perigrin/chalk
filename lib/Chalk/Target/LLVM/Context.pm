@@ -9005,7 +9005,7 @@ sub _jump_merge_value {
     my ($self, $phi, $in, $what) = @_;
     my $v = $self->lower_value($in);
     return ( $phi->stamp // '' ) eq 'Unknown'  # static type
-        ? [ $v, $self->_repr_of($in) // '' ]
+        ? [ $v, $self->_repr_of($in) // '', $in ]
         : $self->_as_phi_reading($v, $in, $phi, $what);
 }
 
@@ -9032,7 +9032,35 @@ sub _close_jump_merge {
         # AN ARM THAT IS NOT A SCALAR -- a bare `return`'s empty list, the
         # list face of an exit a scalar caller reads the other face of -- is
         # not built: a read of this Phi is refused by name (_lower_phi).
+        # ...UNLESS THE CALL IS MADE FOR A LIST: then each arm is an array --
+        # a bare `return`'s (), a list's elements, the one value -- made in
+        # its own block before the branch that ends it (pvm 174).
         if (grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar)\z/ } @r) {
+            if (( $self->{_inline_want} // '' ) eq 'list'
+                    && !grep { !/\A(?:Int|Num|Str|Boolean|Undef|Scalar|Array|List)\z/ } @r) {
+                for my $p (@preds) {
+                    my ($v, $from, $n) = $p->{vals}{ $phi->id }->@*;
+                    next if $from eq 'Array';
+                    $self->{current_idx} = $self->_find_block_idx($p->{label});
+                    $v = $from eq 'List' && blessed($n) && $n->operation eq 'ArrayLiteral'
+                        ? $self->_emit_flattened_array_of([ $n->inputs->@* ])
+                        : $from eq 'List' ? die "GAP: a list a jump merges for a list call, other than a literal, is not lowered\n"
+                        : do {
+                            my $one = $self->_emit_array_of([]);
+                            my $slot = $from eq 'Undef' ? $self->_build_slot($v, '0', 'Undef', 'a jump merge')
+                                     : $from eq 'Scalar' ? $v
+                                     : $self->_emit_coercion($v, $from, 'Scalar', 'a jump merge');
+                            $self->_emit("  call void \@chalk_array_push_slot(%Array* $one, %Slot $slot)  ; the one value, as a list");
+                            $one;
+                          };
+                    die "GAP: a jump merge's arm opened blocks to be made a list -- not lowered\n"
+                        if $self->_current_block_label ne $p->{label};
+                    $p->{vals}{ $phi->id } = [ $v, 'Array', $n ];
+                }
+                $_->{vals}{ $phi->id } = $_->{vals}{ $phi->id }[0] for @preds;
+                $self->{cache}{ 'repr:' . $phi->id } = 'Array';
+                next;
+            }
             $self->{_unbuilt_jump_phi}{ $phi->id } = 1;
             next;
         }
@@ -10869,6 +10897,11 @@ sub _emit_array_of {
                   && ( $_->name // '' ) =~ /\A(?:glob|unpack|each)\z/ } @$inputs;
     return $self->_emit_flattened_array_of($inputs)
         if grep { _returns_nothing_in_a_list($_) } @$inputs;
+    # A SUB CALLED FOR A LIST that nothing typed is its list (pvm 174: a
+    # bare `return`'s () or the last value, merged as an array).
+    return $self->_emit_flattened_array_of($inputs)
+        if grep { blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'direct'
+                  && ( $_->want // '' ) eq 'list' && ( $_->stamp // 'Unknown' ) eq 'Unknown' } @$inputs; # static type
 
     $self->{_need_aggregate_types} = 1;
     $self->{_need_malloc_memcpy}   = 1;
@@ -11721,7 +11754,9 @@ sub _emit_flattened_array_of {
         }
         # A SUB'S LIST is what its callee returned: an array flattens, a
         # scalar is one element.
-        if ($s eq 'List' && $in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'direct') {
+        # ...SO IS ONE NOTHING TYPED, called for a list (pvm 174).
+        if (( $s eq 'List' || ( $s eq 'Unknown' && ( $in->can('want') ? $in->want // '' : '' ) eq 'list' ) )
+                && $in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'direct') {
             my $r    = $self->lower_value($in);
             my $from = $self->{_inline_value_repr}{ refaddr($in) } // '';
             if ($from eq 'Array') {
