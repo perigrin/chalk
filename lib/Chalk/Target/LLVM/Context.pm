@@ -9372,10 +9372,20 @@ sub close_eval {
             next;
         }
         my $to   = $f->{dies} ? 'Scalar' : ($phi->stamp // '');  # static type
+        # NOTHING TYPED IT (pvm 136: a try's value, a method's): a Scalar,
+        # its readers told so (_repr_of).
         die "GAP: a block eval's value is a " . ($phi->stamp // 'untyped')
           . " where a die makes it undef -- only a Scalar holds both\n"
-            if $f->{dies} && ($phi->stamp // '') ne 'Scalar';  # static type
+            if $f->{dies} && ($phi->stamp // '') !~ /\A(?:Scalar|Unknown)\z/;  # static type
+        $self->{cache}{ 'repr:' . $phi->id } = 'Scalar'
+            if $f->{dies} && ($phi->stamp // '') eq 'Unknown';  # static type
         my $from = $v->stamp // '';  # static type
+        $from = $self->_repr_of($v) // '' if $from eq 'Unknown';
+        $from = 'Scalar' if $from eq 'Slot';
+        # A VALUE NOTHING TYPED EVEN LOWERED has no Scalar to be boxed as: its
+        # cell would read as nothing perl had.
+        die "GAP: a block eval's value nothing typed, even lowered, is not lowered\n"
+            if $f->{dies} && ( $phi->stamp // '' ) eq 'Unknown' && $from !~ /\A(?:Int|Num|Str|Boolean|Undef|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/;  # static type
         my $ref  = $raw{ $phi->id };
         $ref = $self->_emit_coercion($ref, $from, $to, 'eval value') if $from ne $to;
         $normal{ $phi->id } = $ref;
@@ -17535,8 +17545,10 @@ sub _dispatch_invocant {
         $self->{_need_exit} = 1;
         $self->_set_terminator("  br i1 $ok2, label %$yes, label %$no");
         $self->_new_block($no);
-        $self->_emit("  call void \@exit(i32 255)  ; a method on what is not a blessed reference");
-        $self->_set_terminator("  unreachable");
+        unless ($self->_dispatch_dies_into_eval($self->{_dispatch_node})) {
+            $self->_emit("  call void \@exit(i32 255)  ; a method on what is not a blessed reference");
+            $self->_set_terminator("  unreachable");
+        }
         $self->_new_block($yes);
         $ref = $self->_fresh;
         $self->_emit("  $ref = inttoptr i64 $pl to i8*  ; dispatch: the invocant");
@@ -17589,6 +17601,7 @@ sub _lower_runtime_dispatch {
           . "(@lacking) does not have is not lowered -- perl's death there names the file and line\n"
             if @lacking;
     }
+    local $self->{_dispatch_node} = $node;
     my ($is, $cp, $cl) = $self->_dispatch_invocant($obj) or return undef;
     my @args = grep { blessed($_) } $node->inputs->@*;
     pop @args if $node->can('memory_input') && $node->memory_input;
@@ -17631,8 +17644,10 @@ sub _lower_runtime_dispatch {
         $self->_new_block($next);
     }
     $self->{_need_exit} = 1;
-    $self->_emit("  call void \@exit(i32 255)  ; dispatch: no package of this program has the method");
-    $self->_set_terminator("  unreachable");
+    unless ($self->_dispatch_dies_into_eval($node)) {
+        $self->_emit("  call void \@exit(i32 255)  ; dispatch: no package of this program has the method");
+        $self->_set_terminator("  unreachable");
+    }
     $self->_new_block($end);
     my $res = $self->_fresh;
     $self->_emit("  $res = phi %Slot " . join(', ', @in) . "  ; dispatch: its value");
@@ -17756,6 +17771,27 @@ sub _die_into_eval {
     $self->_set_terminator("  br label %$f->{catch}  ; $msg: caught by its eval");
     $self->_new_block($self->_fresh_label('died.after.'));
     return $self->{cache}{ $node->id } = '0';
+}
+
+# _dispatch_dies_into_eval -> true when the current block, a method dispatch
+# that found nothing (perl dies), was ended by a branch to the open eval's
+# catch. Perl's message names the file and line, which nothing here knows:
+# where $@ is read, refused.
+sub _dispatch_dies_into_eval {
+    my ($self, $node) = @_;
+    my $f = ($self->{_eval_frames} // [])->[-1];
+    # IN AN EVAL NOT OPEN AS A BRANCH here: the exit would end the program
+    # where perl's eval catches the die.
+    die "GAP: a method dispatch that can die, in an eval not lowered as a branch, is not lowered\n"
+        if !$f && blessed($node) && $node->can('eval_id') && defined $node->eval_id;
+    return 0 unless $f;
+    die "GAP: a method dispatch that can die inside an eval whose \$@ is read is not lowered "
+      . "-- perl's message names the file and line\n" if $READS_ERROR;
+    $self->_store_eval_error($self->_set_str_len($self->_str_const_parts("a method dispatch died\n", 'dispatch died')));
+    $f->{cached_at_first_die} //= { map { $_ => 1 } keys %{ $self->{cache} } };
+    $f->{dies}++;
+    $self->_set_terminator("  br label %$f->{catch}  ; dispatch died: caught by its eval");
+    return 1;
 }
 
 # Lowers a Call(dispatch_kind='method', name='new') node.
