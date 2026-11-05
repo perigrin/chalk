@@ -53,10 +53,10 @@ for my $case (
 }
 
 # A WRITE THROUGH @_ into a flattened argument stores into the caller's
-# element: refused by name.
+# element (pvm 199: one array passed, stored back after the call).
 {
     my $got = eval { through_llvm(q{sub g { $_[1] = 42 } my @x = (1, 2); g(@x); print "@x\n";}) };
-    ok(!defined $got && $@ =~ /GAP/, 'a write through @_ into an array argument: refused by name') or diag $got // $@;
+    is($got, "1 42\n", "a write through \@_ into an array argument: perl's answer") or diag $@;
 }
 
 done_testing;

@@ -17826,8 +17826,56 @@ sub _lower_call_new {
 # argument it aliases -- a variable kept in memory, or an element. A literal
 # is read-only in perl (it dies), and a temporary keeps no store; the first
 # is refused, the second needs nothing.
+# _unlink(@nodes): take nodes built only to be lowered out of their inputs'
+# consumer lists -- left there, they are in the graph for the next lowering
+# of it (a sub inlined twice), an element store no chain holds.
+sub _unlink {
+    for my $n (@_) {
+        $_->remove_consumer($n) for grep { blessed($_) && $_->can('remove_consumer') } $n->inputs->@*;
+    }
+}
+
 sub _copy_out_written_args {
-    my ($self, $name, $written, $args, $arr) = @_;
+    my ($self, $name, $written, $args, $arr, $one_array) = @_;
+    # ONE ARRAY PASSED: $_[N] is its element N -- stored back there when it
+    # has one; past its end @_ grew, the array did not.
+    if ($one_array) {
+        my $src = $args->[0];
+        my $ctr = $src->operation eq 'PostfixDeref' ? $src->inputs->[0] : $src;
+        my $f = Chalk::IR::NodeFactory->new;
+        for my $i (@$written) {
+            my $sarr = $self->_container_ptr($ctr, 'Array');
+            my ($lp, $len, $in, $ep, $elems, $sp, $slot) = map { $self->_fresh } 1 .. 7;
+            $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $sarr, i32 0, i32 0");
+            $self->_emit("  $len = load i64, i64* $lp  ; the array passed: its length");
+            $self->_emit("  $in = icmp ult i64 $i, $len  ; \$_[$i] one of its elements?");
+            my ($yes, $done) = map { $self->_fresh_label("argout.$_.") } qw(put done);
+            $self->_set_terminator("  br i1 $in, label %$yes, label %$done");
+            $self->_new_block($yes);
+            $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2  ; \@_ elems ptr");
+            $self->_emit("  $elems = load %Slot*, %Slot** $ep");
+            $self->_emit("  $sp = getelementptr inbounds %Slot, %Slot* $elems, i64 $i  ; \$_[$i]");
+            $self->_emit("  $slot = load %Slot, %Slot* $sp  ; \$_[$i] after the call");
+            my %before = map { $_ => 1 } keys %{ $self->{cache} };
+            my $ph = $f->make('Constant', value => "\0copy-out:$i:" . refaddr($src), const_type => 'string');
+            $ph->set_stamp('Scalar');
+            my $ix = $f->make('Constant', value => $i, const_type => 'integer');
+            $ix->set_stamp('Int');
+            my $el = $f->make("Subscript", inputs => [ $ctr, $ix ]);
+            $el->set_kind("array");
+            $el->set_stamp('Scalar');
+            local $self->{_arg_bind} = { ($self->{_arg_bind} // {})->%*,
+                                         refaddr($ph) => { ref => $slot, repr => 'Scalar' } };
+            my $store = $f->make('Assign', inputs => [ $el, $ph ]);
+            $store->set_stamp('Scalar');
+            $self->_lower_assign($store);
+            _unlink($store, $el);
+            delete @{ $self->{cache} }{ grep { !$before{$_} } keys %{ $self->{cache} } };
+            $self->_set_terminator("  br label %$done");
+            $self->_new_block($done);
+        }
+        return;
+    }
     for my $i (@$written) {
         die "GAP: direct call to '$name': callee writes \$_[$i] past the "
           . scalar(@$args) . " argument(s) passed -- that grows \@_, which "
@@ -17868,6 +17916,7 @@ sub _copy_out_written_args {
             my $store = $f->make('Assign', inputs => [ $arg, $ph ]);
             $store->set_stamp('Scalar');
             $self->_lower_assign($store);
+            _unlink($store);
             next;
         }
         my $c = $self->_ensure_i1($self->lower_value($arg->inputs->[0]),
@@ -17880,6 +17929,7 @@ sub _copy_out_written_args {
             my $store = $f->make('Assign', inputs => [ $arm->[1], $ph ]);
             $store->set_stamp('Scalar');
             $self->_lower_assign($store);
+            _unlink($store);
             $self->_set_terminator("  br label %$end");
             delete @{ $self->{cache} }{ grep { !$before{$_} } keys %{ $self->{cache} } };
         }
@@ -17984,7 +18034,7 @@ sub _lower_call_on_each_arm {
         my ($label, $list) = @$arm;
         $self->_new_block($label);
         my %before = map { $_ => 1 } keys %{ $self->{cache} };
-        @$in = ( $list->inputs->@*, $mem ? $saved[-1] : () );
+        @$in = ( ( $list->operation eq 'ArrayLiteral' ? $list->inputs->@* : $list ), $mem ? $saved[-1] : () );
         my $ref = eval { $self->_lower_call_direct($node) };
         my $err = $@;
         @$in = @saved;
@@ -18027,9 +18077,13 @@ sub _lower_call_direct {
         my $in = $node->inputs;
         my $mem = $node->can('memory_input') && $node->memory_input ? 1 : 0;
         my $t = @$in - $mem == 1 ? $in->[0] : undef;
+        # AN ARM THAT IS AN ARRAY (`$c ? @$x : ()`) is passed as itself (pvm 199).
+        my $an_array = sub ($n) {
+            $n->operation =~ /\A(?:PostfixDeref|PadAccess)\z/ && ( $n->sigil // '' ) eq '@'
+        };
         if ($t && $t->operation eq 'TernaryExpr'
-            && !grep { $_->operation ne 'ArrayLiteral'
-                       || grep { ( $_->stamp // 'Unknown' ) =~ /\A(?:Array|Hash|List)\z/ } $_->inputs->@* } # static type
+            && !grep { !$an_array->($_) && ( $_->operation ne 'ArrayLiteral'
+                       || grep { !$an_array->($_) && ( $_->stamp // 'Unknown' ) =~ /\A(?:Array|Hash|List)\z/ } $_->inputs->@* ) } # static type
                $t->inputs->@[1, 2]) {
             return $self->_lower_call_on_each_arm($node, $t, $mem);
         }
@@ -18381,6 +18435,17 @@ sub _lower_call_direct {
         return $st eq 'Array' || ( $st eq 'List' && $a->operation eq 'Call' )
             || ( $st eq 'Unknown' && $a->operation eq 'Call' && ( $a->can('want') ? $a->want // '' : '' ) eq 'list' );
     };
+    # ONE ARRAY, ITS ELEMENTS WRITTEN (`g(@a)`, g writing $_[N]): @_ is a copy
+    # of the elements, each written one stored back after the call to the
+    # element it aliases (pvm 199). No shift, slurpy, signature or read by
+    # position: those would need @_ to stay the elements themselves.
+    my $one_array = @args == 1 && ( $args[0]->stamp // '' ) eq 'Array' # static type
+        && ( ( $args[0]->operation eq 'PostfixDeref' && ( $args[0]->sigil // '' ) eq '@' )
+             || ( $args[0]->operation eq 'PadAccess' && ( $args[0]->sigil // '' ) eq '@' )
+             # A NAMED `my @a` (a literal of no name is constants: perl dies writing one)
+             || ( $args[0]->operation eq 'ArrayLiteral' && defined $args[0]->symbol ) )
+        && $written && $args_array && !$slurpy && !$signature && !$shared && !@arg_reads
+        && !$self->{_args_list_after_shifts};
     my $by_position = @arg_reads && !$args_array && !$slurpy && !$written && !$signature && !$shared
         && ( grep { $flattens->($_) } @args )
         && !grep { ( $_->stamp // '' ) =~ /\A(?:Hash|List)\z/ && !$flattens->($_) } @args; # static type
@@ -18388,7 +18453,7 @@ sub _lower_call_direct {
                 ? ( $list_after ? @args[ 0 .. List::Util::min($list_after, scalar @args) - 1 ] : @args ) : () ) {
         my $st = $a->stamp // 'Unknown'; # static type
         next if $as_list_only && ( $st eq 'Array' || ( $st eq 'List' && $a->operation eq 'Call' ) );
-        next if $by_position;
+        next if $by_position || $one_array;
         die "GAP: direct call to '$name': an argument stamped $st flattens into \@_, "
           . "which inlining does not build.\n"
             if $st =~ /\A(?:Array|Hash|List)\z/
@@ -18396,7 +18461,7 @@ sub _lower_call_direct {
     }
     # @_ READ AS A LIST is one argument per element: an argument that is
     # itself a list would flatten, which this does not build.
-    if ($args_array && !$as_list_only && !$list_after) {
+    if ($args_array && !$as_list_only && !$list_after && !$one_array) {
         for my $a (@args) {
             die "GAP: direct call to '$name': an argument stamped "
               . ( $a->stamp // 'NONE' ) . " flattens into \@_, which inlining " # static type
@@ -18503,6 +18568,7 @@ sub _lower_call_direct {
         $self->{_arg_bind}{ refaddr($r) } = { ref => $self->lower_value($d), repr => $d->stamp }; # static type
     }
     my $args_arr = !$args_array ? undef
+        : $one_array ? $self->_emit_flattened_array_of(\@args)
         : $list_after ? $self->_emit_flattened_array_of([ @args[ List::Util::min($list_after, scalar @args) .. $#args ] ])
         : $as_list_only ? $self->_emit_flattened_array_of(\@args)
         : $self->_emit_array_of(\@args);
@@ -18532,7 +18598,7 @@ sub _lower_call_direct {
     # case insists the arguments DIFFER.
     my $ref = $inline->();
     $self->{cache}->%* = %cache_before;
-    $self->_copy_out_written_args($name, $written, \@args, $args_arr) if $written;
+    $self->_copy_out_written_args($name, $written, \@args, $args_arr, $one_array) if $written;
 
     # Memoize under the caller Call node's id, same reasoning as the
     # no-argument path above: this Call can be reached a second time as the
