@@ -6213,6 +6213,24 @@ sub _short_circuit_at_merge {
     my $m   = blessed($reg) ? $self->{_if_merge_at}{ $reg->id } : undef;
     return undef unless $m;
     my ($lr, $rr) = map { my $r = $self->_repr_of($_) // $_->stamp // ''; $r eq 'Slot' ? 'Scalar' : $r } $lhs, $rhs;  # static type
+    # `@a && LIST` IN LIST CONTEXT: the list when @a has elements, else the
+    # false value -- @a's count, so 0 -- as a one-element list (pvm 089).
+    if ($node->operation eq 'And' && $lr eq 'Array' && $rr eq 'Array') {
+        my ($rlab, $llab) = $p->index == 0 ? @$m{qw(then else)} : @$m{qw(else then)};
+        my ($took, $rarr) = ($self->_fresh, $self->_fresh);
+        my $blk = $self->{blocks}[ $m->{idx} ];
+        my $aty = _repr_to_llvm_type('Array');
+        unshift $blk->{insts}->@*,
+            "  $took = phi i1 [ true, %$llab ], [ false, %$rlab ]  ; And: the left side's value?",
+            "  $rarr = phi $aty [ null, %$llab ], [ $self->{cache}{ $rhs->id }, %$rlab ]  ; And: the right side's list";
+        my $zero = Chalk::IR::Node::Constant->new(id => "and0:" . refaddr($node), value => 0, const_type => 'integer');
+        $zero->set_stamp('Int');
+        my $one = $self->_emit_flattened_array_of([$zero]);
+        my $res = $self->_fresh;
+        $self->_emit("  $res = select i1 $took, $aty $one, $aty $rarr  ; And: (0) or the list");
+        $self->{cache}{ 'repr:' . $node->id } = 'Array';
+        return $self->{cache}{ $node->id } = $res;
+    }
     die "GAP: an " . $node->operation . " whose right side ran in an if arm, its sides a $lr and a $rr, is not lowered\n"
         unless $lr eq $rr && $lr =~ /\A(?:Int|Num|Str|Boolean|Scalar|ArrayRef|HashRef|CodeRef|ScalarRef)\z/;
     my ($rlab, $llab) = $p->index == 0 ? @$m{qw(then else)} : @$m{qw(else then)};
