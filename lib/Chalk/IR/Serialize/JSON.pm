@@ -708,7 +708,7 @@ sub _deserialize_graph ($method_data) {
                 $nd->{stamp} = 'Hash'  if ( $fields->{sigil} // '' ) eq '%';
             }
         }
-        elsif ($op =~ /\ABit(?:And|Or|Xor)\z/) {
+        elsif ($op =~ /\A(?:Bit(?:And|Or|Xor)|Complement)\z/) {
             $args{flavor} = $fields->{flavor} if defined $fields->{flavor};
         }
         elsif ($op eq 'Ref') {

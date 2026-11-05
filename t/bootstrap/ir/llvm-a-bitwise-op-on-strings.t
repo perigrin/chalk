@@ -86,4 +86,34 @@ for my $case (
     [ q{my $s = $ENV{X} // "12"; for my $i (1, 2) { print $s & "10" } print "\n";}, 'a string op in a loop' ],
 ) { $each_env->(@$case, 1) }
 
+# A STRING RESULT READ AS A STRING by anything but a stringify, a numeric read
+# or another bitwise op: perl's answer, or refused -- it read the number (0)
+# (review5 C1, wrong at a9628f32 too).
+for my $case (
+    [ q{my $a = $ENV{X} // "ab"; my @l = ($a & "zz"); print "@l\n";}, 'a string result in a list' ],
+    [ q{my $a = $ENV{X} // "ab"; my $x = $a & "zz"; if ($x) { print "true\n" } else { print "false\n" }}, 'the truth of a string result' ],
+    [ q{my $a = $ENV{X} // "ab"; my %h = (k => $a | "  "); print "$h{k}\n";}, 'a string result as a hash value' ],
+    [ q{my $a = $ENV{X} // "ab"; my $x = $a & "zz"; print uc($x), "\n";}, 'a string result passed to uc' ],
+    [ q{my $a = $ENV{X} // "ab"; my $x = $ENV{Y} ? "no" : ($a & "zz"); print "$x\n";}, 'a string result in a ?:' ],
+) { $each_env->(@$case, 1) }
+
+# THE STRING OPS (&. |. ^. ~. under feature "bitwise") act on strings, numbers
+# stringified (review5 C3, wrong at a9628f32 too).
+for my $case (
+    [ q{use feature "bitwise"; no warnings; my $a = $ENV{X} // 12; print $a &. "3", "\n";}, '&. of a number and a string' ],
+    [ q{use feature "bitwise"; no warnings; my $a = $ENV{X} // "ab"; my $b = $ENV{Y} // "cd"; print $a & $b, " ", $a &. $b, "\n";}, '& and &. of the same strings' ],
+    [ q{use feature "bitwise"; no warnings; my $a = $ENV{X} // "ab"; my $n = $a | 0; my $s = $a |. "  "; print "$n [$s]\n";}, '|. after a numeric |' ],
+    [ q{use feature "bitwise"; no warnings; my $a = $ENV{X} // "ab"; print ~$a & 255, "\n";}, '~ on numbers under the feature' ],
+    [ q{use feature "bitwise"; no warnings; my $a = $ENV{X} // 12; print length(~.$a), " ", (~.$a) &. "zz", "\n";}, '~. on bytes under the feature' ],
+) { $each_env->(@$case, 1) }
+
+# A STOP AT RUN TIME IS NAMED: an unsigned result past an i64 refuses there,
+# and says so -- it exited 255 with nothing to say why (review5).
+{
+    my $src = q{my $a = $ENV{X} // "ab"; my $u = ~$a; my $v = $a & 3; my $w = ~$a; print length($u), " $v ", length($w), "\n";};
+    my $got = eval { through_llvm($src, {}) };
+    like($@, qr/chalk: refused at run time: /, 'a run-time stop names itself') if !defined $got;
+    pass("perl's answer") if defined $got;
+}
+
 done_testing;

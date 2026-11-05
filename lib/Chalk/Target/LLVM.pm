@@ -127,6 +127,39 @@ sub _emit_str_to_num_helper {
     # The helper is emitted as LLVM IR text. We use a direct implementation
     # with a loop for whitespace skipping and a branch for the 0x check.
     return <<'END_HELPER';
+; @chalk_str_to_int(ptr, len) -> i64: perl's integer reading of a string. Its
+; integer prefix exactly (strtoll), when that prefix is the whole numeric
+; prefix (no . e E after it) and an i64 holds it; else through the double --
+; which lost the last digit of 2**53+1 when every string went that way.
+define internal i64 @chalk_str_to_int(i8* %ptr, i64 %len) {
+entry:
+  %d = call double @chalk_str_to_num(i8* %ptr, i64 %len)
+  %ad = call double @llvm.fabs.f64(double %d)
+  %small = fcmp olt double %ad, 9.0e18
+  br i1 %small, label %exact, label %viad
+exact:
+  %cn = add i64 %len, 1
+  %cbuf = call i8* @malloc(i64 %cn)
+  %cc = call i8* @memcpy(i8* %cbuf, i8* %ptr, i64 %len)
+  %nul = getelementptr inbounds i8, i8* %cbuf, i64 %len
+  store i8 0, i8* %nul
+  %endp = alloca i8*
+  %l = call i64 @strtoll(i8* %cbuf, i8** %endp, i32 10)
+  %e = load i8*, i8** %endp
+  %c = load i8, i8* %e
+  %isdot = icmp eq i8 %c, 46
+  %ise = icmp eq i8 %c, 101
+  %isE = icmp eq i8 %c, 69
+  %f1 = or i1 %isdot, %ise
+  %frac = or i1 %f1, %isE
+  br i1 %frac, label %viad, label %retl
+retl:
+  ret i64 %l
+viad:
+  %vi = fptosi double %d to i64
+  ret i64 %vi
+}
+
 define internal double @chalk_str_to_num(i8* %ptr, i64 %len) {
 entry:
   ; Whitespace skip: advance ptr while current byte is whitespace and within len.

@@ -841,6 +841,7 @@ sub render_need_flag_prologue {
     if ($self->{_need_exit} && !$self->{_exit_emitted}++) {
         push @lines, 'declare void @exit(i32)';
     }
+    push @lines, 'declare i64 @write(i32, i8*, i64)' if $self->{_need_stop_message} && !$self->{_write_emitted}++;
     push @lines, 'declare i64 @time(i64*)' if $self->{_need_time};
     push @lines, do { my $d = _repr_to_llvm_type('Num'); "declare $d \@pow($d, $d)" } if $self->{_need_pow};
 
@@ -908,6 +909,7 @@ sub render_need_flag_prologue {
     if ($self->{_need_str_to_num_helper}) {
         push @lines, '';
         push @lines, 'declare double @strtod(i8* nocapture readonly, i8** nocapture)';
+        push @lines, 'declare i64 @strtoll(i8*, i8**, i32)', do { my $d = _repr_to_llvm_type('Num'); "declare $d \@llvm.fabs.f64($d)" };
         push @lines, '';
         # @chalk_str_to_num(i8* %ptr, i64 %len) -> double
         # Implements perl's leading-numeric rule (decimal only; "0x..." -> 0.0).
@@ -957,6 +959,7 @@ sub render_need_flag_postclass_reemit {
     if ($self->{_need_str_to_num_helper} && !$self->{_str_to_num_helper_emitted}) {
         push @lines, '';
         push @lines, 'declare double @strtod(i8* nocapture readonly, i8** nocapture)';
+        push @lines, 'declare i64 @strtoll(i8*, i8**, i32)', do { my $d = _repr_to_llvm_type('Num'); "declare $d \@llvm.fabs.f64($d)" };
         push @lines, '';
         push @lines, _emit_str_to_num_helper();
         $self->{_str_to_num_helper_emitted} = 1;
@@ -992,6 +995,7 @@ sub render_need_flag_postclass_reemit {
     # ...and exit, which a method body's helper (++ on a Scalar) calls.
     push @lines, 'declare void @exit(i32)'
         if $self->{_need_exit} && !$self->{_exit_emitted}++;
+    push @lines, 'declare i64 @write(i32, i8*, i64)' if $self->{_need_stop_message} && !$self->{_write_emitted}++;
     # Post-class re-emit for _need_memcmp: a method body doing Subscript(Hash)
     # sets _need_memcmp on $body_ctx (propagated to $self by G.5), but the prologue
     # memcmp declare runs BEFORE method bodies lower. If the flag was set only by a
@@ -2936,6 +2940,7 @@ sub _lower_bitop {
         $n = $n->inputs->[0] while blessed($n) && $n->operation eq 'Coerce';
         blessed($n) && $n->operation eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:integer|number)\z/;
     };
+    return $self->_lower_bitop_on_strings($node, $llop) if ( $node->flavor // '' ) eq 'string';
     return $self->_lower_bitop_on_strings($node, $llop)
         unless ( $node->flavor // '' ) eq 'numeric' || grep { $is_number->($_) } @in;
     my @v = map {
@@ -2997,6 +3002,10 @@ sub _lower_bitop_on_strings {
         $both = $self->_fresh;
         $self->_emit("  $both = and i1 $is[0], $is[1]  ; $what: no number among them?");
     }
+    # UNDER feature "bitwise" THE OP SAYS WHICH: &. |. ^. ~. act on bytes, numbers
+    # stringified; & | ^ ~ on numbers, strings numified (review5 C3).
+    my $flavor = $node->can('flavor') ? $node->flavor // '' : '';
+    $both = $flavor eq 'string' ? 'true' : 'false' if $flavor =~ /\A(?:string|numeric)\z/;
     my ($ap, $al) = $self->_str_parts($str[0]);
     my ($bp, $bl) = @str > 1 ? $self->_str_parts($str[1]) : ( $ap, $al );
     my ($olen, $bytes, $len) = map { $self->_fresh } 1 .. 3;
@@ -3025,6 +3034,17 @@ sub _lower_bitop_on_strings {
     $self->_emit("  $str = select i1 $both, %Str $as_str, %Str $n_str  ; $what: bytes or a number");
     $self->_emit("  $num = select i1 $both, i64 $s_num, i64 $n");
     $self->{cache}{ 'bitstr:' . $node->id } = { is => $both, str => $str };
+    # ITS STRING IS READ ONLY BY A STRINGIFY (Coerce to Str reads it above) OR
+    # ANOTHER BITWISE OP; a numeric read takes the number, as perl numifies the
+    # bytes. Anything else -- a truth test, a list, a hash value, a call's
+    # argument, a merge -- read the number, 0 for perl's "`b" (review5 C1).
+    for my $u ($self->_users_by_inputs($node)) {
+        my $o = $u->operation;
+        next if $o =~ /\A(?:Bit(?:And|Or|Xor)|Complement|LeftShift|RightShift)\z/;
+        next if $o eq 'Coerce' && ( $u->to_repr // '' ) =~ /\A(?:Str|Int|Num)\z/;
+        die "GAP: the string result of a bitwise op, read by a $o, is not lowered -- only a"
+          . " stringify, a numeric read or another bitwise op reads its bytes\n";
+    }
     # DONE ON NUMBERS, it numified each variable it read: a later op reads a number.
     for my $leaf (grep { blessed($_) && $_->operation =~ /\A(?:EnvRead|DefinedOr)\z/ } map { _bit_leaf($_) } @in) {
         my $slot = $self->_bit_numified_slot($leaf);
@@ -3109,6 +3129,15 @@ sub _bit_string_of {
     $self->_emit("  $was = load i1, i1* " . $self->_bit_numified_slot($n) . "  ; an op made it a number?");
     $self->_emit("  $still = select i1 $was, i1 false, i1 $is  ; still a string?");
     return ( $still, $s );
+}
+
+# _users_by_inputs($n) -> every node of the program with $n among its inputs
+# (consumer lists may miss one); the consumers where no program is known.
+sub _users_by_inputs {
+    my ($self, $n) = @_;
+    my $ret = $self->{_program_return} or return _value_users($n);
+    my $all = $self->{_bit_all_nodes} //= [ _program_nodes($ret) ];
+    return grep { my $u = $_; grep { blessed($_) && $_ == $n } $u->inputs->@* } @$all;
 }
 
 # _bit_readers_of($leaf) -> every bitwise or shift op of the program reading
@@ -3273,6 +3302,10 @@ sub _stop_unless {
     $self->{_need_exit} = 1;
     $self->_set_terminator("  br i1 $ok, label %$go, label %$stop");
     $self->_new_block($stop);
+    # NAMED, NOT SILENT: a stop is a refusal made at run time, and says which.
+    my ($mp, $ml) = $self->_str_const_parts("chalk: refused at run time: $what\n", 'stop message');
+    $self->{_need_stop_message} = 1;
+    $self->_emit("  call i64 \@write(i32 2, i8* $mp, i64 $ml)  ; name the stop");
     $self->_emit("  call void \@exit(i32 255)  ; $what");
     $self->_set_terminator("  unreachable");
     $self->_new_block($go);
@@ -4583,9 +4616,15 @@ sub _emit_coercion {
     # which was latent while nothing routed a Str into an Int. The %Slot tag
     # dispatch is the first caller that reaches it: reading a cell as Int must
     # enumerate the Str tag, because the cell may hold one.
+    # Its integer prefix is read EXACTLY when it is the whole numeric prefix
+    # (@chalk_str_to_int): through the double alone, 2**53+1 lost a digit.
     elsif ($from eq 'Str' && $to eq 'Int') {
-        my $as_num = $self->_emit_coercion($input_ref, 'Str', 'Num', $what);
-        return $self->_emit_coercion($as_num, 'Num', 'Int', $what);
+        my ($ptr_ref, $len_ref) = $self->_str_parts($input_ref);
+        $self->{_need_str_to_num_helper} = 1;
+        $self->{_need_malloc_memcpy}     = 1;
+        my $ref = $self->_fresh;
+        $self->_emit("  $ref = call i64 \@chalk_str_to_int(i8* $ptr_ref, i64 $len_ref)  ; $what [Str->Int] its integer prefix");
+        return $ref;
     }
     # Coerce(Str->Boolean): perl's string truthiness rule.
     # false iff the string is "" (empty) or exactly "0".

@@ -159,6 +159,7 @@ sub read_slot_module ($defined, $tag, $payload, $to) {
         # The Str arm calls this; a stub is enough because no case below is
         # Str-tagged, and the arm still has to LINK.
         'define double @chalk_str_to_num(i8* %a, i64 %b) { ret double 0.0 }',
+        'define i64 @chalk_str_to_int(i8* %a, i64 %b) { ret i64 0 }',
         'define i32 @main() {',
         @body,
         '}',

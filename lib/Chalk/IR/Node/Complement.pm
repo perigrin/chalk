@@ -11,4 +11,9 @@ class Chalk::IR::Node::Complement :isa(Chalk::IR::Node::UnaryOp) {
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
     method op_str()    { '~' }
+    # Under feature "bitwise": `~` is numeric, `~.` string (B::SoN's flavor).
+    field $flavor :param :reader = undef;
+    method content_hash() {
+        return join('|', $self->operation, ( $flavor // () ), $self->_serialize_inputs());
+    }
 }
