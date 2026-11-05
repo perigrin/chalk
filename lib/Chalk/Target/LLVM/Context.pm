@@ -3312,6 +3312,23 @@ sub _stop_unless {
     return;
 }
 
+# _freeze_merge_reads($if_or_loop): the reads of what an if or a loop left --
+# their memory version the merge's memory Phi -- are made right after it, as
+# a store's are after the store. Left to their use, a later store came first:
+# `for (1..2) { $x->{n}++ } my $t = $x->{n}; $x->{n} = 9` read 9 (review A).
+sub _freeze_merge_reads {
+    my ($self, $s) = @_;
+    my $r = $s->can('region') ? $s->region : undef;
+    return unless blessed($r);
+    # IN AN EVAL'S BODY a read made here is the body's, and the eval's join
+    # holds what it reads to its end (close_eval): left to its use there.
+    return if @{ $self->{_eval_frames} // [] };
+    $self->_freeze_memory_reads($_) for grep {
+        blessed($_) && $_->operation eq 'Phi' && _is_memory_phi($_)
+            && blessed($_->region) && refaddr($_->region) == refaddr($r)
+    } ( $r->consumers // [] )->@*;
+}
+
 # _local_restore_of($assign) -> the ElemRestore that puts back the element a
 # `local` store writes: the same container and key (its memory is whatever
 # version the scope ends at, not the store).
@@ -5448,6 +5465,17 @@ sub _lower_assign {
         # the SAME aggregate the array name resolves to (memory-SSA phase 2d).
         my $container = $self->_unwrap_ref_container($lhs->inputs->[0]);
         my $key_idx   = $lhs->inputs->[1];
+        # A STORE INTO A LIST THAT FLATTENS what has elements of its own (a
+        # foreach over `$c ? @a : @b` or `(@a, @b)`): perl's loop variable is
+        # an alias of those elements, and this list is a copy -- the store
+        # was lost (review B). Refused.
+        die "GAP: a store through a foreach alias into a list that flattens arrays is not lowered "
+          . "-- perl aliases their elements, and the list here is a copy\n"
+            if $container->operation eq 'ArrayLiteral' && !defined $container->symbol
+                && ( $container->stamp // '' ) eq 'Array' # static type
+                && grep { blessed($_) && ( ( $_->stamp // '' ) =~ /\A(?:Array|List|Hash)\z/ # static type
+                                           || $_->operation =~ /\A(?:TernaryExpr|Call)\z/ ) }
+                       $container->inputs->@*;
         my $ctr_repr  = $self->_repr_of($container) // '';
         # A CONTAINER READ BY ITS TAG: the reference it holds, or one made where
         # an undef stood -- perl autovivifies it (pvm 176 184 225 232 233).
@@ -7479,10 +7507,12 @@ sub process_control_node {
     if ($op eq 'If') {
         $self->_make_pending_reads_before($node);
         $self->_process_if_node($node);
+        $self->_freeze_merge_reads($node);
     }
     elsif ($op eq 'Loop') {
         $self->_make_pending_reads_before($node);
         $self->_process_loop_node($node);
+        $self->_freeze_merge_reads($node);
     }
     elsif (Chalk::IR::NodeFactory::is_statement_node($op)) {
         # Every statement node (VarDecl + the shared statement-effect table:
@@ -10120,7 +10150,7 @@ sub _process_loop_body {
     my $body_proj = _loop_body_start($loop_node);
     return unless defined $body_proj;
 
-    my @body_nodes = _collect_branch_body($body_proj);
+    my @body_nodes = do { local $Chalk::Target::LLVM::Context::COLLECTING_LOOP_BODY = 1; _collect_branch_body($body_proj) };
     # EVERY STATEMENT through process_control_node, as an if arm's are: an
     # eval in the body opens there (and its join closes it), a die in it is
     # a branch to that eval's end. Lowered by lower_value, a block eval in a
@@ -10532,6 +10562,12 @@ sub _collect_body_recursive {
         # a field read the producer pinned on the chain is taken where it
         # stands (process_control_node), not at its use after a store
         || ( $op eq 'FieldAccess' && blessed($node->control_in) )
+        # so is a `[...]` / `{...}` pinned where it runs in a loop's body: made
+        # at its use in an inner loop instead, each use built its own (review
+        # C). Not an if arm's: there it is the arm's value (`$v // []`), the
+        # merge's to make.
+        || ( $Chalk::Target::LLVM::Context::COLLECTING_LOOP_BODY && $op =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && blessed($node->control_in)
+             && ( $node->stamp // '' ) =~ /\A(?:ArrayRef|HashRef)\z/ ) # static type
         # a die an eval opened in this arm catches is one of its statements
         # (one caught by an eval outside the arm ends the arm, as before)
         || ( $op eq 'Unwind' && defined $node->eval_id

@@ -54,6 +54,8 @@ for my $case (
     [ q{sub g { $_[0] = $_[0] + 1; $_[1] = $_[1] * 2 } sub f { my $m = [5, 6]; for my $i (1, 2) { my $x = 1; g($x, $m->[0]) } "@$m" } print f(), "\n";}, 'the second argument' ],
     [ q{sub g { $_[0] = "z" } sub f { my $h = {k => "a"}; for my $i (1, 2) { g($h->{k}) } $h->{k} } print f(), "\n";}, 'a hash element' ],
     [ q{sub g { $_[0] = $_[0] + 1; $_[1] = $_[1] * 2 } sub f { my $l = [1, 2]; my $m = [5, 6]; for my $x (@$l) { for my $y (@$m) { g($x, $y) } } "@$l|@$m" } print f(), "\n";}, 'two aliases' ],
+    [ q{sub g { $_[0] = $_[0] + 1 } for my $i (1) { my $m = [5]; g($m->[0]) for 1..2; print "$m->[0]\n" }}, q{declared in a loop, written in an inner loop} ],
+    [ q{sub g { $_[0] = $_[0] * 2 } my $t = 0; for my $i (1, 2) { my $m = [5, $i]; g($m->[0]) for 1..2; $t += $m->[0] + $m->[1] } print "$t\n";}, q{review q21} ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
