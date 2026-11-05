@@ -16855,6 +16855,27 @@ sub _lower_postfix_deref {
         return $self->_lower_hash_deref($node);
     }
     elsif ($sigil eq '$') {
+        # ${\ EXPR}: A REFERENCE MADE TO A VALUE, read at once, is that value
+        # (pvm 212). Not a variable or an element -- a store through one of
+        # those is a store to it, lowered elsewhere.
+        my $rn = $node->inputs->[0];
+        if (blessed($rn) && $rn->operation eq 'Ref' && !$rn->each && !$rn->fresh_each_pass) {
+            my ($x) = grep { blessed($_) } $rn->inputs->@*;
+            if (blessed($x) && $x->operation =~ /\A(?:TernaryExpr|Constant|Concat|Add|Subtract|Multiply|Coerce|Call)\z/
+                    && !( $x->operation eq 'Call' && ( $x->dispatch_kind // '' ) ne 'builtin' )) {
+                my $v    = $self->lower_value($x);
+                my $from = $self->_repr_of($x) // $x->stamp // ''; # static type
+                $from = 'Scalar' if $from eq 'Slot';
+                # Read as a Scalar (the deref's stamp), it is boxed as one.
+                if (( $node->stamp // '' ) eq 'Scalar' && $from ne 'Scalar') { # static type
+                    $v = $from eq 'Undef' ? $self->_build_slot($v, '0', 'Undef', '${\ EXPR}')
+                       : $self->_emit_coercion($v, $from, 'Scalar', '${\ EXPR}');
+                    $from = 'Scalar';
+                }
+                $self->{cache}{ 'repr:' . $node->id } = $from;
+                return $self->{cache}{ $node->id } = $v;
+            }
+        }
         # $$r: the %Slot the reference points at, read as this node reads.
         my $ptr  = $self->_scalar_ref_target($node->inputs->[0]);
         my $slot = $self->_fresh;
