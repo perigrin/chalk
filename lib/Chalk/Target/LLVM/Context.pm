@@ -17877,6 +17877,46 @@ sub _call_sub_define {
     return $self->{cache}{ $node->id } = $r;
 }
 
+# _lower_call_on_each_arm($call, $ternary, $mem) -- the call made in each
+# arm's block on that arm's elements (a ?: of lists as its one argument),
+# its value the phi of the two.
+sub _lower_call_on_each_arm {
+    my ($self, $node, $t, $mem) = @_;
+    my $cond = $self->_ensure_i1($self->lower_value($t->inputs->[0]),
+        $self->_repr_of($t->inputs->[0]) // _require_repr($t->inputs->[0], 'TernaryExpr.condition'));
+    my ($tl, $fl, $end) = map { $self->_fresh_label("callarm.$_.") } qw(t f end);
+    $self->_set_terminator("  br i1 $cond, label %$tl, label %$fl  ; call on each arm of ?:");
+    my $in = $node->inputs;
+    my @saved = @$in;
+    my (@phi, %repr);
+    for my $arm ([$tl, $t->inputs->[1]], [$fl, $t->inputs->[2]]) {
+        my ($label, $list) = @$arm;
+        $self->_new_block($label);
+        my %before = map { $_ => 1 } keys %{ $self->{cache} };
+        @$in = ( $list->inputs->@*, $mem ? $saved[-1] : () );
+        my $ref = eval { $self->_lower_call_direct($node) };
+        my $err = $@;
+        @$in = @saved;
+        die $err if $err;
+        my $r = $self->_repr_of($node) // '';
+        $repr{$r} = 1;
+        push @phi, [ $ref, $self->_current_block_label ];
+        $self->_set_terminator("  br label %$end");
+        delete @{ $self->{cache} }{ grep { !$before{$_} } keys %{ $self->{cache} } };
+    }
+    $self->_new_block($end);
+    return $self->{cache}{ $node->id } = '0' if ( $node->want // '' ) eq 'void';
+    my ($r) = keys %repr;
+    die "GAP: a call on each arm of a ?: whose value is a " . join('/', sort keys %repr)
+      . " is not lowered -- only one Int, Num or Boolean merges here\n"
+        unless keys %repr == 1 && $r =~ /\A(?:Int|Num|Boolean)\z/;
+    my $res = $self->_fresh;
+    $self->_emit("  $res = phi " . _repr_to_llvm_type($r) . " "
+        . join(', ', map { "[ $_->[0], %$_->[1] ]" } @phi) . "  ; call on each arm of ?:");
+    $self->{cache}{ 'repr:' . $node->id } = $r;
+    return $self->{cache}{ $node->id } = $res;
+}
+
 sub _lower_call_direct {
     my ($self, $node) = @_;
     # The context the call is made in, which a wantarray in the inlined body
@@ -17888,6 +17928,21 @@ sub _lower_call_direct {
     # at once so a call inside the inlined body does not see them.
     my $via = delete $self->{_call_via};
     my $name  = $via ? $via->{name} : $node->name;
+    # ONE ARGUMENT, A ?: OF TWO LISTS OF SCALARS (`g($c ? ($s, $t) : ())`):
+    # the call is made on the taken arm's list, so each arm's elements are the
+    # call's arguments in a block of its own -- a write to $_[N] reaches that
+    # arm's variable (pvm 145).
+    if (!$via && !( $node->can('shares_args') && $node->shares_args )) {
+        my $in = $node->inputs;
+        my $mem = $node->can('memory_input') && $node->memory_input ? 1 : 0;
+        my $t = @$in - $mem == 1 ? $in->[0] : undef;
+        if ($t && $t->operation eq 'TernaryExpr'
+            && !grep { $_->operation ne 'ArrayLiteral'
+                       || grep { ( $_->stamp // 'Unknown' ) =~ /\A(?:Array|Hash|List)\z/ } $_->inputs->@* } # static type
+               $t->inputs->@[1, 2]) {
+            return $self->_lower_call_on_each_arm($node, $t, $mem);
+        }
+    }
     # `&name;` SHARES ITS CALLER'S @_: the arguments of the inlined call it is
     # made in (_frame_args), or none at the program's top level. A shift on
     # either side would change the @_ the other sees: refused.
