@@ -8528,8 +8528,11 @@ sub _prelower_branch_store_operands {
                                 $node->inputs->@*;
             next unless defined $target;
             # container = inputs[0], index = inputs[1] of the Subscript lvalue.
-            $self->lower_value($target->inputs->[0]);
-            $self->lower_value($target->inputs->[1]);
+            # ONE A LOOP MAKES (its counter's element, in a loop in an arm) is
+            # that loop's, made in its body (pvm 224).
+            for my $x ($target->inputs->@[0, 1]) {
+                $self->lower_value($x) unless _reaches_an_unlowered_phi($self, $x);
+            }
         }
         elsif ($node->operation eq 'Call'
             && $node->can('dispatch_kind')
