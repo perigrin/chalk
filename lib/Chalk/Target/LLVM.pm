@@ -696,8 +696,9 @@ sub _args_from_reads {
                 grep { _reads_as_value($_, $r) }
                 grep { blessed($_) } ( $r->can('consumers') ? $r->consumers // [] : [] )->@*;
             my @to = keys %to;
-            return undef unless @to == 1 && $_DEFINE_REPR{ $to[0] };
-            $st = $to[0];
+            # READ AS NONE OF ONE SCALAR TYPE -- a reference walked, an object
+            # a method is called on -- it is taken as a Scalar, read by its tag.
+            $st = @to == 1 && $_DEFINE_REPR{ $to[0] } ? $to[0] : 'Scalar';
         }
         push @reprs, $st;
     }
@@ -741,6 +742,8 @@ sub _sub_has_define {
     # An optional parameter: a call may pass fewer arguments than the define
     # takes, and the default is computed in the body -- inlined, for now.
     return $sinfo->{has_define} = 0 if $sinfo->{optional};
+    # A SCALAR PARAMETER (a reference, an object) only for a sub that must
+    # be called -- one calling itself; any other is inlined, as before.
     my $ok = !grep { !$_DEFINE_REPR{$_} } @{ $sinfo->{param_reprs} // [] };
     if ($ok) {
         _settle_recursive_return($registry, $cname, $sinfo);
@@ -766,8 +769,15 @@ sub _sub_calls_itself {
     my $full = $cname . '::' . $s->name;
     return ( grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Call'
-            && ( $_->dispatch_kind // '' ) eq 'direct'
-            && ( ( $_->name // '' ) eq $full || ( $_->name // '' ) eq $s->name )
+            && ( ( ( $_->dispatch_kind // '' ) eq 'direct'
+                   && ( ( $_->name // '' ) eq $full || ( $_->name // '' ) eq $s->name ) )
+                 # A METHOD CALL resolved to this very sub (`$self->f(...)` in f).
+                 || ( ( $_->dispatch_kind // '' ) eq 'method'
+                      && ( ( $_->can('target') && blessed($_->target) && refaddr($_->target) == refaddr($s) )
+                           # ...or named as it is, its class this one or none
+                           # said (`$self->f`, the class known where it is called)
+                           || ( ( $_->name // '' ) eq $s->name
+                                && ( ( $_->class_name // $cname ) eq $cname ) ) ) ) )
     } _graph_all_nodes($g) ) ? 1 : 0;
 }
 
@@ -1922,6 +1932,9 @@ sub lower_with_elaboration {
         class_registry => $class_registry);
     # The MOP itself, for a method whose class only an inlined call site knows.
     $ctx->{mop} = $opts{mop};
+    # ...and for every body context made while this program lowers (a sub's
+    # define dispatching a method on what it is passed).
+    local $Chalk::Target::LLVM::Context::LOWERING_MOP = $opts{mop};
     # The program's Return: a check over all of its nodes (_bit_read_alone).
     $ctx->{_program_return} = $return_node;
 

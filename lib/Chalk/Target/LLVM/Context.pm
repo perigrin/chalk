@@ -261,8 +261,10 @@ sub inherit_need_flags_from {
 # parent up front cannot change body output -- only what the eventual
 # prologue renders, which absorb_need_flags_from already covers regardless
 # of when the seed happened).
+our $LOWERING_MOP;   # set by Chalk::Target::LLVM::lower for its bodies
 sub configure_as_method_body {
     my ($self, %args) = @_;
+    $self->{mop} //= $LOWERING_MOP;   # the program's, while it lowers
     my $has_self = $args{has_self} // 1;
     if ($has_self) {
         $self->{_in_method_body}   = 1;
@@ -18190,7 +18192,7 @@ sub _call_sub_define {
     for my $i (0 .. $#args) {
         my $want = $reprs->[$i];
         die "GAP: direct call to '$name': a $want parameter of its define is not lowered\n"
-            unless $want =~ /\A(?:Int|Num|Str|Boolean)\z/;
+            unless $want =~ /\A(?:Int|Num|Str|Boolean|Scalar)\z/;
         # Lowered first: an argument nothing typed (`$n - 1`) is what it
         # lowers to.
         my $ref  = $self->lower_value($args[$i]);
@@ -18217,11 +18219,13 @@ sub _call_sub_define {
     # stamp, which need not be the define's return (`g($_[0] + 1)` stamped
     # Num, g's body an Int product; lli refused an i64 in an fadd).
     my $want = $node->stamp // ''; # static type
-    if ($want ne $ret && $want =~ /\A(?:Int|Num|Str|Boolean)\z/) {
+    if ($want ne $ret && $want =~ /\A(?:Int|Num|Str|Boolean|Scalar)\z/) {
         $r = $self->_emit_coercion($r, $ret, $want, "$name result");
         $ret = $want;
     }
     $self->{cache}{ 'repr:' . $node->id } = $ret;
+    # ...as an inlined call's is, for a run-time dispatch merging it.
+    $self->{_inline_value_repr}{ refaddr($node) } = $ret;
     return $self->{cache}{ $node->id } = $r;
 }
 
@@ -18276,6 +18280,12 @@ sub _lower_call_direct {
     # at once so a call inside the inlined body does not see them.
     my $via = delete $self->{_call_via};
     my $name  = $via ? $via->{name} : $node->name;
+    # A PACKAGE SUB CALLED AS A METHOD is named by its package: its define,
+    # if it calls itself, is found by that name.
+    if (!$via && ( $node->dispatch_kind // '' ) eq 'method' && $name !~ /::/
+            && blessed($node->target) && $node->target->can('class') && blessed($node->target->class)) {
+        $name = $node->target->class->name . '::' . $name;
+    }
     # ONE ARGUMENT, A ?: OF TWO LISTS OF SCALARS (`g($c ? ($s, $t) : ())`):
     # the call is made on the taken arm's list, so each arm's elements are the
     # call's arguments in a block of its own -- a write to $_[N] reaches that
@@ -18338,7 +18348,9 @@ sub _lower_call_direct {
     # inlined: a die in a define does not unwind to the eval's catch yet.
     my $in_eval = @{ $self->{_eval_frames} // [] }
         || ( $node->can('eval_id') && defined $node->eval_id );
-    my $sub = !$via && !$shared && $self->_recursive_sub_info($name);
+    # ...AND ONE A RUN-TIME DISPATCH CHOSE (_call_via): a method that calls
+    # itself through its invocant is its define, not inlined into itself.
+    my $sub = !$shared && $self->_recursive_sub_info($name);
     # A call passing the wrong count is perl's arity die (or its refusal),
     # handled below before any body is lowered.
     my $argc = scalar(@{ $node->inputs }) - ( $node->can('memory_input') && $node->memory_input ? 1 : 0 );
