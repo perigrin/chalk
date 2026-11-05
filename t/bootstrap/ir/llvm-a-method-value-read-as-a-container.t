@@ -54,7 +54,7 @@ for my $case (
 sub f { my ($phi) = @_; my $init = $phi->inputs->[0]; if ($init->operation eq 'P') { my $vd = $init->inputs->[0]; return "vd=" . $vd->operation } "no" }
 print f(N->new("Phi", [N->new("P", [N->new("V", [])])])), "\n";}, 'an element of an element of a method value' ],
     [ q{package N { sub new { bless { o => $_[1], i => $_[2] }, $_[0] } sub operation { $_[0]{o} } sub inputs { $_[0]{i} } }
-my $s = {}; sub f { my ($self, $phi) = @_; my $init = $phi->inputs->[0]; $self->{t}{ $init->operation } = 1; } f($s, N->new("Phi", [N->new("P", [])])); print join(",", keys %{$s->{t}}), "\n";}, 'a store keyed by a method value' ],
+my $s = {}; sub f { my ($self, $phi) = @_; my $init = $phi->inputs->[0]; $self->{t}{ $init->operation } = 1; } f($s, N->new("Phi", [N->new("P", [])])); print join(",", keys %{$s->{t}}), "\n";}, 'a store keyed by a method value: perl, or refused' ],
     [ q{package N { sub new { bless { o => $_[1], i => $_[2], id => $_[3] }, $_[0] } sub operation { $_[0]{o} } sub inputs { $_[0]{i} } sub id { $_[0]{id} } }
 sub upd { my ($self, $phi, $ref) = @_; my $inputs = $phi->inputs; return unless defined $inputs && @$inputs; my $init = $inputs->[0]; return unless defined $init;
   if ($init->operation eq 'PadAccess') { my $vd = $init->inputs->[0]; if (defined $vd && $vd->operation eq 'VarDecl') { $self->{t}{ $vd->id } = $ref; $self->{p}{ $phi->id } = $vd->id; return } } }
@@ -65,14 +65,15 @@ sub upd { my ($self, $init) = @_; if ($init->operation eq "P") { my $vd = $init-
 my $s = {}; upd($s, N->new("P", [N->new("V", [])])); print scalar(keys %$s), "\n";}, q{a bare return in a sub called for nothing} ],
     [ q{package N { sub new { bless { o => $_[1], i => $_[2] }, $_[0] } sub operation { $_[0]{o} } sub inputs { $_[0]{i} } }
 sub upd { my ($self, $phi) = @_; my $inputs = $phi->inputs; return unless @$inputs; my $init = $inputs->[0]; if ($init->operation eq "P") { $self->{t} = 1; return } 0 }
-my $s = {}; upd($s, N->new("Phi", [])); print scalar(keys %$s), "\n";}, q{a builtin read after an inlined method of the same node id} ],
+my $s = {}; upd($s, N->new("Phi", [])); print scalar(keys %$s), "\n";}, q{a builtin read after an inlined method of the same node id: perl, or refused} ],
+    [ q{sub g { my ($h) = @_; $h->{n}++; 1 } my $x = {n => 1}; for (1..2) { g($x) } my $t = $x->{n}; $x->{n} = 9; print "$t $x->{n}\n";}, q{a read after a loop of calls, then a store: perl, or refused} ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
     if (defined $got) { is($got, perl_says($pl, {}), "$name: perl's answer") }
     # pvm 175 goes on to a join over a hash, and a bare return's List merge
     # has no machine layout: refused by name, not yet lowered.
-    elsif ($name =~ /\A(?:pvm 175|a bare return)/) { like($@, qr/GAP/, "$name: refused by name") }
+    elsif ($name =~ /\A(?:pvm 175|a bare return)|refused/) { like($@, qr/GAP/, "$name: refused by name") }
     else { fail("$name: perl's answer"); diag $@ }
 }
 

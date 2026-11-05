@@ -11910,6 +11910,15 @@ sub _emit_flattened_array_of {
         # in that arm's block (pvm 225).
         if ($s eq 'List' && $in->operation eq 'TernaryExpr') {
             my ($c, @arms) = $in->inputs->@*;
+            # BOTH ARMS ARE MADE, each in its block: an arm that dereferences
+            # what is no reference (`ref $y ? @$y : ($y)`, $y an Int) has no
+            # lowering, though it never runs -- refused.
+            for my $d (map { $_->operation eq 'ArrayLiteral' ? $_->inputs->@* : $_ } @arms) {
+                next unless blessed($d) && $d->operation eq 'PostfixDeref';
+                my $r = $self->_repr_of($d->inputs->[0]) // $d->inputs->[0]->stamp // ''; # static type
+                die "GAP: a ?: of lists whose arm dereferences a $r is not lowered\n"
+                    if $r =~ /\A(?:Int|Num|Str|Boolean|Undef|HashRef|CodeRef)\z/;
+            }
             my $cond = $self->_ensure_i1($self->lower_value($c),
                 $self->_repr_of($c) // _require_repr($c, 'TernaryExpr.condition'));
             my ($tl, $fl, $end) = map { $self->_fresh_label("tlist.$_.") } qw(t f end);
@@ -18529,7 +18538,18 @@ sub _lower_call_direct {
              # A NAMED `my @a` (a literal of no name is constants: perl dies writing one)
              || ( $args[0]->operation eq 'ArrayLiteral' && defined $args[0]->symbol ) )
         && $written && $args_array && !$slurpy && !$signature && !$shared && !@arg_reads
-        && !$self->{_args_list_after_shifts};
+        && !$self->{_args_list_after_shifts}
+        # @_ IS THE ELEMENTS THEMSELVES in perl: a callee that can reach the
+        # array another way -- an element or a deref not of @_, a sub of its
+        # own -- would see the copy disagree (review of 5f40cdf0).
+        && !grep {
+               my $op = $_->operation;
+               ( $op =~ /\A(?:Subscript|Count|Exists|Delete|PostfixDeref)\z/
+                 && !( blessed($_->inputs->[0]) && $_->inputs->[0]->operation eq 'ArgsSource' ) )
+               || ( $op eq 'Call' && ( $_->dispatch_kind // '' ) ne 'builtin' )
+               || ( $op eq 'Call' && ( $_->name // '' ) =~ /\A(?:push|pop|shift|unshift|splice)\z/ )
+               || $op =~ /\A(?:ArrayLiteral|EntryDef|CellRead)\z/ && ( $_->can('sigil') ? $_->sigil // '' : '' ) eq '@'
+           } Chalk::IR::Analysis::_all_graph_nodes($graph);
     my $by_position = @arg_reads && !$args_array && !$slurpy && !$written && !$signature && !$shared
         && ( grep { $flattens->($_) } @args )
         && !grep { ( $_->stamp // '' ) =~ /\A(?:Hash|List)\z/ && !$flattens->($_) } @args; # static type
@@ -18918,9 +18938,6 @@ sub _lower_inlined_structure {
     local $self->{_local_slots}          = {};
     local $self->{_graph_entry_idx}      = $self->{current_idx};
     local $self->{_branch_guarded_store} = 0;
-    # A READ LEFT WAITING in the callee is the callee's, gone with its cache:
-    # kept past it, a later store in the caller found it never made (pvm 175).
-    local $self->{_pending_tag_reads}    = { %{ $self->{_pending_tag_reads} // {} } };
     local $self->{_loop_ctx_stack}       = [];
     local $self->{_jump_merges}          = {};
     Chalk::Target::LLVM::_process_control_chain($self, $return);
@@ -19001,9 +19018,6 @@ sub _lower_inlined_effects_then_value {
     local $self->{cache}         = {};
     local $self->{_past_a_died_eval} = {};   # keyed by id, as {cache} is
     local $self->{_frozen_reads} = {};   # keyed by id, as {cache} is
-    # and the reads it leaves waiting are the callee's, as in
-    # _lower_inlined_structure (pvm 175)
-    local $self->{_pending_tag_reads} = { %{ $self->{_pending_tag_reads} // {} } };
     local $self->{_empty_arrays} = {};   # the callee's `my @a`, fresh per call
     local $self->{_local_slots}  = {};   # and its `my $x` kept in memory
     local $self->{_graph_entry_idx} = $self->{current_idx};
@@ -21394,6 +21408,8 @@ sub _subst_body_value {
         my $op = $n->operation;
         if ($op eq 'RegexMatch') { return () if $match && $match != $n; $match = $n; next }
         next if $op eq 'Constant';
+        # A DIVISION CAN DIE (by zero), and a die here names no line: refused.
+        return () if $op =~ /\A(?:Divide|Modulo)\z/;
         return () unless $op eq 'RegexCapture' || $PURE_DESCEND_OPS{$op}
             || ( $op eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:uc|lc|ucfirst|lcfirst|length)\z/ );
         push @q, $n->inputs->@*;

@@ -53,10 +53,12 @@ for my $case (
     [ q{my @r; for my $input (1, [2, 3]) { my @flat = (ref($input) eq 'ARRAY') ? $input->@* : ($input); push @r, scalar(@flat) . ":@flat" } print "@r\n";}, 'pvm 225 shape: an array or one scalar' ],
     [ q{my @a = (1, 2); my $c = $ENV{C} // 1; my @f = ($c ? @a : (7, 8, 9)); print scalar(@f), ":@f\n";}, 'an array or a list' ],
     [ q{my @a = (1, 2); my $c = $ENV{C} // 0; my @f = (0, ($c ? @a : (7, 8, 9)), 5); print scalar(@f), ":@f\n";}, 'inside a longer list, the false arm' ],
+    [ q{my $y = 7; my @g = ref $y ? @$y : ($y); print "@g\n";}, q{an arm that dereferences what is no reference: perl, or refused} ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
     if (defined $got) { is($got, perl_says($pl, {}), "$name: perl's answer") }
+    elsif ($name =~ /refused/) { like($@, qr/GAP/, "$name: refused by name") }
     else { fail("$name: perl's answer"); diag $@ }
 }
 

@@ -54,6 +54,7 @@ for my $case (
     [ q{my $s = "x12y345"; $s =~ s/(\d)(\d)/$2 . $1/ge; print "$s\n";}, 'two groups' ],
     [ q{my $s = "a-b"; $s =~ s/(\w)/"<" . $1 . ">"/ge; print "$s\n";}, 'a concatenation' ],
     [ q{my $s = "a-b"; $s =~ s/(\w)/uc($1) x 2/ge; print "$s\n";}, 'a builtin over a capture: perl, or refused' ],
+    [ q{my $s = "a0b2"; $s =~ s/(\d)/10 \/ $1/ge; print "$s\n";}, q{a division by zero in the body: refused (perl dies naming the line)} ],
     [ q{my $n = 5; my $s = "a1b2"; $s =~ s/(\d)/$1+$n/ge; print "$s\n";}, 'reading a variable: refused by name' ],
 ) {
     my ($src, $name) = @$case;

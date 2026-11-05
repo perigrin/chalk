@@ -61,10 +61,13 @@ sub f { my ($x, $c) = @_; my $s = "";
   return "$s|$k|$n|@$x" }
 print f([1, 2, 3], 1), " ", f([4], 0), "\n";}, 'pvm 199' ],
     [ q{sub g { $_[0] = 9; scalar @_ } sub ok1 { $_ > 1 } sub f { my ($x, $c) = @_; my $s = ""; for my $e ($c ? @$x : ()) { $s .= $e } my $k = join ",", grep { ok1() } ($c ? @$x : ()); my $n = g(@$x); "$s|$k|$n|@$x" } print f([1, 2, 3], 1), " ", f([4], 0), "\n";}, q{a sub called twice: what the first call built is not left in the graph} ],
+    [ q{my @a = (1, 2); sub g { $_[0] = 9; $a[0] = 4; 0 } g(@a); print "@a\n";}, q{the callee also writes the array: perl, or refused} ],
+    [ q{my @a = (1, 2, 3); sub g { $_[0] = 9; print "$a[0]\n"; 0 } g(@a); print "@a\n";}, q{the callee also reads the array: perl, or refused} ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
     if (defined $got) { is($got, perl_says($pl, {}), "$name: perl's answer") }
+    elsif ($name =~ /refused/) { like($@, qr/GAP/, "$name: refused by name") }
     else { fail("$name: perl's answer"); diag $@ }
 }
 
