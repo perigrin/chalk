@@ -944,7 +944,7 @@ sub _populate_registry_from_mop_class {
         # value it arrives as the lattice top and must be tested for.)
         my $ret_repr  = ( ( $m->return_type // 'Unknown' ) ne 'Unknown' )
             ? $m->return_type
-            : _require_repr($body_node, "MOP::Method '$mname' body root");
+            : $Chalk::IR::Analysis::LIST_VALUED_METHOD{"${cname}::$mname"} ? 'Array' : _require_repr($body_node, "MOP::Method '$mname' body root");
         # CALLED ONLY IN SCALAR CONTEXT, a returned list assignment to a field
         # is its count (Analysis %SCALAR_ONLY_METHOD), not the declared list.
         $ret_repr = $Chalk::IR::Analysis::SCALAR_ONLY_METHOD{"${cname}::$mname"} ? 'Int' : 'Array'
@@ -1452,7 +1452,10 @@ sub _emit_class_registry_ir {
                    && ( ( ($body_node isa Chalk::IR::Node) ? ($body_node->stamp // '') : '' )
                           =~ /\A(?:List|Array)\z/
                         # or lowered as one (a list-only method's field array)
-                        || ( $body_ctx->_repr_of($body_node) // '' ) eq 'Array' )) {
+                        || ( $body_ctx->_repr_of($body_node) // '' ) eq 'Array' 
+                        # or `values`/`keys` of a field hash (Analysis %LIST_VALUED_METHOD)
+                        || ( ($body_node isa Chalk::IR::Node) && $body_node->operation eq 'Call'
+                             && ( $body_node->name // '' ) =~ /\A(?:values|keys)\z/ ) )) {
                 push @lines, "  ret %Array* $body_val";
             }
             # `return $self`: the invocant pointer the method was called with

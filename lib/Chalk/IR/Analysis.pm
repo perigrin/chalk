@@ -572,11 +572,40 @@ sub infer ($class, $graphs) {
     # ...and those called only in list context, whose returned list
     # assignment to a field Array is that array (its contents after).
     our %LIST_ONLY_METHOD = ();
+    # A METHOD RETURNING `values %field` OR `keys %field` returns that list, as
+    # an array, whatever its calls' contexts: a call in list context reads the
+    # array, one in scalar context its count -- as perl's values/keys give.
+    our %LIST_VALUED_METHOD = ();
     my %wants;
     for my $g (values %graphs) {
         for my $c (grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method'
                           && defined $_->class_name } _all_graph_nodes($g)) {
             $wants{ $c->class_name . '::' . ( $c->name // '' ) }{ $c->want // 'unknown' } = 1;
+        }
+    }
+    # Every method graph, called or not: its body is lowered either way.
+    for my $m (sort keys %graphs) {
+        my ($r) = grep { blessed($_) && $_->operation eq 'Return' } $graphs{$m}->returns->@*;
+        my $v = $r ? $r->inputs->[0] : undef;
+        next unless blessed($v) && $v->operation eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin'
+            && ( $v->name // '' ) =~ /\A(?:values|keys)\z/
+            # Its CALLER'S context, not its own: `scalar(keys %h)` is always a count.
+            && ( $v->want // '' ) ne 'scalar'
+            # A HASH FIELD by its declaration -- one nothing stores to arrives
+            # stamped Unknown.
+            && grep {
+                my $fa = $_;
+                blessed($fa) && $fa->operation eq 'FieldAccess' && grep {
+                    $_->fieldix == $fa->field_index && $_->sigil eq '%'
+                } ( eval { $mop->for_class($fa->field_stash)->fields } )
+            } $v->inputs->@*;
+        next if grep { !/\A(?:scalar|list|void)\z/ } keys %{ $wants{$m} // {} };
+        $LIST_VALUED_METHOD{$m} = 1;
+        for my $g (values %graphs) {
+            $_->set_stamp( ( $_->want // '' ) eq 'list' ? 'Array' : 'Int' ) for grep {
+                $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method'
+                    && ( $_->class_name // '' ) . '::' . ( $_->name // '' ) eq $m
+            } _all_graph_nodes($g);
         }
     }
     for my $m (grep { join(',', keys $wants{$_}->%*) =~ /\A(?:scalar|list)\z/ && $graphs{$_} } keys %wants) {

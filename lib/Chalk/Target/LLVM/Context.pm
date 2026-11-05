@@ -19211,7 +19211,11 @@ sub _lower_call_method {
     # 11.0's bits read as an i64. The callee has ONE body at ONE machine type;
     # it is the CALL that must meet it, and the refinement is honoured after.
     if ($result_repr ne $abi_repr
-            && !Chalk::Grammar::Perl::TypeLibrary::is_subtype($result_repr, $abi_repr)) {
+            && !Chalk::Grammar::Perl::TypeLibrary::is_subtype($result_repr, $abi_repr)
+            # A LIST-VALUED METHOD (values/keys of a field) called in scalar
+            # context: the array it returns, read as its count below.
+            && !( $abi_repr eq 'Array' && $result_repr eq 'Int'
+                   && $Chalk::IR::Analysis::LIST_VALUED_METHOD{"${class_name}::$method_name"} )) {
         die "GAP: Call(method) '$method_name' node repr=$result_repr disagrees "
           . "with class '$class_name' vtable ABI return_repr=$abi_repr — "
           . "neither refines the other, so a mismatched indirect call would be "
@@ -19331,6 +19335,13 @@ sub _lower_call_method {
         # there once, not in a parallel inline table).
         my $ret_ty = Chalk::Target::LLVM::_method_fn_llvm_ret_type($abi_repr);
         $self->_emit("  $result = call $ret_ty $typed_fn($arg_text)  ; Call(method) $method_name -> $ret_ty");
+        # IN SCALAR CONTEXT, values/keys are the count: the array's length.
+        if ($abi_repr eq 'Array' && $result_repr eq 'Int') {
+            my ($lp, $n) = ($self->_fresh, $self->_fresh);
+            $self->_emit("  $lp = getelementptr inbounds %Array, %Array* $result, i32 0, i32 0  ; Call(method) $method_name: count");
+            $self->_emit("  $n = load i64, i64* $lp  ; values/keys in scalar context");
+            return $self->{cache}{ $node->id } = $n;
+        }
         # THE CALL IS AT THE ABI; THE NODE MAY KNOW MORE. When the vtable
         # declares Scalar the callee returns %Slot, but this node's repr may
         # have been refined to something narrower -- Int <: Scalar. Consumers
