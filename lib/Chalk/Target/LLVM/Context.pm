@@ -18158,6 +18158,13 @@ sub _lower_call_direct {
     # are reachable from one place -- which is the whole point of Chalk keeping
     # a MOP alongside the graph rather than dissolving declarations into it.
     my $target = $via ? $via->{target} : $node->can('target') ? $node->target : undef;
+    # A NAME A GLOB WAS BOUND TO (`*rr = \&A::rr`, _lower_entry_write) before
+    # this call runs that sub (pvm 209).
+    if (!defined $target && defined( my $to = ( $self->{_sub_alias} // {} )->{$name} )) {
+        my ($pkg, $sym) = $to =~ /\A(.*)::([^:]+)\z/;
+        my $cls = $pkg && $self->{mop} ? $self->{mop}->for_class($pkg) : undef;
+        ($target) = $cls ? grep { $_->name eq $sym } $cls->subs : ();
+    }
     my $graph  = $target && $target->can('graph') ? $target->graph : undef;
     die "GAP: direct call to '$name' has no resolved callee — the loader could "
       . "not resolve the sub name to a metaobject (an unknown or builtin sub)."
@@ -20915,6 +20922,24 @@ sub _lower_entry_write {
     # name already runs that sub, so the assignment has nothing left to do.
     return $self->{cache}{ $node->id } = '0'
         if $value->operation eq 'AnonSub' && $value->glob_bound;
+    # `*name = \&other` ON THE PROGRAM'S OWN CHAIN (no arm, no loop, not an
+    # inlined body): a call of name lowered after it runs other (pvm 209).
+    # One lowered before it finds no sub, as perl's dies; a name a sub of
+    # its own already holds is refused.
+    if (( $target->sigil // '' ) eq '&' && $value->operation eq 'Ref') {
+        my ($code) = $value->inputs->@*;
+        my $full = ( $target->package // 'main' ) . '::' . ( $target->symbol // '' );
+        my ($pkg, $sym) = $full =~ /\A(.*)::([^:]+)\z/;
+        my $own = $self->{mop} && $self->{mop}->for_class($pkg)
+            && grep { $_->name eq $sym } $self->{mop}->for_class($pkg)->subs;
+        die "GAP: a glob's code slot bound other than to a named sub, on the program's own "
+          . "chain, over no sub of its own, is not lowered\n"
+            unless blessed($code) && $code->operation eq 'Constant' && ( $code->const_type // '' ) eq 'code'
+                && !$own && !$self->{_inlining} && !@{ $self->{_loop_ctx_stack} // [] }
+                && !defined _arm_proj_of($node->control_in);
+        $self->{_sub_alias}{$full} = $code->value;
+        return $self->{cache}{ $node->id } = '0';
+    }
     # `our @ISA = ("Base")`: the parent the class registry already holds
     # (B::SoN records it), so method calls resolve through it statically --
     # the store has nothing left to do. Any other @ISA store or read is
