@@ -3320,13 +3320,29 @@ sub _freeze_merge_reads {
     my ($self, $s) = @_;
     my $r = $s->can('region') ? $s->region : undef;
     return unless blessed($r);
-    # IN AN EVAL'S BODY a read made here is the body's, and the eval's join
-    # holds what it reads to its end (close_eval): left to its use there.
-    return if @{ $self->{_eval_frames} // [] };
-    $self->_freeze_memory_reads($_) for grep {
+    my @phis = grep {
         blessed($_) && $_->operation eq 'Phi' && _is_memory_phi($_)
             && blessed($_->region) && refaddr($_->region) == refaddr($r)
     } ( $r->consumers // [] )->@*;
+    # IN AN EVAL'S BODY a read made here is the body's, and the eval's join
+    # refuses one read after it (close_eval, pvm 156): the reads are made
+    # before the body's next store instead -- the only place they can go
+    # stale (_freeze_eval_merge_reads).
+    if (my $f = ( $self->{_eval_frames} // [] )->[-1]) {
+        push @{ $f->{merge_phis} }, @phis;
+        return;
+    }
+    $self->_freeze_memory_reads($_) for @phis;
+    return;
+}
+
+# _freeze_eval_merge_reads: before a store in an eval's body, the reads of
+# what an if or a loop there left (_freeze_merge_reads) are made.
+sub _freeze_eval_merge_reads {
+    my ($self) = @_;
+    my $f = ( $self->{_eval_frames} // [] )->[-1] or return;
+    my $phis = delete $f->{merge_phis} or return;
+    $self->_freeze_memory_reads($_) for @$phis;
 }
 
 # _local_restore_of($assign) -> the ElemRestore that puts back the element a
@@ -7523,6 +7539,8 @@ sub process_control_node {
         # substitution — is emitted at its control position, before any
         # later read.
         $self->_make_pending_reads_before($node);
+        $self->_freeze_eval_merge_reads
+            if $op =~ /\A(?:Assign|CompoundAssign|EntryWrite|ElemRestore|Delete|RegexSubst|Call)\z/;
         # A `local` PUT BACK where its scope ends after a loop or an if: a read
         # of the version that merge made (`return $x` after `$x += $_ for ...`)
         # is made before the put-back. Left to its use, it read the restored value.

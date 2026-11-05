@@ -58,6 +58,8 @@ for my $case (
     [ q{our $x = 0; if (@ARGV) { $x = 1 } else { $x = 2 } my $y = $x; if (!@ARGV) { $x = 5 } print "$y $x\n";}, q{q85} ],
     [ q{sub g { my ($h) = @_; $h->{n}++; 1 } my $x = {n => 1}; g($x) for 1..2; my $t = $x->{n}; g($x); print "$t $x->{n}\n";}, q{p55} ],
     [ q{sub g { my ($h) = @_; $h->{n}++; 1 } my $x = {n => 1}; my $i = 0; while ($i++ < 2) { g($x) } my $t = $x->{n}; g($x); print "$t $x->{n}\n";}, q{p57} ],
+    [ q{my $h = {n => 1}; eval { for (1..2) { $h->{n}++ } my $t = $h->{n}; $h->{n} = 9; print "$t $h->{n}\n"; 1 };}, q{in an eval body: a hash reference} ],
+    [ q{my %h = (n => 1); my $t = eval { $h{n}++ for 1..2; my $v = $h{n}; $h{n} = 9; $v }; print "$t $h{n}\n";}, q{in an eval body: a named hash, the value read after} ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
