@@ -7578,6 +7578,13 @@ sub process_control_node {
     elsif ($op eq 'CellWrite') {
         $self->lower_value($node);
     }
+    # AN ANONYMOUS AGGREGATE PINNED WHERE IT RUNS (`my $m = [5, 6]`) is made
+    # there: made at its first use instead -- in a loop body -- the loop's
+    # scope dropped it, and each later use made a fresh one, a store into it
+    # lost (`for (1, 2) { g($m->[0]) }`, g writing $_[0], left @$m as it was).
+    elsif ($op =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( $node->stamp // '' ) =~ /\A(?:ArrayRef|HashRef)\z/) { # static type
+        $self->lower_value($node);
+    }
     # A WRITE NOTHING ABOVE LOWERS IS REFUSED, not dropped: an EntryWrite
     # reached this branch before it was a statement node, and `our $g = 1;
     # $g = 2; print $g` printed 0.
@@ -17830,13 +17837,23 @@ sub _copy_out_written_args {
         die "GAP: direct call to '$name': callee writes \$_[$i], a literal -- "
           . "perl dies (a read-only value); that is not lowered.\n"
             if $op eq 'Constant';
-        my $lvalue = ( $op eq 'PadAccess' && $arg->is_location )
-                  || ( $op eq 'Subscript' && blessed($arg->inputs->[0])
-                       && $arg->inputs->[0]->operation ne 'ArgsSource' );
+        my $is_lvalue = sub ($n) {
+            my $o = $n->operation;
+            ( $o eq 'PadAccess' && $n->is_location )
+                || ( $o eq 'Subscript' && blessed($n->inputs->[0])
+                     && $n->inputs->[0]->operation ne 'ArgsSource' )
+        };
+        my $lvalue = $is_lvalue->($arg);
+        # A FOREACH ALIAS (`exists $a[$i] ? $$alias : $a[$i]`, the loop variable
+        # over an array through a reference): stored back along the arm taken,
+        # through the alias or to the element (pvm 186).
+        my @alias = $op eq 'TernaryExpr' ? $arg->inputs->@[1, 2] : ();
+        my $alias = @alias && blessed($alias[0]) && $alias[0]->operation eq 'PostfixDeref'
+            && ( $alias[0]->sigil // '' ) eq '$' && blessed($alias[1]) && $is_lvalue->($alias[1]);
         die "GAP: direct call to '$name': callee writes \$_[$i], whose argument "
           . "is a $op this does not store back to.\n"
-            unless $lvalue || $op =~ /\A(?:Add|Subtract|Multiply|Concat|Call)\z/;
-        next unless $lvalue;
+            unless $lvalue || $alias || $op =~ /\A(?:Add|Subtract|Multiply|Concat|Call)\z/;
+        next unless $lvalue || $alias;
         my ($ep, $elems, $sp, $slot) = map { $self->_fresh } 1 .. 4;
         $self->_emit("  $ep = getelementptr inbounds %Array, %Array* $arr, i32 0, i32 2  ; \@_ elems ptr");
         $self->_emit("  $elems = load %Slot*, %Slot** $ep  ; \@_ elems");
@@ -17847,9 +17864,26 @@ sub _copy_out_written_args {
         $ph->set_stamp('Scalar');
         local $self->{_arg_bind} = { ($self->{_arg_bind} // {})->%*,
                                      refaddr($ph) => { ref => $slot, repr => 'Scalar' } };
-        my $store = $f->make('Assign', inputs => [ $arg, $ph ]);
-        $store->set_stamp('Scalar');
-        $self->_lower_assign($store);
+        unless ($alias) {
+            my $store = $f->make('Assign', inputs => [ $arg, $ph ]);
+            $store->set_stamp('Scalar');
+            $self->_lower_assign($store);
+            next;
+        }
+        my $c = $self->_ensure_i1($self->lower_value($arg->inputs->[0]),
+            $self->_repr_of($arg->inputs->[0]) // 'Boolean');
+        my ($tl, $fl, $end) = map { $self->_fresh_label("aliasout.$_.") } qw(t f end);
+        $self->_set_terminator("  br i1 $c, label %$tl, label %$fl  ; \$_[$i] back to the alias");
+        for my $arm ([$tl, $alias[0]], [$fl, $alias[1]]) {
+            $self->_new_block($arm->[0]);
+            my %before = map { $_ => 1 } keys %{ $self->{cache} };
+            my $store = $f->make('Assign', inputs => [ $arm->[1], $ph ]);
+            $store->set_stamp('Scalar');
+            $self->_lower_assign($store);
+            $self->_set_terminator("  br label %$end");
+            delete @{ $self->{cache} }{ grep { !$before{$_} } keys %{ $self->{cache} } };
+        }
+        $self->_new_block($end);
     }
 }
 
