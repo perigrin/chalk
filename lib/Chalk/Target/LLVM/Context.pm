@@ -1829,6 +1829,12 @@ sub lower_value {
             # %Slot for the pointer (`bless { i => $_[1] }` of `new([7])`).
             return $bound->{ref}
                 if $node->stamp eq 'Scalar' && ( $bound->{repr} // '' ) =~ /Ref\z/; # static type
+            # ...AND SO IS A STRING READ OF ONE (pvm 082: `ref $v ? ... : $v`, `$v
+            # gt "m"`, the callee typed by its other calls): _repr_of gives the
+            # reference to its readers, each reading it as it reads one --
+            # `ref` its kind, a string op its KIND(0x...).
+            return $bound->{ref}
+                if $node->stamp eq 'Str' && ( $bound->{repr} // '' ) =~ /\A(?:Array|Hash|Code|Scalar)Ref\z/; # static type
             if (defined $bound->{repr} && defined $node->stamp # static type
                     && $node->stamp ne $bound->{repr}) { # static type
                 die "GAP: an inlined argument is a $bound->{repr} where the "
@@ -5883,6 +5889,10 @@ sub _str_compare_operand {
     # A SCALAR IS STRINGIFIED BY ITS TAG -- the Coerce the producer would
     # have inserted had it known the operand's type (a method's value).
     return $self->_emit_coercion($ref, 'Scalar', 'Str', "$op $side") if $repr eq 'Scalar';
+    # A REFERENCE compares as perl prints it, KIND(0x...) (pvm 082: an
+    # inlined argument a reference where the callee's reads were typed Str).
+    return $self->_emit_coercion($ref, $repr, 'Str', "$op $side")
+        if $repr =~ /\A(?:Array|Hash|Code|Scalar)Ref\z/;
     # StrEq/StrNe's signature is (Str, Str). A non-Str operand arrives through
     # an explicit Stringify inserted by the producer, exactly as Print's
     # arguments do -- `eq` does not know how to render any representation.
