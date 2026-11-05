@@ -411,6 +411,7 @@ sub infer ($class, $graphs) {
     _attach_formats(\%graphs, $mop);
     _type_calls_through_named_refs(\%graphs, $mop);
     _type_calls_returning_self(\%graphs);
+    _type_run_time_method_calls(\%graphs, $mop);
     _widen_shared_scalar_reads(\%graphs);
 
     # Universal repr-inference: seed aggregate/regex reprs and fixpoint-propagate
@@ -1143,6 +1144,34 @@ sub _attach_autoload ($graphs, $mop) {
         my ($auto) = grep { $_->name eq 'AUTOLOAD' } $cls->subs or next;
         $n->set_target($auto);
         $n->set_autoloads($n->name);
+    }
+    return;
+}
+
+# _type_run_time_method_calls($graphs, $mop): a method whose invocant's class
+# is known only at run time (`$c = $c->prev` a loop carries) is dispatched
+# among the package subs of its name. Made for a scalar, when every one of
+# them returns a Scalar, the call is one -- untyped, it left the loop's merge
+# Unknown and the next call on it had no class to dispatch by (pvm 204).
+sub _type_run_time_method_calls ($graphs, $mop) {
+    my %returns_scalar;
+    for my $cls ($mop->classes) {
+        for my $sub ($cls->subs) {
+            my @r = grep { blessed($_) && $_->operation eq 'Return' } ( $sub->graph->returns // [] )->@*;
+            my $all = @r && !grep { !( blessed($_->inputs->[0]) && ( $_->inputs->[0]->stamp // '' ) eq 'Scalar' ) } @r;
+            push @{ $returns_scalar{ $sub->name } }, $all ? 1 : 0;
+        }
+    }
+    for my $gname (sort keys $graphs->%*) {
+        for my $n (_all_graph_nodes($graphs->{$gname})) {
+            # Made for a value: a call for nothing (`$o->set(1);`) has none to type.
+            next unless $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'method'
+                && !defined $n->class_name
+                && !_is_narrowed($n->stamp)
+                && ( $n->want // '' ) !~ /\A(?:list|void)\z/ && ( $n->name // '' ) ne 'new';
+            my $c = $returns_scalar{ $n->name // '' } or next;
+            $n->set_stamp('Scalar') unless grep { !$_ } @$c;
+        }
     }
     return;
 }

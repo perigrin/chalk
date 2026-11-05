@@ -10309,6 +10309,11 @@ sub _prelower_condition_mutation_backedges {
     for my $rec (@$phi_records) {
         my $backedge = $rec->{node}->inputs->[1];
         next unless defined $backedge && blessed($backedge);
+        # A CALL IS NOT A PURE FUNCTION of the header Phi: it runs code (a
+        # method dispatched on what the loop carries, `$c = $c->prev`), and
+        # made in the header it ran on the last pass's undef (pvm 204). Its
+        # consumers outside the Phi are what reads its memory version.
+        next if $backedge->operation eq 'Call' && ( $backedge->dispatch_kind // '' ) ne 'builtin';
         # A back-edge read outside the loop-Phi set: a non-Phi consumer, or a Phi
         # that is not one of THIS loop's header Phis.
         my $read_post_loop = grep {
@@ -16055,7 +16060,7 @@ sub _lower_builtin_join {
     # The separator is a Str by join's signature; anything else is bridged the
     # same way an operand of any Str-context operator is. $" IS " " UNTIL A
     # PROGRAM WRITES IT: read where nothing can have, it is perl's default.
-    my $default_sep = _unwritten_list_separator($sep_node);
+    my $default_sep = do { local $Chalk::Target::LLVM::Context::LIST_SEP_MOP = $self->{mop}; _unwritten_list_separator($sep_node) };
     my $sep_ref = $self->lower_value($default_sep // $sep_node);
     my $sep_repr = $default_sep ? 'Str'
                  : ($sep_node isa Chalk::IR::Value)
@@ -16121,6 +16126,7 @@ sub _lower_builtin_join {
 # stores `$"`, nor does a sub called there. (The walk once passed only the
 # builtins, and an element store through a reference before "@a" refused
 # the join.) The Constant belongs to no graph; it is minted once.
+our $LIST_SEP_MOP;   # the MOP, while a join asks (_writes_list_separator)
 sub _unwritten_list_separator {
     my ($sep) = @_;
     $sep = $sep->inputs->[0] if blessed($sep) && $sep->operation eq 'Coerce';
@@ -16150,9 +16156,16 @@ sub _writes_list_separator {
         }
         if ($op eq 'Call' && ($n->dispatch_kind // '') ne 'builtin') {
             my $target = $n->can('target') ? $n->target : undef;
-            my $graph  = $target && $target->can('graph') ? $target->graph : undef;
-            return 1 unless $graph;   # an unknown callee may write anything
-            push @$q, grep { blessed($_) } $graph->nodes->@*, _control_chain_of($graph);
+            my @graphs = $target && $target->can('graph') ? ($target->graph) : ();
+            # A METHOD DISPATCHED AT RUN TIME runs one of the package subs of
+            # its name: every one is walked (pvm 204).
+            if (!@graphs && ( $n->dispatch_kind // '' ) eq 'method' && !defined $n->class_name
+                    && ( $n->name // '' ) ne 'new' && $LIST_SEP_MOP) {
+                @graphs = map { $_->graph } grep { $_->name eq $n->name }
+                    map { $_->subs } $LIST_SEP_MOP->classes;
+            }
+            return 1 unless @graphs;   # an unknown callee may write anything
+            push @$q, grep { blessed($_) } map { ( $_->nodes->@*, _control_chain_of($_) ) } @graphs;
         }
         push @$q, grep { blessed($_) } $n->inputs->@*,
             ($n->can('control_in') ? $n->control_in : ());
