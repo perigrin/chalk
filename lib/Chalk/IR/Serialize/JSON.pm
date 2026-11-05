@@ -1281,7 +1281,7 @@ sub from_json ($json_string) {
     @PHASE_GRAPHS = map { [ $_->[0], $analysed->{ $_->[1] } ] } @PHASE_BLOCKS;
     # REGEX CODE BLOCK BODIES, by the name a match carries (code_bodies): the
     # lowering makes each a function the matcher calls.
-    %CODE_GRAPHS = map { ( $_ => $analysed->{$_} ) } grep { /::__REGEXCODE__:/ } keys %$analysed;
+    %CODE_GRAPHS = map { ( $_ => $analysed->{$_} ) } grep { /::__(?:REGEXCODE|SUBSTREPL)__:/ } keys %$analysed;
     # A LIST-CONTEXT COPY'S EVAL VALUE IS A LIST: typed after the passes, which
     # join its arms (a value and undef) to Scalar.
     for my $key (map { $_->{list} // () } values %CONTEXT_COPY) {

@@ -21157,10 +21157,11 @@ sub _lower_regex_subst {
         // die "GAP: RegexSubst subject (ref=$subj_ptr) has no tracked length — "
              . "the matcher needs the subject's byte length.";
 
-    # A REPLACEMENT MADE PER MATCH (/ge) is a graph of its own, not lowered
-    # here: dropped, the replacement was "".
+    # A REPLACEMENT MADE PER MATCH (/ge) is a graph of its own: made in each
+    # match's block from that match's groups (_lower_regex_subst_g), when it
+    # reads nothing but them. Dropped, the replacement was "".
     die "GAP: s/// whose replacement is computed per match (/ge) is not lowered\n"
-        if defined $node->replacement_body;
+        if defined $node->replacement_body && !( $global && $self->_subst_body_value($node) );
     my $compiled = _compile_regex_pattern($node->pattern, $flags);
     my $segs     = $repl_node ? [ { kind => 'val' } ]
                  : _parse_subst_replacement($node->replacement // '', $compiled->{ngroups} // 0);
@@ -21168,7 +21169,8 @@ sub _lower_regex_subst {
     if ($global) {
         # A COMPUTED REPLACEMENT is made once by B::SoN, not once per match.
         die "GAP: s///g with a computed replacement (/e, or one made per match) is not lowered\n"
-            if $repl_node || defined $node->replacement_body;
+            if $repl_node;
+        $segs = [ { kind => 'body' } ] if defined $node->replacement_body;
         # PERL STEPS OVER AN EMPTY MATCH by rules of its own, and ^ matches
         # only at the start: neither is this loop's.
         die "GAP: s///g whose pattern is anchored at the start is not lowered\n"
@@ -21335,6 +21337,20 @@ sub _lower_regex_subst_g {
             $a = $self->_emit_str_append($a, $self->_set_str_len($self->_str_const_parts($seg->{text}, 's///g: replacement')), 's///g');
             next;
         }
+        if ($seg->{kind} eq 'body') {
+            my ($val, $mnode) = $self->_subst_body_value($node);
+            my $v = do {
+                local $self->{cache} = {};
+                local $self->{_regex_captures} = { %{ $self->{_regex_captures} // {} },
+                    $mnode->id => { %$m, subj_ptr => $rp } };
+                $self->{cache}{ $mnode->id } = 'true';
+                my $r = $self->lower_value($val);
+                my $from = $self->_repr_of($val) // '';
+                $from eq 'Str' ? $r : $self->_emit_coercion($r, $from, 'Str', 's///ge: the replacement');
+            };
+            $a = $self->_emit_str_append($a, $v, 's///ge: this match\'s replacement');
+            next;
+        }
         my $n = $seg->{n};
         my ($cp, $clen) = map { $self->_fresh } 1 .. 2;
         $self->_emit("  $cp = getelementptr inbounds i8, i8* $rp, i64 $m->{cap_s}[$n]  ; s///g: \$$n");
@@ -21359,6 +21375,30 @@ sub _lower_regex_subst_g {
             . "  ; s///g stores lexical " . $subj_node->name);
     }
     return $self->{cache}{ $node->id } = $res;
+}
+
+# _subst_body_value($subst) -> ($value, $match) of its /ge replacement body,
+# or () where that body does more than compute from its match's groups: an
+# effect on its chain, or a read of anything but its match, a constant or a
+# pure operation over them.
+sub _subst_body_value {
+    my ($self, $node) = @_;
+    my $g = $Chalk::IR::Serialize::JSON::CODE_GRAPHS{ $node->replacement_body // '' } or return ();
+    my ($ret) = ( $g->returns // [] )->@*;
+    return () unless blessed($ret) && blessed($ret->control_in) && $ret->control_in->operation eq 'Start';
+    my $val = $ret->inputs->[0] // return ();
+    my (%seen, @q, $match);
+    @q = ($val);
+    while (defined(my $n = shift @q)) {
+        next if !blessed($n) || $seen{ refaddr($n) }++;
+        my $op = $n->operation;
+        if ($op eq 'RegexMatch') { return () if $match && $match != $n; $match = $n; next }
+        next if $op eq 'Constant';
+        return () unless $op eq 'RegexCapture' || $PURE_DESCEND_OPS{$op}
+            || ( $op eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:uc|lc|ucfirst|lcfirst|length)\z/ );
+        push @q, $n->inputs->@*;
+    }
+    return $match ? ($val, $match) : ();
 }
 
 # _lower_regex_subst_count($node): what s/// yields -- how many it replaced,
