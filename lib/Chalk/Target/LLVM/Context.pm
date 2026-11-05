@@ -7493,6 +7493,14 @@ sub process_control_node {
         # substitution — is emitted at its control position, before any
         # later read.
         $self->_make_pending_reads_before($node);
+        # A `local` PUT BACK where its scope ends after a loop or an if: a read
+        # of the version that merge made (`return $x` after `$x += $_ for ...`)
+        # is made before the put-back. Left to its use, it read the restored value.
+        if ($op eq 'ElemRestore' || $op eq 'EntryWrite') {
+            my $m = $node->inputs->[-1];
+            $self->_freeze_memory_reads($m)
+                if blessed($m) && $m->operation eq 'Phi' && $m->can('memory') && $m->memory;
+        }
         $self->lower_value($node);
         # Memory-SSA: an element-store Assign PRODUCES a new memory version.
         # Emit + freeze the element reads that observe THIS version (its
