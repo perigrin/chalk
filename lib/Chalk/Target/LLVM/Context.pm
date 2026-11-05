@@ -13979,6 +13979,27 @@ sub _make_pending_reads_before {
     my $op = $node->operation;
     my $lhs = $op eq 'Assign' ? $node->inputs->[0] : undef;
     my $structure = $op eq 'Loop' || $op eq 'If';
+    # A DIRECT CALL, inlined, may store through what it is passed (pvm 233).
+    # Every call is a memory version (B::SoN's call barrier), so a read
+    # perl makes after it is at the call's version or a later one -- none
+    # made yet. A read still waiting is one perl made BEFORE the call: it is
+    # made here, unless only a ternary chooses it.
+    if ($op eq 'Call' && ( $node->dispatch_kind // '' ) eq 'direct') {
+        for my $p (values %{ $self->{_pending_tag_reads} // {} }) {
+            next if exists $self->{cache}{ $p->id };
+            next if _reaches_an_unlowered_phi($self, $p);
+            next unless ( $self->{_pending_tag_cache}{ refaddr($p) } // 0 ) == refaddr($self->{cache});
+            next unless $p->operation =~ /\A(?:PostfixDeref|Subscript|Count|Exists)\z/;
+            next if grep { blessed($_) && $_->operation eq 'TernaryExpr'
+                           && grep { blessed($_) && refaddr($_) == refaddr($p) } $_->inputs->@[1, 2] }
+                ( $p->consumers // [] )->@*;
+            $self->{cache}{ $p->id } = $self->lower_value($p);
+            $self->{_frozen_reads}{ $p->id } = 1;
+            # Made: no longer waiting -- the callee, under its own cache, asks.
+            delete $self->{_pending_tag_reads}{ refaddr($p) };
+        }
+        return;
+    }
     return unless $structure || ( blessed($lhs) && $lhs->operation =~ /\A(?:Subscript|PostfixDeref)\z/ )
         || $self->_is_array_mutating_call($node);
     # A STORE TO AN AGGREGATE NOTHING REFERS TO: no read through a
