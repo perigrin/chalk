@@ -142,7 +142,7 @@ sub walk {
         # arguments already (args), nothing to store.
         elsif ($op eq 'Assign' && $b->{args} && $s->can('targets') && defined $s->targets
                && blessed($s->inputs->[-1]) && $s->inputs->[-1]->operation eq 'ArgsSource') {
-            $b->args_assign($s);
+            $b->{argsarr} ? $b->list_args_assign($s) : $b->args_assign($s);
             $ctl = $s;
         }
         elsif ($op eq 'Assign') { $b->assign($s); push @{ $b->{passed} }, $s; $ctl = $s }
@@ -193,6 +193,33 @@ sub isa_write {
     $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($_), '%Slot') ]) for $from->inputs->@*;
     $b->emit(op => 'MopIsaSet', type => 'void', inputs => [ $b->const_str($pkg), $arr ]);
     return 1;
+}
+
+sub _args_list_assign {
+    my ($s) = @_;
+    return $s->operation eq 'Assign' && $s->can('targets') && defined $s->targets
+        && blessed($s->inputs->[-1]) && $s->inputs->[-1]->operation eq 'ArgsSource';
+}
+
+# args_elem($Assign, $read) -> @_'s element a `my (...) = @_` target is.
+sub args_elem {
+    my ($b, $s, $r) = @_;
+    my @t = @{ $s->inputs }[ 0 .. $#{ $s->inputs } - 1 ];
+    out('a `my (...) = @_` of what is not a scalar') if grep { !blessed($_) || $_->operation ne 'PadAccess' || ( $_->sigil // '' ) ne '$' } @t;
+    my ($i) = grep { $t[$_]->symbol eq $r->symbol } 0 .. $#t;
+    out('a read after `my (...) = @_` of no target') unless defined $i;
+    my $ix = $b->emit(op => 'Const', type => 'i64', attr => { value => $i });
+    return $b->emit(op => 'AGet', type => '%Slot', inputs => [ $b->{argsarr}, $ix ]);
+}
+
+# list_args_assign($Assign): `my (...) = @_` on the chain in the list
+# convention: each target, and each read of one after it, is @_'s element
+# now -- made here, before a shift after it.
+sub list_args_assign {
+    my ($b, $s) = @_;
+    for my $r ( @{ $s->inputs }[ 0 .. $#{ $s->inputs } - 1 ], grep { blessed($_) && $_->operation eq 'PadAccess' } ( $s->consumers // [] )->@* ) {
+        $b->{memo}{ refaddr($r) } //= $b->args_elem($s, $r);
+    }
 }
 
 # args_assign($Assign): `my ($x, $y) = @_` on the chain. Each target is an
@@ -378,6 +405,7 @@ sub array_value {
     return $b->array_of($in[0]) if $op eq 'PostfixDeref';
     return $b->array_var($v) if _array_var($v);
     return $b->emit(op => 'Argv', type => '%Array*') if _argv($v);
+    return $b->{argsarr} // out('@_ outside a sub taking it as a list') if $op eq 'ArgsSource';
     return $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($in[0]) ]) if $op eq 'Count';
     if ($op eq 'Subscript') {
         out('a hash element') unless ( $v->can('kind') ? $v->kind // 'array' : 'array' ) eq 'array';
@@ -394,7 +422,7 @@ sub array_value {
             my ($sep, @list) = @args;
             # ONE ARRAY is joined as it is; scalars (an array literal folded to
             # its elements, `"@a"`) go into a fresh array first.
-            my $arr = ( @list == 1 && ( $list[0]->operation =~ /\A(?:ArrayLiteral|PostfixDeref)\z/ || _array_var($list[0]) || _argv($list[0]) ) ) ? $b->array_of($list[0]) : do {
+            my $arr = ( @list == 1 && ( $list[0]->operation =~ /\A(?:ArrayLiteral|PostfixDeref|ArgsSource)\z/ || _array_var($list[0]) || _argv($list[0]) ) ) ? $b->array_of($list[0]) : do {
                 my $t = $b->emit(op => 'NewArray', type => '%Array*');
                 for my $e (@list) {
                     out('a join of a list') if _is_list($e); # static type
@@ -456,7 +484,7 @@ sub array_var {
 sub array_of {
     my ($b, $n) = @_;
     out('an array that is not a `my` array (' . ( blessed($n) ? $n->operation . ( $n->can('symbol') && defined $n->symbol ? ' ' . $n->symbol : '' ) : 'none' ) . ')')
-        unless blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|PostfixDeref)\z/ || _array_var($n) || _argv($n) );
+        unless blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|PostfixDeref|ArgsSource)\z/ || _array_var($n) || _argv($n) );
     my $a = $b->value($n);
     out('not an array') unless $a->type eq '%Array*';
     return $a;
@@ -649,6 +677,23 @@ sub call {
     my $fn = $b->func($sub, $c->name);
     my @args = $c->inputs->@*;
     pop @args if $c->can('memory_input') && $c->memory_input;
+    # `&f;` IS CALLED WITH THE CALLER'S OWN @_ (the same array: a shift there
+    # is seen here): both must take @_ as an array.
+    if ($c->can('shares_args') && $c->shares_args) {
+        out('an & call sharing @_ of a sub not taking it as a list') unless $fn->{list} && $b->{argsarr};
+        $b->hash_reads_settled('a call');
+        return $b->emit(op => 'Call', type => '%Slot', inputs => [ $b->{argsarr} ], attr => { fn => $fn->{name} });
+    }
+    if ($fn->{list}) {
+        # @_ BUILT HERE: each scalar pushed, an array's elements appended.
+        my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+        for my $a (@args) {
+            if (_is_list($a)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($a) ]) }
+            else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($a), '%Slot') ]) }
+        }
+        $b->hash_reads_settled('a call');
+        return $b->emit(op => 'Call', type => '%Slot', inputs => [$arr], attr => { fn => $fn->{name} });
+    }
     out('a call passing a list') if grep { _is_list($_) } @args; # static type
     out('a call of a sub with a signature of another arity (perl dies)')
         if $fn->{signature} && @args != $fn->{nargs};
@@ -736,9 +781,14 @@ sub func {
     out("sub $name returns more than one reading") if $ret->inputs->@* > 1;
     my $an = bless {}, 'Chalk::Target::LLVM::Context';
     my @reads = eval { $an->_collect_positional_arg_reads($g, $name) };
+    # @_ READ AS A LIST (join(@_), "@_", scalar(@_), for (@_)): the sub takes
+    # @_ as one %Array its caller builds -- the list convention. A write to
+    # $_[N] (the caller's variable) or a signature is not T2's.
+    my $list = !$@ && $an->{_args_read_as_a_list} && !$an->{_args_written} && !$an->{_args_slurpy} && !$an->{_args_signature};
     out("sub $name reads \@_ other than by shifts, \$_[N] or a signature")
-        if $@ || grep { !blessed($_) } @reads
-        or $an->{_args_written} || $an->{_args_read_as_a_list} || $an->{_args_slurpy};
+        if !$list && ( $@ || grep { !blessed($_) } @reads
+        or $an->{_args_written} || $an->{_args_read_as_a_list} || $an->{_args_slurpy} );
+    @reads = () if $list;
     # A SIGNATURE'S OPTIONAL PARAMETER has a default the body computes: not
     # T2's yet (dropped, `($a, $b = 3)` gave $b undef). Its arity is checked
     # at each call (perl dies on another).
@@ -751,9 +801,18 @@ sub func {
     ( my $id = $name ) =~ s/\W+/_/g;
     # Two subs one name (a method call's bare name): the second numbered.
     $id .= '_' . scalar keys %{ $b->{funcs} } if grep { $_->{name} eq "\@f_$id" } values %{ $b->{funcs} // {} };
-    my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => scalar @reads, signature => $sig, blocks => [] };
+    my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $list ? 1 : scalar @reads,
+        signature => $sig, list => $list, blocks => [] };
     my @argn = map { Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot', attr => { index => $_ }) } 0 .. $#reads;
     $argn[$_]->set_name("%a$_") for 0 .. $#argn;
+    my $argsarr = $list ? Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Array*', attr => { index => 0 }) : undef;
+    $argsarr->set_name('%a0') if $argsarr;
+    local $b->{argsarr} = $argsarr;
+    # A READ OF `my (...) = @_` made where it is used reads @_ then: one the
+    # sub shifts first would be of the shifted array.
+    local $b->{args_mutated} = $list && scalar grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
+        && ( $_->name // '' ) =~ /\A(?:shift|pop|push|unshift|splice)\z/ && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'ArgsSource' }
+        Chalk::Target::LLVM::Context::_graph_component($g);
     local $b->{blocks} = $fn->{blocks};
     local $b->{cur};
     local $b->{locs} = {};
@@ -895,7 +954,7 @@ sub type_of {
     return '%Slot' if $b->{args}{ refaddr($v) };
     # AN ARRAY is an %Array of %Slot, by pointer; a count of it an i64, an
     # element a %Slot (it holds what was stored, by its tag).
-    return '%Array*' if $op eq 'ArrayLiteral' || $op eq 'PostfixDeref' || _array_var($v);
+    return '%Array*' if $op eq 'ArrayLiteral' || $op eq 'PostfixDeref' || _array_var($v) || $op eq 'ArgsSource';
     return 'i64' if $op eq 'Count';
     return '%Slot' if $op eq 'Subscript';
     # A HASH REFERENCE is a %Slot (tag 5) over a %Hash: it is a scalar.
@@ -941,6 +1000,13 @@ sub _value {
     my ($b, $v) = @_;
     # AN ARGUMENT READ (a shift, $_[N], a signature parameter) is the argument.
     if (my $arg = $b->{args}{ refaddr($v) }) { return $arg }
+    # (a read after the Assign takes it as input; a target read is its input)
+    if ($b->{argsarr} && $v->operation eq 'PadAccess'
+        && ( my ($as) = ( grep( { blessed($_) && _args_list_assign($_) } $v->inputs->@* ),
+                          grep( { blessed($_) && _args_list_assign($_) && grep { blessed($_) && refaddr($_) == refaddr($v) } @{ $_->inputs }[ 0 .. $#{ $_->inputs } - 1 ] } ( $v->consumers // [] )->@* ) ) )) {
+        out('a read of `my (...) = @_` in a sub that shifts @_') if $b->{args_mutated};
+        return $b->args_elem($as, $v);
+    }
     my $op = $v->operation;
     my $ty = $b->type_of($v);
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'direct') { return $b->call($v) }
@@ -1135,8 +1201,12 @@ sub print_module {
     for my $fn (sort { $a->{name} cmp $b->{name} } values %{ $bld->{funcs} // {} }) {
         my $i = 0;
         $_->set_name('%v' . $i++) for map { @{ $_->{nodes} } } @{ $fn->{blocks} };
-        push @L, "define internal %Slot $fn->{name}(" . join(', ', map { "%Slot %a$_" } 0 .. $fn->{nargs} - 1) . ') {',
+        push @L, "define internal %Slot $fn->{name}(" . ( $fn->{list} ? '%Array* %a0' : join(', ', map { "%Slot %a$_" } 0 .. $fn->{nargs} - 1) ) . ') {',
             _blocks($fn->{blocks}), '}', '';
+        if ($fn->{list}) {   # its wrapper is itself: @_ already an %Array
+            push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {", "  %r = call %Slot $fn->{name}(%Array* %args)", '  ret %Slot %r', '}', '';
+            next;
+        }
         # ITS WRAPPER, a method's entry: @_ as an %Array, each argument its
         # element (undef past the end). A signature's arity perl checks.
         push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {";
@@ -1236,6 +1306,7 @@ sub _line {
     return "call void \@t2_hset(" . $arg->(@in) . ')' if $op eq 'HSet';
     return "$nm = call %Slot \@t2_hget(" . $arg->(@in) . ')' if $op eq 'HGet';
     return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
+    return "call void \@t2_aappend(" . $arg->(@in) . ')' if $op eq 'AAppend';
     if ($op eq 'ASet') {
         my $len = do { use bytes; length $a{msg} };
         return "call void \@t2_aset(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
@@ -2209,6 +2280,22 @@ store:
   ret %Array* %a
 done:
   ret %Array* %have
+}
+define internal void @t2_aappend(%Array* %d, %Array* %s) {
+entry:
+  %n = call i64 @t2_alen(%Array* %s)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %v = call %Slot @t2_aget(%Array* %s, i64 %i)
+  call void @t2_apush(%Array* %d, %Slot %v)
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  ret void
 }
 ; t2_strcmp(x, y) -> perl's cmp: -1, 0 or 1, bytewise, a prefix first.
 define internal i64 @t2_strcmp(%Str %x, %Str %y) {
