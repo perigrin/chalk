@@ -125,6 +125,11 @@ sub walk {
         out('a control node with ' . scalar(@s) . ' successors') if @s > 1;
         my $s = $s[0];
         my $op = $s->operation;
+        # A STATEMENT A READ TAKES AS ITS MEMORY must be a version T2 orders
+        # reads by (_is_version): a new store kind missing there let reads after
+        # it be made after the next store (three wrong answers, slices 14-15).
+        out("a statement $op that versions memory T2 does not order reads by")
+            if !_is_version($s) && grep { blessed($_) && refaddr( _memory_input($_) // 0 ) == refaddr($s) } ( $s->consumers // [] )->@*;
         return $ctl if $op eq 'Return';
         if ($op eq 'Print') {
             # One print of each argument, in order (perl prints the list).
