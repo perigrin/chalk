@@ -89,6 +89,7 @@ sub build {
     $b->{passed} = [ _memstarts($ret, 1) ];
     $b->index_readers(_own_nodes($ret));
     $b->new_block('entry');
+    $b->emit(op => 'SaveArgs', type => 'void');   # argv, for @ARGV
     $b->make_mop if grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($b->{mop}, $ret);
     $b->make_constant_arrays(_own_nodes($ret));
     $b->{jumps} = {};
@@ -187,7 +188,7 @@ sub isa_write {
     my $pkg = $to->can('package') ? $to->package : undef;
     out('an @ISA of no known package') unless defined $pkg && length $pkg;
     out('an @ISA written from what is not a list of names') unless blessed($from) && $from->operation eq 'ArrayLiteral';
-    out('an @ISA of a list') if grep { ( $_->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/ } $from->inputs->@*; # static type
+    out('an @ISA of a list') if grep { _is_list($_) } $from->inputs->@*; # static type
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
     $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($_), '%Slot') ]) for $from->inputs->@*;
     $b->emit(op => 'MopIsaSet', type => 'void', inputs => [ $b->const_str($pkg), $arr ]);
@@ -337,7 +338,7 @@ sub hash_value {
         out('a {...} of an odd list') if @in % 2;
         my $h = $b->emit(op => 'HNew', type => '%Slot');
         for (my $i = 0; $i < @in; $i += 2) {
-            out('a list in a {...}') if grep { ( $_->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/ } @in[ $i, $i + 1 ]; # static type
+            out('a list in a {...}') if grep { _is_list($_) } @in[ $i, $i + 1 ]; # static type
             $b->emit(op => 'HSet', type => 'void',
                 inputs => [ $h, $b->as($b->value($in[$i]), '%Str'), $b->as($b->value($in[ $i + 1 ]), '%Slot') ]);
         }
@@ -346,6 +347,9 @@ sub hash_value {
     if ($op eq 'Subscript' && ( $v->can('kind') ? $v->kind // '' : '' ) eq 'hash') {
         # THROUGH A REFERENCE a scalar holds: perl's $h->{k}. A named %h is
         # not this slice's.
+        # THROUGH AN ELEMENT (`$a[0]{k}`) perl makes the element a hash when it
+        # is undef: not T2's (it would stop).
+        out('a hash element through an element') if $in[0]->operation eq 'Subscript' && !$b->{args}{ refaddr($in[0]) };   # $_[N] is an argument
         out('a hash element of a named hash') if ( $in[0]->can('sigil') ? $in[0]->sigil // '' : '' ) eq '%'
             || $in[0]->operation =~ /\A(?:HashLiteral|EntryDef)\z/ && ( $in[0]->stamp // '' ) eq 'Hash' # static type
             || $in[0]->operation eq 'Constant';   # a package hash by name: $ENV{K}
@@ -366,12 +370,14 @@ sub array_value {
         out('an array first made in an arm or a loop body') if $b->{depth} && !_pinned($v);
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
         for my $e (@in) {
-            out('a list in an array literal') if ( $e->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
+            out('a list in an array literal') if _is_list($e); # static type
             $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($e), '%Slot') ]);
         }
         return $a;
     }
     return $b->array_of($in[0]) if $op eq 'PostfixDeref';
+    return $b->array_var($v) if _array_var($v);
+    return $b->emit(op => 'Argv', type => '%Array*') if _argv($v);
     return $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($in[0]) ]) if $op eq 'Count';
     if ($op eq 'Subscript') {
         out('a hash element') unless ( $v->can('kind') ? $v->kind // 'array' : 'array' ) eq 'array';
@@ -388,10 +394,10 @@ sub array_value {
             my ($sep, @list) = @args;
             # ONE ARRAY is joined as it is; scalars (an array literal folded to
             # its elements, `"@a"`) go into a fresh array first.
-            my $arr = ( @list == 1 && $list[0]->operation =~ /\A(?:ArrayLiteral|PostfixDeref)\z/ ) ? $b->array_of($list[0]) : do {
+            my $arr = ( @list == 1 && ( $list[0]->operation =~ /\A(?:ArrayLiteral|PostfixDeref)\z/ || _array_var($list[0]) || _argv($list[0]) ) ) ? $b->array_of($list[0]) : do {
                 my $t = $b->emit(op => 'NewArray', type => '%Array*');
                 for my $e (@list) {
-                    out('a join of a list') if ( $e->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
+                    out('a join of a list') if _is_list($e); # static type
                     $b->emit(op => 'APush', type => 'void', inputs => [ $t, $b->as($b->value($e), '%Slot') ]);
                 }
                 $t;
@@ -410,10 +416,47 @@ sub array_value {
     return undef;
 }
 
+# _is_list($n): a value that is a list in perl's list context -- its stamp
+# says so, or it is an array or hash variable (stamped Unknown).
+sub _is_list {
+    my ($n) = @_;
+    return 1 if ( $n->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
+    return 1 if $n->operation eq 'PadAccess' && ( $n->sigil // '' ) =~ /\A[@%]\z/;
+    return 0;
+}
+
+# @ARGV: the program's arguments, one array (made from argv on first use).
+sub _argv {
+    my ($n) = @_;
+    return blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) eq '@' && ( $n->symbol // '' ) eq 'ARGV'
+        && ( ( $n->can('package') ? $n->package : undef ) // 'main' ) eq 'main';
+}
+
+# A `my @a` NAMED, NOT MADE HERE: B::SoN's PadAccess of an array declared
+# once in its sub (one declared in a loop body or an arm is an ArrayLiteral
+# pinned there, made each time). One %Array per variable, made at its
+# function's entry: fresh each call. A closure's (shared) is not T2's.
+sub _array_var {
+    my ($n) = @_;
+    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '@' && !$n->inputs->@*;
+}
+
+sub array_var {
+    my ($b, $pad) = @_;
+    out('an array a closure shares') if $pad->can('shared') && $pad->shared;
+    my $key = '@' . $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
+    return $b->{locs}{$key} //= do {
+        my $a = Chalk::Target::LLVM::T2::_n(op => 'NewArray', type => '%Array*');
+        unshift @{ $b->{blocks}[0]{nodes} }, $a;
+        $a;
+    };
+}
+
 # array_of($n) -> the %Array* a T1 node names (an ArrayLiteral, a deref of one).
 sub array_of {
     my ($b, $n) = @_;
-    out('an array that is not a `my` array') unless blessed($n) && $n->operation =~ /\A(?:ArrayLiteral|PostfixDeref)\z/;
+    out('an array that is not a `my` array (' . ( blessed($n) ? $n->operation . ( $n->can('symbol') && defined $n->symbol ? ' ' . $n->symbol : '' ) : 'none' ) . ')')
+        unless blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|PostfixDeref)\z/ || _array_var($n) || _argv($n) );
     my $a = $b->value($n);
     out('not an array') unless $a->type eq '%Array*';
     return $a;
@@ -430,7 +473,7 @@ sub array_stmt {
         my ($arr, @vals) = @in;
         my $a = $b->array_of($arr);
         for my $e (@vals) {
-            out('a push of a list') if ( $e->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
+            out('a push of a list') if _is_list($e); # static type
             $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($e), '%Slot') ]);
         }
         return;
@@ -443,6 +486,7 @@ sub element_store {
     my ($b, $target, $v, $s) = @_;
     if (( $target->can('kind') ? $target->kind // 'array' : 'array' ) eq 'hash') {
         my ($h, $k) = $target->inputs->@[0, 1];
+        out('a hash element store through an element') if $h->operation eq 'Subscript' && !$b->{args}{ refaddr($h) };
         out('a hash element store of a named hash') if ( $h->can('sigil') ? $h->sigil // '' : '' ) eq '%' || $h->operation eq 'Constant'
             || $h->operation =~ /\A(?:HashLiteral|EntryDef)\z/ && ( $h->stamp // '' ) eq 'Hash'; # static type
         # perl evaluates what it stores, then where, then stores.
@@ -605,7 +649,7 @@ sub call {
     my $fn = $b->func($sub, $c->name);
     my @args = $c->inputs->@*;
     pop @args if $c->can('memory_input') && $c->memory_input;
-    out('a call passing a list') if grep { ( $_->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/ } @args; # static type
+    out('a call passing a list') if grep { _is_list($_) } @args; # static type
     out('a call of a sub with a signature of another arity (perl dies)')
         if $fn->{signature} && @args != $fn->{nargs};
     my @pass = map { $b->as($b->value($_), '%Slot') } @args;
@@ -669,7 +713,7 @@ sub method_call {
     my @args = $c->inputs->@*;
     pop @args if $c->can('memory_input') && $c->memory_input;
     out('a method call with no invocant') unless @args && blessed($args[0]);
-    out('a method call passing a list') if grep { ( $_->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/ } @args; # static type
+    out('a method call passing a list') if grep { _is_list($_) } @args; # static type
     my @pass = map { $b->as($b->value($_), '%Slot') } @args;
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
     $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for @pass;
@@ -851,13 +895,14 @@ sub type_of {
     return '%Slot' if $b->{args}{ refaddr($v) };
     # AN ARRAY is an %Array of %Slot, by pointer; a count of it an i64, an
     # element a %Slot (it holds what was stored, by its tag).
-    return '%Array*' if $op eq 'ArrayLiteral' || $op eq 'PostfixDeref';
+    return '%Array*' if $op eq 'ArrayLiteral' || $op eq 'PostfixDeref' || _array_var($v);
     return 'i64' if $op eq 'Count';
     return '%Slot' if $op eq 'Subscript';
     # A HASH REFERENCE is a %Slot (tag 5) over a %Hash: it is a scalar.
     return '%Slot' if $op eq 'HashLiteral' && ( $v->stamp // '' ) eq 'HashRef'; # static type
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
+    return '%Array*' if _argv($v);
     return '%Str' if $op eq 'EntryDef';
     return '%Slot' if $op eq 'PadAccess' && $v->is_location;
     return '%Slot' if $op eq 'Increment' || $op eq 'Decrement';
@@ -874,6 +919,10 @@ sub type_of {
         && $b->type_of($v->inputs->[0]) =~ /\A%(?:Slot|Str)\z/;
     return $b->phi_type($v) if $op eq 'Phi';
     return '%Slot' if ( $v->stamp // '' ) =~ /\A(?:Unknown|None)\z/; # static type
+    if ($op eq 'And' || $op eq 'Or') {
+        my %t = map { ( $b->type_of($_) => 1 ) } $v->inputs->@[0, 1];
+        return keys %t == 1 ? ( keys %t )[0] : '%Slot';
+    }
     if ($op eq 'TernaryExpr') {
         my %t = map { ( $b->type_of($_) => 1 ) } $v->inputs->@[1, 2];
         return keys %t == 1 ? ( keys %t )[0] : '%Slot';
@@ -994,10 +1043,17 @@ sub _value {
         $b->{strs}{$k} //= scalar keys %{ $b->{strs} };
         return $b->emit(op => 'Env', type => '%Slot', attr => { key => $k, id => $b->{strs}{$k} });
     }
-    if ($op eq 'DefinedOr' || $op eq 'TernaryExpr') {
+    if ($op eq 'DefinedOr' || $op eq 'TernaryExpr' || $op eq 'And' || $op eq 'Or') {
         # A MERGE: its condition, an arm built in each block, a phi at the join.
         my ($cond, $then, $else);
-        if ($op eq 'TernaryExpr') {
+        if ($op eq 'And' || $op eq 'Or') {
+            # perl's && and ||: the left side's value when it decides, else
+            # the right side's (built only then).
+            my $lhs = $b->value($v->inputs->[0]);
+            $cond = $b->truth($lhs);
+            ($then, $else) = $op eq 'And' ? ( $v->inputs->[1], $lhs ) : ( $lhs, $v->inputs->[1] );
+        }
+        elsif ($op eq 'TernaryExpr') {
             ($cond, $then, $else) = $v->inputs->@*;
             $cond = $b->truth($b->value($cond));
         }
@@ -1017,7 +1073,7 @@ sub _value {
         my $tend = $b->{cur};
         my $eb = $b->new_block('else');
         { local $b->{memo} = { %{ $b->{memo} } };
-          $ev = $b->as($b->value($else), $ty); }
+          $ev = $b->as( blessed($else) && $else->isa('Chalk::Target::LLVM::T2::Node') ? $else : $b->value($else), $ty ); }
         my $eend = $b->{cur};
         my $jb = $b->new_block('join');
         $from->{term} = [ 'condbr', $cond, $tb, $eb ];
@@ -1032,12 +1088,16 @@ sub _value {
 sub truth {
     my ($b, $n) = @_;
     return $n if $n->type eq 'i1';
+    $n = $b->as($n, 'i64') if $n->type eq '%Array*';
     return $b->emit(op => 'Truth', type => 'i1', inputs => [$n]);
 }
 
 # as($node, $type) -> the node converted to that type (itself if it is one).
 sub as {
     my ($b, $n, $ty) = @_;
+    return $n if $n->type eq $ty;
+    # AN ARRAY AS A SCALAR is its count (`if (@a)`, `@a + 3`).
+    $n = $b->emit(op => 'ALen', type => 'i64', inputs => [$n]) if $n->type eq '%Array*';
     return $n if $n->type eq $ty;
     return $b->emit(op => 'Convert', type => $ty, inputs => [$n], attr => { from => $n->type });
 }
@@ -1070,7 +1130,7 @@ sub print_module {
         my $len = do { use bytes; length $s };
         push @L, sprintf('@s%d = private unnamed_addr constant [%d x i8] c"%s\00"', $strs->{$s}, $len + 1, _c($s));
     }
-    push @L, 'define i32 @main() {', _blocks($bld->{blocks}), '}', '';
+    push @L, 'define i32 @main(i32 %argc, i8** %argv) {', _blocks($bld->{blocks}), '}', '';
     # EACH SUB A FUNCTION: `%Slot (%Slot %a0, ...)`, its blocks printed alike.
     for my $fn (sort { $a->{name} cmp $b->{name} } values %{ $bld->{funcs} // {} }) {
         my $i = 0;
@@ -1160,6 +1220,8 @@ sub _line {
     return "$nm = call i64 \@t2_strcmp(" . $arg->(@in) . ')' if $op eq 'StrCmp';
     return "$nm = call %Array* \@t2_new_array()" if $op eq 'NewArray';
     return "$nm = call %Slot \@t2_hnew()" if $op eq 'HNew';
+    return "call void \@t2_save_args(i32 %argc, i8** %argv)" if $op eq 'SaveArgs';
+    return "$nm = call %Array* \@t2_argv()" if $op eq 'Argv';
     return "$nm = call %Slot \@t2_bless(" . $arg->(@in) . ')' if $op eq 'Bless';
     return "$nm = call %Str \@t2_reftype(" . $arg->(@in) . ')' if $op eq 'RefType';
     return "call void \@t2_mop_class(" . $arg->(@in) . ')' if $op eq 'MopClass';
@@ -2108,6 +2170,45 @@ make:
   ret %Slot %n
 have:
   ret %Slot %t
+}
+@t2_argc = internal global i32 0
+@t2_argvp = internal global i8** null
+@t2_ARGV = internal global %Array* null
+define internal void @t2_save_args(i32 %c, i8** %v) {
+  store i32 %c, i32* @t2_argc
+  store i8** %v, i8*** @t2_argvp
+  ret void
+}
+; t2_argv() -> @ARGV: argv[1..] as strings, made once.
+define internal %Array* @t2_argv() {
+entry:
+  %have = load %Array*, %Array** @t2_ARGV
+  %made = icmp ne %Array* %have, null
+  br i1 %made, label %done, label %make
+make:
+  %a = call %Array* @t2_new_array()
+  %c32 = load i32, i32* @t2_argc
+  %c = sext i32 %c32 to i64
+  %v = load i8**, i8*** @t2_argvp
+  br label %loop
+loop:
+  %i = phi i64 [ 1, %make ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %c
+  br i1 %more, label %body, label %store
+body:
+  %pp = getelementptr i8*, i8** %v, i64 %i
+  %p = load i8*, i8** %pp
+  %n = call i64 @strlen(i8* %p)
+  %s = call %Str @t2_str(i8* %p, i64 %n)
+  %sl = call %Slot @t2_box_str(%Str %s)
+  call void @t2_apush(%Array* %a, %Slot %sl)
+  %i2 = add i64 %i, 1
+  br label %loop
+store:
+  store %Array* %a, %Array** @t2_ARGV
+  ret %Array* %a
+done:
+  ret %Array* %have
 }
 ; t2_strcmp(x, y) -> perl's cmp: -1, 0 or 1, bytewise, a prefix first.
 define internal i64 @t2_strcmp(%Str %x, %Str %y) {
