@@ -45,8 +45,8 @@ sub _n { Chalk::Target::LLVM::T2::Node->new(@_) }
 # lower_program($return_node) -> the module's text, or undef when the program
 # is not slice 1's.
 sub lower_program {
-    my ($class, $ret) = @_;
-    my $b = bless { blocks => [], cur => undef, memo => {}, strs => {} }, 'Chalk::Target::LLVM::T2::Builder';
+    my ($class, $ret, %opt) = @_;
+    my $b = bless { blocks => [], cur => undef, memo => {}, strs => {}, mop => $opt{mop} }, 'Chalk::Target::LLVM::T2::Builder';
     my $ok = eval { $b->build($ret); 1 };
     return undef unless $ok;
     return Chalk::Target::LLVM::T2::Printer::print_module($b);
@@ -88,6 +88,7 @@ sub build {
     $b->{passed} = [ _memstarts($ret, 1) ];
     $b->index_readers(_own_nodes($ret));
     $b->new_block('entry');
+    $b->make_mop if grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($b->{mop}, $ret);
     $b->make_constant_arrays(_own_nodes($ret));
     $b->{jumps} = {};
     $b->walk($start);
@@ -135,6 +136,13 @@ sub walk {
             push @{ $b->{passed} }, $s;
             $ctl = $s;
         }
+        # `my (...) = @_` PINNED (a call follows it): its reads are the
+        # arguments already (args), nothing to store.
+        elsif ($op eq 'Assign' && $b->{args} && $s->can('targets') && defined $s->targets
+               && blessed($s->inputs->[-1]) && $s->inputs->[-1]->operation eq 'ArgsSource') {
+            $b->args_assign($s);
+            $ctl = $s;
+        }
         elsif ($op eq 'Assign') { $b->assign($s); push @{ $b->{passed} }, $s; $ctl = $s }
         # A `my @a` PINNED WHERE IT RUNS (B::SoN pins one in a loop body or an
         # arm): a fresh array there, each time control reaches it.
@@ -143,7 +151,7 @@ sub walk {
         elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'HashRef') { $b->value($s); $ctl = $s }   # static type
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands.
-        elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || ( $s->dispatch_kind // '' ) eq 'direct' )) {
+        elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || ( $s->dispatch_kind // '' ) =~ /\A(?:direct|method)\z/ )) {
             $b->value($s);
             push @{ $b->{passed} }, $s;   # B::SoN versions memory at a call
             $ctl = $s;
@@ -151,6 +159,25 @@ sub walk {
         else { out("a statement $op") }
     }
     return $ctl;
+}
+
+# args_assign($Assign): `my ($x, $y) = @_` on the chain. Each target is an
+# argument; a read of one made after it (its input this Assign) is too. A
+# target or read not an argument is not T2's (it would read undef).
+sub args_assign {
+    my ($b, $s) = @_;
+    my @t = @{ $s->inputs }[ 0 .. $#{ $s->inputs } - 1 ];
+    out('a `my (...) = @_` of what is not a scalar') if grep { !blessed($_) || $_->operation ne 'PadAccess' || ( $_->sigil // '' ) ne '$' } @t;
+    my %arg_of;
+    for my $t (@t) {
+        my $a = $b->{args}{ refaddr($t) } // out('a `my (...) = @_` target that is not an argument');
+        $arg_of{ $t->symbol } = $a;
+    }
+    for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' } ( $s->consumers // [] )->@*) {
+        next if $b->{args}{ refaddr($r) };
+        out('a read after `my (...) = @_` of no target') unless grep { blessed($_) && refaddr($_) == refaddr($s) } $r->inputs->@*;
+        $b->{args}{ refaddr($r) } = $arg_of{ $r->symbol } // out('a read after `my (...) = @_` of no target');
+    }
 }
 
 # A `my` VARIABLE KEPT IN MEMORY (B::SoN's location: passed to a sub, written
@@ -539,11 +566,76 @@ sub call {
     return $b->emit(op => 'Call', type => '%Slot', inputs => \@pass, attr => { fn => $fn->{name} });
 }
 
+# THE RUN-TIME MOP: perl's classes as data the program holds. Each package is
+# a stash (a hash) in @t2_stashes: its subs a method call can find, by name,
+# each a code slot (tag 7) holding its wrapper `%Slot (%Array* @_)`; "@ISA" an
+# array slot (tag 6) of its parents' names. A method call looks the method up
+# from the invocant's class, depth first through @ISA, as perl does.
+sub make_mop {
+    my ($b) = @_;
+    my $mop = $b->{mop} // out('a method call with no MOP');
+    my %cls = map { ( $_->name => $_ ) } $mop->classes;
+    my @classes = @cls{ sort keys %cls };   # by name (a sort block's $b is the builder here)
+    # A `class` (fields, ADJUST, methods with $self) is not a package of subs.
+    out('a class of the class feature') if grep { $_->methods || $_->fields || $_->adjust_blocks } @classes;
+    my %called = map { ( $_->name => 1 ) }
+        grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($mop, $b->{ret});
+    # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES, VERSION): not T2's.
+    my %defined = map { ( $_->name => 1 ) } map { $_->subs } @classes;
+    out("a method no package defines ($_)") for grep { !$defined{$_} } sort keys %called;
+    out('an AUTOLOAD') if $defined{AUTOLOAD};
+    for my $cls (@classes) {
+        my $cs = $b->const_str($cls->name);
+        $b->emit(op => 'MopClass', type => 'void', inputs => [$cs]);
+        $b->emit(op => 'MopIsa', type => 'void', inputs => [ $cs, $b->const_str($cls->parent_name) ])
+            if defined $cls->parent_name && length $cls->parent_name;
+        my %sub = map { ( $_->name => $_ ) } grep { $called{ $_->name } && $_->graph } $cls->subs;
+        for my $sub (@sub{ sort keys %sub }) {
+            my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
+            $b->emit(op => 'MopDef', type => 'void', inputs => [ $cs, $b->const_str($sub->name) ], attr => { fn => $fn->{name} });
+        }
+    }
+}
+
+sub const_str {
+    my ($b, $c) = @_;
+    $b->{strs}{$c} //= scalar keys %{ $b->{strs} };
+    return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => $c, id => $b->{strs}{$c} });
+}
+
+# _all_nodes($mop, $ret) -> the program's nodes and every package sub's.
+sub _all_nodes {
+    my ($mop, $ret) = @_;
+    my @n = Chalk::Target::LLVM::Context::_program_nodes($ret);
+    for my $sub ( $mop ? map { $_->subs } $mop->classes : () ) {
+        push @n, Chalk::Target::LLVM::Context::_graph_component($sub->graph) if $sub->graph;
+    }
+    return @n;
+}
+
+# method_call($Call) -> a method call: @_ built (the invocant first), the
+# method looked up from the invocant's class at run time, its wrapper called.
+sub method_call {
+    my ($b, $c) = @_;
+    my @args = $c->inputs->@*;
+    pop @args if $c->can('memory_input') && $c->memory_input;
+    out('a method call with no invocant') unless @args && blessed($args[0]);
+    out('a method call passing a list') if grep { ( $_->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/ } @args; # static type
+    my @pass = map { $b->as($b->value($_), '%Slot') } @args;
+    my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+    $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for @pass;
+    my $cls = $b->emit(op => 'ClassOf', type => '%Str', inputs => [ $pass[0] ]);
+    my $fp = $b->emit(op => 'MFind', type => 'i8*', inputs => [ $cls, $b->const_str($c->name) ]);
+    return $b->emit(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
+}
+
 # func($sub, $name) -> the T2 function a sub is: `%Slot (%Slot args...)`, its
 # body built in its own blocks, made before them so a call of itself finds it.
 sub func {
     my ($b, $sub, $name) = @_;
-    return $b->{funcs}{$name} if $b->{funcs}{$name};
+    # ONE FUNCTION PER SUB: a method's name is not its package's (two
+    # classes' `hi` are two subs).
+    return $b->{funcs}{ refaddr($sub) } if $b->{funcs}{ refaddr($sub) };
     my $g = $sub->graph;
     my $ret = $g->returns->[0];
     out("sub $name has no Return") unless blessed($ret) && $ret->operation eq 'Return';
@@ -563,7 +655,9 @@ sub func {
             if $decl->{optional} || ( $decl->{mandatory} // scalar @reads ) != @reads;
     }
     ( my $id = $name ) =~ s/\W+/_/g;
-    my $fn = $b->{funcs}{$name} = { name => "\@f_$id", nargs => scalar @reads, signature => $sig, blocks => [] };
+    # Two subs one name (a method call's bare name): the second numbered.
+    $id .= '_' . scalar keys %{ $b->{funcs} } if grep { $_->{name} eq "\@f_$id" } values %{ $b->{funcs} // {} };
+    my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => scalar @reads, signature => $sig, blocks => [] };
     my @argn = map { Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot', attr => { index => $_ }) } 0 .. $#reads;
     $argn[$_]->set_name("%a$_") for 0 .. $#argn;
     local $b->{blocks} = $fn->{blocks};
@@ -717,7 +811,10 @@ sub type_of {
     return '%Str' if $op eq 'EntryDef';
     return '%Slot' if $op eq 'PadAccess' && $v->is_location;
     return '%Slot' if $op eq 'Increment' || $op eq 'Decrement';
-    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'direct';
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) =~ /\A(?:direct|method)\z/;
+    # AN OBJECT is its blessed reference; ref() of one its class, or HASH.
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless';
+    return '%Str' if $op eq 'RefType';
     # ARITHMETIC ON A %Slot is perl's: Ints stay Ints until they overflow. Done
     # as doubles (T1 may say Num), fact(20) lost its digits.
     return '%Slot' if $ARITH{$op} && grep { $b->type_of($_) eq '%Slot' } $v->inputs->@[0, 1];
@@ -748,6 +845,18 @@ sub _value {
     my $op = $v->operation;
     my $ty = $b->type_of($v);
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'direct') { return $b->call($v) }
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'method') { return $b->method_call($v) }
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless') {
+        my @in = $v->inputs->@*;
+        pop @in if $v->can('memory_input') && $v->memory_input;
+        # ONE ARGUMENT blesses into the package the bless is in: not known here.
+        out('a bless of one argument') unless @in == 2;
+        return $b->emit(op => 'Bless', type => '%Slot',
+            inputs => [ $b->as($b->value($in[0]), '%Slot'), $b->as($b->value($in[1]), '%Str') ]);
+    }
+    if ($op eq 'RefType') {
+        return $b->emit(op => 'RefType', type => '%Str', inputs => [ $b->as($b->value($v->inputs->[0]), '%Slot') ]);
+    }
     # A READ OF A VARIABLE KEPT IN MEMORY: a load, where it is first used (or
     # earlier, before a store that replaces its version: reads_before).
     if ($op eq 'PadAccess' && $v->is_location) {
@@ -910,6 +1019,18 @@ sub print_module {
         $_->set_name('%v' . $i++) for map { @{ $_->{nodes} } } @{ $fn->{blocks} };
         push @L, "define internal %Slot $fn->{name}(" . join(', ', map { "%Slot %a$_" } 0 .. $fn->{nargs} - 1) . ') {',
             _blocks($fn->{blocks}), '}', '';
+        # ITS WRAPPER, a method's entry: @_ as an %Array, each argument its
+        # element (undef past the end). A signature's arity perl checks.
+        push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {";
+        if ($fn->{signature}) {
+            push @L, '  %n = call i64 @t2_alen(%Array* %args)', "  %ok = icmp eq i64 %n, $fn->{nargs}",
+                '  br i1 %ok, label %call, label %bad', 'bad:',
+                '  call void @t2_stop(i8* getelementptr ([68 x i8], [68 x i8]* @msg_arity, i64 0, i64 0), i64 67)',
+                '  unreachable', 'call:';
+        }
+        push @L, "  %a$_ = call %Slot \@t2_aget(%Array* %args, i64 $_)" for 0 .. $fn->{nargs} - 1;
+        push @L, "  %r = call %Slot $fn->{name}(" . join(', ', map { "%Slot %a$_" } 0 .. $fn->{nargs} - 1) . ')',
+            '  ret %Slot %r', '}', '';
     }
     return join("\n", @L);
 }
@@ -980,6 +1101,16 @@ sub _line {
     return "$nm = call %Str \@t2_concat(" . $arg->(@in) . ')' if $op eq 'Concat';
     return "$nm = call %Array* \@t2_new_array()" if $op eq 'NewArray';
     return "$nm = call %Slot \@t2_hnew()" if $op eq 'HNew';
+    return "$nm = call %Slot \@t2_bless(" . $arg->(@in) . ')' if $op eq 'Bless';
+    return "$nm = call %Str \@t2_reftype(" . $arg->(@in) . ')' if $op eq 'RefType';
+    return "call void \@t2_mop_class(" . $arg->(@in) . ')' if $op eq 'MopClass';
+    return "call void \@t2_mop_isa(" . $arg->(@in) . ')' if $op eq 'MopIsa';
+    return "call void \@t2_mop_def(" . $arg->(@in) . ", i8* bitcast (%Slot (%Array*)* $a{fn}_w to i8*))" if $op eq 'MopDef';
+    return "$nm = call %Str \@t2_classof(" . $arg->(@in) . ')' if $op eq 'ClassOf';
+    return "$nm = call i8* \@t2_mfind(" . $arg->(@in) . ')' if $op eq 'MFind';
+    if ($op eq 'MCall') {
+        return "$nm.f = bitcast i8* " . $in[0]->name . " to %Slot (%Array*)*\n  $nm = call %Slot $nm.f(%Array* " . $in[1]->name . ')';
+    }
     return "call void \@t2_hset(" . $arg->(@in) . ')' if $op eq 'HSet';
     return "$nm = call %Slot \@t2_hget(" . $arg->(@in) . ')' if $op eq 'HGet';
     return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
@@ -1807,6 +1938,7 @@ ref:
 ; is not promised; keys/each are not this slice's).
 declare i32 @memcmp(i8*, i8*, i64)
 @msg_notahash = private unnamed_addr constant [75 x i8] c"chalk: refused at run time: a hash element read through no HASH reference\0A\00"
+@lit_hash = private unnamed_addr constant [5 x i8] c"HASH\00"
 @msg_refstr = private unnamed_addr constant [62 x i8] c"chalk: refused at run time: a reference read as a str or num\0A\00"
 define internal void @t2_stop(i8* %m, i64 %n) {
   %w = call i64 @write(i32 2, i8* %m, i64 %n)
@@ -1817,8 +1949,11 @@ define internal void @t2_refscalar() {
   call void @t2_stop(i8* getelementptr ([62 x i8], [62 x i8]* @msg_refstr, i64 0, i64 0), i64 61)
   unreachable
 }
+; A HASH'S %Array: element 0 is the class a bless gave it (undef until),
+; then key, value pairs.
 define internal %Slot @t2_hnew() {
   %a = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %a, %Slot zeroinitializer)
   %i = ptrtoint %Array* %a to i64
   %s = call %Slot @t2_slot(i8 5, i64 %i)
   ret %Slot %s
@@ -1844,7 +1979,7 @@ entry:
   %kl = extractvalue %Str %k, 1
   br label %loop
 loop:
-  %i = phi i64 [ 0, %entry ], [ %i2, %next ]
+  %i = phi i64 [ 1, %entry ], [ %i2, %next ]
   %more = icmp slt i64 %i, %n
   br i1 %more, label %body, label %none
 body:
@@ -1865,6 +2000,179 @@ found:
   ret i64 %i
 none:
   ret i64 -1
+}
+define internal %Slot @t2_bless(%Slot %h, %Str %c) {
+  %a = call %Array* @t2_harr(%Slot %h)
+  %cs = call %Slot @t2_box_str(%Str %c)
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  store %Slot %cs, %Slot* %els
+  ret %Slot %h
+}
+; t2_reftype(s) -> perl's ref(): an object's class, HASH, or "" for no reference.
+define internal %Str @t2_reftype(%Slot %s) {
+entry:
+  %t = extractvalue %Slot %s, 0
+  %isref = icmp eq i8 %t, 5
+  br i1 %isref, label %ref, label %none
+ref:
+  %a = call %Array* @t2_harr(%Slot %s)
+  %c = call %Slot @t2_aget(%Array* %a, i64 0)
+  %ct = extractvalue %Slot %c, 0
+  %blessed = icmp eq i8 %ct, 3
+  br i1 %blessed, label %obj, label %hash
+obj:
+  %cn = call %Str @t2_slot_str(%Slot %c)
+  ret %Str %cn
+hash:
+  %h = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_hash, i64 0, i64 0), i64 4)
+  ret %Str %h
+none:
+  %e = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_hash, i64 0, i64 0), i64 0)
+  ret %Str %e
+}
+@t2_stashes = internal global %Slot zeroinitializer
+@lit_isa = private unnamed_addr constant [5 x i8] c"@ISA\00"
+@msg_nomethod = private unnamed_addr constant [79 x i8] c"chalk: refused at run time: a method call no class of the invocant can answer\0A\00"
+@msg_noclass = private unnamed_addr constant [77 x i8] c"chalk: refused at run time: a method call on what is not an object or class\0A\00"
+@msg_arity = private unnamed_addr constant [68 x i8] c"chalk: refused at run time: a call of a signature of another arity\0A\00"
+define internal %Slot @t2_stash_table() {
+entry:
+  %t = load %Slot, %Slot* @t2_stashes
+  %tag = extractvalue %Slot %t, 0
+  %made = icmp eq i8 %tag, 5
+  br i1 %made, label %have, label %make
+make:
+  %n = call %Slot @t2_hnew()
+  store %Slot %n, %Slot* @t2_stashes
+  ret %Slot %n
+have:
+  ret %Slot %t
+}
+define internal void @t2_mop_class(%Str %c) {
+  %t = call %Slot @t2_stash_table()
+  %s = call %Slot @t2_hnew()
+  call void @t2_hset(%Slot %t, %Str %c, %Slot %s)
+  ret void
+}
+define internal %Str @t2_isa_key() {
+  %k = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_isa, i64 0, i64 0), i64 4)
+  ret %Str %k
+}
+; t2_mop_isa(class, parent): push parent onto class's @ISA.
+define internal void @t2_mop_isa(%Str %c, %Str %p) {
+entry:
+  %t = call %Slot @t2_stash_table()
+  %s = call %Slot @t2_hget(%Slot %t, %Str %c)
+  %k = call %Str @t2_isa_key()
+  %isa = call %Slot @t2_hget(%Slot %s, %Str %k)
+  %tag = extractvalue %Slot %isa, 0
+  %has = icmp eq i8 %tag, 6
+  br i1 %has, label %push, label %make
+make:
+  %na = call %Array* @t2_new_array()
+  %ni = ptrtoint %Array* %na to i64
+  %ns = call %Slot @t2_slot(i8 6, i64 %ni)
+  call void @t2_hset(%Slot %s, %Str %k, %Slot %ns)
+  br label %push
+push:
+  %cur = phi %Slot [ %isa, %entry ], [ %ns, %make ]
+  %cv = extractvalue %Slot %cur, 1
+  %arr = inttoptr i64 %cv to %Array*
+  %ps = call %Slot @t2_box_str(%Str %p)
+  call void @t2_apush(%Array* %arr, %Slot %ps)
+  ret void
+}
+define internal void @t2_mop_def(%Str %c, %Str %m, i8* %f) {
+  %t = call %Slot @t2_stash_table()
+  %s = call %Slot @t2_hget(%Slot %t, %Str %c)
+  %fi = ptrtoint i8* %f to i64
+  %fs = call %Slot @t2_slot(i8 7, i64 %fi)
+  call void @t2_hset(%Slot %s, %Str %m, %Slot %fs)
+  ret void
+}
+; t2_classof(inv) -> the class a method call looks from: an object's, or a
+; class name's own.
+define internal %Str @t2_classof(%Slot %inv) {
+entry:
+  %t = extractvalue %Slot %inv, 0
+  %isref = icmp eq i8 %t, 5
+  br i1 %isref, label %ref, label %name
+ref:
+  %a = call %Array* @t2_harr(%Slot %inv)
+  %cl = call %Slot @t2_aget(%Array* %a, i64 0)
+  %ct = extractvalue %Slot %cl, 0
+  %blessed = icmp eq i8 %ct, 3
+  br i1 %blessed, label %obj, label %bad
+obj:
+  %cn = call %Str @t2_slot_str(%Slot %cl)
+  ret %Str %cn
+name:
+  %isstr = icmp eq i8 %t, 3
+  br i1 %isstr, label %named, label %bad
+named:
+  %nn = call %Str @t2_slot_str(%Slot %inv)
+  ret %Str %nn
+bad:
+  call void @t2_stop(i8* getelementptr ([77 x i8], [77 x i8]* @msg_noclass, i64 0, i64 0), i64 76)
+  unreachable
+}
+; t2_mfind1(class, m) -> m's code in class or, depth first, its @ISA; null.
+define internal i8* @t2_mfind1(%Str %c, %Str %m) {
+entry:
+  %t = call %Slot @t2_stash_table()
+  %s = call %Slot @t2_hget(%Slot %t, %Str %c)
+  %st = extractvalue %Slot %s, 0
+  %known = icmp eq i8 %st, 5
+  br i1 %known, label %look, label %none
+look:
+  %f = call %Slot @t2_hget(%Slot %s, %Str %m)
+  %ft = extractvalue %Slot %f, 0
+  %code = icmp eq i8 %ft, 7
+  br i1 %code, label %found, label %parents
+found:
+  %fv = extractvalue %Slot %f, 1
+  %fp = inttoptr i64 %fv to i8*
+  ret i8* %fp
+parents:
+  %k = call %Str @t2_isa_key()
+  %isa = call %Slot @t2_hget(%Slot %s, %Str %k)
+  %it = extractvalue %Slot %isa, 0
+  %has = icmp eq i8 %it, 6
+  br i1 %has, label %walk, label %none
+walk:
+  %iv = extractvalue %Slot %isa, 1
+  %arr = inttoptr i64 %iv to %Array*
+  %n = call i64 @t2_alen(%Array* %arr)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %walk ], [ %i2, %next ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %none
+body:
+  %ps = call %Slot @t2_aget(%Array* %arr, i64 %i)
+  %pn = call %Str @t2_slot_str(%Slot %ps)
+  %r = call i8* @t2_mfind1(%Str %pn, %Str %m)
+  %got = icmp ne i8* %r, null
+  br i1 %got, label %ret, label %next
+ret:
+  ret i8* %r
+next:
+  %i2 = add i64 %i, 1
+  br label %loop
+none:
+  ret i8* null
+}
+define internal i8* @t2_mfind(%Str %c, %Str %m) {
+entry:
+  %r = call i8* @t2_mfind1(%Str %c, %Str %m)
+  %got = icmp ne i8* %r, null
+  br i1 %got, label %ok, label %bad
+ok:
+  ret i8* %r
+bad:
+  call void @t2_stop(i8* getelementptr ([79 x i8], [79 x i8]* @msg_nomethod, i64 0, i64 0), i64 78)
+  unreachable
 }
 define internal %Slot @t2_hget(%Slot %h, %Str %k) {
 entry:

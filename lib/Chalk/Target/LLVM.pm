@@ -1909,7 +1909,7 @@ sub lower_with_elaboration {
     # below, a fallback each slice shrinks. A phase block is not slice 1's.
     if (!grep { blessed($_->[1]) } @Chalk::IR::Serialize::JSON::PHASE_GRAPHS) {
         require Chalk::Target::LLVM::T2;
-        my $ir = Chalk::Target::LLVM::T2->lower_program($return_node);
+        my $ir = Chalk::Target::LLVM::T2->lower_program($return_node, mop => $opts{mop});
         return $ir if defined $ir;
     }
 
