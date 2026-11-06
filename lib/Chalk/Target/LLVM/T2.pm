@@ -50,7 +50,10 @@ sub lower_program {
     my $b = bless { blocks => [], cur => undef, memo => {}, strs => {}, mop => $opt{mop} }, 'Chalk::Target::LLVM::T2::Builder';
     my $ok = eval { $b->build($ret); 1 };
     return undef unless $ok;
-    return Chalk::Target::LLVM::T2::Printer::print_module($b);
+    # A PRINTING FAILURE (a conversion T2 lacks) falls back too: it escaped
+    # as a death, a GAP where the fallback had lowered it (pvm 140).
+    my $ir = eval { Chalk::Target::LLVM::T2::Printer::print_module($b) };
+    return $ir;
 }
 
 package Chalk::Target::LLVM::T2::Builder;
@@ -129,7 +132,7 @@ sub walk {
         # reads by (_is_version): a new store kind missing there let reads after
         # it be made after the next store (three wrong answers, slices 14-15).
         out("a statement $op that versions memory T2 does not order reads by")
-            if !_is_version($s) && grep { blessed($_) && refaddr( _memory_input($_) // 0 ) == refaddr($s) } ( $s->consumers // [] )->@*;
+            if !_is_version($s) && grep { my $m = blessed($_) ? _memory_input($_) : undef; blessed($m) && refaddr($m) == refaddr($s) } ( $s->consumers // [] )->@*;
         return $ctl if $op eq 'Return';
         if ($op eq 'Print') {
             # One print of each argument, in order (perl prints the list).
@@ -156,6 +159,14 @@ sub walk {
             $b->hash_reads_settled('a delete') if $op eq 'Delete';
             $b->value($s);
             push @{ $b->{passed} }, $s;
+            $ctl = $s;
+        }
+        # map's `$_` FOR A CALLEE: its body reads the element itself; only code
+        # reading the global $_ needs it -- none in the program, a no-op.
+        elsif ($op eq 'LocalAlias' && ( $s->can('name') ? $s->name // '' : '' ) eq '_') {
+            out('a $_ aliased where the program reads $_')
+                if grep { _pkg_scalar($_) && $_->symbol eq '_' && grep { blessed($_) && $_->operation ne 'EntryWrite' } ( $_->consumers // [] )->@* }
+                   _all_nodes($b->{mop}, $b->{ret});
             $ctl = $s;
         }
         # `package X;` names the package code after it is in: nothing T2 reads.
@@ -285,7 +296,9 @@ sub args_assign {
 # undef until stored. Only a plain scalar `my` of this function.
 sub location {
     my ($b, $pad) = @_;
-    out('a variable that is not a `my` scalar kept here')
+    out('a variable that is not a `my` scalar kept here (' . ( blessed($pad) ? $pad->operation . ' ' . ( $pad->can('sigil') ? $pad->sigil // '' : '' )
+        . ( $pad->can('symbol') ? $pad->symbol // '' : '' ) . ( $pad->can('shared') && $pad->shared ? ' shared' : '' )
+        . ( $pad->can('is_location') && !$pad->is_location ? ' not-location' : '' ) : 'none' ) . ')')
         unless blessed($pad) && $pad->operation eq 'PadAccess' && $pad->is_location && !$pad->shared
         && ( $pad->sigil // '$' ) eq '$';
     my $key = $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
@@ -516,6 +529,22 @@ sub array_value {
             && ( $v->stamp // '' ) eq 'ArrayRef';   # \(@a) is a reference to each element type
         return $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->array_of($t) ]);
     }
+    if ($op eq 'ListAppend') {
+        # map's and grep's list, built a pass at a time: the value (a list,
+        # flattened) appended -- by grep only where its condition held.
+        my ($acc, $x, $cond) = @in;
+        my $arr = $b->array_of($acc);
+        my $c = $v->can('collector') ? $v->collector // '' : '';
+        if ($c eq 'grep') {
+            $b->emit(op => 'APushIf', type => 'void', inputs => [ $arr, $b->as($b->value($x), '%Slot'), $b->truth($b->value($cond)) ]);
+        }
+        elsif ($c eq 'map' && !blessed($cond)) {
+            if (_is_list($x)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($x) ]) }
+            else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($x), '%Slot') ]) }
+        }
+        else { out("a list collector $c") }
+        return $arr;
+    }
     if (_aderef($v)) {
         # `my @p = @$r` IS A COPY (B::SoN's copy): its own array, of the
         # elements as they are here.
@@ -543,7 +572,7 @@ sub array_value {
             my ($sep, @list) = @args;
             # ONE ARRAY is joined as it is; scalars (an array literal folded to
             # its elements, `"@a"`) go into a fresh array first.
-            my $arr = ( @list == 1 && ( $list[0]->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || _aderef($list[0]) || _array_var($list[0]) || _argv($list[0]) ) ) ? $b->array_of($list[0]) : do {
+            my $arr = ( @list == 1 && _is_list($list[0]) ) ? $b->array_of($list[0]) : do {
                 my $t = $b->emit(op => 'NewArray', type => '%Array*');
                 for my $e (@list) {
                     out('a join of a list') if _is_list($e); # static type
@@ -583,7 +612,9 @@ sub _aderef {
 
 # A PACKAGE SCALAR (`our $g`, `$::s`, `$P::v`): one global %Slot every sub
 # reads and writes. perl's own ($/, $", $0, $_, $a/$b of sort, ...) are not.
-my %PERLS_OWN = map { ( $_ => 1 ) } qw(ARGV ENV INC STDIN STDOUT STDERR _ 0 a b AUTOLOAD);
+# ($_ is one: B::SoN spells a foreach's aliasing as stores to it, the
+# element written back, and its value restored after.)
+my %PERLS_OWN = map { ( $_ => 1 ) } qw(ARGV ENV INC STDIN STDOUT STDERR 0 a b AUTOLOAD);
 sub _pkg_scalar {
     my ($n) = @_;
     return blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) eq '$'
@@ -634,6 +665,8 @@ sub array_of {
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]
         out('not an array');
     }
+    # A LIST A LOOP BUILDS (a phi of one, map's ListAppend) is its array.
+    return $b->value($n) if blessed($n) && $n->operation =~ /\A(?:Phi|ListAppend)\z/ && $b->type_of($n) eq '%Array*';
     # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`).
     return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if _named_hash($n);
     return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n->inputs->[0]) ])
@@ -1013,6 +1046,12 @@ sub phi_type {
     my ($b, $phi) = @_;
     my $st = $phi->stamp // ''; # static type
     return '%Slot' if $st =~ /\A(?:Str|Unknown|None|Scalar)\z/;
+    # A LIST A LOOP BUILDS (map, grep): one array, its back edge a ListAppend
+    # to it. Another array phi (`@p = ()` in a loop) is not this.
+    if ($st =~ /\A(?:Array|List)\z/) {
+        out("a phi stamped $st") unless grep { blessed($_) && $_->operation eq 'ListAppend' } $phi->inputs->@*;
+        return '%Array*';
+    }
     return $SCALAR{$st} // out("a phi stamped $st");
 }
 
@@ -1034,7 +1073,15 @@ sub loop {
 
     $b->reads_before($_) for @{ $b->{passed} };   # see if_stmt
     my $pre = $b->{cur};
-    my @init = map { $b->as($b->value($_->inputs->[0]), $b->loop_type($_)) } @phis;
+    # A LIST THE LOOP BUILDS starts empty each time the loop is entered: a
+    # fresh array here (the empty literal, made once at entry, was every
+    # pass's of an outer loop: "xa c ya c a c" for "xa c ya c").
+    my @init = map {
+        my $i0 = $_->inputs->[0];
+        $b->loop_type($_) eq '%Array*' && blessed($i0) && $i0->operation eq 'ArrayLiteral' && !$i0->inputs->@*
+            ? $b->emit(op => 'NewArray', type => '%Array*')
+            : $b->as($b->value($i0), $b->loop_type($_))
+    } @phis;
     my $pre_end = $b->{cur};
     my $head = $b->new_block('loop');
     $pre_end->{term} = [ 'br', $head ];
@@ -1123,7 +1170,7 @@ sub type_of {
     # AN ARRAY REFERENCE is a %Slot (tag 6) over an %Array: a scalar.
     return '%Slot' if $op eq 'ArrayLiteral' && ( $v->stamp // '' ) eq 'ArrayRef'; # static type
     return '%Slot' if $op eq 'Ref';
-    return '%Array*' if $op eq 'ArrayLiteral' || _aderef($v) || _array_var($v) || $op eq 'ArgsSource';
+    return '%Array*' if $op eq 'ArrayLiteral' || _aderef($v) || _array_var($v) || $op eq 'ArgsSource' || $op eq 'ListAppend';
     return 'i64' if $op eq 'Count';
     return '%Slot' if $op eq 'Subscript';
     # A HASH REFERENCE is a %Slot (tag 5) over a %Hash: it is a scalar.
@@ -1138,6 +1185,7 @@ sub type_of {
         return $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar' ? 'i64' : '%Array*';
     }
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
+    return '%Str' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
     return '%Array*' if _argv($v);
     return '%Slot' if _pkg_scalar($v);   # what it holds is what was stored last, anywhere
@@ -1212,6 +1260,18 @@ sub _value {
     if (_pkg_scalar($v)) {
         out('a package scalar read of no one version') if $b->{unversioned}{ refaddr($v) };
         return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_of($v) });
+    }
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/) {
+        # ASCII CASE: past ASCII perl's case is a character's (refused there).
+        $b->{past_ascii} //= scalar grep { $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'string' && ( $_->value // '' ) =~ /[^\x00-\x7f]/ }
+            _all_nodes($b->{mop}, $b->{ret});
+        out('a case change where a string goes past ASCII') if $b->{past_ascii};
+        my @a = grep { blessed($_) } $v->inputs->@*;
+        pop @a if $v->can('memory_input') && $v->memory_input;
+        out('a case change of other than one argument') unless @a == 1;
+        my %mode = (uc => 0, lc => 1, ucfirst => 2, lcfirst => 3);
+        my $m = $b->emit(op => 'Const', type => 'i64', attr => { value => $mode{ $v->name } });
+        return $b->emit(op => 'StrCase', type => '%Str', inputs => [ $b->as($b->value($a[0]), '%Str'), $m ]);
     }
     if ($op eq 'Length') {
         # perl's length counts characters; T2's strings are bytes -- the same
@@ -1363,6 +1423,7 @@ sub as {
     # AN ARRAY AS A SCALAR is its count (`if (@a)`, `@a + 3`).
     $n = $b->emit(op => 'ALen', type => 'i64', inputs => [$n]) if $n->type eq '%Array*';
     return $n if $n->type eq $ty;
+    out("a conversion " . $n->type . " -> $ty") unless exists $Chalk::Target::LLVM::T2::Printer::CONVERT{ $n->type . '>' . $ty };
     return $b->emit(op => 'Convert', type => $ty, inputs => [$n], attr => { from => $n->type });
 }
 
@@ -1487,6 +1548,7 @@ sub _line {
     }
     return "$nm = call %Str \@t2_concat(" . $arg->(@in) . ')' if $op eq 'Concat';
     return "$nm = call i64 \@t2_strcmp(" . $arg->(@in) . ')' if $op eq 'StrCmp';
+    return "$nm = call %Str \@t2_strcase(" . $arg->(@in) . ')' if $op eq 'StrCase';
     return "$nm = extractvalue %Str " . $in[0]->name . ', 1' if $op eq 'StrLen';
     return "$nm = call %Slot \@t2_slot_length(" . $arg->(@in) . ')' if $op eq 'SlotLength';
     return "$nm = call %Array* \@t2_new_array()" if $op eq 'NewArray';
@@ -1517,6 +1579,7 @@ sub _line {
     return "$nm = call %Array* \@t2_hvalues(" . $arg->(@in) . ')' if $op eq 'HValues';
     return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
     return "call void \@t2_aappend(" . $arg->(@in) . ')' if $op eq 'AAppend';
+    return "call void \@t2_apush_if(" . $arg->(@in) . ')' if $op eq 'APushIf';
     return "$nm = call %Slot \@t2_aref(" . $arg->(@in) . ')' if $op eq 'ARef';
     return "$nm = call %Array* \@t2_aderef(" . $arg->(@in) . ')' if $op eq 'ADeref';
     if ($op eq 'ASet') {
@@ -2558,6 +2621,15 @@ yes:
   %a = inttoptr i64 %v to %Array*
   ret %Array* %a
 }
+define internal void @t2_apush_if(%Array* %a, %Slot %v, i1 %c) {
+entry:
+  br i1 %c, label %push, label %done
+push:
+  call void @t2_apush(%Array* %a, %Slot %v)
+  br label %done
+done:
+  ret void
+}
 define internal void @t2_aappend(%Array* %d, %Array* %s) {
 entry:
   %n = call i64 @t2_alen(%Array* %s)
@@ -2587,6 +2659,64 @@ len:
   %n = extractvalue %Str %str, 1
   %r = call %Slot @t2_box_i64(i64 %n)
   ret %Slot %r
+}
+@msg_caseascii = private unnamed_addr constant [71 x i8] c"chalk: refused at run time: a case change of a string past ASCII (T2)\0A\00"
+; t2_strcase(s, mode) -> s in ASCII case: 0 uc, 1 lc, 2 ucfirst, 3 lcfirst.
+define internal %Str @t2_strcase(%Str %s, i64 %mode) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %cap = add i64 %n, 1
+  %buf = call i8* @malloc(i64 %cap)
+  %up = icmp eq i64 %mode, 0
+  %up1 = icmp eq i64 %mode, 2
+  %toup = or i1 %up, %up1
+  %first = icmp sge i64 %mode, 2
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %put ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %sp = getelementptr i8, i8* %p, i64 %i
+  %c = load i8, i8* %sp
+  ; A BYTE PAST ASCII: perl's case of it depends on how it was read -- a stop.
+  %high = icmp slt i8 %c, 0
+  br i1 %high, label %past, label %ascii
+past:
+  call void @t2_stop(i8* getelementptr ([71 x i8], [71 x i8]* @msg_caseascii, i64 0, i64 0), i64 70)
+  unreachable
+ascii:
+  %notfirst = icmp ne i64 %i, 0
+  %keep = and i1 %first, %notfirst
+  br i1 %keep, label %put0, label %conv
+conv:
+  br i1 %toup, label %upper, label %lower
+upper:
+  %isl = icmp uge i8 %c, 97
+  %isl2 = icmp ule i8 %c, 122
+  %lw = and i1 %isl, %isl2
+  %cu = sub i8 %c, 32
+  %ru = select i1 %lw, i8 %cu, i8 %c
+  br label %put
+lower:
+  %isu = icmp uge i8 %c, 65
+  %isu2 = icmp ule i8 %c, 90
+  %uw = and i1 %isu, %isu2
+  %cl = add i8 %c, 32
+  %rl = select i1 %uw, i8 %cl, i8 %c
+  br label %put
+put0:
+  br label %put
+put:
+  %r = phi i8 [ %ru, %upper ], [ %rl, %lower ], [ %c, %put0 ]
+  %dp = getelementptr i8, i8* %buf, i64 %i
+  store i8 %r, i8* %dp
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  %out = call %Str @t2_str(i8* %buf, i64 %n)
+  ret %Str %out
 }
 ; t2_strcmp(x, y) -> perl's cmp: -1, 0 or 1, bytewise, a prefix first.
 define internal i64 @t2_strcmp(%Str %x, %Str %y) {
