@@ -77,7 +77,8 @@ for my $ctx (sort keys %FIXTURE) {
         # the Coerce took the Unknown path and rendered an empty string where
         # perl prints 2, an emitted Print with `i64 0` as its length. A test
         # that stopped at "it lowers" passed over that.
-        like($ir, qr/keys: key count/,
+        # T2 counts or lists them through its hash runtime (both print 2).
+        like($ir, qr/keys: key count|call i64 \@t2_hcount\(|call %Array\* \@t2_hkeys\(/,
             'the emitted IR reads the hash count');
     };
 }

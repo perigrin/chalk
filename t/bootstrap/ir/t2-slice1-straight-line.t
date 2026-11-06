@@ -67,13 +67,14 @@ for my $case (
     like($LAST_LL, qr/^; chalk T2/m, "$name: lowered through T2");
 }
 
-# Out of T2's slices (a hash): the fallback, unchanged.
+# Out of T2's slices (a regex match; a hash was, until slice 14): the
+# fallback, unchanged.
 {
-    my $src = q{my %h = (a => 21, b => 2); print $h{a} * $h{b}, "\n";};
+    my $src = q{my $s = $ENV{NOPE} // "ab"; print $s =~ /b/ ? 21 : 2, "\n";};
     $LAST_LL = '';
     my ($got, $pl) = eval { through_llvm($src, {}) };
-    is($got, perl_says($pl // write_pl($src), {}), "a hash: perl's answer") or diag $@;
-    unlike($LAST_LL, qr/^; chalk T2/m, 'a hash: not T2 (falls back)');
+    is($got, perl_says($pl // write_pl($src), {}), "a regex: perl's answer") or diag $@;
+    unlike($LAST_LL, qr/^; chalk T2/m, 'a regex: not T2 (falls back)');
 }
 
 

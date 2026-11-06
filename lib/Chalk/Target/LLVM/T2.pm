@@ -146,6 +146,13 @@ sub walk {
             $ctl = $s;
         }
         elsif ($op eq 'Assign') { $b->assign($s); push @{ $b->{passed} }, $s; $ctl = $s }
+        # A delete (or an exists) on the chain: made where it stands.
+        elsif ($op =~ /\A(?:Delete|Exists)\z/ && ( $s->can('kind') ? $s->kind // '' : '' ) eq 'hash') {
+            $b->hash_reads_settled('a delete') if $op eq 'Delete';
+            $b->value($s);
+            push @{ $b->{passed} }, $s;
+            $ctl = $s;
+        }
         # `package X;` names the package code after it is in: nothing T2 reads.
         elsif ($op eq 'PackageMark') { $ctl = $s }
         # `@X::ISA = (...)`: the run-time MOP's parents of X, replaced.
@@ -162,7 +169,7 @@ sub walk {
             push @{ $b->{passed} }, $s;   # B::SoN versions memory at a call
             $ctl = $s;
         }
-        else { out("a statement $op") }
+        else { out("a statement $op" . ( $op eq 'Call' ? ' ' . ( $s->dispatch_kind // '' ) . ' ' . ( $s->name // '' ) : '' )) }
     }
     return $ctl;
 }
@@ -185,7 +192,9 @@ sub hash_reads_settled {
 sub _through_ref {
     my ($b, $n) = @_;
     my $op = $n->operation;
-    return 1 if $op eq 'Subscript' && ( $n->can('kind') ? $n->kind // '' : '' ) eq 'hash';
+    if ($op =~ /\A(?:Subscript|Exists)\z/ && ( $n->can('kind') ? $n->kind // '' : '' ) eq 'hash') {
+        return _named_hash($n->inputs->[0]) ? 0 : 1;   # a `my %h` is a hash: never a stop
+    }
     return 0 unless $op =~ /\A(?:Subscript|Count|PostfixDeref)\z/;
     my $c = $n->inputs->[0];
     $c = $c->inputs->[0] while _aderef($c);
@@ -368,6 +377,11 @@ sub make_constant_arrays {
         next if grep { !( blessed($_) && $_->operation eq 'Constant' ) } $lit->inputs->@*;
         $b->value($lit);
     }
+    # A `my %h = (...)` of constants, or of @_, is made at entry too.
+    for my $lit (grep { $_->operation eq 'HashLiteral' && ( $_->stamp // '' ) eq 'Hash' && !_pinned($_) } @nodes) { # static type
+        next if grep { !( blessed($_) && ( $_->operation =~ /\A(?:Constant|ArgsSource)\z/ || $b->{args}{ refaddr($_) } ) ) } $lit->inputs->@*;
+        $b->value($lit);
+    }
 }
 
 # hash_value($v, $op) -> the T2 node of a hash reference, or of an element
@@ -376,10 +390,23 @@ sub hash_value {
     my ($b, $v, $op) = @_;
     my @in = $v->inputs->@*;
     if ($op eq 'HashLiteral') {
-        out('a hash that is not a {...}') unless ( $v->stamp // '' ) eq 'HashRef'; # static type
-        out('a {...} not made where it runs') unless _pinned($v);
-        out('a {...} of an odd list') if @in % 2;
+        my $st = $v->stamp // ''; # static type
+        out('a hash that is not a {...} or a `my %h`') unless $st =~ /\A(?:HashRef|Hash)\z/;
+        out('a {...} not made where it runs') if $st eq 'HashRef' && !_pinned($v);
+        # A `my %h` NOT MADE AT ENTRY, needed in an arm or a loop body, would be
+        # made there -- again each pass, and gone after.
+        out('a hash first made in an arm or a loop body') if $st eq 'Hash' && $b->{depth} && !_pinned($v);
         my $h = $b->emit(op => 'HNew', type => '%Slot');
+        if (grep { _is_list($_) } @in) {   # `my %o = @_`, `{ %$r, k => 1 }`: pairs of a list
+            my $l = $b->emit(op => 'NewArray', type => '%Array*');
+            for my $e (@in) {
+                if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $l, $b->array_of($e) ]) }
+                else { $b->emit(op => 'APush', type => 'void', inputs => [ $l, $b->as($b->value($e), '%Slot') ]) }
+            }
+            $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $l ]);
+            return $h;
+        }
+        out('a {...} of an odd list') if @in % 2;
         for (my $i = 0; $i < @in; $i += 2) {
             out('a list in a {...}') if grep { _is_list($_) } @in[ $i, $i + 1 ]; # static type
             $b->emit(op => 'HSet', type => 'void',
@@ -387,19 +414,54 @@ sub hash_value {
         }
         return $h;
     }
-    if ($op eq 'Subscript' && ( $v->can('kind') ? $v->kind // '' : '' ) eq 'hash') {
-        # THROUGH A REFERENCE a scalar holds: perl's $h->{k}. A named %h is
-        # not this slice's.
-        # THROUGH AN ELEMENT (`$a[0]{k}`) perl makes the element a hash when it
-        # is undef: not T2's (it would stop).
-        out('a hash element through an element') if $in[0]->operation eq 'Subscript' && !$b->{args}{ refaddr($in[0]) };   # $_[N] is an argument
-        out('a hash element of a named hash') if ( $in[0]->can('sigil') ? $in[0]->sigil // '' : '' ) eq '%'
-            || $in[0]->operation =~ /\A(?:HashLiteral|EntryDef)\z/ && ( $in[0]->stamp // '' ) eq 'Hash' # static type
-            || $in[0]->operation eq 'Constant';   # a package hash by name: $ENV{K}
-        return $b->emit(op => 'HGet', type => '%Slot',
-            inputs => [ $b->as($b->value($in[0]), '%Slot'), $b->as($b->value($in[1]), '%Str') ]);
+    return $b->hash_var($v) if _hash_var($v);
+    my $kind = $v->can('kind') ? $v->kind // '' : '';
+    if ($op =~ /\A(?:Subscript|Exists|Delete)\z/ && $kind eq 'hash') {
+        my $h = $b->hash_of($in[0]);
+        my $k = $b->as($b->value($in[1]), '%Str');
+        return $b->emit(op => 'HGet', type => '%Slot', inputs => [ $h, $k ]) if $op eq 'Subscript';
+        return $b->emit(op => 'HExists', type => 'i1', inputs => [ $h, $k ]) if $op eq 'Exists';
+        return $b->emit(op => 'HDelete', type => '%Slot', inputs => [ $h, $k ]);
+    }
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
+        my $h = $b->hash_of($in[0]);
+        return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]) if $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar';
+        return $b->emit(op => $v->name eq 'keys' ? 'HKeys' : 'HValues', type => '%Array*', inputs => [$h]);
     }
     return undef;
+}
+
+# A `my %h` NAMED, NOT MADE HERE (`my %e;`): one hash per variable, made at
+# its function's entry -- as a `my @a` is.
+sub _hash_var {
+    my ($n) = @_;
+    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '%' && !$n->inputs->@*;
+}
+sub _named_hash {
+    my ($n) = @_;
+    return _hash_var($n) || blessed($n) && $n->operation eq 'HashLiteral' && ( $n->stamp // '' ) eq 'Hash'; # static type
+}
+sub hash_var {
+    my ($b, $pad) = @_;
+    out('a hash a closure shares') if $pad->can('shared') && $pad->shared;
+    my $key = '%' . $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
+    return $b->{locs}{$key} //= do {
+        my $h = Chalk::Target::LLVM::T2::_n(op => 'HNew', type => '%Slot');
+        unshift @{ $b->{blocks}[0]{nodes} }, $h;
+        $h;
+    };
+}
+
+# hash_of($n) -> the %Slot of the hash a hash element, exists, delete or keys
+# is of: a `my %h`, or the reference a scalar holds (`$h->{k}`). A package
+# hash (%ENV, %main::h) and one through an element (perl makes it) are not.
+sub hash_of {
+    my ($b, $n) = @_;
+    return $b->value($n) if _named_hash($n);
+    out('a hash element through an element') if $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) };   # $_[N] is an argument
+    out('a hash element of a named hash') if ( $n->can('sigil') ? $n->sigil // '' : '' ) eq '%'
+        || $n->operation eq 'EntryDef' || $n->operation eq 'Constant';   # a package hash by name: $ENV{K}
+    return $b->as($b->value($n), '%Slot');
 }
 
 # array_value($v, $op) -> the T2 node of an array, or of a read of one; undef
@@ -413,7 +475,8 @@ sub array_value {
         out('an array first made in an arm or a loop body') if $b->{depth} && !_pinned($v);
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
         for my $e (@in) {
-            out('a list in an array literal') if _is_list($e); # static type
+            # A LIST IN IT is flattened: its elements appended (`(keys %h)`, `(@a, 4)`).
+            if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->array_of($e) ]); next }
             $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($e), '%Slot') ]);
         }
         return ( $v->stamp // '' ) eq 'ArrayRef' ? $b->emit(op => 'ARef', type => '%Slot', inputs => [$a]) : $a; # static type
@@ -522,12 +585,17 @@ sub array_var {
 sub array_of {
     my ($b, $n) = @_;
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
-    if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || _aderef($n) || _array_var($n) || _argv($n) )) {
+    if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || _aderef($n) || _array_var($n) || _argv($n)
+                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:keys|values)\z/ )) {
         my $a = $b->value($n);
         return $a if $a->type eq '%Array*';
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]
         out('not an array');
     }
+    # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`).
+    return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if _named_hash($n);
+    return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n->inputs->[0]) ])
+        if blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%';
     # THROUGH AN ELEMENT (`$a[1][0]`, not `$_[N]`) perl makes the element an
     # array when it is undef -- a store inside a read: not T2's yet.
     out('an array through an element') if blessed($n) && $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) };
@@ -562,13 +630,10 @@ sub element_store {
     my ($b, $target, $v, $s) = @_;
     if (( $target->can('kind') ? $target->kind // 'array' : 'array' ) eq 'hash') {
         my ($h, $k) = $target->inputs->@[0, 1];
-        out('a hash element store through an element') if $h->operation eq 'Subscript' && !$b->{args}{ refaddr($h) };
-        out('a hash element store of a named hash') if ( $h->can('sigil') ? $h->sigil // '' : '' ) eq '%' || $h->operation eq 'Constant'
-            || $h->operation =~ /\A(?:HashLiteral|EntryDef)\z/ && ( $h->stamp // '' ) eq 'Hash'; # static type
         # perl evaluates what it stores, then where, then stores.
         my $val = $b->as($b->value($v), '%Slot');
         my $key = $b->as($b->value($k), '%Str');
-        my $ref = $b->as($b->value($h), '%Slot');
+        my $ref = $b->hash_of($h);
         # A HASH READ STILL TO BE MADE, of a version this store replaces, would
         # be made after it and see the new value: refused. (reads_before leaves
         # hash reads in place: made early, one could run above its guard.)
@@ -578,6 +643,9 @@ sub element_store {
         return;
     }
     my ($arr, $idx) = $target->inputs->@[0, 1];
+    # A FLATTENED LIST (`for (@a, @b) { $_ *= 10 }`) is a copy here; perl's
+    # elements are the arrays' own.
+    out('a store into a flattened list') if blessed($arr) && $arr->operation eq 'ArrayLiteral' && grep { _is_list($_) } $arr->inputs->@*;
     my $val = $b->as($b->value($v), '%Slot');
     my $ix  = $b->as($b->value($idx), 'i64');
     my $a   = $b->array_of($arr);
@@ -649,7 +717,11 @@ sub if_stmt {
             my $arm = $arm_of[$k];
             local $b->{cur} = $vals{$arm}{block};
             local $b->{memo} = $vals{$arm}{memo};
-            push @in, [ $b->as($b->value($p->inputs->[$k]), $ty), $vals{$arm}{block} ];
+            push @in, [ $b->as($b->value($p->inputs->[$k]), $ty), $arm ];
+            # MAKING IT MAY MAKE BLOCKS (a ?: B::SoN folded an inner if into):
+            # the arm ends where that left off (it ended before, a phi from
+            # the old end, and that block's condbr overwritten by the br).
+            $vals{$arm}{block} = $b->{cur};
         }
         push @made, [ $p, $ty, \@in ];
     }
@@ -658,7 +730,7 @@ sub if_stmt {
     for my $m (@made) {
         my ($p, $ty, $in) = @$m;
         $b->{memo}{ refaddr($p) } = $b->emit(op => 'Phi', type => $ty,
-            inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $_->[1] } @$in ] });
+            inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $vals{ $_->[1] }{block} } @$in ] });
     }
     push @{ $b->{passed} }, _memory_phis($region);
     return $region;
@@ -704,7 +776,8 @@ sub join_jumps {
             my $pr = $preds[ $pred_of[$k] ];
             local $b->{cur}  = $pr->{block};
             local $b->{memo} = $pr->{memo};
-            push @in, [ $b->as($b->value($p->inputs->[$k]), $ty), $pr->{block} ];
+            push @in, [ $b->as($b->value($p->inputs->[$k]), $ty), $pr ];
+            $pr->{block} = $b->{cur};   # making it may make blocks (see if_stmt)
         }
         push @made, [ $p, $ty, \@in ];
     }
@@ -713,7 +786,7 @@ sub join_jumps {
     for my $m (@made) {
         my ($p, $ty, $in) = @$m;
         $b->{memo}{ refaddr($p) } = $b->emit(op => 'Phi', type => $ty,
-            inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $_->[1] } @$in ] });
+            inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $_->[1]{block} } @$in ] });
     }
     push @{ $b->{passed} }, _memory_phis($r);
     return $r;
@@ -1012,7 +1085,16 @@ sub type_of {
     return 'i64' if $op eq 'Count';
     return '%Slot' if $op eq 'Subscript';
     # A HASH REFERENCE is a %Slot (tag 5) over a %Hash: it is a scalar.
-    return '%Slot' if $op eq 'HashLiteral' && ( $v->stamp // '' ) eq 'HashRef'; # static type
+    return '%Slot' if $op eq 'HashLiteral' && ( $v->stamp // '' ) =~ /\A(?:HashRef|Hash)\z/; # static type
+    return '%Slot' if _hash_var($v);
+    # length of a scalar: undef for undef, so a %Slot; of a string, an i64.
+    return ( ( $v->inputs->[0]->stamp // '' ) !~ /\A(?:Array|ArrayRef)\z/ && $b->type_of($v->inputs->[0]) eq '%Slot' ) ? '%Slot' : 'i64' if $op eq 'Length'; # static type
+    my $hk = $v->can('kind') ? $v->kind // '' : '';
+    return 'i1' if $op eq 'Exists' && $hk eq 'hash';
+    return '%Slot' if $op eq 'Delete' && $hk eq 'hash';
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
+        return $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar' ? 'i64' : '%Array*';
+    }
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
     return '%Array*' if _argv($v);
@@ -1084,6 +1166,20 @@ sub _value {
     }
     if (my $h = $b->hash_value($v, $op)) { return $h }
     if (my $arr = $b->array_value($v, $op)) { return $arr }
+    if ($op eq 'Length') {
+        # perl's length counts characters; T2's strings are bytes -- the same
+        # only while no string constant goes past ASCII.
+        $b->{past_ascii} //= scalar grep { $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'string' && ( $_->value // '' ) =~ /[^\x00-\x7f]/ }
+            _all_nodes($b->{mop}, $b->{ret});
+        out('a length where a string goes past ASCII') if $b->{past_ascii};
+        my $in0 = $v->inputs->[0];
+        # LENGTH OF AN ARRAY is its count (the IR's Length of an Array/ArrayRef).
+        return $b->as($b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($in0) ]), $ty)
+            if ( $in0->stamp // '' ) =~ /\A(?:Array|ArrayRef)\z/ || $b->type_of($in0) eq '%Array*'; # static type
+        my $x = $b->value($in0);
+        return $b->emit(op => 'SlotLength', type => '%Slot', inputs => [$x]) if $ty eq '%Slot';
+        return $b->emit(op => 'StrLen', type => 'i64', inputs => [ $b->as($x, '%Str') ]);
+    }
     if ($op eq 'Not') {
         # perl's !: the operand's truth, inverted.
         my $x = $b->as($b->value($v->inputs->[0]), 'i1');
@@ -1202,7 +1298,7 @@ sub _value {
         $eend->{term} = [ 'br', $jb ];
         return $b->emit(op => 'Phi', type => $ty, inputs => [ $tv, $ev ], attr => { from => [ $tend, $eend ] });
     }
-    out($op);
+    out($op . ( $op eq 'Call' ? ' ' . ( $v->dispatch_kind // '' ) . ' ' . ( $v->name // '' ) : '' ));
 }
 
 # truth($node) -> an i1: perl's truth of a value of any slice type.
@@ -1343,6 +1439,8 @@ sub _line {
     }
     return "$nm = call %Str \@t2_concat(" . $arg->(@in) . ')' if $op eq 'Concat';
     return "$nm = call i64 \@t2_strcmp(" . $arg->(@in) . ')' if $op eq 'StrCmp';
+    return "$nm = extractvalue %Str " . $in[0]->name . ', 1' if $op eq 'StrLen';
+    return "$nm = call %Slot \@t2_slot_length(" . $arg->(@in) . ')' if $op eq 'SlotLength';
     return "$nm = call %Array* \@t2_new_array()" if $op eq 'NewArray';
     return "$nm = call %Slot \@t2_hnew()" if $op eq 'HNew';
     return "call void \@t2_save_args(i32 %argc, i8** %argv)" if $op eq 'SaveArgs';
@@ -1360,6 +1458,13 @@ sub _line {
     }
     return "call void \@t2_hset(" . $arg->(@in) . ')' if $op eq 'HSet';
     return "$nm = call %Slot \@t2_hget(" . $arg->(@in) . ')' if $op eq 'HGet';
+    return "$nm = call i1 \@t2_hexists(" . $arg->(@in) . ')' if $op eq 'HExists';
+    return "$nm = call %Slot \@t2_hdelete(" . $arg->(@in) . ')' if $op eq 'HDelete';
+    return "call void \@t2_hfroma(" . $arg->(@in) . ')' if $op eq 'HFromArray';
+    return "$nm = call i64 \@t2_hcount(" . $arg->(@in) . ')' if $op eq 'HCount';
+    return "$nm = call %Array* \@t2_hkeys(" . $arg->(@in) . ')' if $op eq 'HKeys';
+    return "$nm = call %Array* \@t2_hpairs(" . $arg->(@in) . ')' if $op eq 'HPairs';
+    return "$nm = call %Array* \@t2_hvalues(" . $arg->(@in) . ')' if $op eq 'HValues';
     return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
     return "call void \@t2_aappend(" . $arg->(@in) . ')' if $op eq 'AAppend';
     return "$nm = call %Slot \@t2_aref(" . $arg->(@in) . ')' if $op eq 'ARef';
@@ -2419,6 +2524,20 @@ body:
 done:
   ret void
 }
+; t2_slot_length(s) -> perl's length of a scalar: undef for undef.
+define internal %Slot @t2_slot_length(%Slot %s) {
+entry:
+  %t = extractvalue %Slot %s, 0
+  %u = icmp eq i8 %t, 0
+  br i1 %u, label %undef, label %len
+undef:
+  ret %Slot zeroinitializer
+len:
+  %str = call %Str @t2_slot_str(%Slot %s)
+  %n = extractvalue %Str %str, 1
+  %r = call %Slot @t2_box_i64(i64 %n)
+  ret %Slot %r
+}
 ; t2_strcmp(x, y) -> perl's cmp: -1, 0 or 1, bytewise, a prefix first.
 define internal i64 @t2_strcmp(%Str %x, %Str %y) {
 entry:
@@ -2606,6 +2725,118 @@ get:
   ret %Slot %v
 undef:
   ret %Slot zeroinitializer
+}
+define internal i1 @t2_hexists(%Slot %h, %Str %k) {
+  %a = call %Array* @t2_harr(%Slot %h)
+  %i = call i64 @t2_hfind(%Array* %a, %Str %k)
+  %e = icmp sge i64 %i, 0
+  ret i1 %e
+}
+; t2_hdelete(h, k) -> k's value (undef if none), its pair taken out.
+define internal %Slot @t2_hdelete(%Slot %h, %Str %k) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %h)
+  %i = call i64 @t2_hfind(%Array* %a, %Str %k)
+  %miss = icmp slt i64 %i, 0
+  br i1 %miss, label %none, label %take
+none:
+  ret %Slot zeroinitializer
+take:
+  %j = add i64 %i, 1
+  %v = call %Slot @t2_aget(%Array* %a, i64 %j)
+  %lp = getelementptr %Array, %Array* %a, i32 0, i32 0
+  %n = load i64, i64* %lp
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  br label %loop
+loop:
+  %d = phi i64 [ %i, %take ], [ %d2, %move ]
+  %src = add i64 %d, 2
+  %more = icmp slt i64 %src, %n
+  br i1 %more, label %move, label %done
+move:
+  %sp = getelementptr %Slot, %Slot* %els, i64 %src
+  %sv = load %Slot, %Slot* %sp
+  %dp = getelementptr %Slot, %Slot* %els, i64 %d
+  store %Slot %sv, %Slot* %dp
+  %d2 = add i64 %d, 1
+  br label %loop
+done:
+  %n2 = sub i64 %n, 2
+  store i64 %n2, i64* %lp
+  ret %Slot %v
+}
+define internal void @t2_hfroma(%Slot %h, %Array* %l) {
+entry:
+  %n = call i64 @t2_alen(%Array* %l)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %ks = call %Slot @t2_aget(%Array* %l, i64 %i)
+  %k = call %Str @t2_slot_str(%Slot %ks)
+  %j = add i64 %i, 1
+  %v = call %Slot @t2_aget(%Array* %l, i64 %j)
+  call void @t2_hset(%Slot %h, %Str %k, %Slot %v)
+  %i2 = add i64 %i, 2
+  br label %loop
+done:
+  ret void
+}
+define internal i64 @t2_hcount(%Slot %h) {
+  %a = call %Array* @t2_harr(%Slot %h)
+  %n = call i64 @t2_alen(%Array* %a)
+  %p = sub i64 %n, 1
+  %c = sdiv i64 %p, 2
+  ret i64 %c
+}
+; t2_hpick(h, from) -> every other element of the hash's pairs from index
+; from: 1 its keys, 2 its values.
+define internal %Array* @t2_hpick(%Slot %h, i64 %from) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %h)
+  %n = call i64 @t2_alen(%Array* %a)
+  %r = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %i = phi i64 [ %from, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %v = call %Slot @t2_aget(%Array* %a, i64 %i)
+  call void @t2_apush(%Array* %r, %Slot %v)
+  %i2 = add i64 %i, 2
+  br label %loop
+done:
+  ret %Array* %r
+}
+define internal %Array* @t2_hpairs(%Slot %h) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %h)
+  %n = call i64 @t2_alen(%Array* %a)
+  %r = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %i = phi i64 [ 1, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %v = call %Slot @t2_aget(%Array* %a, i64 %i)
+  call void @t2_apush(%Array* %r, %Slot %v)
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
+define internal %Array* @t2_hkeys(%Slot %h) {
+  %r = call %Array* @t2_hpick(%Slot %h, i64 1)
+  ret %Array* %r
+}
+define internal %Array* @t2_hvalues(%Slot %h) {
+  %r = call %Array* @t2_hpick(%Slot %h, i64 2)
+  ret %Array* %r
 }
 define internal void @t2_hset(%Slot %h, %Str %k, %Slot %v) {
 entry:
