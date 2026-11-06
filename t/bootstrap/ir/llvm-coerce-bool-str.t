@@ -261,11 +261,12 @@ sub run_ll {
         my ($r) = make_not_bool_str_program($int_val);
         my $ll  = Chalk::Target::LLVM->lower($r, program_mode => 1);
 
-        like($ll, qr/\@bool_str_\d+ = private unnamed_addr constant \[2 x i8\] c"1\\00"/,
+        # T2 builds one face, "1", and takes 0 or 1 bytes of it by the i1.
+        like($ll, qr/\@(?:bool_str_\d+|lit_one) = private unnamed_addr constant \[2 x i8\] c"1\\00"/,
             "CBS9: $label .ll materializes the true face \"1\" as [2 x i8]");
-        like($ll, qr/\@bool_str_\d+ = private unnamed_addr constant \[1 x i8\] c"\\00"/,
+        like($ll, qr/\@bool_str_\d+ = private unnamed_addr constant \[1 x i8\] c"\\00"|\@lit_one, i64 0, i64 0\n  %n = zext i1 %b to i64/,
             "CBS9: $label .ll materializes the false face \"\" as [1 x i8] (NUL only)");
-        like($ll, qr/select i1 .*Coerce\[Boolean->Str\] -> ptr/,
+        like($ll, qr/select i1 .*Coerce\[Boolean->Str\] -> ptr|call %Str \@t2_bool_str\(i1 /,
             "CBS9: $label .ll selects between the two faces at runtime");
     }
 }

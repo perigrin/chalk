@@ -89,7 +89,9 @@ sub build {
     $b->index_readers(_own_nodes($ret));
     $b->new_block('entry');
     $b->make_constant_arrays(_own_nodes($ret));
+    $b->{jumps} = {};
     $b->walk($start);
+    out('an early exit to a merge never reached') if %{ $b->{jumps} };
     $b->{cur}{term} = [ 'ret' ];
 }
 
@@ -112,7 +114,11 @@ sub walk {
         # ONLY THE PROGRAM'S Return ends it: another hung on the same control is
         # not this program's (a graph built over an earlier one).
         @s = grep { $_->operation ne 'Return' || refaddr($_) == refaddr($b->{ret}) } @s;
-        return $ctl unless @s;
+        unless (@s) {
+            # A MERGE AN EARLIER ARM JUMPED TO, this control its other way in.
+            if (my $r = $b->join_jumps($ctl)) { $ctl = $r; next }
+            return $ctl;
+        }
         out('a control node with ' . scalar(@s) . ' successors') if @s > 1;
         my $s = $s[0];
         my $op = $s->operation;
@@ -133,6 +139,8 @@ sub walk {
         # A `my @a` PINNED WHERE IT RUNS (B::SoN pins one in a loop body or an
         # arm): a fresh array there, each time control reaches it.
         elsif ($op eq 'ArrayLiteral' && ( $s->stamp // '' ) eq 'Array') { $b->value($s); $ctl = $s }   # static type
+        # A `{...}` PINNED WHERE IT RUNS: a fresh hash there, each time.
+        elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'HashRef') { $b->value($s); $ctl = $s }   # static type
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands.
         elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || ( $s->dispatch_kind // '' ) eq 'direct' )) {
@@ -174,7 +182,12 @@ sub reads_before {
     # uses costs nothing.
     # A READ IN A LOOP OR AN ARM -- one that needs a phi not yet made, `$a[$i]`
     # in a foreach -- is made in its place: it is there, not here, it is read.
-    $b->value($_) for grep { !$b->_needs_unmade_phi($_, {}) } @{ $b->{readers}{ refaddr($version) } // [] };
+    # A HASH ELEMENT READ may stop (through what is no hash reference), so it
+    # is made where it stands, under its guard -- and nothing in this slice
+    # stores into a hash, so it cannot go stale (`return 0 unless $t; $t->{v}`).
+    $b->value($_) for grep { !$b->_needs_unmade_phi($_, {})
+                             && !( $_->operation eq 'Subscript' && ( $_->can('kind') ? $_->kind // '' : '' ) eq 'hash' ) }
+        @{ $b->{readers}{ refaddr($version) } // [] };
 }
 
 sub _needs_unmade_phi {
@@ -251,6 +264,35 @@ sub make_constant_arrays {
         next if grep { !( blessed($_) && $_->operation eq 'Constant' ) } $lit->inputs->@*;
         $b->value($lit);
     }
+}
+
+# hash_value($v, $op) -> the T2 node of a hash reference, or of an element
+# read through one; undef for what is not.
+sub hash_value {
+    my ($b, $v, $op) = @_;
+    my @in = $v->inputs->@*;
+    if ($op eq 'HashLiteral') {
+        out('a hash that is not a {...}') unless ( $v->stamp // '' ) eq 'HashRef'; # static type
+        out('a {...} not made where it runs') unless _pinned($v);
+        out('a {...} of an odd list') if @in % 2;
+        my $h = $b->emit(op => 'HNew', type => '%Slot');
+        for (my $i = 0; $i < @in; $i += 2) {
+            out('a list in a {...}') if grep { ( $_->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/ } @in[ $i, $i + 1 ]; # static type
+            $b->emit(op => 'HSet', type => 'void',
+                inputs => [ $h, $b->as($b->value($in[$i]), '%Str'), $b->as($b->value($in[ $i + 1 ]), '%Slot') ]);
+        }
+        return $h;
+    }
+    if ($op eq 'Subscript' && ( $v->can('kind') ? $v->kind // '' : '' ) eq 'hash') {
+        # THROUGH A REFERENCE a scalar holds: perl's $h->{k}. A named %h is
+        # not this slice's.
+        out('a hash element of a named hash') if ( $in[0]->can('sigil') ? $in[0]->sigil // '' : '' ) eq '%'
+            || $in[0]->operation =~ /\A(?:HashLiteral|EntryDef)\z/ && ( $in[0]->stamp // '' ) eq 'Hash' # static type
+            || $in[0]->operation eq 'Constant';   # a package hash by name: $ENV{K}
+        return $b->emit(op => 'HGet', type => '%Slot',
+            inputs => [ $b->as($b->value($in[0]), '%Slot'), $b->as($b->value($in[1]), '%Str') ]);
+    }
+    return undef;
 }
 
 # array_value($v, $op) -> the T2 node of an array, or of a read of one; undef
@@ -379,8 +421,20 @@ sub if_stmt {
     }
     $from->{term} = [ 'condbr', $cond, $blk{0}, $blk{1} ];
     my ($region) = grep { $_->operation eq 'Region' } ( $end{0}->consumers // [] )->@*;
-    out('an if whose arms do not meet') unless $region
-        && grep { refaddr($_) == refaddr($end{1}) } grep { blessed($_) } $region->inputs->@*;
+    # ARMS THAT DO NOT MEET: one leaves early (`// return` in an arm) for a
+    # merge further out. That arm waits there (jump); the if goes on from the
+    # other, which is where its statements continue (pvm 093).
+    unless ($region && grep { refaddr($_) == refaddr($end{1}) } grep { blessed($_) } $region->inputs->@*) {
+        my %far = map { my $i = $_; ( $i => [ grep { $_->operation eq 'Region' } ( $end{$i}->consumers // [] )->@* ] ) } 0, 1;
+        my ($jump) = grep { my $i = $_; @{ $far{$i} } == 1 && _merges_further($far{$i}[0], $end{ 1 - $i }) } 0, 1;
+        out('an if whose arms do not meet') unless defined $jump;
+        my $r = $far{$jump}[0];
+        push @{ $b->{jumps}{ refaddr($r) } }, { %{ $vals{$jump} }, end => $end{$jump} };
+        my $go = 1 - $jump;
+        $b->{cur}  = $vals{$go}{block};
+        $b->{memo} = $vals{$go}{memo};
+        return $end{$go};
+    }
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($region)
                       && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $region->consumers // [] )->@*;
     my %seen;
@@ -410,6 +464,61 @@ sub if_stmt {
     }
     push @{ $b->{passed} }, _memory_phis($region);
     return $region;
+}
+
+# _merges_further($region, $ctl) -> true when $ctl reaches $region by the
+# control it goes on to -- through the Regions it feeds, and what they head.
+sub _merges_further {
+    my ($r, $ctl) = @_;
+    my (%seen, @q);
+    @q = ($ctl);
+    while (defined(my $n = shift @q)) {
+        next if $seen{ refaddr($n) }++;
+        return 1 if refaddr($n) == refaddr($r);
+        push @q, grep { blessed($_) && ( $_->operation eq 'Region'
+                        || ( $_->can('control_in') && blessed($_->control_in) && refaddr($_->control_in) == refaddr($n) ) ) }
+            ( $n->consumers // [] )->@*;
+    }
+    return 0;
+}
+
+# join_jumps($ctl) -> the merge the walk goes on from, or undef: where control
+# runs out at $ctl and $ctl feeds a merge an earlier arm jumped to, that merge
+# is made -- each jump and this way in a predecessor, each phi's input made in
+# its own predecessor's block.
+sub join_jumps {
+    my ($b, $ctl) = @_;
+    my ($r) = grep { $_->operation eq 'Region' && $b->{jumps}{ refaddr($_) } } ( $ctl->consumers // [] )->@*;
+    return undef unless $r;
+    my @preds = ( @{ delete $b->{jumps}{ refaddr($r) } }, { block => $b->{cur}, ctl => $ctl, end => $ctl, memo => $b->{memo} } );
+    my @ways = $r->inputs->@*;
+    my @pred_of = map { my $in = $_; ( grep { blessed($in) && refaddr($preds[$_]{end}) == refaddr($in) } 0 .. $#preds )[0] } @ways;
+    out('a merge with a way in no arm reached') if grep { !defined } @pred_of;
+    my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
+                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $r->consumers // [] )->@*;
+    my %seen;
+    @phis = grep { !$seen{ refaddr($_) }++ } @phis;
+    my @made;
+    for my $p (@phis) {
+        my $ty = $b->phi_type($p);
+        my @in;
+        for my $k (0 .. $#pred_of) {
+            my $pr = $preds[ $pred_of[$k] ];
+            local $b->{cur}  = $pr->{block};
+            local $b->{memo} = $pr->{memo};
+            push @in, [ $b->as($b->value($p->inputs->[$k]), $ty), $pr->{block} ];
+        }
+        push @made, [ $p, $ty, \@in ];
+    }
+    my $join = $b->new_block('join');
+    $_->{block}{term} = [ 'br', $join ] for @preds;
+    for my $m (@made) {
+        my ($p, $ty, $in) = @$m;
+        $b->{memo}{ refaddr($p) } = $b->emit(op => 'Phi', type => $ty,
+            inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $_->[1] } @$in ] });
+    }
+    push @{ $b->{passed} }, _memory_phis($r);
+    return $r;
 }
 
 # call($Call) -> the %Slot a direct call of a sub returns: its function, made
@@ -476,7 +585,9 @@ sub func {
     }
     $b->new_block('entry');
     $b->make_constant_arrays(Chalk::Target::LLVM::Context::_graph_component($g));
+    local $b->{jumps} = {};   # this function's early exits
     $b->walk($start);
+    out('an early exit to a merge never reached') if %{ $b->{jumps} };
     my $v = $ret->inputs->[0];
     my $r = blessed($v) ? $b->as($b->value($v), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
     $b->{cur}{term} = [ 'retval', $r ];
@@ -599,6 +710,8 @@ sub type_of {
     return '%Array*' if $op eq 'ArrayLiteral' || $op eq 'PostfixDeref';
     return 'i64' if $op eq 'Count';
     return '%Slot' if $op eq 'Subscript';
+    # A HASH REFERENCE is a %Slot (tag 5) over a %Hash: it is a scalar.
+    return '%Slot' if $op eq 'HashLiteral' && ( $v->stamp // '' ) eq 'HashRef'; # static type
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
     return '%Str' if $op eq 'EntryDef';
@@ -640,7 +753,14 @@ sub _value {
     if ($op eq 'PadAccess' && $v->is_location) {
         return $b->as($b->emit(op => 'Load', type => '%Slot', inputs => [ $b->location($v) ]), $ty);
     }
+    if (my $h = $b->hash_value($v, $op)) { return $h }
     if (my $arr = $b->array_value($v, $op)) { return $arr }
+    if ($op eq 'Not') {
+        # perl's !: the operand's truth, inverted.
+        my $x = $b->as($b->value($v->inputs->[0]), 'i1');
+        my $f = $b->emit(op => 'Const', type => 'i1', attr => { value => 0 });
+        return $b->as($b->emit(op => 'Cmp', type => 'i1', attr => { op => 'eq' }, inputs => [ $x, $f ]), $ty);
+    }
     if ($op eq 'Defined') {
         return $b->emit(op => 'Defined', type => 'i1', inputs => [ $b->as($b->value($v->inputs->[0]), '%Slot') ]);
     }
@@ -859,6 +979,9 @@ sub _line {
     }
     return "$nm = call %Str \@t2_concat(" . $arg->(@in) . ')' if $op eq 'Concat';
     return "$nm = call %Array* \@t2_new_array()" if $op eq 'NewArray';
+    return "$nm = call %Slot \@t2_hnew()" if $op eq 'HNew';
+    return "call void \@t2_hset(" . $arg->(@in) . ')' if $op eq 'HSet';
+    return "$nm = call %Slot \@t2_hget(" . $arg->(@in) . ')' if $op eq 'HGet';
     return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
     if ($op eq 'ASet') {
         my $len = do { use bytes; length $a{msg} };
@@ -1041,7 +1164,8 @@ entry:
   %t = extractvalue %Slot %s, 0
   switch i8 %t, label %undef [ i8 1, label %same
                                i8 2, label %same
-                               i8 3, label %str ]
+                               i8 3, label %str
+                               i8 5, label %ref ]
 same:
   ret %Slot %s
 str:
@@ -1053,6 +1177,9 @@ str:
 undef:
   %z = call %Slot @t2_box_i64(i64 0)
   ret %Slot %z
+ref:
+  call void @t2_refscalar()
+  unreachable
 }
 define internal %Str @t2_bool_str(i1 %b) {
   %p = getelementptr [2 x i8], [2 x i8]* @lit_one, i64 0, i64 0
@@ -1314,7 +1441,8 @@ entry:
   %v = extractvalue %Slot %s, 1
   switch i8 %t, label %undef [ i8 1, label %int
                                i8 2, label %num
-                               i8 3, label %str ]
+                               i8 3, label %str
+                               i8 5, label %ref ]
 int:
   %di = sitofp i64 %v to double
   ret double %di
@@ -1328,6 +1456,9 @@ str:
   ret double %ds
 undef:
   ret double 0.0
+ref:
+  call void @t2_refscalar()
+  unreachable
 }
 define internal i64 @t2_slot_i64(%Slot %s) {
 entry:
@@ -1429,7 +1560,8 @@ entry:
   %v = extractvalue %Slot %s, 1
   switch i8 %t, label %undef [ i8 1, label %int
                                i8 2, label %num
-                               i8 3, label %str ]
+                               i8 3, label %str
+                               i8 5, label %ref ]
 int:
   %si = call %Str @t2_i64_str(i64 %v)
   ret %Str %si
@@ -1444,6 +1576,9 @@ str:
 undef:
   %e = call %Str @t2_str(i8* null, i64 0)
   ret %Str %e
+ref:
+  call void @t2_refscalar()
+  unreachable
 }
 
 ; %Array: { len, cap, elements } -- a `my @a`, its elements %Slot.
@@ -1648,7 +1783,8 @@ entry:
   %v = extractvalue %Slot %s, 1
   switch i8 %t, label %undef [ i8 1, label %int
                                i8 2, label %num
-                               i8 3, label %str ]
+                               i8 3, label %str
+                               i8 5, label %ref ]
 int:
   %bi = icmp ne i64 %v, 0
   ret i1 %bi
@@ -1663,6 +1799,104 @@ str:
   ret i1 %bs
 undef:
   ret i1 0
+ref:
+  ret i1 1
+}
+; A HASH REFERENCE is a %Slot of tag 5 whose payload is an %Array of its
+; pairs, key (a boxed Str) then value, in insertion order (perl's own order
+; is not promised; keys/each are not this slice's).
+declare i32 @memcmp(i8*, i8*, i64)
+@msg_notahash = private unnamed_addr constant [75 x i8] c"chalk: refused at run time: a hash element read through no HASH reference\0A\00"
+@msg_refstr = private unnamed_addr constant [62 x i8] c"chalk: refused at run time: a reference read as a str or num\0A\00"
+define internal void @t2_stop(i8* %m, i64 %n) {
+  %w = call i64 @write(i32 2, i8* %m, i64 %n)
+  call void @exit(i32 255)
+  unreachable
+}
+define internal void @t2_refscalar() {
+  call void @t2_stop(i8* getelementptr ([62 x i8], [62 x i8]* @msg_refstr, i64 0, i64 0), i64 61)
+  unreachable
+}
+define internal %Slot @t2_hnew() {
+  %a = call %Array* @t2_new_array()
+  %i = ptrtoint %Array* %a to i64
+  %s = call %Slot @t2_slot(i8 5, i64 %i)
+  ret %Slot %s
+}
+define internal %Array* @t2_harr(%Slot %h) {
+entry:
+  %t = extractvalue %Slot %h, 0
+  %ok = icmp eq i8 %t, 5
+  br i1 %ok, label %yes, label %no
+no:
+  call void @t2_stop(i8* getelementptr ([75 x i8], [75 x i8]* @msg_notahash, i64 0, i64 0), i64 74)
+  unreachable
+yes:
+  %v = extractvalue %Slot %h, 1
+  %a = inttoptr i64 %v to %Array*
+  ret %Array* %a
+}
+; t2_hfind(a, k) -> the index of k's key slot, or -1.
+define internal i64 @t2_hfind(%Array* %a, %Str %k) {
+entry:
+  %n = call i64 @t2_alen(%Array* %a)
+  %kp = extractvalue %Str %k, 0
+  %kl = extractvalue %Str %k, 1
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %next ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %none
+body:
+  %ks = call %Slot @t2_aget(%Array* %a, i64 %i)
+  %kstr = call %Str @t2_slot_str(%Slot %ks)
+  %ol = extractvalue %Str %kstr, 1
+  %samelen = icmp eq i64 %ol, %kl
+  br i1 %samelen, label %cmp, label %next
+cmp:
+  %op = extractvalue %Str %kstr, 0
+  %c = call i32 @memcmp(i8* %op, i8* %kp, i64 %kl)
+  %eq = icmp eq i32 %c, 0
+  br i1 %eq, label %found, label %next
+next:
+  %i2 = add i64 %i, 2
+  br label %loop
+found:
+  ret i64 %i
+none:
+  ret i64 -1
+}
+define internal %Slot @t2_hget(%Slot %h, %Str %k) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %h)
+  %i = call i64 @t2_hfind(%Array* %a, %Str %k)
+  %miss = icmp slt i64 %i, 0
+  br i1 %miss, label %undef, label %get
+get:
+  %j = add i64 %i, 1
+  %v = call %Slot @t2_aget(%Array* %a, i64 %j)
+  ret %Slot %v
+undef:
+  ret %Slot zeroinitializer
+}
+define internal void @t2_hset(%Slot %h, %Str %k, %Slot %v) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %h)
+  %i = call i64 @t2_hfind(%Array* %a, %Str %k)
+  %miss = icmp slt i64 %i, 0
+  br i1 %miss, label %add, label %put
+add:
+  %ks = call %Slot @t2_box_str(%Str %k)
+  call void @t2_apush(%Array* %a, %Slot %ks)
+  call void @t2_apush(%Array* %a, %Slot %v)
+  ret void
+put:
+  %j = add i64 %i, 1
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  %p = getelementptr %Slot, %Slot* %els, i64 %j
+  store %Slot %v, %Slot* %p
+  ret void
 }
 LL
 
