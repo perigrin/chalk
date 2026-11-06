@@ -52,13 +52,15 @@ for my $c (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
-# REFUSED by name: a code reference used other than by a call.
+# A CODE REFERENCE THAT LEAVES WHERE IT IS MADE: refused by name, or (T2's
+# code values, slice 19) perl's answer.
 for my $c (
-    [ q{sub mk { return sub { 1 } } my $f = mk(); print $f->(), "\n";}, 'a code reference that leaves where it is made' ],
+    [ q{sub mk { return sub { 1 } } my $f = mk(); print $f->(), "\n";}, "1\n", 'a code reference that leaves where it is made' ],
 ) {
-    my ($src, $name) = @$c;
-    eval { through_llvm($src) };
-    like($@, qr/GAP: /, "$name: refused");
+    my ($src, $want, $name) = @$c;
+    my $got = eval { through_llvm($src) };
+    if (defined $got) { is($got, $want, "$name: perl's answer") }
+    else { like($@, qr/GAP: /, "$name: refused") }
 }
 
 done_testing;

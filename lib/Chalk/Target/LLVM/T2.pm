@@ -103,6 +103,7 @@ sub build {
                : out('no way back to Start from ' . $start->operation);
     }
     $b->{ret} = $ret;
+    $b->{own_nodes} = [ _own_nodes($ret) ];
     $b->{passed} = [ _memstarts($ret, 1) ];
     $b->index_readers(_own_nodes($ret));
     $b->new_block('entry');
@@ -184,6 +185,17 @@ sub walk {
             $ctl = $s;
         }
         elsif ($op eq 'Assign') { $b->assign($s); push @{ $b->{passed} }, $s; $ctl = $s }
+        # A STORE THROUGH A CELL (a captured variable written): what it is
+        # given, then the store into the variable's storage.
+        elsif ($op eq 'CellWrite') {
+            my ($cell, $val) = $s->inputs->@[0, 1];
+            my $v = $b->as($b->value($val), '%Slot');
+            my $ptr = $b->value($cell);
+            $b->hash_reads_settled('a store to a captured variable');
+            $b->emit(op => 'Store', type => 'void', inputs => [ $v, $ptr ]);
+            push @{ $b->{passed} }, $s;
+            $ctl = $s;
+        }
         # A delete (or an exists) on the chain: made where it stands.
         elsif ($op =~ /\A(?:Delete|Exists)\z/ && ( $s->can('kind') ? $s->kind // '' : '' ) eq 'hash') {
             $b->hash_reads_settled('a delete') if $op eq 'Delete';
@@ -219,7 +231,7 @@ sub walk {
         elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'HashRef') { $b->value($s); $ctl = $s }   # static type
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands.
-        elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || ( $s->dispatch_kind // '' ) =~ /\A(?:direct|method)\z/ )) {
+        elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || ( $s->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/ )) {
             $b->value($s);
             push @{ $b->{passed} }, $s;   # B::SoN versions memory at a call
             $ctl = $s;
@@ -300,6 +312,9 @@ sub list_args_assign {
     for my $r ( @{ $s->inputs }[ 0 .. $#{ $s->inputs } - 1 ], grep { blessed($_) && $_->operation eq 'PadAccess' } ( $s->consumers // [] )->@* ) {
         $b->{memo}{ refaddr($r) } //= $b->args_elem($s, $r);
     }
+    for my $t (grep { blessed($_) && $_->operation eq 'PadAccess' && $_->is_location } @{ $s->inputs }[ 0 .. $#{ $s->inputs } - 1 ]) {
+        $b->emit(op => 'Store', type => 'void', inputs => [ $b->{memo}{ refaddr($t) }, $b->location($t) ]);   # (see args_assign)
+    }
 }
 
 # args_assign($Assign): `my ($x, $y) = @_` on the chain. Each target is an
@@ -313,6 +328,9 @@ sub args_assign {
     for my $t (@t) {
         my $a = $b->{args}{ refaddr($t) } // out('a `my (...) = @_` target that is not an argument');
         $arg_of{ $t->symbol } = $a;
+        # A TARGET KEPT IN MEMORY (a closure captures it): the argument stored
+        # there too -- read through its cell, it was undef ("0 0" for "10 50").
+        $b->emit(op => 'Store', type => 'void', inputs => [ $b->as($a, '%Slot'), $b->location($t) ]) if $t->is_location;
     }
     for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' } ( $s->consumers // [] )->@*) {
         next if $b->{args}{ refaddr($r) };
@@ -329,11 +347,21 @@ sub location {
     out('a variable that is not a `my` scalar kept here (' . ( blessed($pad) ? $pad->operation . ' ' . ( $pad->can('sigil') ? $pad->sigil // '' : '' )
         . ( $pad->can('symbol') ? $pad->symbol // '' : '' ) . ( $pad->can('shared') && $pad->shared ? ' shared' : '' )
         . ( $pad->can('is_location') && !$pad->is_location ? ' not-location' : '' ) : 'none' ) . ')')
-        unless blessed($pad) && $pad->operation eq 'PadAccess' && $pad->is_location && !$pad->shared
-        && ( $pad->sigil // '$' ) eq '$';
+        unless blessed($pad) && $pad->operation eq 'PadAccess' && $pad->is_location
+        && ( $pad->sigil // '$' ) eq '$'
+        # A SHARED VARIABLE is this function's only where a MakeCell here
+        # captures it (it owns it); a named sub's view of an outer `my` is not
+        # (its own cell would be another variable: 3 wrong answers).
+        && ( !$pad->shared || grep { $_->operation eq 'MakeCell' && ( $_->cell_name // '' ) eq $pad->name } @{ $b->{own_nodes} // [] } );
     my $key = $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
     return $b->{locs}{$key} //= do {
-        my $p = Chalk::Target::LLVM::T2::_n(op => 'Alloca', type => '%Slot*', attr => { name => $pad->name });
+        # A VARIABLE A CLOSURE CAPTURES (shared) lives on the heap -- made at
+        # its function's entry, fresh each call -- so a closure outliving the
+        # call still holds it; the maker and the closure share it.
+        # (captured: marked shared, or named by a MakeCell here -- `my ($k) = @_`
+        # captured was not marked, and its closure read freed stack: "0 0")
+        my $captured = $pad->shared || grep { $_->operation eq 'MakeCell' && ( $_->cell_name // '' ) eq $pad->name } @{ $b->{own_nodes} // [] };
+        my $p = Chalk::Target::LLVM::T2::_n(op => ( $captured ? 'HeapCell' : 'Alloca' ), type => '%Slot*', attr => { name => $pad->name });
         unshift @{ $b->{blocks}[0]{nodes} }, $p;
         $p;
     };
@@ -374,7 +402,7 @@ sub _is_version {
     my ($n) = @_;
     return 0 unless blessed($n) && $n->can('operation');
     my $op = $n->operation;
-    return 1 if $op =~ /\A(?:MemStart|Assign|EntryWrite|Delete)\z/;   # a store's version
+    return 1 if $op =~ /\A(?:MemStart|Assign|EntryWrite|Delete|CellWrite)\z/;   # a store's version
     return 1 if $op eq 'Call' && $n->can('control_in') && blessed($n->control_in);
     return $op eq 'Phi' && Chalk::Target::LLVM::Context::_is_memory_phi($n) ? 1 : 0;
 }
@@ -391,6 +419,7 @@ sub _memory_input {
     return $in[2] if $op eq 'Subscript' || $op eq 'Exists';
     return $in[0] if _pkg_scalar($n);   # a package scalar's read, at its version
     return $in[0] if $op eq 'FieldAccess';
+    return $in[1] if $op eq 'CellRead';
     return $in[1] if $op eq 'Count' || $op eq 'PostfixDeref';
     return $in[-1] if $op eq 'Call' && $n->can('memory_input') && $n->memory_input;
     return undef;
@@ -645,7 +674,7 @@ sub _is_list {
     my ($n) = @_;
     # A CALL IN LIST CONTEXT: its result is a list (of one value, maybe). Its
     # use decides, not its stamp (a call stamped List is a scalar's in `my $n =`).
-    return _list_use($n) if $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) =~ /\A(?:direct|method)\z/;
+    return _list_use($n) if $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/;
     return 1 if ( $n->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
     return 1 if $n->operation eq 'PadAccess' && ( $n->sigil // '' ) =~ /\A[@%]\z/;
     return 1 if $Chalk::Target::LLVM::T2::Builder::LIST_FIELD{ refaddr($n) };
@@ -731,7 +760,7 @@ sub _list_use {
         my $at1 = grep { $_ == 1 } @pos;
         if ($op eq 'ArrayLiteral' || $op eq 'Print'
             || $op eq 'Call' && ( $u->dispatch_kind // '' ) eq 'direct'
-            || $op eq 'Call' && ( $u->dispatch_kind // '' ) eq 'method' && !$at0   # not the invocant
+            || $op eq 'Call' && ( $u->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ && !$at0   # not the invocant, nor the code
             || $op eq 'Call' && ( $u->name // '' ) =~ /\A(?:push|unshift|join)\z/ && !$at0
             || $op eq 'ListAppend' && $at1
             || $op eq 'Return' && $u->inputs->@* == 2 && $at0) { $list++ }
@@ -777,7 +806,7 @@ sub array_of {
     }
     # A CALL IN LIST CONTEXT: a sub returning a list gives a reference to it; a
     # sub returning one value is a list of it. A method's sub is not known here.
-    if (blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct') {
+    if (blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct' && ( $n->name // '' ) !~ /__ANON__/) {
         my $r = $b->value($n);
         my $t = $n->target;
         my $fn = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
@@ -787,6 +816,10 @@ sub array_of {
         $b->emit(op => 'APush', type => 'void', inputs => [ $a, $r ]);
         return $a;
     }
+    # A CALL OF A CODE VALUE IN LIST CONTEXT: its wrapper hands back a list's
+    # reference, as a method's does.
+    return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ])
+        if blessed($n) && $n->operation eq 'Call' && ( ( $n->dispatch_kind // '' ) eq 'indirect' || ( $n->name // '' ) =~ /__ANON__/ );   # (a closure called directly too)
     # A METHOD IN LIST CONTEXT: its wrapper hands back a reference to a list
     # always (the sub's list, or one of its value) -- but a class's `new`,
     # made here, is its object.
@@ -1008,6 +1041,15 @@ sub join_jumps {
 # once, called with each argument boxed (one not passed is undef).
 sub call {
     my ($b, $c) = @_;
+    # A DIRECT CALL OF A CLOSURE (`$f->()` B::SoN resolved): through the code
+    # value its AnonSub makes in this function -- its cells are there.
+    if (( $c->name // '' ) =~ /__ANON__/) {
+        my @anon = grep { $_->operation eq 'AnonSub' && ( $_->name // '' ) eq $c->name } @{ $b->{own_nodes} // [] };
+        out('a direct call of a closure made elsewhere') unless @anon == 1;
+        my @args = $c->inputs->@*;
+        pop @args if $c->can('memory_input') && $c->memory_input;
+        return $b->code_call($c, $b->value( $anon[0] ), @args);
+    }
     my $sub = $c->target;
     out('a direct call with no sub') unless blessed($sub) && $sub->can('graph') && $sub->graph;
     my $fn = $b->func($sub, $c->name);
@@ -1197,7 +1239,7 @@ sub scalar_arg {
     my ($b, $n) = @_;
     return $b->as($b->value($n), '%Slot') unless _is_list($n);
     out('a call passing a list') unless $n->operation eq 'Call';
-    if (( $n->dispatch_kind // '' ) eq 'direct') {
+    if (( $n->dispatch_kind // '' ) eq 'direct' && ( $n->name // '' ) !~ /__ANON__/) {
         my $r = $b->value($n);
         my $t = $n->target;
         my $fn = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
@@ -1238,10 +1280,47 @@ sub set_want {
     $b->emit(op => 'SetWant', type => 'void', inputs => [$w]);
 }
 
+# code_value($AnonSub) -> a code value (%Slot tag 8): its function's wrapper
+# and the cells it captured, in its CellParam order.
+sub code_value {
+    my ($b, $a) = @_;
+    # (an AnonSub of the program may hold no sub; a direct call of it names one)
+    my ($called) = grep { $_->operation eq 'Call' && ( $_->name // '' ) eq ( $a->name // '' ) && blessed( $_->can('target') ? $_->target : undef ) }
+        @{ $b->{own_nodes} // [] };
+    my $sub = $a->sub // ( $called ? $called->target : undef );
+    out('a closure of no sub') unless blessed($sub) && $sub->can('graph') && $sub->graph;
+    my $fn = $b->func($sub, $a->name // 'anon', closure => 1);
+    my @cells = map { $b->value($_) } grep { blessed($_) } $a->inputs->@*;
+    out('a closure capturing what is not a cell') if grep { $_->type ne '%Slot*' } @cells;
+    my $n = $b->emit(op => 'Const', type => 'i64', attr => { value => scalar @cells });
+    my $env = $b->emit(op => 'EnvNew', type => '%Slot**', inputs => [$n]);
+    for my $i (0 .. $#cells) {
+        my $ix = $b->emit(op => 'Const', type => 'i64', attr => { value => $i });
+        $b->emit(op => 'EnvSet', type => 'void', inputs => [ $env, $ix, $cells[$i] ]);
+    }
+    return $b->emit(op => 'CodeNew', type => '%Slot', inputs => [$env], attr => { fn => $fn->{name} });
+}
+
+# code_call($Call, $code, @args) -> calling a code value: @_ built (lists
+# flattened), its function found (a stop if it is no code), called with its
+# cells, in the call's context.
+sub code_call {
+    my ($b, $c, $code, @args) = @_;
+    my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+    for my $a (@args) {
+        if (_is_list($a)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($a) ]) }
+        else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($a), '%Slot') ]) }
+    }
+    $b->hash_reads_settled('a call of a code value');
+    $b->set_want($c);
+    return $b->emit(op => 'CallCode', type => '%Slot', inputs => [ $code, $arr ]);
+}
+
 # func($sub, $name) -> the T2 function a sub is: `%Slot (%Slot args...)`, its
 # body built in its own blocks, made before them so a call of itself finds it.
 sub func {
-    my ($b, $sub, $name) = @_;
+    my ($b, $sub, $name, %o) = @_;
+    my $closure = $o{closure};
     # ONE FUNCTION PER SUB: a method's name is not its package's (two
     # classes' `hi` are two subs).
     return $b->{funcs}{ refaddr($sub) } if $b->{funcs}{ refaddr($sub) };
@@ -1284,7 +1363,18 @@ sub func {
     # @_ READ AS A LIST (join(@_), "@_", scalar(@_), for (@_)): the sub takes
     # @_ as one %Array its caller builds -- the list convention. A write to
     # $_[N] (the caller's variable) or a signature is not T2's.
-    my $list = !$is_method && !$@ && $an->{_args_read_as_a_list} && !$an->{_args_written} && !$an->{_args_slurpy} && !$an->{_args_signature};
+    # A CLOSURE takes @_ as one array always (its code value's calling
+    # convention), its captured cells as its environment.
+    my $list = !$is_method && !$@ && ( $an->{_args_read_as_a_list} || $closure ) && !$an->{_args_written} && !$an->{_args_slurpy} && !$an->{_args_signature};
+    out("closure $name reads \@_ other than T2 takes it") if $closure && !$list;
+    # A CAPTURE USED BUT BY A CELL READ OR WRITE: B::SoN spells `$t += 1` on
+    # one as Coerce(CellParam) + 1, with no write -- lowered, $t never changed
+    # (0 for 16). Refused, as Context.pm refuses it.
+    out("closure $name uses a capture other than by reading or writing it (an op-assign)")
+        if grep { my $p = $_; grep { blessed($_) && $_->operation !~ /\A(?:CellRead|CellWrite|MakeCell)\z/ } ( $p->consumers // [] )->@* }
+           grep { $_->operation eq 'CellParam' } Chalk::Target::LLVM::Context::_graph_component($g);
+    out("sub $name captures a variable (a named sub's closure)") if !$closure
+        && grep { $_->operation eq 'CellParam' } Chalk::Target::LLVM::Context::_graph_component($g);
     out("sub $name reads \@_ other than by shifts, \$_[N] or a signature")
         if !$is_method && !$list && ( $@ || grep { !blessed($_) } @reads
         or $an->{_args_written} || $an->{_args_read_as_a_list} || $an->{_args_slurpy} );
@@ -1303,7 +1393,7 @@ sub func {
     $id .= '_' . scalar keys %{ $b->{funcs} } if grep { $_->{name} eq "\@f_$id" } values %{ $b->{funcs} // {} };
     my $nargs = $is_method ? 1 + $margs{np} : $list ? 1 : scalar @reads;
     my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $nargs,
-        signature => $sig, list => $list, listret => $listret, blocks => [] };
+        signature => $sig, list => $list, listret => $listret, closure => $closure, blocks => [] };
     my @argn = map { Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot', attr => { index => $_ }) } 0 .. ( $is_method ? $nargs : scalar @reads ) - 1;
     $argn[$_]->set_name("%a$_") for 0 .. $#argn;
     my $argsarr = $list ? Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Array*', attr => { index => 0 }) : undef;
@@ -1321,6 +1411,8 @@ sub func {
     local $b->{args} = $is_method ? { map { ( $_ => $argn[ $margs{$_} ] ) } grep { $_ ne 'np' } keys %margs }
                                   : { map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads };
     local $b->{self} = $is_method ? $argn[0] : undef;   # a field's object
+    local $b->{env} = $closure ? do { my $e = Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot**', attr => { index => 1 }); $e->set_name('%env'); $e } : undef;
+    local $b->{own_nodes} = [ Chalk::Target::LLVM::Context::_graph_component($g) ];
     local $b->{ret} = $ret;
     local $b->{passed} = [ grep { $_->operation eq 'MemStart' } Chalk::Target::LLVM::Context::_graph_component($g) ];
     local $b->{readers};
@@ -1535,6 +1627,9 @@ sub type_of {
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
     return '%Array*' if _argv($v);
     return '%Slot' if _pkg_scalar($v);   # what it holds is what was stored last, anywhere
+    return '%Slot*' if $op eq 'MakeCell' || $op eq 'CellParam';   # a captured variable's storage
+    return '%Slot' if $op eq 'CellRead' || $op eq 'AnonSub';
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'indirect';
     if ($op eq 'FieldAccess') {
         my (undef, $sg) = $b->field_of($v);
         return $sg eq '@' ? '%Array*' : '%Slot';   # a scalar's value, or a hash's (its %Slot)
@@ -1588,6 +1683,28 @@ sub _value {
     my $ty = $b->type_of($v);
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'direct') { return $b->call($v) }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'method') { return $b->method_call($v) }
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'indirect') {
+        my ($code, @args) = $v->inputs->@*;
+        pop @args if $v->can('memory_input') && $v->memory_input;
+        return $b->code_call($v, $b->as($b->value($code), '%Slot'), @args);
+    }
+    if ($op eq 'MakeCell') {
+        # THE CELL IS THE VARIABLE'S OWN STORAGE (the maker reads and writes it
+        # as the closure does). A variable a loop renews, captured in it, is a
+        # new one each pass: not this (one storage per call).
+        my $var = Chalk::Target::LLVM::Context::_cell_variable($v) // out('a captured variable that is not one kept in memory');
+        out('a variable captured in a loop body or an arm') if $b->{depth};
+        return $b->location($var);
+    }
+    if ($op eq 'CellParam') {
+        my $env = $b->{env} // out('a captured variable outside a closure');
+        my $ix = $b->emit(op => 'Const', type => 'i64', attr => { value => $v->index });
+        return $b->emit(op => 'EnvGet', type => '%Slot*', inputs => [ $env, $ix ]);
+    }
+    if ($op eq 'CellRead') {
+        return $b->emit(op => 'Load', type => '%Slot', inputs => [ $b->value( $v->inputs->[0] ) ]);
+    }
+    if ($op eq 'AnonSub') { return $b->code_value($v) }
     # A push B::SoN left off the chain, a body's last statement (an ADJUST's):
     # made where its value is wanted -- its Return, the only use allowed.
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'push' && !_pinned($v)) {
@@ -1826,8 +1943,14 @@ sub print_module {
     for my $fn (sort { $a->{name} cmp $b->{name} } values %{ $bld->{funcs} // {} }) {
         my $i = 0;
         $_->set_name('%v' . $i++) for map { @{ $_->{nodes} } } @{ $fn->{blocks} };
-        push @L, "define internal %Slot $fn->{name}(" . ( $fn->{list} ? '%Array* %a0' : join(', ', map { "%Slot %a$_" } 0 .. $fn->{nargs} - 1) ) . ') {',
+        push @L, "define internal %Slot $fn->{name}(" . ( $fn->{closure} ? '%Array* %a0, %Slot** %env' : $fn->{list} ? '%Array* %a0' : join(', ', map { "%Slot %a$_" } 0 .. $fn->{nargs} - 1) ) . ') {',
             _blocks($fn->{blocks}), '}', '';
+        if ($fn->{closure}) {   # its code value's entry: a list context gets a list
+            my @cn = $fn->{listret} ? ('  ret %Slot %r') : ('  %rn = call %Slot @t2_list_of(%Slot %r, i1 %w)', '  ret %Slot %rn');
+            push @L, "define internal %Slot $fn->{name}_cw(%Array* %args, %Slot** %env) {", '  %w = load i1, i1* @t2_want',
+                "  %r = call %Slot $fn->{name}(%Array* %args, %Slot** %env)", @cn, '}', '';
+            next;
+        }
         # ITS WRAPPER (a method's entry) gives a list context a reference to a
         # list: the sub's own (a list return), or one of its one value.
         my @norm = $fn->{listret} ? ('  ret %Slot %r') : ('  %rn = call %Slot @t2_list_of(%Slot %r, i1 %w)', '  ret %Slot %rn');
@@ -1902,6 +2025,15 @@ sub _line {
     return "$nm = call %Slot \@t2_slot(i8 0, i64 0)" if $op eq 'Undef';
     return "$nm = call %Slot $a{fn}(" . $arg->(@in) . ')' if $op eq 'Call';
     return "$nm = alloca %Slot  ; my $a{name}\n  store %Slot zeroinitializer, %Slot* $nm" if $op eq 'Alloca';
+    return "$nm = call %Slot* \@t2_cell_new()  ; my $a{name}, captured" if $op eq 'HeapCell';
+    return "$nm = call %Slot** \@t2_env_new(" . $arg->(@in) . ')' if $op eq 'EnvNew';
+    return "call void \@t2_env_set(" . $arg->(@in) . ')' if $op eq 'EnvSet';
+    return "$nm = call %Slot* \@t2_env_get(" . $arg->(@in) . ')' if $op eq 'EnvGet';
+    return "$nm = call %Slot \@t2_code_new(i8* bitcast (%Slot (%Array*, %Slot**)* $a{fn}_cw to i8*), " . $arg->(@in) . ')' if $op eq 'CodeNew';
+    if ($op eq 'CallCode') {
+        return "$nm.e = call %Slot** \@t2_code_env(%Slot " . $in[0]->name . ")\n  $nm.p = call i8* \@t2_code_fn(%Slot " . $in[0]->name
+            . ")\n  $nm.f = bitcast i8* $nm.p to %Slot (%Array*, %Slot**)*\n  $nm = call %Slot $nm.f(%Array* " . $in[1]->name . ", %Slot** $nm.e)";
+    }
     return "$nm = load %Slot, %Slot* " . $in[0]->name if $op eq 'Load';
     return "$nm = call %Slot \@t2_slot_numify(" . $arg->(@in) . ')' if $op eq 'Numify';
     return "store %Slot " . $in[0]->name . ", %Slot* " . $in[1]->name if $op eq 'Store';
@@ -2138,7 +2270,8 @@ entry:
                                i8 2, label %same
                                i8 3, label %str
                                i8 5, label %ref
-                               i8 6, label %ref ]
+                               i8 6, label %ref
+                               i8 8, label %ref ]
 same:
   ret %Slot %s
 str:
@@ -2418,7 +2551,8 @@ entry:
                                i8 2, label %num
                                i8 3, label %str
                                i8 5, label %ref
-                               i8 6, label %ref ]
+                               i8 6, label %ref
+                               i8 8, label %ref ]
 int:
   %di = sitofp i64 %v to double
   ret double %di
@@ -2538,7 +2672,8 @@ entry:
                                i8 2, label %num
                                i8 3, label %str
                                i8 5, label %ref
-                               i8 6, label %ref ]
+                               i8 6, label %ref
+                               i8 8, label %ref ]
 int:
   %si = call %Str @t2_i64_str(i64 %v)
   ret %Str %si
@@ -2795,7 +2930,8 @@ entry:
                                i8 2, label %num
                                i8 3, label %str
                                i8 5, label %ref
-                               i8 6, label %ref ]
+                               i8 6, label %ref
+                               i8 8, label %ref ]
 int:
   %bi = icmp ne i64 %v, 0
   ret i1 %bi
@@ -2820,6 +2956,7 @@ declare i32 @memcmp(i8*, i8*, i64)
 @msg_notahash = private unnamed_addr constant [75 x i8] c"chalk: refused at run time: a hash element read through no HASH reference\0A\00"
 @lit_hash = private unnamed_addr constant [5 x i8] c"HASH\00"
 @lit_array = private unnamed_addr constant [6 x i8] c"ARRAY\00"
+@lit_code = private unnamed_addr constant [5 x i8] c"CODE\00"
 @msg_notanarray = private unnamed_addr constant [78 x i8] c"chalk: refused at run time: an array element read through no ARRAY reference\0A\00"
 @msg_refstr = private unnamed_addr constant [62 x i8] c"chalk: refused at run time: a reference read as a str or num\0A\00"
 define internal void @t2_stop(i8* %m, i64 %n) {
@@ -2895,6 +3032,12 @@ define internal %Slot @t2_bless(%Slot %h, %Str %c) {
 define internal %Str @t2_reftype(%Slot %s) {
 entry:
   %t = extractvalue %Slot %s, 0
+  %iscode = icmp eq i8 %t, 8
+  br i1 %iscode, label %code, label %notcode
+code:
+  %cs = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_code, i64 0, i64 0), i64 4)
+  ret %Str %cs
+notcode:
   %isarr = icmp eq i8 %t, 6
   br i1 %isarr, label %arr, label %nota
 arr:
@@ -3020,6 +3163,68 @@ list:
   ret %Slot %r
 one:
   ret %Slot %v
+}
+; CLOSURES: a captured variable's storage on the heap; a code value (tag 8)
+; points at {its function, its cells}.
+define internal %Slot* @t2_cell_new() {
+  %m = call i8* @malloc(i64 16)
+  %c = bitcast i8* %m to %Slot*
+  store %Slot zeroinitializer, %Slot* %c
+  ret %Slot* %c
+}
+define internal %Slot** @t2_env_new(i64 %n) {
+  %b = mul i64 %n, 8
+  %b1 = add i64 %b, 8
+  %m = call i8* @malloc(i64 %b1)
+  %e = bitcast i8* %m to %Slot**
+  ret %Slot** %e
+}
+define internal void @t2_env_set(%Slot** %e, i64 %i, %Slot* %c) {
+  %p = getelementptr %Slot*, %Slot** %e, i64 %i
+  store %Slot* %c, %Slot** %p
+  ret void
+}
+define internal %Slot* @t2_env_get(%Slot** %e, i64 %i) {
+  %p = getelementptr %Slot*, %Slot** %e, i64 %i
+  %c = load %Slot*, %Slot** %p
+  ret %Slot* %c
+}
+define internal %Slot @t2_code_new(i8* %f, %Slot** %e) {
+  %m = call i8* @malloc(i64 16)
+  %pf = bitcast i8* %m to i8**
+  store i8* %f, i8** %pf
+  %pe0 = getelementptr i8*, i8** %pf, i64 1
+  %pe = bitcast i8** %pe0 to %Slot***
+  store %Slot** %e, %Slot*** %pe
+  %i = ptrtoint i8* %m to i64
+  %s = call %Slot @t2_slot(i8 8, i64 %i)
+  ret %Slot %s
+}
+@msg_notcode = private unnamed_addr constant [69 x i8] c"chalk: refused at run time: a call of what is not a code value (T2)\0A\00"
+define internal i8** @t2_code_of(%Slot %s) {
+entry:
+  %t = extractvalue %Slot %s, 0
+  %ok = icmp eq i8 %t, 8
+  br i1 %ok, label %yes, label %no
+no:
+  call void @t2_stop(i8* getelementptr ([69 x i8], [69 x i8]* @msg_notcode, i64 0, i64 0), i64 68)
+  unreachable
+yes:
+  %v = extractvalue %Slot %s, 1
+  %p = inttoptr i64 %v to i8**
+  ret i8** %p
+}
+define internal i8* @t2_code_fn(%Slot %s) {
+  %p = call i8** @t2_code_of(%Slot %s)
+  %f = load i8*, i8** %p
+  ret i8* %f
+}
+define internal %Slot** @t2_code_env(%Slot %s) {
+  %p = call i8** @t2_code_of(%Slot %s)
+  %pe0 = getelementptr i8*, i8** %p, i64 1
+  %pe = bitcast i8** %pe0 to %Slot***
+  %e = load %Slot**, %Slot*** %pe
+  ret %Slot** %e
 }
 define internal void @t2_apush_if(%Array* %a, %Slot %v, i1 %c) {
 entry:
