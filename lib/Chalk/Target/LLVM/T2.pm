@@ -50,6 +50,11 @@ sub lower_program {
     my $b = bless { blocks => [], cur => undef, memo => {}, strs => {}, mop => $opt{mop} }, 'Chalk::Target::LLVM::T2::Builder';
     # A CALL print TAKES THROUGH A COERCE is in list context (print's list);
     # the Coerce lists no consumer, so it is found from the Print.
+    # AN ARRAY OR HASH FIELD is a list wherever a list is asked (B::SoN stamps
+    # its FieldAccess Scalar: `join "", @s` joined its count, "1" for "p").
+    local %Chalk::Target::LLVM::T2::Builder::LIST_FIELD = map { ( refaddr($_) => 1 ) }
+        grep { $_->operation eq 'FieldAccess' && ( ( eval { $b->field_of($_) } )[1] // '$' ) =~ /\A[@%]\z/ }
+        Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
     # (want=list too: a Coerce before print is also a scalar's -- `my $n = f();
     # print $n` is the call, coerced, B::SoN having folded $n -- 45 for 2)
     local %Chalk::Target::LLVM::T2::Builder::PRINTED = map { ( refaddr( $_->inputs->[0] ) => 1 ) }
@@ -243,7 +248,7 @@ sub _through_ref {
     my ($b, $n) = @_;
     my $op = $n->operation;
     if ($op =~ /\A(?:Subscript|Exists)\z/ && ( $n->can('kind') ? $n->kind // '' : '' ) eq 'hash') {
-        return _named_hash($n->inputs->[0]) ? 0 : 1;   # a `my %h` is a hash: never a stop
+        return _named_hash($n->inputs->[0]) || $n->inputs->[0]->operation eq 'FieldAccess' ? 0 : 1;   # a `my %h`, a hash field: never a stop
     }
     return 0 unless $op =~ /\A(?:Subscript|Count|PostfixDeref)\z/;
     my $c = $n->inputs->[0];
@@ -385,6 +390,7 @@ sub _memory_input {
     return $in[0] if $op eq 'PadAccess' && $n->is_location;
     return $in[2] if $op eq 'Subscript' || $op eq 'Exists';
     return $in[0] if _pkg_scalar($n);   # a package scalar's read, at its version
+    return $in[0] if $op eq 'FieldAccess';
     return $in[1] if $op eq 'Count' || $op eq 'PostfixDeref';
     return $in[-1] if $op eq 'Call' && $n->can('memory_input') && $n->memory_input;
     return undef;
@@ -406,8 +412,8 @@ sub index_readers {
     # write's memory. Several (local's save, store, restore): no one version --
     # refused where it is read. None: the function's starting memory.
     my @starts = grep { $_->operation eq 'MemStart' } @nodes;
-    for my $n (grep { _pkg_scalar($_) && !$_->inputs->@* } @nodes) {
-        my @w = grep { $_->operation eq 'EntryWrite' && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($n) }
+    for my $n (grep { ( _pkg_scalar($_) || $_->operation eq 'FieldAccess' ) && !$_->inputs->@* } @nodes) {
+        my @w = grep { $_->operation =~ /\A(?:EntryWrite|Assign)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($n) }
             ( $n->consumers // [] )->@*;
         my %seen; @w = grep { !$seen{ refaddr($_) }++ } @w;
         if (@w > 1) { $b->{unversioned}{ refaddr($n) } = 1; next }
@@ -423,6 +429,16 @@ sub assign {
     out('a local') if $s->can('local') && $s->local;
     my ($target, $v) = $s->inputs->@[0, 1];
     return $b->element_store($target, $v, $s) if blessed($target) && $target->operation eq 'Subscript';
+    if (blessed($target) && $target->operation eq 'FieldAccess') {
+        # A FIELD WRITTEN: what it is given, then the store into its object.
+        my ($key, $sg) = $b->field_of($target);
+        out("a store to a $sg field") unless $sg eq '$';
+        my $self = $b->{self} // out('a field outside a method');
+        my $val = $b->as($b->value($v), '%Slot');
+        $b->hash_reads_settled('a field store');
+        $b->emit(op => 'HSet', type => 'void', inputs => [ $self, $b->const_str($key), $val ]);
+        return;
+    }
     my $ptr = $b->location($target);
     $b->reads_before($target->inputs->[0]);
     my $val = $b->as($b->value($v), '%Slot');
@@ -523,6 +539,10 @@ sub hash_var {
 sub hash_of {
     my ($b, $n) = @_;
     return $b->value($n) if _named_hash($n);
+    if ($n->operation eq 'FieldAccess') {   # a hash field: its hash
+        my (undef, $sg) = $b->field_of($n);
+        return $b->value($n) if $sg eq '%';
+    }
     out('a hash element through an element') if $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) };   # $_[N] is an argument
     out('a hash element of a named hash') if ( $n->can('sigil') ? $n->sigil // '' : '' ) eq '%'
         || $n->operation eq 'EntryDef' || $n->operation eq 'Constant';   # a package hash by name: $ENV{K}
@@ -628,6 +648,7 @@ sub _is_list {
     return _list_use($n) if $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) =~ /\A(?:direct|method)\z/;
     return 1 if ( $n->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
     return 1 if $n->operation eq 'PadAccess' && ( $n->sigil // '' ) =~ /\A[@%]\z/;
+    return 1 if $Chalk::Target::LLVM::T2::Builder::LIST_FIELD{ refaddr($n) };
     return 0;
 }
 
@@ -655,6 +676,24 @@ sub global_of {
     return $b->{globals}{$name} //= "\@g_$id";
 }
 
+# A FIELD of the class feature: its key in the object's hash ("Stash::$x",
+# a parent's field and a child's of one name kept apart) and its sigil.
+sub field_of {
+    my ($b, $n) = @_;
+    my $stash = $n->can('field_stash') ? $n->field_stash : undef;
+    my $cls = defined $stash && $b->{mop} ? $b->{mop}->for_class($stash) : undef;
+    out('a field of no known class') unless $cls;
+    # perl numbers a class's fields after its parents' (the MOP from 0 in each)
+    my $off = 0;
+    for (my $p = $cls; defined $p->parent_name && length $p->parent_name; ) {
+        $p = $b->{mop}->for_class( $p->parent_name ) // last;
+        $off += scalar $p->fields;
+    }
+    my ($f) = grep { $_->fieldix + $off == ( $n->field_index // -1 ) } $cls->fields;
+    out('a field of no known index') unless $f;
+    return ( "$stash\::" . $f->name, $f->sigil );
+}
+
 # @ARGV: the program's arguments, one array (made from argv on first use).
 sub _argv {
     my ($n) = @_;
@@ -668,6 +707,7 @@ sub _argv {
 # `$o->m || "x"` is want=list, but perl calls it in scalar context there. A
 # value used both ways is refused (one call, one context).
 our %PRINTED;
+our %LIST_FIELD;
 sub _list_use {
     my ($c) = @_;
     my ($list, $scalar) = (0, 0);
@@ -728,6 +768,7 @@ sub array_of {
     my ($b, $n) = @_;
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
     if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || _aderef($n) || _array_var($n) || _argv($n)
+                         || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
                          || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:keys|values)\z/ )) {
         my $a = $b->value($n);
         return $a if $a->type eq '%Array*';
@@ -747,13 +788,21 @@ sub array_of {
         return $a;
     }
     # A METHOD IN LIST CONTEXT: its wrapper hands back a reference to a list
-    # always (the sub's list, or one of its value).
-    return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ])
-        if blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'method';
+    # always (the sub's list, or one of its value) -- but a class's `new`,
+    # made here, is its object.
+    if (blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'method') {
+        if ($b->_constructs($n)) {
+            my $a = $b->emit(op => 'NewArray', type => '%Array*');
+            $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->value($n) ]);
+            return $a;
+        }
+        return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ]);
+    }
     # A LIST A LOOP BUILDS (a phi of one, map's ListAppend) is its array.
     return $b->value($n) if blessed($n) && $n->operation =~ /\A(?:Phi|ListAppend)\z/ && $b->type_of($n) eq '%Array*';
     # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`).
-    return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if _named_hash($n);
+    return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if _named_hash($n)
+        || blessed($n) && $n->operation eq 'FieldAccess' && ( $b->field_of($n) )[1] eq '%';
     return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n->inputs->[0]) ])
         if blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%';
     # THROUGH AN ELEMENT (`$a[1][0]`, not `$_[N]`) perl makes the element an
@@ -770,7 +819,7 @@ sub array_of {
 # place -- after every read the array's version had.
 sub array_stmt {
     my ($b, $s) = @_;
-    $b->reads_before($_) for @{ $b->{passed} };
+    $b->hash_reads_settled('a ' . $s->name);   # (it may store through a reference: `push @$r, 1`)
     my @in = $s->inputs->@*;
     pop @in if $s->can('memory_input') && $s->memory_input;
     if ($s->name eq 'push') {
@@ -781,6 +830,8 @@ sub array_stmt {
             if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->array_of($e) ]); next }
             $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($e), '%Slot') ]);
         }
+        # ITS VALUE is the array's new count (an ADJUST's last statement).
+        $b->{memo}{ refaddr($s) } = $b->emit(op => 'ALen', type => 'i64', inputs => [$a]);
         return;
     }
     $b->value($s);   # shift, pop: made here, its value memoized for its reader
@@ -1001,12 +1052,14 @@ sub make_mop {
     my $mop = $b->{mop} // out('a method call with no MOP');
     my %cls = map { ( $_->name => $_ ) } $mop->classes;
     my @classes = @cls{ sort keys %cls };   # by name (a sort block's $b is the builder here)
-    # A `class` (fields, ADJUST, methods with $self) is not a package of subs.
-    out('a class of the class feature') if grep { $_->methods || $_->fields || $_->adjust_blocks } @classes;
+    # A CLASS OF THE CLASS FEATURE: its methods go in its stash as subs do;
+    # its `new` is made where it is called (method_call). ADJUST is not T2's yet.
+    # (ADJUST blocks run in the `new` made where it is called)
     my %called = map { ( $_->name => 1 ) }
         grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($mop, $b->{ret});
     # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES, VERSION): not T2's.
-    my %defined = map { ( $_->name => 1 ) } map { $_->subs } @classes;
+    my %defined = map { ( $_->name => 1 ) } map { ( $_->subs, $_->methods ) } @classes;
+    $defined{new} = 1 if grep { _is_feature_class($_) } @classes;   # made where it is called
     out("a method no package defines ($_)") for grep { !$defined{$_} } sort keys %called;
     out('an AUTOLOAD') if $defined{AUTOLOAD};
     for my $cls (@classes) {
@@ -1014,12 +1067,78 @@ sub make_mop {
         $b->emit(op => 'MopClass', type => 'void', inputs => [$cs]);
         $b->emit(op => 'MopIsa', type => 'void', inputs => [ $cs, $b->const_str($cls->parent_name) ])
             if defined $cls->parent_name && length $cls->parent_name;
-        my %sub = map { ( $_->name => $_ ) } grep { $called{ $_->name } && $_->graph } $cls->subs;
+        my %sub = map { ( $_->name => $_ ) } grep { $called{ $_->name } && $_->graph } ( $cls->subs, $cls->methods );
         for my $sub (@sub{ sort keys %sub }) {
             my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
             $b->emit(op => 'MopDef', type => 'void', inputs => [ $cs, $b->const_str($sub->name) ], attr => { fn => $fn->{name} });
         }
     }
+}
+
+sub _is_feature_class {
+    my ($cls) = @_;
+    return scalar( $cls->fields ) || scalar( $cls->methods ) || ( $cls->can('is_class') && $cls->is_class );
+}
+
+# construct($Call, $cls) -> a new object of a class of the class feature:
+# blessed, each field (in order) given its named argument, else its default,
+# else undef -- an array field an empty array. A name it has no field for, or
+# a required one missing, is perl's death: refused (T2 has no die yet).
+sub construct {
+    my ($b, $c, $leaf) = @_;
+    # ITS CLASSES, the root first (:isa): each class's fields, then its
+    # ADJUST blocks, in that order, as perl initializes them.
+    my @chain;
+    for (my $k = $leaf; $k; $k = defined $k->parent_name && length $k->parent_name ? $b->{mop}->for_class( $k->parent_name ) // out('an :isa of a class not here') : undef) {
+        out('an :isa of a package not of the class feature') unless _is_feature_class($k);
+        out('an :isa cycle') if @chain > 64;
+        unshift @chain, $k;
+    }
+    my @in = $c->inputs->@*;
+    pop @in if $c->can('memory_input') && $c->memory_input;
+    my @names = @{ $c->can('param_names') ? $c->param_names // [] : [] };
+    out('a new whose arguments are not name => value') if @names != @in || grep { _is_list($_) } @in;
+    my %arg = map { ( $names[$_] => $in[$_] ) } 0 .. $#in;
+    my %param = map { ( $_->param_name => 1 ) } grep { defined $_->param_name } map { $_->fields } @chain;
+    out("a new with a parameter its class has not ($_)") for grep { !$param{$_} } @names;
+    my $obj = $b->emit(op => 'HNew', type => '%Slot');
+    $obj = $b->emit(op => 'Bless', type => '%Slot', inputs => [ $obj, $b->const_str( $leaf->name ) ]);
+    for my $cls (@chain) {
+        my @byix;   # in field order (no sort block: its $b is the builder here)
+        $byix[ $_->fieldix ] = $_ for $cls->fields;
+        for my $f (grep { defined } @byix) {
+            my $key = $b->const_str( $cls->name . '::' . $f->name );
+            if ($f->sigil eq '@') {
+                out('an array field with a default') if $f->has_default;
+                $b->emit(op => 'HSet', type => 'void', inputs => [ $obj, $key, $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->emit(op => 'NewArray', type => '%Array*') ]) ]);
+                next;
+            }
+            if ($f->sigil eq '%') {
+                out('a hash field with a default') if $f->has_default;
+                $b->emit(op => 'HSet', type => 'void', inputs => [ $obj, $key, $b->emit(op => 'HNew', type => '%Slot') ]);
+                next;
+            }
+            out('a ' . $f->sigil . ' field') unless $f->sigil eq '$';
+            my $v;
+            if (defined $f->param_name && exists $arg{ $f->param_name }) { $v = $b->as($b->value( $arg{ $f->param_name } ), '%Slot') }
+            elsif ($f->has_default) {
+                my $d = $f->default_value;
+                out('a field default that is not a constant') unless blessed($d) && $d->operation eq 'Constant';
+                $v = $b->as($b->value($d), '%Slot');
+            }
+            elsif (defined $f->param_name) { out('a new missing a required parameter (perl dies)') }
+            else { $v = $b->emit(op => 'Undef', type => '%Slot') }
+            $b->emit(op => 'HSet', type => 'void', inputs => [ $obj, $key, $v ]);
+        }
+        my $i = 0;
+        for my $adj ($cls->adjust_blocks) {
+            out('an ADJUST of no graph') unless $adj->can('graph') && $adj->graph;
+            my $fn = $b->func($adj, $cls->name . '::ADJUST_' . $i++);
+            $b->hash_reads_settled('an ADJUST');
+            $b->emit(op => 'Call', type => '%Slot', inputs => [$obj], attr => { fn => $fn->{name} });
+        }
+    }
+    return $obj;
 }
 
 sub const_str {
@@ -1042,6 +1161,14 @@ sub _all_nodes {
 # method looked up from the invocant's class at run time, its wrapper called.
 sub method_call {
     my ($b, $c) = @_;
+    if (( $c->name // '' ) eq 'new' && $b->{mop}) {
+        # B::SoN's new of a class of the class feature names its class
+        # (class_name), its inputs the named arguments' values.
+        my $cn = $c->can('class_name') ? $c->class_name : undef;
+        my $cls = defined $cn ? $b->{mop}->for_class($cn) : undef;
+        return $b->construct($c, $cls) if $cls && _is_feature_class($cls);
+        out('a new of a class not named here') if !$cls && grep { _is_feature_class($_) } $b->{mop}->classes;
+    }
     my @args = $c->inputs->@*;
     pop @args if $c->can('memory_input') && $c->memory_input;
     out('a method call with no invocant') unless @args && blessed($args[0]);
@@ -1078,7 +1205,17 @@ sub scalar_arg {
         return $r unless $fn->{listret};
         out('a list a call returns passed to a sub taking scalars');
     }
+    return $b->value($n) if $b->_constructs($n);   # a class's new: its object
     return $b->emit(op => 'OneOf', type => '%Slot', inputs => [ $b->array_of($n) ]);
+}
+
+# _constructs($Call) -> true for a class's `new` made where it is called.
+sub _constructs {
+    my ($b, $c) = @_;
+    return 0 unless ( $c->name // '' ) eq 'new' && $b->{mop};
+    my $cn = $c->can('class_name') ? $c->class_name : undef;
+    my $cls = defined $cn ? $b->{mop}->for_class($cn) : undef;
+    return $cls && _is_feature_class($cls) ? 1 : 0;
 }
 
 # as_list($n) -> an %Array* of $n in list context: a list's own, or one of
@@ -1115,23 +1252,48 @@ sub func {
     # sub gives in scalar context (its last, a count, undef). The caller's
     # context (@t2_want, set before the call) picks one.
     my $valueless = $ret->can('valueless') && $ret->valueless;   # `()`, a bare return
-    my $listret = $ret->inputs->@* == 2 || $valueless;
+    # `return values %h` (keys too): one input, B::SoN's, in the caller's
+    # context -- the list, or its count. A list return as well.
+    my $hkv = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation eq 'Call'
+        && ( $ret->inputs->[0]->dispatch_kind // '' ) eq 'builtin' && ( $ret->inputs->[0]->name // '' ) =~ /\A(?:keys|values)\z/
+        && ( $ret->inputs->[0]->can('want') ? $ret->inputs->[0]->want // '' : '' ) ne 'scalar'   # `scalar(keys %h)`: a count always
+        ? $ret->inputs->[0] : undef;
+    my $listret = $ret->inputs->@* == 2 || $valueless || $hkv;
     out("sub $name returns more than one reading") if $ret->inputs->@* > 2;
+    # A METHOD OF THE CLASS FEATURE: $self is its first argument, its signature's
+    # parameter i the i+1th (B::SoN's Parameter nodes). One reading @_, or with
+    # an optional or slurpy parameter, is not T2's yet. Its arity is checked by
+    # its wrapper where it declares parameters (`method m ()` is not checked).
+    my %margs;
+    my $is_method = blessed($sub) && ( $sub->isa('Chalk::MOP::Method') || $sub->isa('Chalk::MOP::Phaser::Adjust') );   # ADJUST: a method of no parameters
+    if ($is_method) {
+        my @gn = Chalk::Target::LLVM::Context::_graph_component($g);
+        out("method $name reads \@_") if grep { $_->operation eq 'ArgsSource' } @gn;
+        my $np = $sub->can('params') ? scalar @{ $sub->params // [] } : 0;
+        out("method $name has a parameter past its declared ones")
+            if grep { $_->operation eq 'Parameter' && ( $_->index // 0 ) >= $np } @gn;
+        out("method $name has a slurpy parameter")
+            if grep { $_->operation eq 'Parameter' && ( $_->can('sigil') ? $_->sigil // '$' : '$' ) ne '$' } @gn
+            or grep { ( ref($_) ? $_->{name} // $_->{sigil} // '' : $_ // '' ) =~ /\A[@%]/ } @{ $sub->can('params') ? $sub->params // [] : [] };
+        $margs{ refaddr($_) } = 0 for grep { $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' && ( $_->symbol // '' ) eq 'self' } @gn;
+        $margs{ refaddr($_) } = $_->index + 1 for grep { $_->operation eq 'Parameter' } @gn;
+        $margs{np} = $np;
+    }
     my $an = bless {}, 'Chalk::Target::LLVM::Context';
-    my @reads = eval { $an->_collect_positional_arg_reads($g, $name) };
+    my @reads = $is_method ? () : eval { $an->_collect_positional_arg_reads($g, $name) };
     # @_ READ AS A LIST (join(@_), "@_", scalar(@_), for (@_)): the sub takes
     # @_ as one %Array its caller builds -- the list convention. A write to
     # $_[N] (the caller's variable) or a signature is not T2's.
-    my $list = !$@ && $an->{_args_read_as_a_list} && !$an->{_args_written} && !$an->{_args_slurpy} && !$an->{_args_signature};
+    my $list = !$is_method && !$@ && $an->{_args_read_as_a_list} && !$an->{_args_written} && !$an->{_args_slurpy} && !$an->{_args_signature};
     out("sub $name reads \@_ other than by shifts, \$_[N] or a signature")
-        if !$list && ( $@ || grep { !blessed($_) } @reads
+        if !$is_method && !$list && ( $@ || grep { !blessed($_) } @reads
         or $an->{_args_written} || $an->{_args_read_as_a_list} || $an->{_args_slurpy} );
     @reads = () if $list;
     # A SIGNATURE'S OPTIONAL PARAMETER has a default the body computes: not
     # T2's yet (dropped, `($a, $b = 3)` gave $b undef). Its arity is checked
     # at each call (perl dies on another).
-    my $sig = $an->{_args_signature};
-    if ($sig) {
+    my $sig = $is_method ? $margs{np} > 0 : $an->{_args_signature};
+    if ($sig && !$is_method) {
         my $decl = $sub->can('signature') ? $sub->signature // {} : {};
         out("sub $name has an optional signature parameter")
             if $decl->{optional} || ( $decl->{mandatory} // scalar @reads ) != @reads;
@@ -1139,9 +1301,10 @@ sub func {
     ( my $id = $name ) =~ s/\W+/_/g;
     # Two subs one name (a method call's bare name): the second numbered.
     $id .= '_' . scalar keys %{ $b->{funcs} } if grep { $_->{name} eq "\@f_$id" } values %{ $b->{funcs} // {} };
-    my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $list ? 1 : scalar @reads,
+    my $nargs = $is_method ? 1 + $margs{np} : $list ? 1 : scalar @reads;
+    my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $nargs,
         signature => $sig, list => $list, listret => $listret, blocks => [] };
-    my @argn = map { Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot', attr => { index => $_ }) } 0 .. $#reads;
+    my @argn = map { Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot', attr => { index => $_ }) } 0 .. ( $is_method ? $nargs : scalar @reads ) - 1;
     $argn[$_]->set_name("%a$_") for 0 .. $#argn;
     my $argsarr = $list ? Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Array*', attr => { index => 0 }) : undef;
     $argsarr->set_name('%a0') if $argsarr;
@@ -1155,7 +1318,9 @@ sub func {
     local $b->{cur};
     local $b->{locs} = {};
     local $b->{memo} = {};
-    local $b->{args} = { map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads };
+    local $b->{args} = $is_method ? { map { ( $_ => $argn[ $margs{$_} ] ) } grep { $_ ne 'np' } keys %margs }
+                                  : { map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads };
+    local $b->{self} = $is_method ? $argn[0] : undef;   # a field's object
     local $b->{ret} = $ret;
     local $b->{passed} = [ grep { $_->operation eq 'MemStart' } Chalk::Target::LLVM::Context::_graph_component($g) ];
     local $b->{readers};
@@ -1181,7 +1346,13 @@ sub func {
     out('an early exit to a merge never reached') if %{ $b->{jumps} };
     my $v = $ret->inputs->[0];
     my $r;
-    if ($valueless) {   # no element in a list, undef in a scalar
+    if ($hkv) {
+        my $h = $b->hash_of( $hkv->inputs->[0] );
+        my $l = $b->emit(op => $hkv->name eq 'keys' ? 'HKeys' : 'HValues', type => '%Array*', inputs => [$h]);
+        my $n = $b->as($b->emit(op => 'HCount', type => 'i64', inputs => [$h]), '%Slot');
+        $r = $b->emit(op => 'Select', type => '%Slot', inputs => [ $want, $b->emit(op => 'ARef', type => '%Slot', inputs => [$l]), $n ]);
+    }
+    elsif ($valueless) {   # no element in a list, undef in a scalar
         my $l = $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->emit(op => 'NewArray', type => '%Array*') ]);
         $r = $b->emit(op => 'Select', type => '%Slot', inputs => [ $want, $l, $b->emit(op => 'Undef', type => '%Slot') ]);
     }
@@ -1364,6 +1535,10 @@ sub type_of {
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
     return '%Array*' if _argv($v);
     return '%Slot' if _pkg_scalar($v);   # what it holds is what was stored last, anywhere
+    if ($op eq 'FieldAccess') {
+        my (undef, $sg) = $b->field_of($v);
+        return $sg eq '@' ? '%Array*' : '%Slot';   # a scalar's value, or a hash's (its %Slot)
+    }
     return '%Str' if $op eq 'EntryDef';
     return '%Slot' if $op eq 'PadAccess' && $v->is_location;
     return '%Slot' if $op eq 'Increment' || $op eq 'Decrement';
@@ -1413,6 +1588,14 @@ sub _value {
     my $ty = $b->type_of($v);
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'direct') { return $b->call($v) }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'method') { return $b->method_call($v) }
+    # A push B::SoN left off the chain, a body's last statement (an ADJUST's):
+    # made where its value is wanted -- its Return, the only use allowed.
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'push' && !_pinned($v)) {
+        out('a push off the chain used other than by a return')
+            if grep { blessed($_) && $_->operation ne 'Return' } ( $v->consumers // [] )->@*;
+        $b->array_stmt($v);
+        return $b->{memo}{ refaddr($v) };
+    }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless') {
         my @in = $v->inputs->@*;
         pop @in if $v->can('memory_input') && $v->memory_input;
@@ -1432,6 +1615,13 @@ sub _value {
     }
     if (my $h = $b->hash_value($v, $op)) { return $h }
     if (my $arr = $b->array_value($v, $op)) { return $arr }
+    if ($op eq 'FieldAccess') {
+        my ($key, $sg) = $b->field_of($v);
+        my $self = $b->{self} // out('a field outside a method');
+        out('a field read of no one version') if $b->{unversioned}{ refaddr($v) };
+        my $slot = $b->emit(op => 'HGet', type => '%Slot', inputs => [ $self, $b->const_str($key) ]);
+        return $sg eq '@' ? $b->emit(op => 'ADeref', type => '%Array*', inputs => [$slot]) : $slot;
+    }
     if (_pkg_scalar($v)) {
         out('a package scalar read of no one version') if $b->{unversioned}{ refaddr($v) };
         return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_of($v) });

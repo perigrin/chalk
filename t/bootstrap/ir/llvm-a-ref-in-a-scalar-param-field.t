@@ -64,7 +64,10 @@ for my $src (
 # read back as Int, the pointer would print as a number.
 {
     my $src = q{use v5.42; use experimental "class"; class N { field $v :param; method v { return $v } } my $o = N->new(v => 5); my $p = N->new(v => [1]); print $o->v, ref($p->v), "\n";};
-    ok(!eval { through_llvm($src); 1 } && $@ =~ /GAP/, "an Int field given a reference is refused") or diag $@;
+    # T2 (slice 18) holds a field as a %Slot of whatever it is given: perl's answer.
+    my $got = eval { through_llvm($src) };
+    my $want = do { my ($fh, $pl) = File::Temp::tempfile(SUFFIX => '.pl', UNLINK => 1); print $fh $src; close $fh; scalar qx($^X $pl 2>/dev/null) };
+    ok(( defined $got && $got eq $want ) || ( !defined $got && $@ =~ /GAP/ ), "an Int field given a reference: perl's answer, or refused") or diag $@;
 }
 
 done_testing;

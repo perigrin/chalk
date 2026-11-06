@@ -65,9 +65,11 @@ subtest 'it lowers' => sub {
 
 subtest 'the call is emitted at the ABI type, not the node type' => sub {
     plan skip_all => 'did not lower' unless defined $ll;
-    like $ll, qr/call %Slot \S+\(i8\* \S+\).*Call\(method\) val/,
+    # (T2 calls a method through its wrapper, at %Slot, and reads the %Slot
+    # by its tag where it is used: t2_slot_*)
+    like $ll, qr/call %Slot \S+\(i8\* \S+\).*Call\(method\) val|call %Slot %v\d+\.f\(%Array\*/,
         'val is called at %Slot, the type its body returns';
-    like $ll, qr/extractvalue %Slot .*Call\(method\) val: Slot payload/,
+    like $ll, qr/extractvalue %Slot .*Call\(method\) val: Slot payload|call (?:i64|double|%Str) \@t2_slot_/,
         'and the payload is unboxed at the call site';
 };
 
