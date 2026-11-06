@@ -63,6 +63,10 @@ sub mk { my ($cls) = @_; return $cls->new } print ref(mk("N")), mk("N")->hi, "\n
 package K { use parent -norequire, 'P'; sub hi { "k" } }
 package L { use parent -norequire, 'P'; }
 print P->new->call_hi, K->new->call_hi, L->new->call_hi, "\n";}, 'use parent: an override, an inherited method' ],
+    [ q{package P { sub new { bless {}, shift } sub hi { "p" } sub call_hi { $_[0]->hi } }
+package K { our @ISA = ('P'); sub hi { "k" } }
+package L { our @ISA = ('P'); }
+print P->new->call_hi, K->new->call_hi, L->new->call_hi, "\n";}, 'our @ISA = (...): an override, an inherited method' ],
 ) {
     my ($src, $name) = @$case;
     $LAST_LL = '';
@@ -76,9 +80,6 @@ for my $case (
     [ q{package P { sub new { bless {}, shift } sub hi { "p" } }
 package K { use parent -norequire, 'P'; }
 sub f { $_[0]->hi } print f(K->new), f(P->new), "\n";}, 'an inherited method' ],
-    [ q{package P { sub new { bless {}, shift } sub hi { "p" } }
-package K { our @ISA = ('P'); }
-sub f { $_[0]->hi } print f(K->new), f(P->new), "\n";}, 'an inherited method, @ISA' ],
     [ q{package P { sub new { bless {}, shift } our $AUTOLOAD; sub AUTOLOAD { "auto" } sub DESTROY {} }
 sub f { $_[0]->hi } print f(P->new), "\n";}, 'AUTOLOAD' ],
 ) {

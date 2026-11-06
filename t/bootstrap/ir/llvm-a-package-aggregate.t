@@ -43,6 +43,8 @@ for my $src (
     q{%::h = (a => 1, b => 2); print scalar(keys %::h), "\n"; print $::h{a}, "\n";},
     q{our @q = (4, 5); sub add { push @q, $_[0] } add(6); print "@q\n";},
     q{package P; our %seen; sub mark { $seen{$_[0]}++ } package main; P::mark("x"); P::mark("x"); print $P::seen{x}, "\n";},
+    # @ISA is the run-time MOP's (T2): a package's parents, not perl's own.
+    q{package D; our @ISA = ("B"); print "ok\n";},
 ) {
     my $want = qx($^X -e '$src' 2>&1);
     my $got = eval { through_llvm($src) };
@@ -53,7 +55,6 @@ for my $src (
 for my $src (
     q{print scalar(@INC) > 0 ? "y" : "n", "\n";},
     q{print exists $INC{"strict.pm"} ? "y" : "n", "\n";},
-    q{package D; our @ISA = ("B"); print "ok\n";},
 ) {
     my $got = eval { through_llvm($src) };
     like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';

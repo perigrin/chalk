@@ -38,6 +38,7 @@ use Scalar::Util qw(blessed refaddr);
 # Undef and a Scalar nothing narrowed are each a %Slot: its tag says which.
 my %SCALAR = (Int => 'i64', Num => 'double', Str => '%Str', Boolean => 'i1', Undef => '%Slot', Scalar => '%Slot');
 my %ARITH  = (Add => 'add', Subtract => 'sub', Multiply => 'mul');
+my %SCMP   = (StrEq => 'eq', StrNe => 'ne', StrLt => 'lt', StrGt => 'gt', StrLe => 'le', StrGe => 'ge');
 my %CMP    = (NumLt => 'lt', NumGt => 'gt', NumLe => 'le', NumGe => 'ge', NumEq => 'eq', NumNe => 'ne');
 
 sub _n { Chalk::Target::LLVM::T2::Node->new(@_) }
@@ -144,6 +145,10 @@ sub walk {
             $ctl = $s;
         }
         elsif ($op eq 'Assign') { $b->assign($s); push @{ $b->{passed} }, $s; $ctl = $s }
+        # `package X;` names the package code after it is in: nothing T2 reads.
+        elsif ($op eq 'PackageMark') { $ctl = $s }
+        # `@X::ISA = (...)`: the run-time MOP's parents of X, replaced.
+        elsif ($op eq 'EntryWrite' && $b->isa_write($s)) { $ctl = $s }
         # A `my @a` PINNED WHERE IT RUNS (B::SoN pins one in a loop body or an
         # arm): a fresh array there, each time control reaches it.
         elsif ($op eq 'ArrayLiteral' && ( $s->stamp // '' ) eq 'Array') { $b->value($s); $ctl = $s }   # static type
@@ -159,6 +164,34 @@ sub walk {
         else { out("a statement $op") }
     }
     return $ctl;
+}
+
+# hash_reads_settled($what): before what may store into a hash (a hash store,
+# a call), no read of a hash element of a version it replaces may still be
+# to make -- made after, it would see the new value. Refused if one is.
+sub hash_reads_settled {
+    my ($b, $what) = @_;
+    for my $ver (@{ $b->{passed} }) {
+        out("a hash element read waiting across $what")
+            if grep { $_->operation eq 'Subscript' && ( $_->can('kind') ? $_->kind // '' : '' ) eq 'hash' && !$b->{memo}{ refaddr($_) } }
+               @{ $b->{readers}{ refaddr($ver) } // [] };
+    }
+}
+
+# isa_write($EntryWrite) -> true when it is `our @ISA = (LIST)` (any
+# package's), its parents now the list's values, in order.
+sub isa_write {
+    my ($b, $s) = @_;
+    my ($to, $from) = $s->inputs->@*;
+    return 0 unless blessed($to) && $to->operation eq 'EntryDef' && ( $to->sigil // '' ) eq '@' && ( $to->symbol // '' ) eq 'ISA';
+    my $pkg = $to->can('package') ? $to->package : undef;
+    out('an @ISA of no known package') unless defined $pkg && length $pkg;
+    out('an @ISA written from what is not a list of names') unless blessed($from) && $from->operation eq 'ArrayLiteral';
+    out('an @ISA of a list') if grep { ( $_->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/ } $from->inputs->@*; # static type
+    my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+    $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($_), '%Slot') ]) for $from->inputs->@*;
+    $b->emit(op => 'MopIsaSet', type => 'void', inputs => [ $b->const_str($pkg), $arr ]);
+    return 1;
 }
 
 # args_assign($Assign): `my ($x, $y) = @_` on the chain. Each target is an
@@ -408,7 +441,22 @@ sub array_stmt {
 # element_store($Subscript, $value): `$a[i] = v`, the array growing to i.
 sub element_store {
     my ($b, $target, $v, $s) = @_;
-    out('a hash element store') unless ( $target->can('kind') ? $target->kind // 'array' : 'array' ) eq 'array';
+    if (( $target->can('kind') ? $target->kind // 'array' : 'array' ) eq 'hash') {
+        my ($h, $k) = $target->inputs->@[0, 1];
+        out('a hash element store of a named hash') if ( $h->can('sigil') ? $h->sigil // '' : '' ) eq '%' || $h->operation eq 'Constant'
+            || $h->operation =~ /\A(?:HashLiteral|EntryDef)\z/ && ( $h->stamp // '' ) eq 'Hash'; # static type
+        # perl evaluates what it stores, then where, then stores.
+        my $val = $b->as($b->value($v), '%Slot');
+        my $key = $b->as($b->value($k), '%Str');
+        my $ref = $b->as($b->value($h), '%Slot');
+        # A HASH READ STILL TO BE MADE, of a version this store replaces, would
+        # be made after it and see the new value: refused. (reads_before leaves
+        # hash reads in place: made early, one could run above its guard.)
+        $b->hash_reads_settled('a hash store');
+        $b->reads_before($_) for @{ $b->{passed} };
+        $b->emit(op => 'HSet', type => 'void', inputs => [ $ref, $key, $val ]);
+        return;
+    }
     $b->reads_before($_) for @{ $b->{passed} };
     my ($arr, $idx) = $target->inputs->@[0, 1];
     $b->emit(op => 'ASet', type => 'void',
@@ -561,6 +609,7 @@ sub call {
     out('a call of a sub with a signature of another arity (perl dies)')
         if $fn->{signature} && @args != $fn->{nargs};
     my @pass = map { $b->as($b->value($_), '%Slot') } @args;
+    $b->hash_reads_settled('a call');   # the sub may store into a hash
     push @pass, $b->emit(op => 'Undef', type => '%Slot') while @pass < $fn->{nargs};
     splice @pass, $fn->{nargs};
     return $b->emit(op => 'Call', type => '%Slot', inputs => \@pass, attr => { fn => $fn->{name} });
@@ -625,6 +674,7 @@ sub method_call {
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
     $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for @pass;
     my $cls = $b->emit(op => 'ClassOf', type => '%Str', inputs => [ $pass[0] ]);
+    $b->hash_reads_settled('a method call');
     my $fp = $b->emit(op => 'MFind', type => 'i8*', inputs => [ $cls, $b->const_str($c->name) ]);
     return $b->emit(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
 }
@@ -928,6 +978,14 @@ sub _value {
         my $t = ( grep { $_->type ne 'i64' } @in ) ? 'double' : 'i64';
         return $b->emit(op => 'Cmp', type => 'i1', inputs => [ map { $b->as($_, $t) } @in ], attr => { op => $c });
     }
+    # PERL'S STRING COMPARISONS: bytewise, a shorter prefix first (cmp's
+    # -1, 0 or 1; the others it against 0).
+    if ($op eq 'StrCmp' || $SCMP{$op}) {
+        my $c3 = $b->emit(op => 'StrCmp', type => 'i64', inputs => [ map { $b->as($b->value($_), '%Str') } $v->inputs->@[0, 1] ]);
+        return $b->as($c3, $ty) if $op eq 'StrCmp';
+        my $z = $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
+        return $b->as($b->emit(op => 'Cmp', type => 'i1', inputs => [ $c3, $z ], attr => { op => $SCMP{$op} }), $ty);
+    }
     if ($op eq 'Concat') {
         return $b->emit(op => 'Concat', type => '%Str', inputs => [ map { $b->as($b->value($_), '%Str') } $v->inputs->@[0, 1] ]);
     }
@@ -1099,12 +1157,14 @@ sub _line {
         return "$nm = call double \@t2_div(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
     }
     return "$nm = call %Str \@t2_concat(" . $arg->(@in) . ')' if $op eq 'Concat';
+    return "$nm = call i64 \@t2_strcmp(" . $arg->(@in) . ')' if $op eq 'StrCmp';
     return "$nm = call %Array* \@t2_new_array()" if $op eq 'NewArray';
     return "$nm = call %Slot \@t2_hnew()" if $op eq 'HNew';
     return "$nm = call %Slot \@t2_bless(" . $arg->(@in) . ')' if $op eq 'Bless';
     return "$nm = call %Str \@t2_reftype(" . $arg->(@in) . ')' if $op eq 'RefType';
     return "call void \@t2_mop_class(" . $arg->(@in) . ')' if $op eq 'MopClass';
     return "call void \@t2_mop_isa(" . $arg->(@in) . ')' if $op eq 'MopIsa';
+    return "call void \@t2_mop_isa_set(" . $arg->(@in) . ')' if $op eq 'MopIsaSet';
     return "call void \@t2_mop_def(" . $arg->(@in) . ", i8* bitcast (%Slot (%Array*)* $a{fn}_w to i8*))" if $op eq 'MopDef';
     return "$nm = call %Str \@t2_classof(" . $arg->(@in) . ')' if $op eq 'ClassOf';
     return "$nm = call i8* \@t2_mfind(" . $arg->(@in) . ')' if $op eq 'MFind';
@@ -2048,6 +2108,56 @@ make:
   ret %Slot %n
 have:
   ret %Slot %t
+}
+; t2_strcmp(x, y) -> perl's cmp: -1, 0 or 1, bytewise, a prefix first.
+define internal i64 @t2_strcmp(%Str %x, %Str %y) {
+entry:
+  %xp = extractvalue %Str %x, 0
+  %xl = extractvalue %Str %x, 1
+  %yp = extractvalue %Str %y, 0
+  %yl = extractvalue %Str %y, 1
+  %short = icmp slt i64 %xl, %yl
+  %m = select i1 %short, i64 %xl, i64 %yl
+  %r = call i32 @memcmp(i8* %xp, i8* %yp, i64 %m)
+  %neg = icmp slt i32 %r, 0
+  %pos = icmp sgt i32 %r, 0
+  br i1 %neg, label %lt, label %notlt
+notlt:
+  br i1 %pos, label %gt, label %bylen
+bylen:
+  br i1 %short, label %lt, label %notshort
+notshort:
+  %longer = icmp sgt i64 %xl, %yl
+  br i1 %longer, label %gt, label %eq
+lt:
+  ret i64 -1
+gt:
+  ret i64 1
+eq:
+  ret i64 0
+}
+; t2_stash(c) -> c's stash, made empty if c has none yet.
+define internal %Slot @t2_stash(%Str %c) {
+entry:
+  %t = call %Slot @t2_stash_table()
+  %s = call %Slot @t2_hget(%Slot %t, %Str %c)
+  %st = extractvalue %Slot %s, 0
+  %has = icmp eq i8 %st, 5
+  br i1 %has, label %ok, label %make
+make:
+  %n = call %Slot @t2_hnew()
+  call void @t2_hset(%Slot %t, %Str %c, %Slot %n)
+  ret %Slot %n
+ok:
+  ret %Slot %s
+}
+define internal void @t2_mop_isa_set(%Str %c, %Array* %a) {
+  %s = call %Slot @t2_stash(%Str %c)
+  %k = call %Str @t2_isa_key()
+  %ai = ptrtoint %Array* %a to i64
+  %as = call %Slot @t2_slot(i8 6, i64 %ai)
+  call void @t2_hset(%Slot %s, %Str %k, %Slot %as)
+  ret void
 }
 define internal void @t2_mop_class(%Str %c) {
   %t = call %Slot @t2_stash_table()
