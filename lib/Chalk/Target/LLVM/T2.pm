@@ -155,6 +155,15 @@ sub walk {
         }
         # `package X;` names the package code after it is in: nothing T2 reads.
         elsif ($op eq 'PackageMark') { $ctl = $s }
+        # A PACKAGE SCALAR WRITTEN: what it held is read first, then stored.
+        elsif ($op eq 'EntryWrite' && _pkg_scalar($s->inputs->[0])) {
+            out('a local') if $s->can('local') && $s->local;
+            my $val = $b->as($b->value($s->inputs->[1]), '%Slot');
+            $b->hash_reads_settled('a package store');
+            $b->emit(op => 'GStore', type => 'void', inputs => [$val], attr => { global => $b->global_of($s->inputs->[0]) });
+            push @{ $b->{passed} }, $s;
+            $ctl = $s;
+        }
         # `@X::ISA = (...)`: the run-time MOP's parents of X, replaced.
         elsif ($op eq 'EntryWrite' && $b->isa_write($s)) { $ctl = $s }
         # A `my @a` PINNED WHERE IT RUNS (B::SoN pins one in a loop body or an
@@ -317,7 +326,7 @@ sub _is_version {
     my ($n) = @_;
     return 0 unless blessed($n) && $n->can('operation');
     my $op = $n->operation;
-    return 1 if $op eq 'MemStart' || $op eq 'Assign';
+    return 1 if $op =~ /\A(?:MemStart|Assign|EntryWrite|Delete)\z/;   # a store's version
     return 1 if $op eq 'Call' && $n->can('control_in') && blessed($n->control_in);
     return $op eq 'Phi' && Chalk::Target::LLVM::Context::_is_memory_phi($n) ? 1 : 0;
 }
@@ -331,7 +340,8 @@ sub _memory_input {
     my $op = $n->operation;
     my @in = $n->inputs->@*;
     return $in[0] if $op eq 'PadAccess' && $n->is_location;
-    return $in[2] if $op eq 'Subscript';
+    return $in[2] if $op eq 'Subscript' || $op eq 'Exists';
+    return $in[0] if _pkg_scalar($n);   # a package scalar's read, at its version
     return $in[1] if $op eq 'Count' || $op eq 'PostfixDeref';
     return $in[-1] if $op eq 'Call' && $n->can('memory_input') && $n->memory_input;
     return undef;
@@ -347,6 +357,18 @@ sub index_readers {
         next if $n->operation =~ /\A(?:Phi|Region|Proj|Start|Return|MemStart)\z/;
         my $m = _memory_input($n);
         push @{ $r{ refaddr($m) } }, $n if _is_version($m);
+    }
+    # A PACKAGE SCALAR READ WITH NO VERSION: B::SoN reads a write's target
+    # node (`$x += 1` reads the node it writes). One write: the read is at that
+    # write's memory. Several (local's save, store, restore): no one version --
+    # refused where it is read. None: the function's starting memory.
+    my @starts = grep { $_->operation eq 'MemStart' } @nodes;
+    for my $n (grep { _pkg_scalar($_) && !$_->inputs->@* } @nodes) {
+        my @w = grep { $_->operation eq 'EntryWrite' && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($n) }
+            ( $n->consumers // [] )->@*;
+        my %seen; @w = grep { !$seen{ refaddr($_) }++ } @w;
+        if (@w > 1) { $b->{unversioned}{ refaddr($n) } = 1; next }
+        push @{ $r{ refaddr($_) } }, $n for @w ? grep { _is_version($_) } $w[0]->inputs->[2] : @starts;
     }
     $b->{readers} = \%r;
 }
@@ -552,6 +574,21 @@ sub _is_list {
 sub _aderef {
     my ($n) = @_;
     return blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '@' ) eq '@';
+}
+
+# A PACKAGE SCALAR (`our $g`, `$::s`, `$P::v`): one global %Slot every sub
+# reads and writes. perl's own ($/, $", $0, $_, $a/$b of sort, ...) are not.
+my %PERLS_OWN = map { ( $_ => 1 ) } qw(ARGV ENV INC STDIN STDOUT STDERR _ 0 a b AUTOLOAD);
+sub _pkg_scalar {
+    my ($n) = @_;
+    return blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) eq '$'
+        && ( $n->symbol // '' ) =~ /\A[A-Za-z_]\w*\z/ && !$PERLS_OWN{ $n->symbol };
+}
+sub global_of {
+    my ($b, $n) = @_;
+    my $name = ( ( $n->can('package') ? $n->package : undef ) // 'main' ) . '::' . $n->symbol;
+    ( my $id = $name ) =~ s/\W+/_/g;
+    return $b->{globals}{$name} //= "\@g_$id";
 }
 
 # @ARGV: the program's arguments, one array (made from argv on first use).
@@ -1098,6 +1135,7 @@ sub type_of {
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
     return '%Array*' if _argv($v);
+    return '%Slot' if _pkg_scalar($v);   # what it holds is what was stored last, anywhere
     return '%Str' if $op eq 'EntryDef';
     return '%Slot' if $op eq 'PadAccess' && $v->is_location;
     return '%Slot' if $op eq 'Increment' || $op eq 'Decrement';
@@ -1166,6 +1204,10 @@ sub _value {
     }
     if (my $h = $b->hash_value($v, $op)) { return $h }
     if (my $arr = $b->array_value($v, $op)) { return $arr }
+    if (_pkg_scalar($v)) {
+        out('a package scalar read of no one version') if $b->{unversioned}{ refaddr($v) };
+        return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_of($v) });
+    }
     if ($op eq 'Length') {
         # perl's length counts characters; T2's strings are bytes -- the same
         # only while no string constant goes past ASCII.
@@ -1347,6 +1389,7 @@ sub print_module {
         my $len = do { use bytes; length $s };
         push @L, sprintf('@s%d = private unnamed_addr constant [%d x i8] c"%s\00"', $strs->{$s}, $len + 1, _c($s));
     }
+    push @L, "$_ = internal global %Slot zeroinitializer" for sort values %{ $bld->{globals} // {} };
     push @L, 'define i32 @main(i32 %argc, i8** %argv) {', _blocks($bld->{blocks}), '}', '';
     # EACH SUB A FUNCTION: `%Slot (%Slot %a0, ...)`, its blocks printed alike.
     for my $fn (sort { $a->{name} cmp $b->{name} } values %{ $bld->{funcs} // {} }) {
@@ -1444,6 +1487,8 @@ sub _line {
     return "$nm = call %Array* \@t2_new_array()" if $op eq 'NewArray';
     return "$nm = call %Slot \@t2_hnew()" if $op eq 'HNew';
     return "call void \@t2_save_args(i32 %argc, i8** %argv)" if $op eq 'SaveArgs';
+    return "$nm = load %Slot, %Slot* $a{global}" if $op eq 'GLoad';
+    return "store %Slot " . $in[0]->name . ", %Slot* $a{global}" if $op eq 'GStore';
     return "$nm = call %Array* \@t2_argv()" if $op eq 'Argv';
     return "$nm = call %Slot \@t2_bless(" . $arg->(@in) . ')' if $op eq 'Bless';
     return "$nm = call %Str \@t2_reftype(" . $arg->(@in) . ')' if $op eq 'RefType';

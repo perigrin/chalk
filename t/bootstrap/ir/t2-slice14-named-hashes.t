@@ -55,6 +55,8 @@ for my $case (
     [ q{sub f { my %o = @_; return exists $o{k} ? $o{k} : "none" } print f(k => 4), f(j => 1), "\n";}, 'my %o = @_' ],
     [ q{my $r = {p => 1}; print exists $r->{p} ? 1 : 0, exists $r->{q} ? 1 : 0, "\n";}, 'exists through a reference' ],
     [ q{my %h = (b => 2, a => 1); my $s = ""; for my $k (keys %h) { $s .= $k } my $t = 0; for my $v (values %h) { $t += $v } print length($s), $t, "\n";}, 'keys and values as lists' ],
+    [ q{my %h = (a => 1); my $e = exists $h{a}; delete $h{a}; print $e ? "was" : "not", exists $h{a} ? "is" : "gone", "\n";}, 'an exists kept across a delete' ],
+    [ q{my %h = (a => 1, b => 2); delete $h{a}; my $x = $h{b}; $h{b} = 9; print $x, $h{b}, "\n";}, 'a read after a delete kept across a store' ],
     [ q{sub n { my ($s) = @_; return length($s) } print length("abc"), length(""), n("xy"), n(12345), "\n";}, 'length of ASCII strings and a number' ],
     [ q{sub n { my ($s) = @_; return length($s) } print defined n(undef) ? "d" : "u", n("ab"), "\n";}, 'length of undef is undef' ],
 ) {
