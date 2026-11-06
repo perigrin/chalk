@@ -9339,8 +9339,11 @@ sub close_eval {
     my $f = ($self->{_eval_frames} // [])->[-1];
     die "GAP: a block eval's join was reached without its body being opened\n"
         unless $f && $f->{region}->id eq $region->id;
+    # (not the join's memory version -- B::SoN's, a caught die's $@ -- which
+    # is no value: taken for one, "a value nothing typed" refused the eval)
     my @phis = grep {
         blessed($_) && $_->operation eq 'Phi' && blessed($_->region) && $_->region->id eq $region->id
+            && !_is_memory_phi($_)
     } ($region->consumers // [])->@*;
     # THE BODY'S VALUE IS MADE IN THE BODY, the eval still open: a division
     # in it that dies is this eval's die (_die_on_zero).

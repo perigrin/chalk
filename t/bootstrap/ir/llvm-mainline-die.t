@@ -51,7 +51,9 @@ subtest 'a mainline die (Unwind on the control chain) emits the abort' => sub {
 
     # (T2's die is one call of its runtime's t2_die, whose exits are its own)
     my $abort_re = $ll =~ /^; chalk T2/m ? qr/call void \@t2_die\(/ : qr/call void \@exit\(i32 255\)/;
-    my $aborts = () = $ll =~ /$abort_re/g;
+    # (t2_die_unwind, the runtime's, calls it too: not counted)
+    (my $prog = $ll) =~ s{^define [^\n]*\@t2_die_unwind\(.*?^\}}{}ms;
+    my $aborts = () = $prog =~ /$abort_re/g;
     is($aborts, 1, 'exactly one abort emitted: not dropped, and not doubled')
         or diag $ll;
 

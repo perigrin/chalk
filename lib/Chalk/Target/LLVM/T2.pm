@@ -66,7 +66,13 @@ sub lower_program {
                && ( $_->inputs->[0]->can('want') ? $_->inputs->[0]->want // '' : '' ) eq 'list' }
         map { grep { blessed($_) } $_->inputs->@* }
         grep { $_->operation eq 'Print' } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
-    my $ok = eval { $b->build($ret); 1 };
+    my $ok = eval {
+        # A SCALAR DEREF dies in perl on a non-SCALAR reference, even where its
+        # value is dead and T2 never lowers it: refused in a program with an eval.
+        Chalk::Target::LLVM::T2::Builder::out('a scalar deref in a program with an eval')
+            if $b->{has_eval} && grep { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' }
+            Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
+        $b->build($ret); 1 };
     return undef unless $ok;
     # A PRINTING FAILURE (a conversion T2 lacks) falls back too: it escaped
     # as a death, a GAP where the fallback had lowered it (pvm 140).
@@ -108,6 +114,8 @@ sub build {
     }
     $b->{ret} = $ret;
     $b->{own_nodes} = [ _own_nodes($ret) ];
+    $b->{eval_at} = { map { ( refaddr( $_->eval_entry ) => $_ ) } grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed( $_->eval_entry ) } @{ $b->{own_nodes} } };
+    $b->{evals} = [];
     $b->{passed} = [ _memstarts($ret, 1) ];
     $b->index_readers(_own_nodes($ret));
     $b->new_block('entry');
@@ -134,7 +142,12 @@ sub successors {
 # skipped, its effect would be lost.
 sub walk {
     my ($b, $ctl) = @_;
+    $b->open_eval($ctl);
     while (1) {
+        # A STATEMENT AN EVAL'S BODY FOLLOWS opens it; the body's end closes it
+        # at its Region, where the body's end and its catch meet.
+        $b->open_eval($ctl);
+        if (my $r = $b->eval_region_after($ctl)) { $ctl = $b->close_eval($r); next }
         my @s = successors($ctl);
         # ONLY THE PROGRAM'S Return ends it: another hung on the same control is
         # not this program's (a graph built over an earlier one).
@@ -172,6 +185,9 @@ sub walk {
                 }
                 $b->emit(op => 'Print', type => 'void', inputs => [ $b->as($b->value($x), '%Str') ]);
             }
+            # ITS VALUE is 1 (perl's print returns true): a block's last
+            # statement, a try's catch.
+            $b->{memo}{ refaddr($s) } = $b->emit(op => 'Const', type => 'i64', attr => { value => 1 });
             $ctl = $s;
         }
         elsif ($op eq 'Loop') { $ctl = $b->loop($s) }
@@ -193,19 +209,36 @@ sub walk {
         # line N.\n" added where it does not end in a newline, and exit 255.
         # The block ends there: nothing after it in its arm runs.
         elsif ($op eq 'Unwind') {
-            # A DIE AN EVAL OR TRY MAY CATCH is not this one: refused wherever
-            # the program has one (a die in a sub its caller's try catches has
-            # no eval_id of its own). `try { die } catch` exited: "y" for "c y".
-            out('a die an eval or try may catch') if $b->{has_eval};
             my @m = grep { blessed($_) } $s->inputs->@*;
             pop @m if $s->can('memory_input') && $s->memory_input;
             out('a die of a list') if grep { _is_list($_) } @m;
             my $msg = @m ? $b->as($b->value( shift @m ), '%Str') : $b->const_str('Died');
             $msg = $b->emit(op => 'Concat', type => '%Str', inputs => [ $msg, $b->as($b->value($_), '%Str') ]) for @m;
             my $at = ' at ' . ( $s->can('file') ? $s->file // '-' : '-' ) . ' line ' . ( $s->can('line') ? $s->line // 0 : 0 ) . ".\n";
-            $b->emit(op => 'Die', type => 'void', inputs => [ $msg, $b->const_str($at) ]);
-            $b->{cur}{term} = ['unreachable'];
+            my $full = $b->emit(op => 'DieMsg', type => '%Str', inputs => [ $msg, $b->const_str($at) ]);
+            if (my $f = ( $b->{evals} // [] )->[-1]) {
+                # IN AN EVAL HERE: $@ is the message, and on to its catch.
+                out('a die of another eval than the one open here') if defined $s->eval_id && $s->eval_id ne ( $f->{region}->eval_id // '' );
+                $b->emit(op => 'SetErr', type => 'void', inputs => [$full]);
+                $b->{cur}{term} = [ 'br', $b->eval_catch($f) ];
+            }
+            elsif ($b->{has_eval} && $b->{in_func}) {
+                # AN EVAL MAY BE OPEN UP THE CALLS: caught there (the dying flag
+                # unwinds every caller), else perl's exit.
+                $b->emit(op => 'DieUnwind', type => 'void', inputs => [$full]);
+                $b->{cur}{term} = [ 'retval', $b->emit(op => 'Undef', type => '%Slot') ];
+            }
+            else {
+                $b->emit(op => 'Die', type => 'void', inputs => [$full]);
+                $b->{cur}{term} = ['unreachable'];
+            }
             $b->{cur}{dead} = 1;
+            # WHAT FOLLOWS A DIE never runs: it goes in a block of its own, no
+            # way into it (in the die's block it ran before the branch: `eval {
+            # die "b"; print "c" }` printed c).
+            my $dead = $b->new_block('dead');
+            $dead->{term} = ['unreachable'];
+            $dead->{dead} = 1;
             $ctl = $s;
         }
         # A STORE THROUGH A CELL (a captured variable written): what it is
@@ -236,6 +269,18 @@ sub walk {
         }
         # `package X;` names the package code after it is in: nothing T2 reads.
         elsif ($op eq 'PackageMark') { $ctl = $s }
+        # A READ OF $@ ON THE CHAIN is made where it stands: a caught die sets
+        # $@ with no store in the graph, so only its place orders it.
+        # (B::SoN gives two reads of $@ around a caught die one version, and
+        # the pipeline makes them one node: what is made from the first stands
+        # for both -- the outer eval's message printed the inner's, "in" for
+        # "out". Forgetting it would make a value saved from the first, used
+        # later, read the second. A $@ read already made is refused here.)
+        elsif ($op eq 'EntryDef' && _pkg_scalar($s)) {
+            out('a $@ read B::SoN made one node with an earlier one') if $s->symbol eq '@' && $b->{memo}{ refaddr($s) };
+            $b->value($s);
+            $ctl = $s;
+        }
         # A PACKAGE SCALAR WRITTEN: what it held is read first, then stored.
         elsif ($op eq 'EntryWrite' && _pkg_scalar($s->inputs->[0])) {
             out('a local') if $s->can('local') && $s->local;
@@ -262,6 +307,124 @@ sub walk {
         else { out("a statement $op" . ( $op eq 'Call' ? ' ' . ( $s->dispatch_kind // '' ) . ' ' . ( $s->name // '' ) : '' )) }
     }
     return $ctl;
+}
+
+# EVAL FRAMES. B::SoN's block eval (and try): `$@ = ""` stored before it, its
+# body on the chain after the node eval_entry names, and a Region (eval_id)
+# its end -- whose phis' last input is the value a caught die gives (undef).
+# The body opens a frame: a die in it stores $@ and branches to the frame's
+# catch; a call in it that comes back dying (the flag a die in a sub sets)
+# does too. @t2_eval_depth counts the evals open at run time: a die where
+# none is exits.
+sub open_eval {
+    my ($b, $ctl) = @_;
+    my $r = $b->{eval_at}{ refaddr($ctl) } or return;
+    return if $b->{eval_opened}{ refaddr($r) }++;
+    out('an eval whose body makes a value that may die') if $r->can('eval_may_die') && $r->eval_may_die;
+    # IN LIST OR ITS CALLER'S CONTEXT a caught die gives the empty list, not undef.
+    out('an eval in list or its caller\'s context') if $r->can('eval_want') && defined $r->eval_want;
+    $b->hash_reads_settled('an eval');
+    $b->emit(op => 'EvalEnter', type => 'void');
+    push @{ $b->{evals} }, { region => $r, catch => undef, depth => $b->{depth} // 0, start => $b->{cur}, made_before => { map { ( $_ => 1 ) } keys %{ $b->{memo} } } };
+}
+
+sub eval_catch {
+    my ($b, $f) = @_;
+    return $f->{catch} //= do {
+        my $here = $b->{cur};
+        my $c = $b->new_block('catch');
+        $b->{cur} = $here;
+        $c;
+    };
+}
+
+# eval_region_after($ctl) -> the open eval's Region when $ctl is its body's end.
+sub eval_region_after {
+    my ($b, $ctl) = @_;
+    my $f = ( $b->{evals} // [] )->[-1] or return;
+    my $r = $f->{region};
+    return grep( { blessed($_) && refaddr($_) == refaddr($ctl) } $r->inputs->@* ) ? $r : undef;
+}
+
+sub close_eval {
+    my ($b, $r) = @_;
+    my $f = pop @{ $b->{evals} };
+    out('an eval closed at another depth') if ( $b->{depth} // 0 ) != $f->{depth};
+    out('an eval Region of more than one way in') if $r->inputs->@* != 1;
+    my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
+                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $r->consumers // [] )->@*;
+    my %seen; @phis = grep { !$seen{ refaddr($_) }++ } @phis;
+    my $dead = $b->{cur}{dead};
+    my @in;
+    for my $p (@phis) {
+        my $ty = $b->phi_type($p);
+        push @in, [ $p, $ty, $dead ? undef : $b->as($b->value( $p->inputs->[0] ), $ty) ];
+    }
+    my $end = $b->{cur};
+    unless ($dead) {
+        # AN EVAL ENDING WITHOUT A DIE leaves $@ "" (an inner one's caught die
+        # was left in it: "[x]" for "[]").
+        $b->emit(op => 'SetErr', type => 'void', inputs => [ $b->const_str('') ]);
+        $b->emit(op => 'EvalLeave', type => 'void');
+    }
+    my $join = $b->new_block('evaljoin');
+    $end->{term} = [ 'br', $join ] unless $dead;
+    my @from = $dead ? () : ($end);
+    my @cv;
+    if (my $c = $f->{catch}) {
+        $b->{cur} = $c;
+        $b->emit(op => 'EvalLeave', type => 'void');
+        $b->emit(op => 'ClearDying', type => 'void');
+        # (a value made here is the catch's: not seen after -- an undef made in
+        # one eval's catch was another's phi input, not dominating it)
+        local $b->{memo} = { %{ $b->{memo} } };
+        @cv = map { $b->as($b->value( $_->[0]->inputs->[-1] ), $_->[1]) } @in;
+        $c = $b->{cur};
+        $c->{term} = [ 'br', $join ];
+        push @from, $c;
+    }
+    out('an eval of no way to its end') unless @from;
+    # A VALUE THE BODY MADE past its first block need not dominate the join
+    # (a die skips it): a constant is made again where it is next read;
+    # anything else is refused (the 1 one try made was the next try's: "does
+    # not dominate all uses"). One made in the first block is before any die.
+    my %first = map { ( refaddr($_) => 1 ) } @{ $f->{start}{nodes} };
+    $b->{past_eval}{$_} = 1 for grep { my $m = $b->{memo}{$_}; !$f->{made_before}{$_} && !( ref $m && $first{ refaddr($m) } ) } keys %{ $b->{memo} };
+    $b->{cur} = $join;
+    for my $i (0 .. $#in) {
+        my ($p, $ty, $nv) = @{ $in[$i] };
+        my @vals = ( ( $dead ? () : $nv ), ( $f->{catch} ? $cv[$i] : () ) );
+        $b->{memo}{ refaddr($p) } = @vals == 1 ? $vals[0]
+            : $b->emit(op => 'Phi', type => $ty, inputs => \@vals, attr => { from => [@from] });
+    }
+    push @{ $b->{passed} }, $r, _memory_phis($r);   # (its join's memory version: B::SoN's, the $@ a die set)
+    return $r;
+}
+
+sub emit_call {
+    my ($b, %a) = @_;
+    my $r = $b->emit(%a);
+    $b->after_call;
+    return $r;
+}
+
+# after_call(): a call that may come back dying (a die in it, an eval open up
+# the calls): to the open eval's catch, else on up (this function returns).
+sub after_call {
+    my ($b) = @_;
+    return unless $b->{has_eval};
+    my $f = ( $b->{evals} // [] )->[-1];
+    return unless $f || $b->{in_func};
+    my $d = $b->emit(op => 'IsDying', type => 'i1');
+    my $here = $b->{cur};
+    my $go = $f ? $b->eval_catch($f) : do {
+        my $up = $b->new_block('unwind');
+        $up->{term} = [ 'retval', $b->emit(op => 'Undef', type => '%Slot') ];
+        $up;
+    };
+    my $cont = $b->new_block('cont');
+    $here->{term} = [ 'condbr', $d, $go, $cont ];
+    $b->{cur} = $cont;
 }
 
 # hash_reads_settled($what): before what may store through a reference (a
@@ -407,7 +570,9 @@ sub reads_before {
     # reference), so it is made where it stands, under its guard (`return 0
     # unless $t; $t->{v}`); one still to make at a store or a call is refused
     # there (ref_reads_settled), not made after it.
-    $b->value($_) for grep { !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_) }
+    # (a read pinned on the chain is made where it stands -- a $@ read made
+    # early read the inner eval's message after the outer's die: "in" for "out")
+    $b->value($_) for grep { !_pinned($_) && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_) }
         @{ $b->{readers}{ refaddr($version) } // [] };
 }
 
@@ -719,10 +884,11 @@ my %PERLS_OWN = map { ( $_ => 1 ) } qw(ARGV ENV INC STDIN STDOUT STDERR 0 a b AU
 sub _pkg_scalar {
     my ($n) = @_;
     return blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) eq '$'
-        && ( $n->symbol // '' ) =~ /\A[A-Za-z_]\w*\z/ && !$PERLS_OWN{ $n->symbol };
+        && ( ( $n->symbol // '' ) =~ /\A[A-Za-z_]\w*\z/ && !$PERLS_OWN{ $n->symbol } || ( $n->symbol // '' ) eq '@' );   # ($@: the runtime's, die sets it)
 }
 sub global_of {
     my ($b, $n) = @_;
+    return '@t2_err' if $n->symbol eq '@';
     my $name = ( ( $n->can('package') ? $n->package : undef ) // 'main' ) . '::' . $n->symbol;
     ( my $id = $name ) =~ s/\W+/_/g;
     return $b->{globals}{$name} //= "\@g_$id";
@@ -1088,7 +1254,7 @@ sub call {
         out('an & call sharing @_ of a sub not taking it as a list') unless $fn->{list} && $b->{argsarr};
         $b->hash_reads_settled('a call');
         $b->set_want($c) if $fn->{listret};
-        return $b->emit(op => 'Call', type => '%Slot', inputs => [ $b->{argsarr} ], attr => { fn => $fn->{name} });
+        return $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $b->{argsarr} ], attr => { fn => $fn->{name} });
     }
     if ($fn->{list}) {
         # @_ BUILT HERE: each scalar pushed, an array's elements appended.
@@ -1099,7 +1265,7 @@ sub call {
         }
         $b->hash_reads_settled('a call');
         $b->set_want($c) if $fn->{listret};
-        return $b->emit(op => 'Call', type => '%Slot', inputs => [$arr], attr => { fn => $fn->{name} });
+        return $b->emit_call(op => 'Call', type => '%Slot', inputs => [$arr], attr => { fn => $fn->{name} });
     }
     out('a call of a sub with a signature of another arity (perl dies)')
         if $fn->{signature} && @args != $fn->{nargs};
@@ -1108,7 +1274,7 @@ sub call {
     push @pass, $b->emit(op => 'Undef', type => '%Slot') while @pass < $fn->{nargs};
     splice @pass, $fn->{nargs};
     $b->set_want($c) if $fn->{listret};
-    return $b->emit(op => 'Call', type => '%Slot', inputs => \@pass, attr => { fn => $fn->{name} });
+    return $b->emit_call(op => 'Call', type => '%Slot', inputs => \@pass, attr => { fn => $fn->{name} });
 }
 
 # THE RUN-TIME MOP: perl's classes as data the program holds. Each package is
@@ -1204,7 +1370,7 @@ sub construct {
             out('an ADJUST of no graph') unless $adj->can('graph') && $adj->graph;
             my $fn = $b->func($adj, $cls->name . '::ADJUST_' . $i++);
             $b->hash_reads_settled('an ADJUST');
-            $b->emit(op => 'Call', type => '%Slot', inputs => [$obj], attr => { fn => $fn->{name} });
+            $b->emit_call(op => 'Call', type => '%Slot', inputs => [$obj], attr => { fn => $fn->{name} });
         }
     }
     return $obj;
@@ -1230,6 +1396,10 @@ sub _all_nodes {
 # method looked up from the invocant's class at run time, its wrapper called.
 sub method_call {
     my ($b, $c) = @_;
+    # A METHOD NO CLASS ANSWERS is perl's die, an eval's to catch; T2's lookup
+    # stops there instead -- refused in a program with an eval (it exited
+    # where perl printed "caught").
+    out('a method call in a program with an eval') if $b->{has_eval} && !$b->_constructs($c);
     if (( $c->name // '' ) eq 'new' && $b->{mop}) {
         # B::SoN's new of a class of the class feature names its class
         # (class_name), its inputs the named arguments' values.
@@ -1254,7 +1424,7 @@ sub method_call {
     $b->hash_reads_settled('a method call');
     $b->set_want($c);   # whichever sub it finds may return a list
     my $fp = $b->emit(op => 'MFind', type => 'i8*', inputs => [ $cls, $b->const_str($c->name) ]);
-    return $b->emit(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
+    return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
 }
 
 # scalar_arg($n) -> a positional argument's %Slot. A call in list context
@@ -1340,7 +1510,7 @@ sub code_call {
     }
     $b->hash_reads_settled('a call of a code value');
     $b->set_want($c);
-    return $b->emit(op => 'CallCode', type => '%Slot', inputs => [ $code, $arr ]);
+    return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $arr ]);
 }
 
 # func($sub, $name) -> the T2 function a sub is: `%Slot (%Slot args...)`, its
@@ -1440,6 +1610,10 @@ sub func {
     local $b->{self} = $is_method ? $argn[0] : undef;   # a field's object
     local $b->{env} = $closure ? do { my $e = Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot**', attr => { index => 1 }); $e->set_name('%env'); $e } : undef;
     local $b->{own_nodes} = [ Chalk::Target::LLVM::Context::_graph_component($g) ];
+    local $b->{eval_at} = { map { ( refaddr( $_->eval_entry ) => $_ ) } grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed( $_->eval_entry ) } @{ $b->{own_nodes} } };
+    local $b->{evals} = [];
+    local $b->{eval_opened} = {};
+    local $b->{in_func} = 1;
     local $b->{ret} = $ret;
     local $b->{passed} = [ grep { $_->operation eq 'MemStart' } Chalk::Target::LLVM::Context::_graph_component($g) ];
     local $b->{readers};
@@ -1463,6 +1637,7 @@ sub func {
     local $b->{jumps} = {};   # this function's early exits
     $b->walk($start);
     out('an early exit to a merge never reached') if %{ $b->{jumps} };
+    out('an eval left open at the end') if @{ $b->{evals} };
     my $v = $ret->inputs->[0];
     my $r;
     if ($hkv) {
@@ -1669,6 +1844,7 @@ sub type_of {
     # AN OBJECT is its blessed reference; ref() of one its class, or HASH.
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless';
     return '%Str' if $op eq 'RefType';
+    return 'i64' if $op eq 'Print';
     # ARITHMETIC ON A %Slot is perl's: Ints stay Ints until they overflow. Done
     # as doubles (T1 may say Num), fact(20) lost its digits.
     return '%Slot' if $ARITH{$op} && grep { $b->type_of($_) eq '%Slot' } $v->inputs->@[0, 1];
@@ -1693,6 +1869,10 @@ sub type_of {
 # value($t1) -> the T2 node for a T1 value, built once.
 sub value {
     my ($b, $v) = @_;
+    if (delete $b->{past_eval}{ refaddr($v) }) {
+        out('a value an eval made, read past its end') unless $v->operation eq 'Constant';
+        delete $b->{memo}{ refaddr($v) };
+    }
     return $b->{memo}{ refaddr($v) } //= $b->_value($v);
 }
 
@@ -1827,6 +2007,8 @@ sub _value {
         return $b->as($b->value($v->inputs->[0]), $ty);
     }
     if ($op eq 'Divide') {
+        # (by zero perl dies, an eval's to catch; T2's division exits there)
+        out('a divide in a program with an eval') if $b->{has_eval};
         # A DIVISION T1 TYPED Int is T1's error (7/2 is 3.5): not truncated here.
         out('a Divide typed Int') if $ty eq 'i64';
         # PERL DIVIDES AS NUMBERS and dies on a zero divisor, naming where.
@@ -1839,6 +2021,8 @@ sub _value {
         return $b->as($q, $ty);
     }
     if ($op eq 'Modulo') {
+        # (by zero perl dies, an eval's to catch; T2's division exits there)
+        out('a modulo in a program with an eval') if $b->{has_eval};
         # PERL'S % IS OF INTEGERS, its sign the right side's, and dies on zero.
         out('a % not typed Int') unless $ty eq 'i64';
         my $msg = "Illegal modulus zero at " . ( $v->can('file') && $v->file // '-' )
@@ -2056,6 +2240,13 @@ sub _line {
     return "$nm = alloca %Slot  ; my $a{name}\n  store %Slot zeroinitializer, %Slot* $nm" if $op eq 'Alloca';
     return "$nm = call %Slot* \@t2_cell_new()  ; my $a{name}, captured" if $op eq 'HeapCell';
     return "call void \@t2_die(" . $arg->(@in) . ')' if $op eq 'Die';
+    return "$nm = call %Str \@t2_die_msg(" . $arg->(@in) . ')' if $op eq 'DieMsg';
+    return "call void \@t2_die_unwind(" . $arg->(@in) . ')' if $op eq 'DieUnwind';
+    return "call void \@t2_set_err(" . $arg->(@in) . ')' if $op eq 'SetErr';
+    return "call void \@t2_eval_enter()" if $op eq 'EvalEnter';
+    return "call void \@t2_eval_leave()" if $op eq 'EvalLeave';
+    return "store i1 0, i1* \@t2_dying" if $op eq 'ClearDying';
+    return "$nm = load i1, i1* \@t2_dying" if $op eq 'IsDying';
     return "$nm = call %Slot** \@t2_env_new(" . $arg->(@in) . ')' if $op eq 'EnvNew';
     return "call void \@t2_env_set(" . $arg->(@in) . ')' if $op eq 'EnvSet';
     return "$nm = call %Slot* \@t2_env_get(" . $arg->(@in) . ')' if $op eq 'EnvGet';
@@ -3117,6 +3308,10 @@ have:
 define internal void @t2_save_args(i32 %c, i8** %v) {
   store i32 %c, i32* @t2_argc
   store i8** %v, i8*** @t2_argvp
+  ; perl's $@ starts "" (defined)
+  %e = call %Str @t2_str(i8* null, i64 0)
+  %es = call %Slot @t2_box_str(%Str %e)
+  store %Slot %es, %Slot* @t2_err
   ret void
 }
 ; t2_argv() -> @ARGV: argv[1..] as strings, made once.
@@ -3258,26 +3453,70 @@ define internal %Slot** @t2_code_env(%Slot %s) {
 }
 ; t2_die(msg, at): perl's uncaught die -- the message to STDERR, `at` (" at
 ; FILE line N.\n") after it unless it ends in a newline; exit 255.
-define internal void @t2_die(%Str %m, %Str %at) {
+@lit_died = private unnamed_addr constant [5 x i8] c"Died\00"
+define internal %Str @t2_die_msg(%Str %m, %Str %at) {
 entry:
-  %p = extractvalue %Str %m, 0
   %n = extractvalue %Str %m, 1
-  call i64 @write(i32 2, i8* %p, i64 %n)
   %empty = icmp eq i64 %n, 0
-  br i1 %empty, label %addat, label %last
+  br i1 %empty, label %died, label %last
+died:
+  ; die "" is "Died at FILE line N."
+  %dm = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_died, i64 0, i64 0), i64 4)
+  %dr = call %Str @t2_concat(%Str %dm, %Str %at)
+  ret %Str %dr
 last:
+  %p = extractvalue %Str %m, 0
   %li = sub i64 %n, 1
   %lp = getelementptr i8, i8* %p, i64 %li
   %lc = load i8, i8* %lp
   %nl = icmp eq i8 %lc, 10
   br i1 %nl, label %done, label %addat
 addat:
-  %ap = extractvalue %Str %at, 0
-  %an = extractvalue %Str %at, 1
-  call i64 @write(i32 2, i8* %ap, i64 %an)
-  br label %done
+  %r = call %Str @t2_concat(%Str %m, %Str %at)
+  ret %Str %r
 done:
+  ret %Str %m
+}
+define internal void @t2_die(%Str %m) {
+  %p = extractvalue %Str %m, 0
+  %n = extractvalue %Str %m, 1
+  call i64 @write(i32 2, i8* %p, i64 %n)
   call void @exit(i32 255)
+  unreachable
+}
+; EVAL: $@ (@t2_err), the evals open at run time, and the dying flag a die
+; in a sub sets for its callers to unwind by.
+@t2_err = internal global %Slot zeroinitializer
+@t2_eval_depth = internal global i64 0
+@t2_dying = internal global i1 0
+define internal void @t2_set_err(%Str %m) {
+  %s = call %Slot @t2_box_str(%Str %m)
+  store %Slot %s, %Slot* @t2_err
+  ret void
+}
+define internal void @t2_eval_enter() {
+  %d = load i64, i64* @t2_eval_depth
+  %d1 = add i64 %d, 1
+  store i64 %d1, i64* @t2_eval_depth
+  ret void
+}
+define internal void @t2_eval_leave() {
+  %d = load i64, i64* @t2_eval_depth
+  %d1 = sub i64 %d, 1
+  store i64 %d1, i64* @t2_eval_depth
+  ret void
+}
+define internal void @t2_die_unwind(%Str %m) {
+entry:
+  %d = load i64, i64* @t2_eval_depth
+  %open = icmp sgt i64 %d, 0
+  br i1 %open, label %catch, label %exit
+catch:
+  call void @t2_set_err(%Str %m)
+  store i1 1, i1* @t2_dying
+  ret void
+exit:
+  call void @t2_die(%Str %m)
   unreachable
 }
 define internal void @t2_apush_if(%Array* %a, %Slot %v, i1 %c) {
