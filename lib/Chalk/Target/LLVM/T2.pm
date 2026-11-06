@@ -48,6 +48,10 @@ sub _n { Chalk::Target::LLVM::T2::Node->new(@_) }
 sub lower_program {
     my ($class, $ret, %opt) = @_;
     my $b = bless { blocks => [], cur => undef, memo => {}, strs => {}, mop => $opt{mop} }, 'Chalk::Target::LLVM::T2::Builder';
+    # AN EVAL OR A TRY anywhere in the program (the whole program: a sub's own
+    # nodes do not show its caller's try)
+    $b->{has_eval} = scalar grep { $_->can('eval_id') && defined $_->eval_id || $_->operation eq 'TryCatch' }
+        Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
     # A CALL print TAKES THROUGH A COERCE is in list context (print's list);
     # the Coerce lists no consumer, so it is found from the Print.
     # AN ARRAY OR HASH FIELD is a list wherever a list is asked (B::SoN stamps
@@ -185,6 +189,25 @@ sub walk {
             $ctl = $s;
         }
         elsif ($op eq 'Assign') { $b->assign($s); push @{ $b->{passed} }, $s; $ctl = $s }
+        # AN UNCAUGHT DIE: its message (a list joined) to STDERR, " at FILE
+        # line N.\n" added where it does not end in a newline, and exit 255.
+        # The block ends there: nothing after it in its arm runs.
+        elsif ($op eq 'Unwind') {
+            # A DIE AN EVAL OR TRY MAY CATCH is not this one: refused wherever
+            # the program has one (a die in a sub its caller's try catches has
+            # no eval_id of its own). `try { die } catch` exited: "y" for "c y".
+            out('a die an eval or try may catch') if $b->{has_eval};
+            my @m = grep { blessed($_) } $s->inputs->@*;
+            pop @m if $s->can('memory_input') && $s->memory_input;
+            out('a die of a list') if grep { _is_list($_) } @m;
+            my $msg = @m ? $b->as($b->value( shift @m ), '%Str') : $b->const_str('Died');
+            $msg = $b->emit(op => 'Concat', type => '%Str', inputs => [ $msg, $b->as($b->value($_), '%Str') ]) for @m;
+            my $at = ' at ' . ( $s->can('file') ? $s->file // '-' : '-' ) . ' line ' . ( $s->can('line') ? $s->line // 0 : 0 ) . ".\n";
+            $b->emit(op => 'Die', type => 'void', inputs => [ $msg, $b->const_str($at) ]);
+            $b->{cur}{term} = ['unreachable'];
+            $b->{cur}{dead} = 1;
+            $ctl = $s;
+        }
         # A STORE THROUGH A CELL (a captured variable written): what it is
         # given, then the store into the variable's storage.
         elsif ($op eq 'CellWrite') {
@@ -954,11 +977,14 @@ sub if_stmt {
     # that arm's value -- made in the arm, where it is live.
     my @arm_of = map { my $in = $_; ( grep { refaddr($end{$_}) == refaddr($in) } 0, 1 )[0] } $region->inputs->@*;
     out('an if Region whose ways in are not its arms') if grep { !defined } @arm_of;
+    # AN ARM THAT DIED ends where it died: no way into the join from it.
+    my @live = grep { !$vals{ $arm_of[$_] }{block}{dead} } 0 .. $#arm_of;
+    out('an if both of whose arms die') unless @live;
     my @made;
     for my $p (@phis) {
         my $ty = $b->phi_type($p);
         my @in;
-        for my $k (0 .. $#arm_of) {
+        for my $k (@live) {
             my $arm = $arm_of[$k];
             local $b->{cur} = $vals{$arm}{block};
             local $b->{memo} = $vals{$arm}{memo};
@@ -971,7 +997,7 @@ sub if_stmt {
         push @made, [ $p, $ty, \@in ];
     }
     my $join = $b->new_block('join');
-    $_->{block}{term} = [ 'br', $join ] for values %vals;
+    $_->{block}{term} = [ 'br', $join ] for grep { !$_->{block}{dead} } values %vals;
     for my $m (@made) {
         my ($p, $ty, $in) = @$m;
         $b->{memo}{ refaddr($p) } = $b->emit(op => 'Phi', type => $ty,
@@ -1006,6 +1032,7 @@ sub join_jumps {
     my ($r) = grep { $_->operation eq 'Region' && $b->{jumps}{ refaddr($_) } } ( $ctl->consumers // [] )->@*;
     return undef unless $r;
     my @preds = ( @{ delete $b->{jumps}{ refaddr($r) } }, { block => $b->{cur}, ctl => $ctl, end => $ctl, memo => $b->{memo} } );
+    out('an early exit joined where an arm died') if grep { $_->{block}{dead} } @preds;
     my @ways = $r->inputs->@*;
     my @pred_of = map { my $in = $_; ( grep { blessed($in) && refaddr($preds[$_]{end}) == refaddr($in) } 0 .. $#preds )[0] } @ways;
     out('a merge with a way in no arm reached') if grep { !defined } @pred_of;
@@ -1545,6 +1572,7 @@ sub loop {
         @back = map { $b->as($b->value($phis[$_]->inputs->[1]), $t2[$_]->type) } 0 .. $#phis;
     }
     my $body_end = $b->{cur};
+    out('a loop body that dies at its end') if $body_end->{dead};
     $body_end->{term} = [ 'br', $head ];
     for my $i (0 .. $#t2) {
         push @{ $t2[$i]->inputs }, $back[$i];
@@ -1982,7 +2010,8 @@ sub _blocks {
         push @L, "$blk->{label}:";
         push @L, map { '  ' . _line($_) } @{ $blk->{nodes} };
         my ($k, @t) = @{ $blk->{term} // ['ret'] };
-        push @L, $k eq 'ret'    ? '  ret i32 0'
+        push @L, $k eq 'unreachable' ? '  unreachable'
+               : $k eq 'ret'    ? '  ret i32 0'
                : $k eq 'retval' ? '  ret %Slot ' . $t[0]->name
                : $k eq 'br'     ? "  br label %$t[0]{label}"
                :                    "  br i1 " . $t[0]->name . ", label %$t[1]{label}, label %$t[2]{label}";
@@ -2026,6 +2055,7 @@ sub _line {
     return "$nm = call %Slot $a{fn}(" . $arg->(@in) . ')' if $op eq 'Call';
     return "$nm = alloca %Slot  ; my $a{name}\n  store %Slot zeroinitializer, %Slot* $nm" if $op eq 'Alloca';
     return "$nm = call %Slot* \@t2_cell_new()  ; my $a{name}, captured" if $op eq 'HeapCell';
+    return "call void \@t2_die(" . $arg->(@in) . ')' if $op eq 'Die';
     return "$nm = call %Slot** \@t2_env_new(" . $arg->(@in) . ')' if $op eq 'EnvNew';
     return "call void \@t2_env_set(" . $arg->(@in) . ')' if $op eq 'EnvSet';
     return "$nm = call %Slot* \@t2_env_get(" . $arg->(@in) . ')' if $op eq 'EnvGet';
@@ -3225,6 +3255,30 @@ define internal %Slot** @t2_code_env(%Slot %s) {
   %pe = bitcast i8** %pe0 to %Slot***
   %e = load %Slot**, %Slot*** %pe
   ret %Slot** %e
+}
+; t2_die(msg, at): perl's uncaught die -- the message to STDERR, `at` (" at
+; FILE line N.\n") after it unless it ends in a newline; exit 255.
+define internal void @t2_die(%Str %m, %Str %at) {
+entry:
+  %p = extractvalue %Str %m, 0
+  %n = extractvalue %Str %m, 1
+  call i64 @write(i32 2, i8* %p, i64 %n)
+  %empty = icmp eq i64 %n, 0
+  br i1 %empty, label %addat, label %last
+last:
+  %li = sub i64 %n, 1
+  %lp = getelementptr i8, i8* %p, i64 %li
+  %lc = load i8, i8* %lp
+  %nl = icmp eq i8 %lc, 10
+  br i1 %nl, label %done, label %addat
+addat:
+  %ap = extractvalue %Str %at, 0
+  %an = extractvalue %Str %at, 1
+  call i64 @write(i32 2, i8* %ap, i64 %an)
+  br label %done
+done:
+  call void @exit(i32 255)
+  unreachable
 }
 define internal void @t2_apush_if(%Array* %a, %Slot %v, i1 %c) {
 entry:

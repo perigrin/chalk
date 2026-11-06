@@ -49,7 +49,9 @@ subtest 'a mainline die (Unwind on the control chain) emits the abort' => sub {
     ok(!$@, 'the mainline-die graph lowers without a GAP') or diag $@;
     ok(defined $ll && length $ll, 'lowering produced IR') or return;
 
-    my $aborts = () = $ll =~ /call void \@exit\(i32 255\)/g;
+    # (T2's die is one call of its runtime's t2_die, whose exits are its own)
+    my $abort_re = $ll =~ /^; chalk T2/m ? qr/call void \@t2_die\(/ : qr/call void \@exit\(i32 255\)/;
+    my $aborts = () = $ll =~ /$abort_re/g;
     is($aborts, 1, 'exactly one abort emitted: not dropped, and not doubled')
         or diag $ll;
 
