@@ -48,6 +48,15 @@ sub _n { Chalk::Target::LLVM::T2::Node->new(@_) }
 sub lower_program {
     my ($class, $ret, %opt) = @_;
     my $b = bless { blocks => [], cur => undef, memo => {}, strs => {}, mop => $opt{mop} }, 'Chalk::Target::LLVM::T2::Builder';
+    # A CALL print TAKES THROUGH A COERCE is in list context (print's list);
+    # the Coerce lists no consumer, so it is found from the Print.
+    # (want=list too: a Coerce before print is also a scalar's -- `my $n = f();
+    # print $n` is the call, coerced, B::SoN having folded $n -- 45 for 2)
+    local %Chalk::Target::LLVM::T2::Builder::PRINTED = map { ( refaddr( $_->inputs->[0] ) => 1 ) }
+        grep { $_->operation eq 'Coerce' && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'Call'
+               && ( $_->inputs->[0]->can('want') ? $_->inputs->[0]->want // '' : '' ) eq 'list' }
+        map { grep { blessed($_) } $_->inputs->@* }
+        grep { $_->operation eq 'Print' } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
     my $ok = eval { $b->build($ret); 1 };
     return undef unless $ok;
     # A PRINTING FAILURE (a conversion T2 lacks) falls back too: it escaped
@@ -135,8 +144,24 @@ sub walk {
             if !_is_version($s) && grep { my $m = blessed($_) ? _memory_input($_) : undef; blessed($m) && refaddr($m) == refaddr($s) } ( $s->consumers // [] )->@*;
         return $ctl if $op eq 'Return';
         if ($op eq 'Print') {
-            # One print of each argument, in order (perl prints the list).
-            $b->emit(op => 'Print', type => 'void', inputs => [ $b->as($b->value($_), '%Str') ]) for $s->inputs->@*;
+            # One print of each argument, in order (perl prints the list); a
+            # list's elements one after another ($, is "" until written).
+            for my $in ($s->inputs->@*) {
+                # (a list B::SoN coerced to a string for print is printed as a list;
+                # a copy: the loop variable aliases the Print's own inputs, and
+                # assigning it rewrote the graph the fallback then lowered)
+                my $x = $in;
+                $x = $x->inputs->[0] if $x->operation eq 'Coerce' && blessed( $x->inputs->[0] ) && _is_list( $x->inputs->[0] );
+                if (_is_list($x)) {
+                    out('$, written') if $b->{writes_out_sep} //= scalar grep {
+                        $_->operation =~ /\A(?:EntryWrite|LocalAlias)\z/ && grep { blessed($_) && $_->can('symbol') && ( $_->symbol // '' ) eq ',' } ( $_, $_->inputs->@* )
+                    } _all_nodes($b->{mop}, $b->{ret});
+                    my $none = $b->const_str('');
+                    $b->emit(op => 'Print', type => 'void', inputs => [ $b->emit(op => 'Join', type => '%Str', inputs => [ $none, $b->array_of($x) ]) ]);
+                    next;
+                }
+                $b->emit(op => 'Print', type => 'void', inputs => [ $b->as($b->value($x), '%Str') ]);
+            }
             $ctl = $s;
         }
         elsif ($op eq 'Loop') { $ctl = $b->loop($s) }
@@ -598,6 +623,9 @@ sub array_value {
 # says so, or it is an array or hash variable (stamped Unknown).
 sub _is_list {
     my ($n) = @_;
+    # A CALL IN LIST CONTEXT: its result is a list (of one value, maybe). Its
+    # use decides, not its stamp (a call stamped List is a scalar's in `my $n =`).
+    return _list_use($n) if $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) =~ /\A(?:direct|method)\z/;
     return 1 if ( $n->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
     return 1 if $n->operation eq 'PadAccess' && ( $n->sigil // '' ) =~ /\A[@%]\z/;
     return 0;
@@ -634,6 +662,47 @@ sub _argv {
         && ( ( $n->can('package') ? $n->package : undef ) // 'main' ) eq 'main';
 }
 
+# _list_use($call) -> true when what uses the call's value uses it as a list:
+# an element of a list (an array literal, print's and a call's arguments,
+# push's and join's), map's value, a return's list. Not B::SoN's `want`:
+# `$o->m || "x"` is want=list, but perl calls it in scalar context there. A
+# value used both ways is refused (one call, one context).
+our %PRINTED;
+sub _list_use {
+    my ($c) = @_;
+    my ($list, $scalar) = (0, 0);
+    $list++ if $PRINTED{ refaddr($c) };
+    my %seen;
+    for my $u (grep { blessed($_) && !$seen{ refaddr($_) }++ } ( $c->consumers // [] )->@*) {
+        my $op = $u->operation;
+        my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($c) } 0 .. $#{ $u->inputs };
+        # (the call as a memory version -- a read after it, a store's memory --
+        # is not a use of its value)
+        # (only its memory position: `push @a, f()` has f() as its value AND its memory)
+        my $m = _memory_input($u);
+        if (blessed($m) && refaddr($m) == refaddr($c)) {
+            my ($mi) = reverse grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($m) } 0 .. $#{ $u->inputs };
+            @pos = grep { $_ != $mi } @pos;
+        }
+        @pos = grep { $_ != $#{ $u->inputs } } @pos if $u->operation =~ /\A(?:Assign|EntryWrite|Delete|Exists)\z/;
+        @pos = () if $u->operation eq 'EntryDef';   # its input is its memory ($" read after the call)
+        next unless @pos;
+        my $at0 = grep { $_ == 0 } @pos;   # (a bare grep in an || chain takes the rest as its list)
+        my $at1 = grep { $_ == 1 } @pos;
+        if ($op eq 'ArrayLiteral' || $op eq 'Print'
+            || $op eq 'Call' && ( $u->dispatch_kind // '' ) eq 'direct'
+            || $op eq 'Call' && ( $u->dispatch_kind // '' ) eq 'method' && !$at0   # not the invocant
+            || $op eq 'Call' && ( $u->name // '' ) =~ /\A(?:push|unshift|join)\z/ && !$at0
+            || $op eq 'ListAppend' && $at1
+            || $op eq 'Return' && $u->inputs->@* == 2 && $at0) { $list++ }
+        elsif ($op eq 'Coerce' && $PRINTED{ refaddr($c) }) { }   # print's (counted above)
+        elsif ($op =~ /\A(?:Phi|Return)\z/) { }   # a merge or a tail call: its own use decides
+        else { $scalar++ }
+    }
+    out('a call used both as a list and as a scalar') if $list && $scalar;
+    return $list ? 1 : 0;
+}
+
 # A `my @a` NAMED, NOT MADE HERE: B::SoN's PadAccess of an array declared
 # once in its sub (one declared in a loop body or an arm is an ArrayLiteral
 # pinned there, made each time). One %Array per variable, made at its
@@ -665,6 +734,22 @@ sub array_of {
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]
         out('not an array');
     }
+    # A CALL IN LIST CONTEXT: a sub returning a list gives a reference to it; a
+    # sub returning one value is a list of it. A method's sub is not known here.
+    if (blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct') {
+        my $r = $b->value($n);
+        my $t = $n->target;
+        my $fn = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
+        out('a list from a call of no sub T2 made') unless $fn;
+        return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$r]) if $fn->{listret};
+        my $a = $b->emit(op => 'NewArray', type => '%Array*');
+        $b->emit(op => 'APush', type => 'void', inputs => [ $a, $r ]);
+        return $a;
+    }
+    # A METHOD IN LIST CONTEXT: its wrapper hands back a reference to a list
+    # always (the sub's list, or one of its value).
+    return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ])
+        if blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'method';
     # A LIST A LOOP BUILDS (a phi of one, map's ListAppend) is its array.
     return $b->value($n) if blessed($n) && $n->operation =~ /\A(?:Phi|ListAppend)\z/ && $b->type_of($n) eq '%Array*';
     # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`).
@@ -692,7 +777,8 @@ sub array_stmt {
         my ($arr, @vals) = @in;
         my $a = $b->array_of($arr);
         for my $e (@vals) {
-            out('a push of a list') if _is_list($e); # static type
+            # A LIST PUSHED is its elements (`push @r, f()`, `push @a, @b`).
+            if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->array_of($e) ]); next }
             $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($e), '%Slot') ]);
         }
         return;
@@ -792,7 +878,7 @@ sub if_stmt {
             my $arm = $arm_of[$k];
             local $b->{cur} = $vals{$arm}{block};
             local $b->{memo} = $vals{$arm}{memo};
-            push @in, [ $b->as($b->value($p->inputs->[$k]), $ty), $arm ];
+            push @in, [ $ty eq '%Array*' ? $b->as_list( $p->inputs->[$k] ) : $b->as($b->value($p->inputs->[$k]), $ty), $arm ];
             # MAKING IT MAY MAKE BLOCKS (a ?: B::SoN folded an inner if into):
             # the arm ends where that left off (it ended before, a phi from
             # the old end, and that block's condbr overwritten by the br).
@@ -851,7 +937,7 @@ sub join_jumps {
             my $pr = $preds[ $pred_of[$k] ];
             local $b->{cur}  = $pr->{block};
             local $b->{memo} = $pr->{memo};
-            push @in, [ $b->as($b->value($p->inputs->[$k]), $ty), $pr ];
+            push @in, [ $ty eq '%Array*' ? $b->as_list( $p->inputs->[$k] ) : $b->as($b->value($p->inputs->[$k]), $ty), $pr ];
             $pr->{block} = $b->{cur};   # making it may make blocks (see if_stmt)
         }
         push @made, [ $p, $ty, \@in ];
@@ -881,6 +967,7 @@ sub call {
     if ($c->can('shares_args') && $c->shares_args) {
         out('an & call sharing @_ of a sub not taking it as a list') unless $fn->{list} && $b->{argsarr};
         $b->hash_reads_settled('a call');
+        $b->set_want($c) if $fn->{listret};
         return $b->emit(op => 'Call', type => '%Slot', inputs => [ $b->{argsarr} ], attr => { fn => $fn->{name} });
     }
     if ($fn->{list}) {
@@ -891,15 +978,16 @@ sub call {
             else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($a), '%Slot') ]) }
         }
         $b->hash_reads_settled('a call');
+        $b->set_want($c) if $fn->{listret};
         return $b->emit(op => 'Call', type => '%Slot', inputs => [$arr], attr => { fn => $fn->{name} });
     }
-    out('a call passing a list') if grep { _is_list($_) } @args; # static type
     out('a call of a sub with a signature of another arity (perl dies)')
         if $fn->{signature} && @args != $fn->{nargs};
-    my @pass = map { $b->as($b->value($_), '%Slot') } @args;
+    my @pass = map { $b->scalar_arg($_) } @args;
     $b->hash_reads_settled('a call');   # the sub may store into a hash
     push @pass, $b->emit(op => 'Undef', type => '%Slot') while @pass < $fn->{nargs};
     splice @pass, $fn->{nargs};
+    $b->set_want($c) if $fn->{listret};
     return $b->emit(op => 'Call', type => '%Slot', inputs => \@pass, attr => { fn => $fn->{name} });
 }
 
@@ -957,14 +1045,60 @@ sub method_call {
     my @args = $c->inputs->@*;
     pop @args if $c->can('memory_input') && $c->memory_input;
     out('a method call with no invocant') unless @args && blessed($args[0]);
-    out('a method call passing a list') if grep { _is_list($_) } @args; # static type
-    my @pass = map { $b->as($b->value($_), '%Slot') } @args;
+    out('a method call on a list') if _is_list($args[0]);
+    # @_, each argument pushed, a list's elements appended.
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
-    $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for @pass;
-    my $cls = $b->emit(op => 'ClassOf', type => '%Str', inputs => [ $pass[0] ]);
+    my $inv = $b->as($b->value($args[0]), '%Slot');
+    $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $inv ]);
+    for my $a (@args[ 1 .. $#args ]) {
+        if (_is_list($a)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($a) ]) }
+        else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($a), '%Slot') ]) }
+    }
+    my $cls = $b->emit(op => 'ClassOf', type => '%Str', inputs => [ $inv ]);
     $b->hash_reads_settled('a method call');
+    $b->set_want($c);   # whichever sub it finds may return a list
     my $fp = $b->emit(op => 'MFind', type => 'i8*', inputs => [ $cls, $b->const_str($c->name) ]);
     return $b->emit(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
+}
+
+# scalar_arg($n) -> a positional argument's %Slot. A call in list context
+# (an argument is one) of a sub returning one value is that value; one that
+# may return a list (a method, a list return) must give one element -- a
+# stop at run time if it gives another number (perl passes them all). A
+# list (an array) is refused: positional subs take scalars.
+sub scalar_arg {
+    my ($b, $n) = @_;
+    return $b->as($b->value($n), '%Slot') unless _is_list($n);
+    out('a call passing a list') unless $n->operation eq 'Call';
+    if (( $n->dispatch_kind // '' ) eq 'direct') {
+        my $r = $b->value($n);
+        my $t = $n->target;
+        my $fn = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
+        out('a list from a call of no sub T2 made') unless $fn;
+        return $r unless $fn->{listret};
+        out('a list a call returns passed to a sub taking scalars');
+    }
+    return $b->emit(op => 'OneOf', type => '%Slot', inputs => [ $b->array_of($n) ]);
+}
+
+# as_list($n) -> an %Array* of $n in list context: a list's own, or one of
+# the one value.
+sub as_list {
+    my ($b, $n) = @_;
+    return $b->array_of($n) if blessed($n) && ( _is_list($n) || $b->type_of($n) eq '%Array*' );
+    my $a = $b->emit(op => 'NewArray', type => '%Array*');
+    $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($n), '%Slot') ]);
+    return $a;
+}
+
+# set_want($Call): the caller's context, for a sub returning a list.
+sub set_want {
+    my ($b, $c) = @_;
+    if ($b->{tail} && $b->{tail}{call} == refaddr($c)) {   # handed on from this sub's caller
+        return $b->emit(op => 'SetWant', type => 'void', inputs => [ $b->{tail}{want} ]);
+    }
+    my $w = $b->emit(op => 'Const', type => 'i1', attr => { value => _list_use($c) });
+    $b->emit(op => 'SetWant', type => 'void', inputs => [$w]);
 }
 
 # func($sub, $name) -> the T2 function a sub is: `%Slot (%Slot args...)`, its
@@ -977,7 +1111,12 @@ sub func {
     my $g = $sub->graph;
     my $ret = $g->returns->[0];
     out("sub $name has no Return") unless blessed($ret) && $ret->operation eq 'Return';
-    out("sub $name returns more than one reading") if $ret->inputs->@* > 1;
+    # A LIST RETURN: B::SoN's Return(list, scalar) -- the list, and what the
+    # sub gives in scalar context (its last, a count, undef). The caller's
+    # context (@t2_want, set before the call) picks one.
+    my $valueless = $ret->can('valueless') && $ret->valueless;   # `()`, a bare return
+    my $listret = $ret->inputs->@* == 2 || $valueless;
+    out("sub $name returns more than one reading") if $ret->inputs->@* > 2;
     my $an = bless {}, 'Chalk::Target::LLVM::Context';
     my @reads = eval { $an->_collect_positional_arg_reads($g, $name) };
     # @_ READ AS A LIST (join(@_), "@_", scalar(@_), for (@_)): the sub takes
@@ -1001,7 +1140,7 @@ sub func {
     # Two subs one name (a method call's bare name): the second numbered.
     $id .= '_' . scalar keys %{ $b->{funcs} } if grep { $_->{name} eq "\@f_$id" } values %{ $b->{funcs} // {} };
     my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $list ? 1 : scalar @reads,
-        signature => $sig, list => $list, blocks => [] };
+        signature => $sig, list => $list, listret => $listret, blocks => [] };
     my @argn = map { Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot', attr => { index => $_ }) } 0 .. $#reads;
     $argn[$_]->set_name("%a$_") for 0 .. $#argn;
     my $argsarr = $list ? Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Array*', attr => { index => 0 }) : undef;
@@ -1030,12 +1169,44 @@ sub func {
                : out("no way back to Start in $name");
     }
     $b->new_block('entry');
+    # THE CALLER'S CONTEXT, read first (a call in the body sets it).
+    my $want = $b->emit(op => 'GetWant', type => 'i1');
+    # `return g()` IS CALLED IN THE CALLER'S CONTEXT: it is handed on.
+    my $tail = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation eq 'Call'
+        && ( $ret->inputs->[0]->dispatch_kind // '' ) eq 'direct' ? $ret->inputs->[0] : undef;
+    local $b->{tail} = $tail ? { call => refaddr($tail), want => $want } : undef;
     $b->make_constant_arrays(Chalk::Target::LLVM::Context::_graph_component($g));
     local $b->{jumps} = {};   # this function's early exits
     $b->walk($start);
     out('an early exit to a merge never reached') if %{ $b->{jumps} };
     my $v = $ret->inputs->[0];
-    my $r = blessed($v) ? $b->as($b->value($v), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
+    my $r;
+    if ($valueless) {   # no element in a list, undef in a scalar
+        my $l = $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->emit(op => 'NewArray', type => '%Array*') ]);
+        $r = $b->emit(op => 'Select', type => '%Slot', inputs => [ $want, $l, $b->emit(op => 'Undef', type => '%Slot') ]);
+    }
+    elsif ($listret) {
+        # A FRESH ARRAY of it: a constant one is made once, at entry, and the
+        # caller may write the list it is handed (`for (f()) { $_ = 0 }`).
+        my $copy = $b->emit(op => 'NewArray', type => '%Array*');
+        $b->emit(op => 'AAppend', type => 'void', inputs => [ $copy, $b->as_list($v) ]);
+        my $l = $b->emit(op => 'ARef', type => '%Slot', inputs => [$copy]);
+        my $sv = blessed( $ret->inputs->[1] ) ? $b->as($b->value( $ret->inputs->[1] ), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
+        $r = $b->emit(op => 'Select', type => '%Slot', inputs => [ $want, $l, $sv ]);
+    }
+    elsif ($tail) {
+        # A TAIL CALL OF A SUB RETURNING A LIST: its result as it is (the
+        # list's reference or its scalar, by the context handed on).
+        my $t = $tail->target;
+        my $cf = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
+        out('a tail call of a sub not made yet (recursion)') unless $cf && refaddr($cf) != refaddr($fn);
+        if ($cf->{listret}) { $fn->{listret} = 1; $r = $b->value($tail) }
+        else { $r = $b->as($b->value($tail), '%Slot') }
+    }
+    else {
+        out("sub $name returns a list as one value") if blessed($v) && _is_list($v);
+        $r = blessed($v) ? $b->as($b->value($v), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
+    }
     $b->{cur}{term} = [ 'retval', $r ];
     return $fn;
 }
@@ -1045,6 +1216,10 @@ sub func {
 sub phi_type {
     my ($b, $phi) = @_;
     my $st = $phi->stamp // ''; # static type
+    # THE LIST A SUB RETURNS, merged from its returns (`return` in one arm, a
+    # last value in the other): an array, each arm's value a list of it.
+    return '%Array*' if grep { blessed($_) && $_->operation eq 'Return' && $_->inputs->@* == 2 && refaddr( $_->inputs->[0] ) == refaddr($phi) }
+        ( $phi->consumers // [] )->@*;
     return '%Slot' if $st =~ /\A(?:Str|Unknown|None|Scalar)\z/;
     # A LIST A LOOP BUILDS (map, grep): one array, its back edge a ListAppend
     # to it. Another array phi (`@p = ()` in a loop) is not this.
@@ -1463,13 +1638,17 @@ sub print_module {
         $_->set_name('%v' . $i++) for map { @{ $_->{nodes} } } @{ $fn->{blocks} };
         push @L, "define internal %Slot $fn->{name}(" . ( $fn->{list} ? '%Array* %a0' : join(', ', map { "%Slot %a$_" } 0 .. $fn->{nargs} - 1) ) . ') {',
             _blocks($fn->{blocks}), '}', '';
-        if ($fn->{list}) {   # its wrapper is itself: @_ already an %Array
-            push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {", "  %r = call %Slot $fn->{name}(%Array* %args)", '  ret %Slot %r', '}', '';
+        # ITS WRAPPER (a method's entry) gives a list context a reference to a
+        # list: the sub's own (a list return), or one of its one value.
+        my @norm = $fn->{listret} ? ('  ret %Slot %r') : ('  %rn = call %Slot @t2_list_of(%Slot %r, i1 %w)', '  ret %Slot %rn');
+        if ($fn->{list}) {   # @_ already an %Array
+            push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {", '  %w = load i1, i1* @t2_want',
+                "  %r = call %Slot $fn->{name}(%Array* %args)", @norm, '}', '';
             next;
         }
         # ITS WRAPPER, a method's entry: @_ as an %Array, each argument its
         # element (undef past the end). A signature's arity perl checks.
-        push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {";
+        push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {", '  %w = load i1, i1* @t2_want';
         if ($fn->{signature}) {
             push @L, '  %n = call i64 @t2_alen(%Array* %args)', "  %ok = icmp eq i64 %n, $fn->{nargs}",
                 '  br i1 %ok, label %call, label %bad', 'bad:',
@@ -1478,7 +1657,7 @@ sub print_module {
         }
         push @L, "  %a$_ = call %Slot \@t2_aget(%Array* %args, i64 $_)" for 0 .. $fn->{nargs} - 1;
         push @L, "  %r = call %Slot $fn->{name}(" . join(', ', map { "%Slot %a$_" } 0 .. $fn->{nargs} - 1) . ')',
-            '  ret %Slot %r', '}', '';
+            @norm, '}', '';
     }
     return join("\n", @L);
 }
@@ -1554,6 +1733,9 @@ sub _line {
     return "$nm = call %Array* \@t2_new_array()" if $op eq 'NewArray';
     return "$nm = call %Slot \@t2_hnew()" if $op eq 'HNew';
     return "call void \@t2_save_args(i32 %argc, i8** %argv)" if $op eq 'SaveArgs';
+    return "$nm = load i1, i1* \@t2_want" if $op eq 'GetWant';
+    return "store i1 " . $in[0]->name . ", i1* \@t2_want" if $op eq 'SetWant';
+    return "$nm = select i1 " . $in[0]->name . ', ' . $arg->( @in[ 1, 2 ] ) if $op eq 'Select';
     return "$nm = load %Slot, %Slot* $a{global}" if $op eq 'GLoad';
     return "store %Slot " . $in[0]->name . ", %Slot* $a{global}" if $op eq 'GStore';
     return "$nm = call %Array* \@t2_argv()" if $op eq 'Argv';
@@ -1580,6 +1762,7 @@ sub _line {
     return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
     return "call void \@t2_aappend(" . $arg->(@in) . ')' if $op eq 'AAppend';
     return "call void \@t2_apush_if(" . $arg->(@in) . ')' if $op eq 'APushIf';
+    return "$nm = call %Slot \@t2_one_of(" . $arg->(@in) . ')' if $op eq 'OneOf';
     return "$nm = call %Slot \@t2_aref(" . $arg->(@in) . ')' if $op eq 'ARef';
     return "$nm = call %Array* \@t2_aderef(" . $arg->(@in) . ')' if $op eq 'ADeref';
     if ($op eq 'ASet') {
@@ -2564,6 +2747,7 @@ make:
 have:
   ret %Slot %t
 }
+@t2_want = internal global i1 0   ; the caller's context: 1 a list
 @t2_argc = internal global i32 0
 @t2_argvp = internal global i8** null
 @t2_ARGV = internal global %Array* null
@@ -2620,6 +2804,32 @@ yes:
   %v = extractvalue %Slot %s, 1
   %a = inttoptr i64 %v to %Array*
   ret %Array* %a
+}
+@msg_oneof = private unnamed_addr constant [88 x i8] c"chalk: refused at run time: a list of other than one value passed as one argument (T2)\0A\00"
+; t2_one_of(a) -> a's one element; a stop when it has another number.
+define internal %Slot @t2_one_of(%Array* %a) {
+entry:
+  %n = call i64 @t2_alen(%Array* %a)
+  %one = icmp eq i64 %n, 1
+  br i1 %one, label %ok, label %bad
+ok:
+  %v = call %Slot @t2_aget(%Array* %a, i64 0)
+  ret %Slot %v
+bad:
+  call void @t2_stop(i8* getelementptr ([88 x i8], [88 x i8]* @msg_oneof, i64 0, i64 0), i64 87)
+  unreachable
+}
+; t2_list_of(v, want) -> in a list context a reference to a list of v; else v.
+define internal %Slot @t2_list_of(%Slot %v, i1 %w) {
+entry:
+  br i1 %w, label %list, label %one
+list:
+  %a = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %a, %Slot %v)
+  %r = call %Slot @t2_aref(%Array* %a)
+  ret %Slot %r
+one:
+  ret %Slot %v
 }
 define internal void @t2_apush_if(%Array* %a, %Slot %v, i1 %c) {
 entry:
