@@ -1294,18 +1294,22 @@ sub make_mop {
     # (ADJUST blocks run in the `new` made where it is called)
     my %called = map { ( $_->name =~ s/\A.*:://r => 1 ) }
         grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($mop, $b->{ret});
-    # A NAME NO PACKAGE DEFINES is perl's die ("Can't locate object method"),
-    # unless it is UNIVERSAL's (isa, can, DOES, VERSION) or an AUTOLOAD answers.
+    # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES), else perl's die
+    # ("Can't locate object method"), unless it is VERSION (not T2's) or an
+    # AUTOLOAD answers.
     my %defined = map { ( $_->name => 1 ) } map { ( $_->subs, $_->methods ) } @classes;
     $defined{new} = 1 if grep { _is_feature_class($_) } @classes;   # made where it is called
-    out("a method no package defines ($_)") for grep { !$defined{$_} && ( /\A(?:isa|can|DOES|VERSION)\z/ || $defined{AUTOLOAD} ) } sort keys %called;
+    out("a method no package defines ($_)") for grep { !$defined{$_} && ( $_ eq 'VERSION' || $defined{AUTOLOAD} ) } sort keys %called;
     out('an AUTOLOAD') if $defined{AUTOLOAD};
+    # UNIVERSAL, at the root of every lookup, first: a package of that name here would be wiped.
+    out('a UNIVERSAL package of the program\'s own') if $cls{UNIVERSAL};
+    $b->emit(op => 'MopUniversal', type => 'void');
     for my $cls (@classes) {
         my $cs = $b->const_str($cls->name);
         $b->emit(op => 'MopClass', type => 'void', inputs => [$cs]);
         $b->emit(op => 'MopIsa', type => 'void', inputs => [ $cs, $b->const_str($cls->parent_name) ])
             if defined $cls->parent_name && length $cls->parent_name;
-        my %sub = map { ( $_->name => $_ ) } grep { $called{ $_->name } && $_->graph } ( $cls->subs, $cls->methods );
+        my %sub = map { ( $_->name => $_ ) } grep { ( $called{can} || $called{ $_->name } ) && $_->graph } ( $cls->subs, $cls->methods );
         for my $sub (@sub{ sort keys %sub }) {
             my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
             $b->emit(op => 'MopDef', type => 'void', inputs => [ $cs, $b->const_str($sub->name) ], attr => { fn => $fn->{name} });
@@ -2290,6 +2294,7 @@ sub _line {
     return "$nm = call %Array* \@t2_argv()" if $op eq 'Argv';
     return "$nm = call %Slot \@t2_bless(" . $arg->(@in) . ')' if $op eq 'Bless';
     return "$nm = call %Str \@t2_reftype(" . $arg->(@in) . ')' if $op eq 'RefType';
+    return "call void \@t2_universal_setup()" if $op eq 'MopUniversal';
     return "call void \@t2_mop_class(" . $arg->(@in) . ')' if $op eq 'MopClass';
     return "call void \@t2_mop_isa(" . $arg->(@in) . ')' if $op eq 'MopIsa';
     return "call void \@t2_mop_isa_set(" . $arg->(@in) . ')' if $op eq 'MopIsaSet';
@@ -3769,6 +3774,149 @@ next:
 none:
   ret i8* null
 }
+; UNIVERSAL: perl's stash at the root of every method lookup, holding isa,
+; can and DOES (VERSION is not T2's). t2_universal_setup makes it.
+@lit_universal = private unnamed_addr constant [10 x i8] c"UNIVERSAL\00"
+@lit_u_isa = private unnamed_addr constant [4 x i8] c"isa\00"
+@lit_u_can = private unnamed_addr constant [4 x i8] c"can\00"
+@lit_u_does = private unnamed_addr constant [5 x i8] c"DOES\00"
+define internal %Str @t2_universal_key() {
+  %k = call %Str @t2_str(i8* getelementptr ([10 x i8], [10 x i8]* @lit_universal, i64 0, i64 0), i64 9)
+  ret %Str %k
+}
+define internal void @t2_universal_setup() {
+  %u = call %Str @t2_universal_key()
+  call void @t2_mop_class(%Str %u)
+  %i = call %Str @t2_str(i8* getelementptr ([4 x i8], [4 x i8]* @lit_u_isa, i64 0, i64 0), i64 3)
+  call void @t2_mop_def(%Str %u, %Str %i, i8* bitcast (%Slot (%Array*)* @t2_u_isa_w to i8*))
+  %c = call %Str @t2_str(i8* getelementptr ([4 x i8], [4 x i8]* @lit_u_can, i64 0, i64 0), i64 3)
+  call void @t2_mop_def(%Str %u, %Str %c, i8* bitcast (%Slot (%Array*)* @t2_u_can_w to i8*))
+  %d = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_u_does, i64 0, i64 0), i64 4)
+  call void @t2_mop_def(%Str %u, %Str %d, i8* bitcast (%Slot (%Array*)* @t2_u_isa_w to i8*))
+  ret void
+}
+; t2_mfind_u(class, m, skip) -> as t2_mfind1, and failing that UNIVERSAL's.
+define internal i8* @t2_mfind_u(%Str %c, %Str %m, i1 %skip) {
+entry:
+  %r = call i8* @t2_mfind1(%Str %c, %Str %m, i1 %skip)
+  %got = icmp ne i8* %r, null
+  br i1 %got, label %ok, label %root
+ok:
+  ret i8* %r
+root:
+  %u = call %Str @t2_universal_key()
+  %ru = call i8* @t2_mfind1(%Str %u, %Str %m, i1 0)
+  ret i8* %ru
+}
+; t2_inv_class(inv) -> an object's class, or a class name (t2_mresolve checked it).
+define internal %Str @t2_inv_class(%Slot %inv) {
+entry:
+  %t = extractvalue %Slot %inv, 0
+  %isref = icmp eq i8 %t, 5
+  br i1 %isref, label %ref, label %name
+ref:
+  %a = call %Array* @t2_harr(%Slot %inv)
+  %cl = call %Slot @t2_aget(%Array* %a, i64 0)
+  %cn = call %Str @t2_slot_str(%Slot %cl)
+  ret %Str %cn
+name:
+  %nn = call %Str @t2_slot_str(%Slot %inv)
+  ret %Str %nn
+}
+; t2_isa_walk(class, target) -> class is target or, depth first, inherits it.
+define internal i1 @t2_isa_walk(%Str %c, %Str %target) {
+entry:
+  %d = call i64 @t2_strcmp(%Str %c, %Str %target)
+  %same = icmp eq i64 %d, 0
+  br i1 %same, label %yes, label %stash
+stash:
+  %t = call %Slot @t2_stash_table()
+  %s = call %Slot @t2_hget(%Slot %t, %Str %c)
+  %st = extractvalue %Slot %s, 0
+  %known = icmp eq i8 %st, 5
+  br i1 %known, label %parents, label %no
+parents:
+  %k = call %Str @t2_isa_key()
+  %isa = call %Slot @t2_hget(%Slot %s, %Str %k)
+  %it = extractvalue %Slot %isa, 0
+  %has = icmp eq i8 %it, 6
+  br i1 %has, label %walk, label %no
+walk:
+  %iv = extractvalue %Slot %isa, 1
+  %arr = inttoptr i64 %iv to %Array*
+  %n = call i64 @t2_alen(%Array* %arr)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %walk ], [ %i2, %next ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %no
+body:
+  %ps = call %Slot @t2_aget(%Array* %arr, i64 %i)
+  %pn = call %Str @t2_slot_str(%Slot %ps)
+  %r = call i1 @t2_isa_walk(%Str %pn, %Str %target)
+  br i1 %r, label %yes, label %next
+next:
+  %i2 = add i64 %i, 1
+  br label %loop
+yes:
+  ret i1 1
+no:
+  ret i1 0
+}
+; t2_bool(b) -> perl's true (1) or false (the empty string).
+define internal %Slot @t2_bool(i1 %b) {
+entry:
+  br i1 %b, label %t, label %f
+t:
+  %one = call %Slot @t2_box_i64(i64 1)
+  ret %Slot %one
+f:
+  %e = call %Str @t2_str(i8* null, i64 0)
+  %no = call %Slot @t2_box_str(%Str %e)
+  ret %Slot %no
+}
+; UNIVERSAL::isa (and DOES): method isa ($other) { $self isa $other }
+define internal %Slot @t2_u_isa_w(%Array* %args) {
+entry:
+  %w = load i1, i1* @t2_want
+  %inv = call %Slot @t2_aget(%Array* %args, i64 0)
+  %o = call %Slot @t2_aget(%Array* %args, i64 1)
+  %c = call %Str @t2_inv_class(%Slot %inv)
+  %os = call %Str @t2_slot_str(%Slot %o)
+  %b = call i1 @t2_isa_walk(%Str %c, %Str %os)
+  %r = call %Slot @t2_bool(i1 %b)
+  %rn = call %Slot @t2_list_of(%Slot %r, i1 %w)
+  ret %Slot %rn
+}
+; t2_stash_tramp(args, env): a stash method called as a code value -- its
+; code rides in env.
+define internal %Slot @t2_stash_tramp(%Array* %args, %Slot** %env) {
+entry:
+  %f = bitcast %Slot** %env to %Slot (%Array*)*
+  %r = call %Slot %f(%Array* %args)
+  ret %Slot %r
+}
+; UNIVERSAL::can: the method as a code value, or undef. (A list context gets a
+; list, as a sub's wrapper gives: "[", A->can("x"), "]" read past its end.)
+define internal %Slot @t2_u_can_w(%Array* %args) {
+entry:
+  %w = load i1, i1* @t2_want
+  %inv = call %Slot @t2_aget(%Array* %args, i64 0)
+  %m = call %Slot @t2_aget(%Array* %args, i64 1)
+  %c = call %Str @t2_inv_class(%Slot %inv)
+  %ms = call %Str @t2_slot_str(%Slot %m)
+  %fp = call i8* @t2_mfind_u(%Str %c, %Str %ms, i1 0)
+  %none = icmp eq i8* %fp, null
+  br i1 %none, label %undef, label %code
+undef:
+  %un = call %Slot @t2_list_of(%Slot zeroinitializer, i1 %w)
+  ret %Slot %un
+code:
+  %e = bitcast i8* %fp to %Slot**
+  %cv = call %Slot @t2_code_new(i8* bitcast (%Slot (%Array*, %Slot**)* @t2_stash_tramp to i8*), %Slot** %e)
+  %cn = call %Slot @t2_list_of(%Slot %cv, i1 %w)
+  ret %Slot %cn
+}
 ; t2_mresolve(invocant, method, " at FILE line N.\n", start, mode) -> the method's code,
 ; looked up from (mode 0) the invocant's class, (1) start, a qualified name's
 ; package, or (2) start's @ISA, a SUPER:: call's; where perl dies (no class,
@@ -3814,7 +3962,7 @@ look:
   %fromown = icmp eq i8 %mode, 0
   %c = select i1 %fromown, %Str %own, %Str %start
   %super = icmp eq i8 %mode, 2
-  %r = call i8* @t2_mfind1(%Str %c, %Str %m, i1 %super)
+  %r = call i8* @t2_mfind_u(%Str %c, %Str %m, i1 %super)
   %got = icmp ne i8* %r, null
   br i1 %got, label %ok, label %miss
 ok:
