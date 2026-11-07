@@ -19036,7 +19036,9 @@ sub _lower_inlined_structure {
                     || ( $r->can('head') && blessed($r->head) && $r->head->operation eq 'Loop'
                          && $on_chain{ refaddr($r->head) } )
                     || ( $in_arm && $r->can('head') && blessed($r->head)
-                         && $r->head->operation =~ /\A(?:If|Loop)\z/ ) );
+                         && $r->head->operation =~ /\A(?:If|Loop)\z/ )
+                    # (or an eval's join in that arm: its memory version, B::SoN's, pvm 173)
+                    || ( $in_arm && $r->can('eval_entry') && blessed($r->eval_entry) ) );
             # A LOOP ON THE MAIN CHAIN carries its phi in its header, which
             # dominates what follows the loop; its back-edge is the body's,
             # lowered with it, ifs and all. Only the first value comes from
