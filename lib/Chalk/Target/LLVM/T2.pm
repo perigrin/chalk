@@ -1292,14 +1292,13 @@ sub make_mop {
     # A CLASS OF THE CLASS FEATURE: its methods go in its stash as subs do;
     # its `new` is made where it is called (method_call). ADJUST is not T2's yet.
     # (ADJUST blocks run in the `new` made where it is called)
-    my %called = map { ( $_->name => 1 ) }
+    my %called = map { ( $_->name =~ s/\A.*:://r => 1 ) }
         grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($mop, $b->{ret});
     # A NAME NO PACKAGE DEFINES is perl's die ("Can't locate object method"),
-    # unless it is qualified (SUPER::), UNIVERSAL's (isa, can, DOES, VERSION), or an
-    # AUTOLOAD answers.
+    # unless it is UNIVERSAL's (isa, can, DOES, VERSION) or an AUTOLOAD answers.
     my %defined = map { ( $_->name => 1 ) } map { ( $_->subs, $_->methods ) } @classes;
     $defined{new} = 1 if grep { _is_feature_class($_) } @classes;   # made where it is called
-    out("a method no package defines ($_)") for grep { !$defined{$_} && ( /::/ || /\A(?:isa|can|DOES|VERSION)\z/ || $defined{AUTOLOAD} ) } sort keys %called;
+    out("a method no package defines ($_)") for grep { !$defined{$_} && ( /\A(?:isa|can|DOES|VERSION)\z/ || $defined{AUTOLOAD} ) } sort keys %called;
     out('an AUTOLOAD') if $defined{AUTOLOAD};
     for my $cls (@classes) {
         my $cs = $b->const_str($cls->name);
@@ -1424,7 +1423,14 @@ sub method_call {
     $b->set_want($c);   # whichever sub it finds may return a list
     # (where perl dies -- no class, no method -- a die, an eval's to catch)
     my $at = ' at ' . ( $c->can('file') ? $c->file // '-' : '-' ) . ' line ' . ( $c->can('line') ? $c->line // 0 : 0 ) . ".\n";
-    my $fp = $b->emit(op => 'MResolve', type => 'i8*', inputs => [ $inv, $b->const_str($c->name), $b->const_str($at) ]);
+    # A QUALIFIED NAME starts its lookup at its package (mode 1); Pkg::SUPER::m
+    # at the @ISA of Pkg, the package the call is in (mode 2).
+    my ($start, $mode, $m) = ( '', 0, $c->name );
+    if ($m =~ /\A(.+)::SUPER::(\w+)\z/) { ( $start, $mode, $m ) = ( $1, 2, $2 ) }
+    elsif ($m =~ /\A(.+)::(\w+)\z/)     { ( $start, $mode, $m ) = ( $1, 1, $2 ) }
+    out('a method name T2 cannot split') if $m =~ /::|'/;
+    my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => $mode },
+        inputs => [ $inv, $b->const_str($m), $b->const_str($at), $b->const_str($start) ]);
     return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
 }
 
@@ -2288,7 +2294,7 @@ sub _line {
     return "call void \@t2_mop_isa(" . $arg->(@in) . ')' if $op eq 'MopIsa';
     return "call void \@t2_mop_isa_set(" . $arg->(@in) . ')' if $op eq 'MopIsaSet';
     return "call void \@t2_mop_def(" . $arg->(@in) . ", i8* bitcast (%Slot (%Array*)* $a{fn}_w to i8*))" if $op eq 'MopDef';
-    return "$nm = call i8* \@t2_mresolve(" . $arg->(@in) . ')' if $op eq 'MResolve';
+    return "$nm = call i8* \@t2_mresolve(" . $arg->(@in) . ", i8 $a{mode})" if $op eq 'MResolve';
     if ($op eq 'MCall') {
         return "$nm.f = bitcast i8* " . $in[0]->name . " to %Slot (%Array*)*\n  $nm = call %Slot $nm.f(%Array* " . $in[1]->name . ')';
     }
@@ -3714,14 +3720,17 @@ define internal void @t2_mop_def(%Str %c, %Str %m, i8* %f) {
   call void @t2_hset(%Slot %s, %Str %m, %Slot %fs)
   ret void
 }
-; t2_mfind1(class, m) -> m's code in class or, depth first, its @ISA; null.
-define internal i8* @t2_mfind1(%Str %c, %Str %m) {
+; t2_mfind1(class, m, skip) -> m's code in class (unless skip) or, depth first,
+; its @ISA; null.
+define internal i8* @t2_mfind1(%Str %c, %Str %m, i1 %skip) {
 entry:
   %t = call %Slot @t2_stash_table()
   %s = call %Slot @t2_hget(%Slot %t, %Str %c)
   %st = extractvalue %Slot %s, 0
   %known = icmp eq i8 %st, 5
-  br i1 %known, label %look, label %none
+  br i1 %known, label %own, label %none
+own:
+  br i1 %skip, label %parents, label %look
 look:
   %f = call %Slot @t2_hget(%Slot %s, %Str %m)
   %ft = extractvalue %Slot %f, 0
@@ -3749,7 +3758,7 @@ loop:
 body:
   %ps = call %Slot @t2_aget(%Array* %arr, i64 %i)
   %pn = call %Str @t2_slot_str(%Slot %ps)
-  %r = call i8* @t2_mfind1(%Str %pn, %Str %m)
+  %r = call i8* @t2_mfind1(%Str %pn, %Str %m, i1 0)
   %got = icmp ne i8* %r, null
   br i1 %got, label %ret, label %next
 ret:
@@ -3760,9 +3769,11 @@ next:
 none:
   ret i8* null
 }
-; t2_mresolve(invocant, method, " at FILE line N.\n") -> the method's code;
-; where perl dies (no class, no method), a die and t2_nomethod's code.
-define internal i8* @t2_mresolve(%Slot %inv, %Str %m, %Str %at) {
+; t2_mresolve(invocant, method, " at FILE line N.\n", start, mode) -> the method's code,
+; looked up from (mode 0) the invocant's class, (1) start, a qualified name's
+; package, or (2) start's @ISA, a SUPER:: call's; where perl dies (no class,
+; no method), a die naming that class, and t2_nomethod's code.
+define internal i8* @t2_mresolve(%Slot %inv, %Str %m, %Str %at, %Str %start, i8 %mode) {
 entry:
   %t = extractvalue %Slot %inv, 0
   switch i8 %t, label %named [ i8 0, label %undef i8 5, label %ref i8 6, label %unbl i8 7, label %unbl i8 8, label %unbl ]
@@ -3799,8 +3810,11 @@ nopkg:
   %p3 = call %Str @t2_concat(%Str %p1, %Str %p2)
   br label %die
 look:
-  %c = phi %Str [ %cn, %obj ], [ %nn, %named ]
-  %r = call i8* @t2_mfind1(%Str %c, %Str %m)
+  %own = phi %Str [ %cn, %obj ], [ %nn, %named ]
+  %fromown = icmp eq i8 %mode, 0
+  %c = select i1 %fromown, %Str %own, %Str %start
+  %super = icmp eq i8 %mode, 2
+  %r = call i8* @t2_mfind1(%Str %c, %Str %m, i1 %super)
   %got = icmp ne i8* %r, null
   br i1 %got, label %ok, label %miss
 ok:
