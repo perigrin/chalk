@@ -684,6 +684,23 @@ sub assign {
         $b->emit(op => 'HSet', type => 'void', inputs => [ $self, $b->const_str($key), $val ]);
         return;
     }
+    # A WHOLE AGGREGATE STORED INTO ITS CONTAINER (B::SoN, for a tied one): in
+    # place -- CLEAR and STOREs on a tie, else cleared and refilled -- the list
+    # its inputs, in order.
+    if (blessed($target) && blessed($v) && $v->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/
+            && ( $target->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/
+                 || $target->operation eq 'PadAccess' && ( $target->sigil // '' ) =~ /\A[\@%]\z/ )) {
+        my $h = $target->operation eq 'HashLiteral' || ( $target->can('sigil') && ( $target->sigil // '' ) eq '%' );
+        my $list = $b->emit(op => 'NewArray', type => '%Array*');
+        for my $e (grep { blessed($_) } $v->inputs->@*) {
+            if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $list, $b->array_of($e) ]) }
+            else { $b->emit(op => 'APush', type => 'void', inputs => [ $list, $b->as($b->value($e), '%Slot') ]) }
+        }
+        $b->hash_reads_settled('a whole assign');
+        $b->reads_before($_) for @{ $b->{passed} };
+        $b->emit(op => $h ? 'HAssign' : 'AAssign', type => 'void', inputs => [ $h ? $b->hash_of($target) : $b->array_of($target), $list ]);
+        return;
+    }
     my $ptr = $b->location($target);
     $b->reads_before($target->inputs->[0]);
     my $val = $b->as($b->value($v), '%Slot');
@@ -1392,7 +1409,7 @@ sub make_mop {
     my %called = map { ( $_->name =~ s/\A.*:://r => 1 ) }
         grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($mop, $b->{ret});
     # A TIE'S METHODS are the runtime's to call, by these names.
-    $called{$_} = 1 for grep { my $t = $_; grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' } _all_nodes($mop, $b->{ret}) } qw(TIEARRAY TIEHASH FETCH STORE FETCHSIZE PUSH POP SHIFT UNSHIFT EXISTS DELETE CLEAR FIRSTKEY NEXTKEY);
+    $called{$_} = 1 for grep { my $t = $_; grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' } _all_nodes($mop, $b->{ret}) } qw(TIEARRAY TIEHASH FETCH STORE FETCHSIZE PUSH POP SHIFT UNSHIFT EXISTS DELETE CLEAR EXTEND FIRSTKEY NEXTKEY);
     # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES, VERSION), else
     # perl's die ("Can't locate object method"), unless an AUTOLOAD answers.
     my %defined = map { ( $_->name => 1 ) } map { ( $_->subs, $_->methods ) } @classes;
@@ -2446,6 +2463,8 @@ sub _line {
     return "$nm = call %Array* \@t2_hvalues(" . $arg->(@in) . ')' if $op eq 'HValues';
     return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
     return "call void \@t2_aunshift(" . $arg->(@in) . ')' if $op eq 'AUnshift';
+    return "call void \@t2_aassign(" . $arg->(@in) . ')' if $op eq 'AAssign';
+    return "call void \@t2_hassign(" . $arg->(@in) . ')' if $op eq 'HAssign';
     return "call void \@t2_aunshiftl(" . $arg->(@in) . ')' if $op eq 'AUnshiftL';
     return "$nm = call %Slot \@t2_tie_array(" . $arg->(@in) . ')' if $op eq 'TieArray';
     return "$nm = call %Slot \@t2_tie_hash(" . $arg->(@in) . ')' if $op eq 'TieHash';
@@ -4858,6 +4877,67 @@ define internal %Slot @t2_tied_h(%Slot %h) {
 define internal void @t2_untie_h(%Slot %h) {
   %a = call %Array* @t2_harr(%Slot %h)
   call void @t2_untie(%Array* %a)
+  ret void
+}
+; WHOLE ASSIGN IN PLACE (`@a = LIST`, `%h = LIST` on the container a tie or a
+; reference names): the list copied first -- it may read the aggregate --
+; then, for a tied one, perl's calls; for any other, cleared and refilled.
+@lit_tm_extend = private unnamed_addr constant [7 x i8] c"EXTEND\00"
+define internal void @t2_aassign(%Array* %a, %Array* %l) {
+entry:
+  %c = call %Array* @t2_new_array()
+  call void @t2_aappend(%Array* %c, %Array* %l)
+  %n = call i64 @t2_alen(%Array* %c)
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %d = icmp eq %Meta* %m, @t2_meta_default
+  br i1 %d, label %plain, label %tied
+plain:
+  %lp = getelementptr %Array, %Array* %a, i32 0, i32 0
+  store i64 0, i64* %lp
+  call void @t2_aappend(%Array* %a, %Array* %c)
+  ret void
+tied:
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %ca = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %ca, %Slot %o)
+  %cm = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_tm_clear, i64 0, i64 0), i64 5)
+  %cr = call %Slot @t2_tie_call(%Array* %ca, %Str %cm)
+  %xa = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %xa, %Slot %o)
+  %ns = call %Slot @t2_box_i64(i64 %n)
+  call void @t2_apush(%Array* %xa, %Slot %ns)
+  %xm = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_tm_extend, i64 0, i64 0), i64 6)
+  %xr = call %Slot @t2_tie_call(%Array* %xa, %Str %xm)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %tied ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %v = call %Slot @t2_aget(%Array* %c, i64 %i)
+  call void @t2_aset(%Array* %a, i64 %i, %Slot %v, i8* null, i64 0)
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  ret void
+}
+define internal void @t2_hassign(%Slot %h, %Array* %l) {
+entry:
+  %c = call %Array* @t2_new_array()
+  call void @t2_aappend(%Array* %c, %Array* %l)
+  %a = call %Array* @t2_harr(%Slot %h)
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %d = icmp eq %Meta* %m, @t2_meta_default
+  br i1 %d, label %plain, label %tied
+plain:
+  ; (element 0 is the hash's class: kept)
+  %lp = getelementptr %Array, %Array* %a, i32 0, i32 0
+  store i64 1, i64* %lp
+  call void @t2_hfroma(%Slot %h, %Array* %c)
+  ret void
+tied:
+  ; (a tie's hfroma is CLEAR, then STORE each pair)
+  call void @t2_hfroma(%Slot %h, %Array* %c)
   ret void
 }
 ; t2_mresolve(invocant, method, " at FILE line N.\n", start, mode) -> the method's code,
