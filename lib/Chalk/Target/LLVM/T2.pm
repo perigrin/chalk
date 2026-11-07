@@ -1496,6 +1496,13 @@ sub const_str {
 }
 
 # _all_nodes($mop, $ret) -> the program's nodes and every package sub's.
+# _arg_subscript($n) -> $n is $_[N]: a Subscript of @_ by a constant index.
+sub _arg_subscript {
+    my ($n) = @_;
+    return blessed($n) && $n->operation eq 'Subscript' && blessed( $n->inputs->[0] ) && $n->inputs->[0]->operation eq 'ArgsSource'
+        && blessed( $n->inputs->[1] ) && $n->inputs->[1]->operation eq 'Constant' && ( $n->inputs->[1]->value // '' ) =~ /\A\d+\z/;
+}
+
 sub _all_nodes {
     my ($mop, $ret) = @_;
     my @n = Chalk::Target::LLVM::Context::_program_nodes($ret);
@@ -1689,6 +1696,22 @@ sub func {
            grep { $_->operation eq 'CellParam' } Chalk::Target::LLVM::Context::_graph_component($g);
     out("sub $name captures a variable (a named sub's closure)") if !$closure
         && grep { $_->operation eq 'CellParam' } Chalk::Target::LLVM::Context::_graph_component($g);
+    # $_[N] READ ANYWHERE is the Nth argument: Context.pm's binder keeps one
+    # read per index, and a position never read is a hole it refuses. A sub
+    # that reads @_ only so binds every such read -- after a store, twice --
+    # to its argument; an unread position is a placeholder (its argument
+    # passed, unused).
+    my @also;
+    if (!$is_method && !$list && !$@ && @reads && !$an->{_args_written} && !$an->{_args_read_as_a_list}
+            && !$an->{_args_slurpy} && !$an->{_args_signature}
+            && !grep { blessed($_) && !_arg_subscript($_) } @reads) {
+        my %by;
+        push @{ $by{ $_->inputs->[1]->value } }, $_ for grep { _arg_subscript($_) } Chalk::Target::LLVM::Context::_graph_component($g);
+        my $max = -1;   # (not sort: a sort block's $b is the builder here)
+        $max < $_ and $max = $_ for keys %by;
+        @reads = map { $by{$_} ? $by{$_}[0] : bless( {}, 'Chalk::Target::LLVM::T2::Unread' ) } 0 .. $max;
+        @also = map { my $i = $_; map { [ $_, $i ] } @{ $by{$i} }[ 1 .. $#{ $by{$i} } ] } grep { $by{$_} } 0 .. $max;
+    }
     out("sub $name reads \@_ other than by shifts, \$_[N] or a signature")
         if !$is_method && !$list && ( $@ || grep { !blessed($_) } @reads
         or $an->{_args_written} || $an->{_args_read_as_a_list} || $an->{_args_slurpy} );
@@ -1723,7 +1746,7 @@ sub func {
     local $b->{locs} = {};
     local $b->{memo} = {};
     local $b->{args} = $is_method ? { map { ( $_ => $argn[ $margs{$_} ] ) } grep { $_ ne 'np' } keys %margs }
-                                  : { map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads };
+                                  : { ( map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads ), ( map { ( refaddr( $_->[0] ) => $argn[ $_->[1] ] ) } @also ) };
     local $b->{self} = $is_method ? $argn[0] : undef;   # a field's object
     local $b->{env} = $closure ? do { my $e = Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot**', attr => { index => 1 }); $e->set_name('%env'); $e } : undef;
     local $b->{own_nodes} = [ Chalk::Target::LLVM::Context::_graph_component($g) ];
