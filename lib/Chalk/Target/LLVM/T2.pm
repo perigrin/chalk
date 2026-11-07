@@ -509,11 +509,27 @@ sub _args_list_assign {
 sub args_elem {
     my ($b, $s, $r) = @_;
     my @t = @{ $s->inputs }[ 0 .. $#{ $s->inputs } - 1 ];
-    out('a `my (...) = @_` of what is not a scalar') if grep { !blessed($_) || $_->operation ne 'PadAccess' || ( $_->sigil // '' ) ne '$' } @t;
-    my ($i) = grep { $t[$_]->symbol eq $r->symbol } 0 .. $#t;
+    # (the last may be slurpy: the arguments from its position on)
+    out('a `my (...) = @_` of what is not a scalar') if grep { !blessed($_) || $_->operation ne 'PadAccess' || ( $_->sigil // '' ) ne '$' } @t[ 0 .. $#t - 1 ];
+    out('a `my (...) = @_` of what is not a variable') unless blessed($t[-1]) && $t[-1]->operation eq 'PadAccess';
+    my ($i) = grep { $t[$_]->symbol eq $r->symbol && ( $t[$_]->sigil // '' ) eq ( $r->sigil // '' ) } 0 .. $#t;
     out('a read after `my (...) = @_` of no target') unless defined $i;
+    my $sg = $t[$i]->sigil // '$';
+    return $b->args_rest($b->{argsarr}, $i, $sg) if $sg ne '$';
     my $ix = $b->emit(op => 'Const', type => 'i64', attr => { value => $i });
     return $b->emit(op => 'AGet', type => '%Slot', inputs => [ $b->{argsarr}, $ix ]);
+}
+
+# args_rest($argsarr, $k, $sigil) -> the arguments from position k on: a fresh
+# array, or (sigil %) a fresh hash of those pairs -- a slurpy target's copy.
+sub args_rest {
+    my ($b, $arr, $k, $sg) = @_;
+    my $rest = $b->emit(op => 'ArgsFrom', type => '%Array*', inputs => [ $arr, $b->emit(op => 'Const', type => 'i64', attr => { value => $k }) ]);
+    return $rest if $sg eq '@';
+    out("a slurpy $sg") unless $sg eq '%';
+    my $h = $b->emit(op => 'HNew', type => '%Slot');
+    $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $rest ]);
+    return $h;
 }
 
 # list_args_assign($Assign): `my (...) = @_` on the chain in the list
@@ -800,6 +816,8 @@ sub hash_var {
 # hash (%ENV, %main::h) and one through an element (perl makes it) are not.
 sub hash_of {
     my ($b, $n) = @_;
+    # A SLURPY HASH PARAMETER: its hash, made at the sub's entry (args_rest).
+    return $b->{memo}{ refaddr($n) } if blessed($n) && $n->operation eq 'Parameter' && $b->{memo}{ refaddr($n) };
     return $b->value($n) if _named_hash($n);
     if ($n->operation eq 'FieldAccess') {   # a hash field: its hash
         my (undef, $sg) = $b->field_of($n);
@@ -1055,6 +1073,8 @@ sub array_var {
 # array_of($n) -> the %Array* a T1 node names (an ArrayLiteral, a deref of one).
 sub array_of {
     my ($b, $n) = @_;
+    # A SLURPY ARRAY PARAMETER: its copy, made at the sub's entry (args_rest).
+    return $b->{memo}{ refaddr($n) } if blessed($n) && $n->operation eq 'Parameter' && $b->{memo}{ refaddr($n) };
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
     if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || _aderef($n) || _array_var($n) || _argv($n)
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
@@ -1706,6 +1726,12 @@ sub func {
     # A CLOSURE takes @_ as one array always (its code value's calling
     # convention), its captured cells as its environment.
     my $list = !$is_method && !$@ && ( $an->{_args_read_as_a_list} || $closure ) && !$an->{_args_written} && !$an->{_args_slurpy} && !$an->{_args_signature};
+    # A SLURPY TAIL (`my ($c, @x) = @_`, `sub f ($c, @x)` -- perigrin: the same)
+    # takes @_ as one array: the positional targets its elements 0..k-1, the
+    # slurpy one a copy of the rest.
+    my $slurpy = !$is_method && !$@ && !$closure && !$an->{_args_written} && !$an->{_args_read_as_a_list} ? $an->{_args_slurpy} : undef;
+    my @positional = $slurpy ? @reads : ();
+    $list = 1 if $slurpy;
     out("closure $name reads \@_ other than T2 takes it") if $closure && !$list;
     # A CAPTURE USED BUT BY A CELL READ OR WRITE: B::SoN spells `$t += 1` on
     # one as Coerce(CellParam) + 1, with no write -- lowered, $t never changed
@@ -1742,7 +1768,7 @@ sub func {
     if ($sig && !$is_method) {
         my $decl = $sub->can('signature') ? $sub->signature // {} : {};
         out("sub $name has an optional signature parameter")
-            if $decl->{optional} || ( $decl->{mandatory} // scalar @reads ) != @reads;
+            if $decl->{optional} || ( $decl->{mandatory} // scalar @reads ) != ( $slurpy ? @positional : @reads );
     }
     ( my $id = $name ) =~ s/\W+/_/g;
     # Two subs one name (a method call's bare name): the second numbered.
@@ -1788,6 +1814,18 @@ sub func {
     $b->new_block('entry');
     # THE CALLER'S CONTEXT, read first (a call in the body sets it).
     my $want = $b->emit(op => 'GetWant', type => 'i1');
+    if ($slurpy) {
+        # A SIGNATURE'S ARITY: at least its positional parameters (perl dies
+        # with fewer -- a run-time stop here, as a signature's wrapper's is).
+        $b->emit(op => 'ArgsMin', type => 'void', inputs => [ $argsarr ], attr => { n => scalar @positional }) if $sig;
+        # ITS PARAMETERS, made here: each its argument, the slurpy one the rest.
+        for my $p (grep { $_->operation eq 'Parameter' } Chalk::Target::LLVM::Context::_graph_component($g)) {
+            my $sg = $p->can('sigil') ? $p->sigil // '$' : '$';
+            $b->{memo}{ refaddr($p) } = $sg eq '$'
+                ? $b->emit(op => 'AGet', type => '%Slot', inputs => [ $argsarr, $b->emit(op => 'Const', type => 'i64', attr => { value => $p->index }) ])
+                : $b->args_rest($argsarr, $p->index, $sg);
+        }
+    }
     # `return g()` IS CALLED IN THE CALLER'S CONTEXT: it is handed on.
     my $tail = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation eq 'Call'
         && ( $ret->inputs->[0]->dispatch_kind // '' ) eq 'direct' ? $ret->inputs->[0] : undef;
@@ -2465,6 +2503,8 @@ sub _line {
     return "$nm = call %Array* \@t2_hvalues(" . $arg->(@in) . ')' if $op eq 'HValues';
     return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
     return "call void \@t2_aunshift(" . $arg->(@in) . ')' if $op eq 'AUnshift';
+    return "$nm = call %Array* \@t2_args_from(" . $arg->(@in) . ')' if $op eq 'ArgsFrom';
+    return "call void \@t2_args_min(%Array* " . $in[0]->name . ", i64 $a{n})" if $op eq 'ArgsMin';
     return "call void \@t2_aassign(" . $arg->(@in) . ')' if $op eq 'AAssign';
     return "call void \@t2_hassign(" . $arg->(@in) . ')' if $op eq 'HAssign';
     return "call void \@t2_aunshiftl(" . $arg->(@in) . ')' if $op eq 'AUnshiftL';
@@ -4879,6 +4919,36 @@ define internal %Slot @t2_tied_h(%Slot %h) {
 define internal void @t2_untie_h(%Slot %h) {
   %a = call %Array* @t2_harr(%Slot %h)
   call void @t2_untie(%Array* %a)
+  ret void
+}
+; t2_args_from(a, k) -> a fresh array of a's elements from k on (a slurpy's copy).
+define internal %Array* @t2_args_from(%Array* %a, i64 %k) {
+entry:
+  %r = call %Array* @t2_new_array()
+  %n = call i64 @t2_alen(%Array* %a)
+  br label %loop
+loop:
+  %i = phi i64 [ %k, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %v = call %Slot @t2_aget(%Array* %a, i64 %i)
+  call void @t2_apush(%Array* %r, %Slot %v)
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
+; t2_args_min(a, n): a signature's arity -- at least n arguments, else a stop.
+define internal void @t2_args_min(%Array* %a, i64 %n) {
+entry:
+  %got = call i64 @t2_alen(%Array* %a)
+  %ok = icmp sge i64 %got, %n
+  br i1 %ok, label %fine, label %bad
+bad:
+  call void @t2_stop(i8* getelementptr ([68 x i8], [68 x i8]* @msg_arity, i64 0, i64 0), i64 67)
+  unreachable
+fine:
   ret void
 }
 ; WHOLE ASSIGN IN PLACE (`@a = LIST`, `%h = LIST` on the container a tie or a
