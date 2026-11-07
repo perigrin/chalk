@@ -192,7 +192,7 @@ sub walk {
         }
         elsif ($op eq 'Loop') { $ctl = $b->loop($s) }
         elsif ($op eq 'If')   { $ctl = $b->if_stmt($s) }
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:push|shift|pop)\z/) {
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:push|unshift|shift|pop)\z/) {
             $b->array_stmt($s);
             push @{ $b->{passed} }, $s;
             $ctl = $s;
@@ -457,6 +457,15 @@ sub _through_ref {
     # (a \@a, a [...], @_, a `my @a`, @ARGV: an array it has, never a stop)
     return 0 if $c->operation =~ /\A(?:Ref|ArrayLiteral|ArgsSource)\z/ || _array_var($c) || _argv($c);
     return 1;
+}
+
+# _isa_var($n) -> the package whose @ISA $n is, or undef.
+sub _isa_var {
+    my ($n) = @_;
+    return undef unless blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) eq '@' && ( $n->symbol // '' ) eq 'ISA';
+    my $pkg = $n->can('package') ? $n->package : undef;
+    out('an @ISA of no known package') unless defined $pkg && length $pkg;
+    return $pkg;
 }
 
 # isa_write($EntryWrite) -> true when it is `our @ISA = (LIST)` (any
@@ -1032,6 +1041,12 @@ sub array_of {
     # THROUGH AN ELEMENT (`$a[1][0]`, not `$_[N]`) perl makes the element an
     # array when it is undef -- a store inside a read: not T2's yet.
     out('an array through an element') if blessed($n) && $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) };
+    # @Pkg::ISA IS THE RUN-TIME MOP'S OWN PARENT LIST: the array method lookup
+    # walks, fetched where it is used, so push, shift and the rest change the
+    # class's parents (perigrin: @ISA as the class's container; a view needs nothing kept in step).
+    if (my $pkg = _isa_var($n)) {
+        return $b->emit(op => 'MopIsaArr', type => '%Array*', inputs => [ $b->const_str($pkg) ]);
+    }
     # A SCALAR HOLDING AN ARRAY REFERENCE (a variable, an argument): its
     # array, or a run-time stop when it holds none.
     out('an array that is not a `my` array (' . ( blessed($n) ? $n->operation . ( $n->can('symbol') && defined $n->symbol ? ' ' . $n->symbol : '' ) : 'none' ) . ')')
@@ -1039,7 +1054,7 @@ sub array_of {
     return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ]);
 }
 
-# array_stmt($Call): push, or a shift or pop whose value is not used, in its
+# array_stmt($Call): push or unshift, or a shift or pop whose value is not used, in its
 # place -- after every read the array's version had.
 sub array_stmt {
     my ($b, $s) = @_;
@@ -1055,6 +1070,16 @@ sub array_stmt {
             $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($e), '%Slot') ]);
         }
         # ITS VALUE is the array's new count (an ADJUST's last statement).
+        $b->{memo}{ refaddr($s) } = $b->emit(op => 'ALen', type => 'i64', inputs => [$a]);
+        return;
+    }
+    if ($s->name eq 'unshift') {
+        my ($arr, @vals) = @in;
+        my $a = $b->array_of($arr);
+        out('a list unshifted') if grep { _is_list($_) } @vals;
+        # the last first, so `unshift @a, x, y` leaves x, y in front
+        my @v = map { $b->as($b->value($_), '%Slot') } @vals;
+        $b->emit(op => 'AUnshift', type => 'void', inputs => [ $a, $_ ]) for reverse @v;
         $b->{memo}{ refaddr($s) } = $b->emit(op => 'ALen', type => 'i64', inputs => [$a]);
         return;
     }
@@ -2297,6 +2322,7 @@ sub _line {
     return "call void \@t2_universal_setup()" if $op eq 'MopUniversal';
     return "call void \@t2_mop_class(" . $arg->(@in) . ')' if $op eq 'MopClass';
     return "call void \@t2_mop_isa(" . $arg->(@in) . ')' if $op eq 'MopIsa';
+    return "$nm = call %Array* \@t2_mop_isa_arr(" . $arg->(@in) . ')' if $op eq 'MopIsaArr';
     return "call void \@t2_mop_isa_set(" . $arg->(@in) . ')' if $op eq 'MopIsaSet';
     return "call void \@t2_mop_def(" . $arg->(@in) . ", i8* bitcast (%Slot (%Array*)* $a{fn}_w to i8*))" if $op eq 'MopDef';
     return "$nm = call i8* \@t2_mresolve(" . $arg->(@in) . ", i8 $a{mode})" if $op eq 'MResolve';
@@ -2313,6 +2339,7 @@ sub _line {
     return "$nm = call %Array* \@t2_hpairs(" . $arg->(@in) . ')' if $op eq 'HPairs';
     return "$nm = call %Array* \@t2_hvalues(" . $arg->(@in) . ')' if $op eq 'HValues';
     return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
+    return "call void \@t2_aunshift(" . $arg->(@in) . ')' if $op eq 'AUnshift';
     return "call void \@t2_aappend(" . $arg->(@in) . ')' if $op eq 'AAppend';
     return "call void \@t2_apush_if(" . $arg->(@in) . ')' if $op eq 'APushIf';
     return "$nm = call %Slot \@t2_one_of(" . $arg->(@in) . ')' if $op eq 'OneOf';
@@ -3023,6 +3050,30 @@ define internal void @t2_apush(%Array* %a, %Slot %v) {
   store %Slot %v, %Slot* %p
   ret void
 }
+; t2_aunshift(a, v): v in front, every element one further on.
+define internal void @t2_aunshift(%Array* %a, %Slot %v) {
+entry:
+  %n = call i64 @t2_alen(%Array* %a)
+  %n1 = add i64 %n, 1
+  call void @t2_agrow(%Array* %a, i64 %n1)
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  br label %loop
+loop:
+  %i = phi i64 [ %n, %entry ], [ %im, %body ]
+  %more = icmp sgt i64 %i, 0
+  br i1 %more, label %body, label %done
+body:
+  %im = sub i64 %i, 1
+  %from = getelementptr %Slot, %Slot* %els, i64 %im
+  %e = load %Slot, %Slot* %from
+  %to = getelementptr %Slot, %Slot* %els, i64 %i
+  store %Slot %e, %Slot* %to
+  br label %loop
+done:
+  store %Slot %v, %Slot* %els
+  ret void
+}
 define internal %Slot @t2_aget(%Array* %a, i64 %i) {
 entry:
   %n = call i64 @t2_alen(%Array* %a)
@@ -3674,6 +3725,25 @@ make:
   ret %Slot %n
 ok:
   ret %Slot %s
+}
+; t2_mop_isa_arr(class) -> class's @ISA, the array lookup walks; made empty
+; (and stored) when the class has none yet.
+define internal %Array* @t2_mop_isa_arr(%Str %c) {
+entry:
+  %s = call %Slot @t2_stash(%Str %c)
+  %k = call %Str @t2_isa_key()
+  %isa = call %Slot @t2_hget(%Slot %s, %Str %k)
+  %it = extractvalue %Slot %isa, 0
+  %has = icmp eq i8 %it, 6
+  br i1 %has, label %ok, label %make
+ok:
+  %iv = extractvalue %Slot %isa, 1
+  %a = inttoptr i64 %iv to %Array*
+  ret %Array* %a
+make:
+  %n = call %Array* @t2_new_array()
+  call void @t2_mop_isa_set(%Str %c, %Array* %n)
+  ret %Array* %n
 }
 define internal void @t2_mop_isa_set(%Str %c, %Array* %a) {
   %s = call %Slot @t2_stash(%Str %c)
