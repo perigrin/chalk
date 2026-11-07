@@ -72,11 +72,12 @@ for my $case (
     my $got = eval { through_llvm_file($pl) } // "REFUSED $@";
     is($got, $want, "can as a truth, X=" . ( $x // 'unset' ) . ": " . ( $src =~ s/\n/ /gr ));
 }
-# ...but its value kept, or printed: refused.
+# ...but its value kept, or printed: perl's answer (T2's UNIVERSAL::can gives a
+# code value), or refused.
 {
     my $src = $kinds . qq{my \$o = N->new(kind => "x");\nmy \$c = \$o->can("kind");\nprint ref(\$c), "\\n";\n};
     my $got = eval { through_llvm_file(file_of($src)) } // "REFUSED $@";
-    like($got, qr/\AREFUSED (?:lower|load): /, "can whose value is kept: refused");
+    like($got, qr/\A(?:REFUSED (?:lower|load): |CODE\n)/, "can whose value is kept: perl's answer, or refused");
 }
 
 done_testing;

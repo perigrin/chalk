@@ -1394,6 +1394,13 @@ sub call {
         $b->set_want($c) if $fn->{listret};
         return $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $b->{argsarr} ], attr => { fn => $fn->{name} });
     }
+    # A SIGNATURE WITH A SLURPY TAIL dies with too few arguments, or an odd
+    # count into a slurpy hash (perl's "Too few arguments", "Odd name/value"):
+    # refused by name where the call's count is known, as it was before.
+    if (defined $fn->{minargs} && !grep { _is_list($_) } @args) {
+        out('a call of a signature with too few arguments (perl dies)') if @args < $fn->{minargs};
+        out('an odd count into a signature\'s slurpy hash (perl dies)') if ( $fn->{slurpy_sigil} // '' ) eq '%' && ( @args - $fn->{minargs} ) % 2;
+    }
     if ($fn->{list}) {
         # @_ BUILT HERE: each scalar pushed, an array's elements appended.
         my $arr = $b->emit(op => 'NewArray', type => '%Array*');
@@ -1775,7 +1782,8 @@ sub func {
     $id .= '_' . scalar keys %{ $b->{funcs} } if grep { $_->{name} eq "\@f_$id" } values %{ $b->{funcs} // {} };
     my $nargs = $is_method ? 1 + $margs{np} : $list ? 1 : scalar @reads;
     my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $nargs,
-        signature => $sig, list => $list, listret => $listret, closure => $closure, blocks => [] };
+        signature => $sig, list => $list, listret => $listret, closure => $closure, blocks => [] , minargs => ( $slurpy && $sig ? scalar @positional : undef ),
+        slurpy_sigil => ( $slurpy && $sig ? ( $slurpy->can('sigil') ? $slurpy->sigil // '@' : '@' ) : undef ) };
     my @argn = map { Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot', attr => { index => $_ }) } 0 .. ( $is_method ? $nargs : scalar @reads ) - 1;
     $argn[$_]->set_name("%a$_") for 0 .. $#argn;
     my $argsarr = $list ? Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Array*', attr => { index => 0 }) : undef;
@@ -1818,6 +1826,8 @@ sub func {
         # A SIGNATURE'S ARITY: at least its positional parameters (perl dies
         # with fewer -- a run-time stop here, as a signature's wrapper's is).
         $b->emit(op => 'ArgsMin', type => 'void', inputs => [ $argsarr ], attr => { n => scalar @positional }) if $sig;
+        $b->emit(op => 'ArgsPairs', type => 'void', inputs => [ $argsarr ], attr => { n => scalar @positional })
+            if $sig && ( $slurpy->can('sigil') ? $slurpy->sigil // '' : '' ) eq '%';
         # ITS PARAMETERS, made here: each its argument, the slurpy one the rest.
         for my $p (grep { $_->operation eq 'Parameter' } Chalk::Target::LLVM::Context::_graph_component($g)) {
             my $sg = $p->can('sigil') ? $p->sigil // '$' : '$';
@@ -2505,6 +2515,7 @@ sub _line {
     return "call void \@t2_aunshift(" . $arg->(@in) . ')' if $op eq 'AUnshift';
     return "$nm = call %Array* \@t2_args_from(" . $arg->(@in) . ')' if $op eq 'ArgsFrom';
     return "call void \@t2_args_min(%Array* " . $in[0]->name . ", i64 $a{n})" if $op eq 'ArgsMin';
+    return "call void \@t2_args_pairs(%Array* " . $in[0]->name . ", i64 $a{n})" if $op eq 'ArgsPairs';
     return "call void \@t2_aassign(" . $arg->(@in) . ')' if $op eq 'AAssign';
     return "call void \@t2_hassign(" . $arg->(@in) . ')' if $op eq 'HAssign';
     return "call void \@t2_aunshiftl(" . $arg->(@in) . ')' if $op eq 'AUnshiftL';
@@ -4938,6 +4949,21 @@ body:
   br label %loop
 done:
   ret %Array* %r
+}
+; t2_args_pairs(a, n): a signature's slurpy hash takes pairs -- an odd count
+; past n is a stop (perl dies: "Odd name/value argument").
+define internal void @t2_args_pairs(%Array* %a, i64 %n) {
+entry:
+  %got = call i64 @t2_alen(%Array* %a)
+  %rest = sub i64 %got, %n
+  %odd = and i64 %rest, 1
+  %bad = icmp ne i64 %odd, 0
+  br i1 %bad, label %stop, label %fine
+stop:
+  call void @t2_stop(i8* getelementptr ([68 x i8], [68 x i8]* @msg_arity, i64 0, i64 0), i64 67)
+  unreachable
+fine:
+  ret void
 }
 ; t2_args_min(a, n): a signature's arity -- at least n arguments, else a stop.
 define internal void @t2_args_min(%Array* %a, i64 %n) {
