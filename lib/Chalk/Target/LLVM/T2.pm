@@ -831,6 +831,8 @@ sub array_value {
     if ($op eq 'Ref') {
         # \@a: a reference to the array itself (one array, two names).
         my $t = $in[0];
+        # \%h: a named hash IS its reference here (a %Slot of tag 5), one hash, two names.
+        return $b->value($t) if blessed($t) && _named_hash($t) && ( $v->stamp // '' ) eq 'HashRef';   # static type
         out('a reference to what is not an array') unless blessed($t)
             && ( $t->operation eq 'ArrayLiteral' && ( $t->stamp // '' ) eq 'Array' || _aderef($t) || _array_var($t) || _argv($t) ) # static
             && ( $v->stamp // '' ) eq 'ArrayRef';   # \(@a) is a reference to each element type
