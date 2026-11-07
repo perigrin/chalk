@@ -50,14 +50,13 @@ for my $c (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
-# ITS MESSAGE SEEN is refused: read from $@, or printed by an uncaught die.
-for my $c (
-    [ q{my $x; eval { $x->m; 1 }; print "[$@]\n";}, 'its $@ read' ],
-    [ q{my $x; $x->m; print "after\n";},           'outside an eval' ],
-) {
-    my ($src, $name) = @$c;
-    eval { through_llvm($src) };
-    like($@, qr/GAP: /, "$name: refused");
+# ITS MESSAGE SEEN: perl's, file and line and all (T2 slice 22), or refused.
+my $msg = qr{Can't call method "m" on an undefined value at \S+ line 1\.\n};
+{
+    my $got = eval { through_llvm(q{my $x; eval { $x->m; 1 }; print "[$@]\n";}) };
+    ok(( $got // '' ) =~ /\A\[$msg\]\n\z/ || $@ =~ /GAP: /, 'its $@ read: perl\'s message, or refused') or diag $got // $@;
+    eval { through_llvm(q{my $x; $x->m; print "after\n";}) };
+    like($@, qr/GAP: |\Alli exited 255: $msg\z/, 'outside an eval: perl\'s message and exit, or refused');
 }
 
 done_testing;

@@ -63,10 +63,10 @@ for my $case (
 }
 
 # A DIE IN A BODY THAT IS NOT INLINED -- a class method, lowered as its own
-# function -- would end the program where perl catches it: refused by name.
+# function -- is caught as perl catches it (T2 slice 22), or refused by name.
 {
     my $got = eval { through_llvm(q{use v5.42; use feature 'class'; no warnings; class C { method m { die "m\n" } } my $r = eval { C->new->m; 1 }; print defined $r ? "ran\n" : "died: $@";}) };
-    like($@, qr/GAP: .*inside a block eval/, 'a method call in an eval is refused');
+    ok(( $got // '' ) eq "died: m\n" || $@ =~ /GAP: .*inside a block eval/, 'a method call in an eval: perl\'s answer, or refused') or diag $got // $@;
 }
 
 # A DIE PERL MAKES ITSELF -- a deref of what is not a SCALAR reference -- has

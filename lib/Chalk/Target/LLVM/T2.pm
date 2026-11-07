@@ -348,7 +348,8 @@ sub eval_region_after {
 
 sub close_eval {
     my ($b, $r) = @_;
-    my $f = pop @{ $b->{evals} };
+    # (popped once the body's value is made: a divide there is the eval's to catch)
+    my $f = $b->{evals}[-1];
     out('an eval closed at another depth') if ( $b->{depth} // 0 ) != $f->{depth};
     out('an eval Region of more than one way in') if $r->inputs->@* != 1;
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
@@ -360,6 +361,7 @@ sub close_eval {
         my $ty = $b->phi_type($p);
         push @in, [ $p, $ty, $dead ? undef : $b->as($b->value( $p->inputs->[0] ), $ty) ];
     }
+    pop @{ $b->{evals} };
     my $end = $b->{cur};
     unless ($dead) {
         # AN EVAL ENDING WITHOUT A DIE leaves $@ "" (an inner one's caught die
@@ -1292,10 +1294,12 @@ sub make_mop {
     # (ADJUST blocks run in the `new` made where it is called)
     my %called = map { ( $_->name => 1 ) }
         grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($mop, $b->{ret});
-    # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES, VERSION): not T2's.
+    # A NAME NO PACKAGE DEFINES is perl's die ("Can't locate object method"),
+    # unless it is qualified (SUPER::), UNIVERSAL's (isa, can, DOES, VERSION), or an
+    # AUTOLOAD answers.
     my %defined = map { ( $_->name => 1 ) } map { ( $_->subs, $_->methods ) } @classes;
     $defined{new} = 1 if grep { _is_feature_class($_) } @classes;   # made where it is called
-    out("a method no package defines ($_)") for grep { !$defined{$_} } sort keys %called;
+    out("a method no package defines ($_)") for grep { !$defined{$_} && ( /::/ || /\A(?:isa|can|DOES|VERSION)\z/ || $defined{AUTOLOAD} ) } sort keys %called;
     out('an AUTOLOAD') if $defined{AUTOLOAD};
     for my $cls (@classes) {
         my $cs = $b->const_str($cls->name);
@@ -1396,10 +1400,6 @@ sub _all_nodes {
 # method looked up from the invocant's class at run time, its wrapper called.
 sub method_call {
     my ($b, $c) = @_;
-    # A METHOD NO CLASS ANSWERS is perl's die, an eval's to catch; T2's lookup
-    # stops there instead -- refused in a program with an eval (it exited
-    # where perl printed "caught").
-    out('a method call in a program with an eval') if $b->{has_eval} && !$b->_constructs($c);
     if (( $c->name // '' ) eq 'new' && $b->{mop}) {
         # B::SoN's new of a class of the class feature names its class
         # (class_name), its inputs the named arguments' values.
@@ -1420,10 +1420,11 @@ sub method_call {
         if (_is_list($a)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($a) ]) }
         else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($a), '%Slot') ]) }
     }
-    my $cls = $b->emit(op => 'ClassOf', type => '%Str', inputs => [ $inv ]);
     $b->hash_reads_settled('a method call');
     $b->set_want($c);   # whichever sub it finds may return a list
-    my $fp = $b->emit(op => 'MFind', type => 'i8*', inputs => [ $cls, $b->const_str($c->name) ]);
+    # (where perl dies -- no class, no method -- a die, an eval's to catch)
+    my $at = ' at ' . ( $c->can('file') ? $c->file // '-' : '-' ) . ' line ' . ( $c->can('line') ? $c->line // 0 : 0 ) . ".\n";
+    my $fp = $b->emit(op => 'MResolve', type => 'i8*', inputs => [ $inv, $b->const_str($c->name), $b->const_str($at) ]);
     return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
 }
 
@@ -2007,8 +2008,6 @@ sub _value {
         return $b->as($b->value($v->inputs->[0]), $ty);
     }
     if ($op eq 'Divide') {
-        # (by zero perl dies, an eval's to catch; T2's division exits there)
-        out('a divide in a program with an eval') if $b->{has_eval};
         # A DIVISION T1 TYPED Int is T1's error (7/2 is 3.5): not truncated here.
         out('a Divide typed Int') if $ty eq 'i64';
         # PERL DIVIDES AS NUMBERS and dies on a zero divisor, naming where.
@@ -2018,19 +2017,20 @@ sub _value {
         my $q = $b->emit(op => 'Div', type => 'double',
             inputs => [ map { $b->as($b->value($_), 'double') } $v->inputs->@[0, 1] ],
             attr => { msg => $msg, id => $b->{strs}{$msg} });
+        $b->after_call;   # (a zero divisor is a die: an eval's to catch)
         return $b->as($q, $ty);
     }
     if ($op eq 'Modulo') {
-        # (by zero perl dies, an eval's to catch; T2's division exits there)
-        out('a modulo in a program with an eval') if $b->{has_eval};
         # PERL'S % IS OF INTEGERS, its sign the right side's, and dies on zero.
         out('a % not typed Int') unless $ty eq 'i64';
         my $msg = "Illegal modulus zero at " . ( $v->can('file') && $v->file // '-' )
                  . " line " . ( $v->can('line') && $v->line // 0 ) . ".\n";
         $b->{strs}{$msg} //= scalar keys %{ $b->{strs} };
-        return $b->emit(op => 'Mod', type => 'i64',
+        my $r = $b->emit(op => 'Mod', type => 'i64',
             inputs => [ map { $b->as($b->value($_), 'i64') } $v->inputs->@[0, 1] ],
             attr => { msg => $msg, id => $b->{strs}{$msg} });
+        $b->after_call;   # (a zero modulus is a die: an eval's to catch)
+        return $r;
     }
     if (my $a = $ARITH{$op}) {
         if ($ty eq '%Slot') {
@@ -2288,8 +2288,7 @@ sub _line {
     return "call void \@t2_mop_isa(" . $arg->(@in) . ')' if $op eq 'MopIsa';
     return "call void \@t2_mop_isa_set(" . $arg->(@in) . ')' if $op eq 'MopIsaSet';
     return "call void \@t2_mop_def(" . $arg->(@in) . ", i8* bitcast (%Slot (%Array*)* $a{fn}_w to i8*))" if $op eq 'MopDef';
-    return "$nm = call %Str \@t2_classof(" . $arg->(@in) . ')' if $op eq 'ClassOf';
-    return "$nm = call i8* \@t2_mfind(" . $arg->(@in) . ')' if $op eq 'MFind';
+    return "$nm = call i8* \@t2_mresolve(" . $arg->(@in) . ')' if $op eq 'MResolve';
     if ($op eq 'MCall') {
         return "$nm.f = bitcast i8* " . $in[0]->name . " to %Slot (%Array*)*\n  $nm = call %Slot $nm.f(%Array* " . $in[1]->name . ')';
     }
@@ -2573,9 +2572,9 @@ entry:
   %z = fcmp oeq double %y, 0.0
   br i1 %z, label %die, label %ok
 die:
-  call i64 @write(i32 2, i8* %msg, i64 %n)
-  call void @exit(i32 255)
-  unreachable
+  %m = call %Str @t2_str(i8* %msg, i64 %n)
+  call void @t2_die_unwind(%Str %m)
+  ret double 0.0
 ok:
   %q = fdiv double %x, %y
   ret double %q
@@ -2585,9 +2584,9 @@ entry:
   %z = icmp eq i64 %y, 0
   br i1 %z, label %die, label %ok
 die:
-  call i64 @write(i32 2, i8* %msg, i64 %n)
-  call void @exit(i32 255)
-  unreachable
+  %m = call %Str @t2_str(i8* %msg, i64 %n)
+  call void @t2_die_unwind(%Str %m)
+  ret i64 0
 ok:
   %r = srem i64 %x, %y
   %rnz = icmp ne i64 %r, 0
@@ -3285,8 +3284,15 @@ none:
 }
 @t2_stashes = internal global %Slot zeroinitializer
 @lit_isa = private unnamed_addr constant [5 x i8] c"@ISA\00"
-@msg_nomethod = private unnamed_addr constant [79 x i8] c"chalk: refused at run time: a method call no class of the invocant can answer\0A\00"
-@msg_noclass = private unnamed_addr constant [77 x i8] c"chalk: refused at run time: a method call on what is not an object or class\0A\00"
+@lit_cm = private unnamed_addr constant [20 x i8] c"Can't call method \22\00"
+@lit_undefv = private unnamed_addr constant [24 x i8] c"\22 on an undefined value\00"
+@lit_unbl = private unnamed_addr constant [25 x i8] c"\22 on unblessed reference\00"
+@lit_nopkg = private unnamed_addr constant [40 x i8] c"\22 without a package or object reference\00"
+@lit_lom = private unnamed_addr constant [29 x i8] c"Can't locate object method \22\00"
+@lit_via = private unnamed_addr constant [16 x i8] c"\22 via package \22\00"
+@lit_q = private unnamed_addr constant [2 x i8] c"\22\00"
+@lit_forgot = private unnamed_addr constant [32 x i8] c"\22 (perhaps you forgot to load \22\00"
+@lit_qp = private unnamed_addr constant [4 x i8] c"\22?)\00"
 @msg_arity = private unnamed_addr constant [68 x i8] c"chalk: refused at run time: a call of a signature of another arity\0A\00"
 define internal %Slot @t2_stash_table() {
 entry:
@@ -3708,32 +3714,6 @@ define internal void @t2_mop_def(%Str %c, %Str %m, i8* %f) {
   call void @t2_hset(%Slot %s, %Str %m, %Slot %fs)
   ret void
 }
-; t2_classof(inv) -> the class a method call looks from: an object's, or a
-; class name's own.
-define internal %Str @t2_classof(%Slot %inv) {
-entry:
-  %t = extractvalue %Slot %inv, 0
-  %isref = icmp eq i8 %t, 5
-  br i1 %isref, label %ref, label %name
-ref:
-  %a = call %Array* @t2_harr(%Slot %inv)
-  %cl = call %Slot @t2_aget(%Array* %a, i64 0)
-  %ct = extractvalue %Slot %cl, 0
-  %blessed = icmp eq i8 %ct, 3
-  br i1 %blessed, label %obj, label %bad
-obj:
-  %cn = call %Str @t2_slot_str(%Slot %cl)
-  ret %Str %cn
-name:
-  %isstr = icmp eq i8 %t, 3
-  br i1 %isstr, label %named, label %bad
-named:
-  %nn = call %Str @t2_slot_str(%Slot %inv)
-  ret %Str %nn
-bad:
-  call void @t2_stop(i8* getelementptr ([77 x i8], [77 x i8]* @msg_noclass, i64 0, i64 0), i64 76)
-  unreachable
-}
 ; t2_mfind1(class, m) -> m's code in class or, depth first, its @ISA; null.
 define internal i8* @t2_mfind1(%Str %c, %Str %m) {
 entry:
@@ -3780,16 +3760,83 @@ next:
 none:
   ret i8* null
 }
-define internal i8* @t2_mfind(%Str %c, %Str %m) {
+; t2_mresolve(invocant, method, " at FILE line N.\n") -> the method's code;
+; where perl dies (no class, no method), a die and t2_nomethod's code.
+define internal i8* @t2_mresolve(%Slot %inv, %Str %m, %Str %at) {
 entry:
+  %t = extractvalue %Slot %inv, 0
+  switch i8 %t, label %named [ i8 0, label %undef i8 5, label %ref i8 6, label %unbl i8 7, label %unbl i8 8, label %unbl ]
+undef:
+  %u0 = call %Str @t2_str(i8* getelementptr ([20 x i8], [20 x i8]* @lit_cm, i64 0, i64 0), i64 19)
+  %u1 = call %Str @t2_concat(%Str %u0, %Str %m)
+  %u2 = call %Str @t2_str(i8* getelementptr ([24 x i8], [24 x i8]* @lit_undefv, i64 0, i64 0), i64 23)
+  %u3 = call %Str @t2_concat(%Str %u1, %Str %u2)
+  br label %die
+ref:
+  %a = call %Array* @t2_harr(%Slot %inv)
+  %cl = call %Slot @t2_aget(%Array* %a, i64 0)
+  %ct = extractvalue %Slot %cl, 0
+  %blessed = icmp eq i8 %ct, 3
+  br i1 %blessed, label %obj, label %unbl
+obj:
+  %cn = call %Str @t2_slot_str(%Slot %cl)
+  br label %look
+unbl:
+  %b0 = call %Str @t2_str(i8* getelementptr ([20 x i8], [20 x i8]* @lit_cm, i64 0, i64 0), i64 19)
+  %b1 = call %Str @t2_concat(%Str %b0, %Str %m)
+  %b2 = call %Str @t2_str(i8* getelementptr ([25 x i8], [25 x i8]* @lit_unbl, i64 0, i64 0), i64 24)
+  %b3 = call %Str @t2_concat(%Str %b1, %Str %b2)
+  br label %die
+named:
+  %nn = call %Str @t2_slot_str(%Slot %inv)
+  %nl = extractvalue %Str %nn, 1
+  %empty = icmp eq i64 %nl, 0
+  br i1 %empty, label %nopkg, label %look
+nopkg:
+  %p0 = call %Str @t2_str(i8* getelementptr ([20 x i8], [20 x i8]* @lit_cm, i64 0, i64 0), i64 19)
+  %p1 = call %Str @t2_concat(%Str %p0, %Str %m)
+  %p2 = call %Str @t2_str(i8* getelementptr ([40 x i8], [40 x i8]* @lit_nopkg, i64 0, i64 0), i64 39)
+  %p3 = call %Str @t2_concat(%Str %p1, %Str %p2)
+  br label %die
+look:
+  %c = phi %Str [ %cn, %obj ], [ %nn, %named ]
   %r = call i8* @t2_mfind1(%Str %c, %Str %m)
   %got = icmp ne i8* %r, null
-  br i1 %got, label %ok, label %bad
+  br i1 %got, label %ok, label %miss
 ok:
   ret i8* %r
-bad:
-  call void @t2_stop(i8* getelementptr ([79 x i8], [79 x i8]* @msg_nomethod, i64 0, i64 0), i64 78)
-  unreachable
+miss:
+  %l0 = call %Str @t2_str(i8* getelementptr ([29 x i8], [29 x i8]* @lit_lom, i64 0, i64 0), i64 28)
+  %l1 = call %Str @t2_concat(%Str %l0, %Str %m)
+  %l2 = call %Str @t2_str(i8* getelementptr ([16 x i8], [16 x i8]* @lit_via, i64 0, i64 0), i64 15)
+  %l3 = call %Str @t2_concat(%Str %l1, %Str %l2)
+  %l4 = call %Str @t2_concat(%Str %l3, %Str %c)
+  %tb = call %Slot @t2_stash_table()
+  %s = call %Slot @t2_hget(%Slot %tb, %Str %c)
+  %st = extractvalue %Slot %s, 0
+  %known = icmp eq i8 %st, 5
+  br i1 %known, label %quote, label %forgot
+quote:
+  %k0 = call %Str @t2_str(i8* getelementptr ([2 x i8], [2 x i8]* @lit_q, i64 0, i64 0), i64 1)
+  %k1 = call %Str @t2_concat(%Str %l4, %Str %k0)
+  br label %die
+forgot:
+  %f0 = call %Str @t2_str(i8* getelementptr ([32 x i8], [32 x i8]* @lit_forgot, i64 0, i64 0), i64 31)
+  %f1 = call %Str @t2_concat(%Str %l4, %Str %f0)
+  %f2 = call %Str @t2_concat(%Str %f1, %Str %c)
+  %f3 = call %Str @t2_str(i8* getelementptr ([4 x i8], [4 x i8]* @lit_qp, i64 0, i64 0), i64 3)
+  %f4 = call %Str @t2_concat(%Str %f2, %Str %f3)
+  br label %die
+die:
+  %msg = phi %Str [ %u3, %undef ], [ %b3, %unbl ], [ %p3, %nopkg ], [ %k1, %quote ], [ %f4, %forgot ]
+  %full = call %Str @t2_concat(%Str %msg, %Str %at)
+  call void @t2_die_unwind(%Str %full)
+  ret i8* bitcast (%Slot (%Array*)* @t2_nomethod to i8*)
+}
+; t2_nomethod(@_) -> undef: called where no method was found, a die already set.
+define internal %Slot @t2_nomethod(%Array* %args) {
+entry:
+  ret %Slot zeroinitializer
 }
 define internal %Slot @t2_hget(%Slot %h, %Str %k) {
 entry:

@@ -858,8 +858,9 @@ sub _deserialize_graph ($method_data) {
         $node->set_die_site($nd->{fields}{eval_id}, $nd->{fields}{file}, $nd->{fields}{line})
             if ( $op eq 'Divide' || $op eq 'Modulo' ) && defined $nd->{fields} && defined $nd->{fields}{line};
         # A die's site: the file and line perl's message names.
+        # (a method call's too: where no class answers it, perl's message names it)
         $node->set_site($nd->{fields}{file}, $nd->{fields}{line})
-            if $op eq 'Unwind' && defined $nd->{fields} && defined $nd->{fields}{line};
+            if ( $op eq 'Unwind' || $op eq 'Call' ) && defined $nd->{fields} && defined $nd->{fields}{line};
         # A block eval's id, on its join and on each die it lexically holds.
         $node->set_eval_id($nd->{fields}{eval_id})
             if ($op eq 'Region' || $op eq 'Unwind' || $op eq 'Call') && defined $nd->{fields}

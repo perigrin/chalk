@@ -135,6 +135,12 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     field $autoloads :reader = undef;
     method set_autoloads($v) { $autoloads = $v; return }
 
+    # A METHOD CALL'S SITE (B::SoN's): perl's message names it where no
+    # class answers it.
+    field $file :reader = undef;
+    field $line :reader = undef;
+    method set_site($f, $l) { ($file, $line) = ($f, $l); return }
+
     # The block eval whose body this call is in (B::SoN's eval_id), or
     # undef: the callee's own die names no eval.
     field $eval_id :reader = undef;

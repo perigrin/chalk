@@ -55,11 +55,11 @@ for my $case (
     is($out, "1.5 3\n", 'a nonzero divisor divides') or diag $@;
 }
 
-# INSIDE AN EVAL perl catches it with " at FILE line N." in $@, which this
-# lowering does not know: refused by name. A literal nonzero divisor cannot die.
+# INSIDE AN EVAL perl catches it, " at FILE line N." in $@: perl's answer
+# (T2 slice 22), or refused by name. A literal nonzero divisor cannot die.
 {
-    eval { through_llvm(q{sub d { 1 / $_[0] } my $z = $ENV{NO_SUCH_VAR} // 0; my $r = eval { d($z) }; print defined $r ? "ran\n" : "died\n";}) };
-    like($@, qr/GAP: .*zero.*eval/, 'a division that may be by zero, in an eval, is refused');
+    my ($dz) = eval { through_llvm(q{sub d { 1 / $_[0] } my $z = $ENV{NO_SUCH_VAR} // 0; my $r = eval { d($z) }; print defined $r ? "ran\n" : "died\n";}) };
+    ok(( $dz // '' ) eq "died\n" || $@ =~ /GAP: .*zero.*eval/, 'a division that may be by zero, in an eval: perl\'s answer, or refused') or diag $@;
     my ($out) = eval { through_llvm(q{sub h { $_[0] / 2 } my $x = $ENV{NO_SUCH_VAR} // 6; my $r = eval { h($x) }; print "$r\n";}) };
     is($out, "3\n", 'a division by a literal in an eval is lowered') or diag $@;
     # An UNUSED division still dies in perl; B::SoN drops it from the graph,
