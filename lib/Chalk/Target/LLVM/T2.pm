@@ -783,9 +783,30 @@ sub hash_value {
         return $b->emit(op => 'HDelete', type => '%Slot', inputs => [ $h, $k ]);
     }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
-        my $h = $b->hash_of($in[0]);
+        # %$r READ WHOLE: the hash the reference holds; an undefined one is an
+        # empty hash here, as in perl (a store through it would autovivify: not this).
+        my $h = blessed($in[0]) && $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%'
+            ? $b->emit(op => 'HDerefR', type => '%Slot', inputs => [ $b->as($b->value( $in[0]->inputs->[0] ), '%Slot') ])
+            : $b->hash_of($in[0]);
         return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]) if $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar';
         return $b->emit(op => $v->name eq 'keys' ? 'HKeys' : 'HValues', type => '%Array*', inputs => [$h]);
+    }
+    # sort (by string or by number, either way) and reverse, of a list: a new
+    # list. A sort with its own comparator is not T2's yet.
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:sort|reverse)\z/
+            && ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/) {   # static type
+        out('a sort with its own comparator') if $v->name eq 'sort'
+            && ( ( $v->can('sort_cmp_body') && $v->sort_cmp_body ) || !( $v->can('sort_cmp') && defined $v->sort_cmp ) );
+        my @l = @in;
+        pop @l if $v->can('memory_input') && $v->memory_input;
+        my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+        for my $e (grep { blessed($_) } @l) {
+            if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($e) ]) }
+            else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($e), '%Slot') ]) }
+        }
+        return $b->emit(op => 'ARev', type => '%Array*', inputs => [$arr]) if $v->name eq 'reverse';
+        return $b->emit(op => 'ASort', type => '%Array*', inputs => [$arr],
+            attr => { num => ( $v->sort_cmp eq 'numeric' ? 1 : 0 ), desc => ( ( $v->can('sort_order') ? $v->sort_order // '' : '' ) eq 'descending' ? 1 : 0 ) });
     }
     return undef;
 }
@@ -1078,7 +1099,7 @@ sub array_of {
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
     if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || _aderef($n) || _array_var($n) || _argv($n)
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
-                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:keys|values)\z/ )) {
+                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:keys|values|sort|reverse)\z/ )) {
         my $a = $b->value($n);
         return $a if $a->type eq '%Array*';
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]
@@ -2032,6 +2053,8 @@ sub type_of {
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
         return $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar' ? 'i64' : '%Array*';
     }
+    return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:sort|reverse)\z/
+        && ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/;   # static type
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
     return '%Str' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
@@ -2516,6 +2539,9 @@ sub _line {
     return "$nm = call %Array* \@t2_args_from(" . $arg->(@in) . ')' if $op eq 'ArgsFrom';
     return "call void \@t2_args_min(%Array* " . $in[0]->name . ", i64 $a{n})" if $op eq 'ArgsMin';
     return "call void \@t2_args_pairs(%Array* " . $in[0]->name . ", i64 $a{n})" if $op eq 'ArgsPairs';
+    return "$nm = call %Array* \@t2_asort(" . $arg->(@in) . ", i1 $a{num}, i1 $a{desc})" if $op eq 'ASort';
+    return "$nm = call %Slot \@t2_hderef_r(" . $arg->(@in) . ')' if $op eq 'HDerefR';
+    return "$nm = call %Array* \@t2_arev(" . $arg->(@in) . ')' if $op eq 'ARev';
     return "call void \@t2_aassign(" . $arg->(@in) . ')' if $op eq 'AAssign';
     return "call void \@t2_hassign(" . $arg->(@in) . ')' if $op eq 'HAssign';
     return "call void \@t2_aunshiftl(" . $arg->(@in) . ')' if $op eq 'AUnshiftL';
@@ -4976,6 +5002,114 @@ bad:
   unreachable
 fine:
   ret void
+}
+; t2_cmp(x, y, num) -> perl's cmp (by string) or <=> (by number): -1, 0, 1.
+define internal i64 @t2_cmp(%Slot %x, %Slot %y, i1 %num) {
+entry:
+  br i1 %num, label %n, label %s
+n:
+  ; (two Ints compared as integers: past 2**53 a double cannot tell them apart)
+  %tx = extractvalue %Slot %x, 0
+  %ty = extractvalue %Slot %y, 0
+  %ix = icmp eq i8 %tx, 1
+  %iy = icmp eq i8 %ty, 1
+  %both = and i1 %ix, %iy
+  br i1 %both, label %ints, label %nums
+ints:
+  %vx = extractvalue %Slot %x, 1
+  %vy = extractvalue %Slot %y, 1
+  %ilt = icmp slt i64 %vx, %vy
+  %igt = icmp sgt i64 %vx, %vy
+  %il = select i1 %ilt, i64 -1, i64 0
+  %ir = select i1 %igt, i64 1, i64 %il
+  ret i64 %ir
+nums:
+  %dx = call double @t2_slot_num(%Slot %x)
+  %dy = call double @t2_slot_num(%Slot %y)
+  %lt = fcmp olt double %dx, %dy
+  %gt = fcmp ogt double %dx, %dy
+  %l = select i1 %lt, i64 -1, i64 0
+  %r = select i1 %gt, i64 1, i64 %l
+  ret i64 %r
+s:
+  %sx = call %Str @t2_slot_str(%Slot %x)
+  %sy = call %Str @t2_slot_str(%Slot %y)
+  %c = call i64 @t2_strcmp(%Str %sx, %Str %sy)
+  %neg = icmp slt i64 %c, 0
+  %pos = icmp sgt i64 %c, 0
+  %c1 = select i1 %neg, i64 -1, i64 0
+  %c2 = select i1 %pos, i64 1, i64 %c1
+  ret i64 %c2
+}
+; t2_hderef_r(r) -> the hash r holds, read whole; undef an empty hash (perl's
+; rvalue %{undef}). What is not a hash stops at its first access.
+define internal %Slot @t2_hderef_r(%Slot %r) {
+entry:
+  %t = extractvalue %Slot %r, 0
+  %u = icmp eq i8 %t, 0
+  br i1 %u, label %empty, label %as
+empty:
+  %h = call %Slot @t2_hnew()
+  ret %Slot %h
+as:
+  ret %Slot %r
+}
+; t2_asort(a, num, desc) -> a new list of a's elements in order (stable, as
+; perl's mergesort is).
+define internal %Array* @t2_asort(%Array* %a, i1 %num, i1 %desc) {
+entry:
+  %r = call %Array* @t2_new_array()
+  call void @t2_aappend(%Array* %r, %Array* %a)
+  %n = call i64 @t2_alen(%Array* %r)
+  br label %outer
+outer:
+  %i = phi i64 [ 1, %entry ], [ %i2, %placed ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %take, label %done
+take:
+  %v = call %Slot @t2_aget(%Array* %r, i64 %i)
+  br label %inner
+inner:
+  %j = phi i64 [ %i, %take ], [ %jm, %shift ]
+  %atstart = icmp eq i64 %j, 0
+  br i1 %atstart, label %place, label %look
+look:
+  %jm = sub i64 %j, 1
+  %p = call %Slot @t2_aget(%Array* %r, i64 %jm)
+  %c0 = call i64 @t2_cmp(%Slot %p, %Slot %v, i1 %num)
+  %cn = sub i64 0, %c0
+  %c = select i1 %desc, i64 %cn, i64 %c0
+  %after = icmp sgt i64 %c, 0
+  br i1 %after, label %shift, label %place
+shift:
+  call void @t2_aset(%Array* %r, i64 %j, %Slot %p, i8* null, i64 0)
+  br label %inner
+place:
+  call void @t2_aset(%Array* %r, i64 %j, %Slot %v, i8* null, i64 0)
+  br label %placed
+placed:
+  %i2 = add i64 %i, 1
+  br label %outer
+done:
+  ret %Array* %r
+}
+; t2_arev(a) -> a new list of a's elements, last first.
+define internal %Array* @t2_arev(%Array* %a) {
+entry:
+  %r = call %Array* @t2_new_array()
+  %n = call i64 @t2_alen(%Array* %a)
+  br label %loop
+loop:
+  %i = phi i64 [ %n, %entry ], [ %im, %body ]
+  %more = icmp sgt i64 %i, 0
+  br i1 %more, label %body, label %done
+body:
+  %im = sub i64 %i, 1
+  %v = call %Slot @t2_aget(%Array* %a, i64 %im)
+  call void @t2_apush(%Array* %r, %Slot %v)
+  br label %loop
+done:
+  ret %Array* %r
 }
 ; WHOLE ASSIGN IN PLACE (`@a = LIST`, `%h = LIST` on the container a tie or a
 ; reference names): the list copied first -- it may read the aggregate --

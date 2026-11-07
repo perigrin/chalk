@@ -53,7 +53,8 @@ for my $name (sort keys %FIXTURE) {
         # without one would order by whatever the buffer already held and
         # still "lower" -- and for `sort keys %h` that is insertion order,
         # which is right often enough to hide the bug.
-        like($ir, qr/sort:/, 'the emitted IR names the sort it lowered');
+        # (Context.pm's sort: block, or T2's runtime sort, the comparator its flag)
+        like($ir, qr/sort:|call %Array\* \@t2_asort\(/, 'the emitted IR names the sort it lowered');
     };
 }
 
