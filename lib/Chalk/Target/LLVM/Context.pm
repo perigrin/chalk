@@ -2472,7 +2472,10 @@ sub lower_value {
           . "untied -- or that an arm or a loop holds -- is not lowered\n"
             unless $Chalk::IR::Analysis::TIED{ refaddr($node) };
         $self->_refuse_inside_eval("a tie (TIESCALAR may die)");
-        my (undef, $class, @args) = grep { blessed($_) } $node->inputs->@*;
+        # (its memory input is no argument: B::SoN orders a tie as global state)
+        my @in = grep { blessed($_) } $node->inputs->@*;
+        pop @in if $node->can('memory_input') && $node->memory_input;
+        my (undef, $class, @args) = @in;
         my $r = $self->_lower_runtime_dispatch($node, $class, name => 'TIESCALAR', args => [ $class, @args ],
             as => 'Scalar');
         die "GAP: a tie to a class no package of this program declares TIESCALAR in is not lowered\n"

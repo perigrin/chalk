@@ -2738,10 +2738,15 @@ entry:
 first:
   %c0 = load i8, i8* %p
   %l0 = call i1 @t2_is_letter(i8 %c0)
-  br i1 %l0, label %loop, label %no
+  ; (perl's /^[a-zA-Z]*[0-9]*$/: no letters at all is magic too -- "007"++ is "008")
+  %g0 = icmp uge i8 %c0, 48
+  %e0 = icmp ule i8 %c0, 57
+  %d0 = and i1 %g0, %e0
+  %ok0 = or i1 %l0, %d0
+  br i1 %ok0, label %loop, label %no
 loop:
   %i = phi i64 [ 1, %first ], [ %i1, %next ]
-  %digits = phi i1 [ 0, %first ], [ %d1, %next ]
+  %digits = phi i1 [ %d0, %first ], [ %d1, %next ]
   %more = icmp slt i64 %i, %n
   br i1 %more, label %body, label %yes
 body:
@@ -2813,7 +2818,9 @@ grow:
   ; carried off the front: a new first character of the first's kind
   %f = load i8, i8* %dst
   %fA = icmp eq i8 %f, 65
-  %lead = select i1 %fA, i8 65, i8 97
+  %f0 = icmp eq i8 %f, 48
+  %lead0 = select i1 %fA, i8 65, i8 97
+  %lead = select i1 %f0, i8 49, i8 %lead0   ; (a digit's is 1: "99"++ is "100")
   store i8 %lead, i8* %buf
   %n2 = add i64 %n, 1
   %g = call %Str @t2_str(i8* %buf, i64 %n2)

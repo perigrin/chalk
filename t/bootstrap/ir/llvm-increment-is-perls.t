@@ -49,6 +49,9 @@ for my $case (
     [ q{my $n = 0; sub f { $n++; return $n } f(); print f(), "\n";}, "2\n", 'a counter a sub shares' ],
     [ q{my %h = (k => "Az", z => "zz", n => "a9", d => "007", s => "3abc", e => "", f => "1.5", m => "-3", y => "Zz9", i => "inf"); for my $k (qw(d e f i k m n s y z)) { $h{$k}++; print "$k=$h{$k},"; } print "\n";},
       "d=008,e=1,f=2.5,i=ing,k=Ba,m=-2,n=b0,s=4,y=AAa0,z=aaa,\n", 'strings, magic and not' ],
+    # A DIGIT CARRIED OFF THE FRONT is a 1, a letter its own kind's first.
+    [ q{my %h = (a => "99", b => "009", c => "0", d => "9", e => "Zz", f => "a9", g => "zz99"); for my $k (qw(a b c d e f g)) { $h{$k}++; print "$k=$h{$k},"; } print "\n";},
+      "a=100,b=010,c=1,d=10,e=AAa,f=b0,g=aaa00,\n", 'a carry off the front' ],
     [ q{my %h = (x => 1.5); $h{x}++; print "$h{x}\n";}, "2.5\n", 'a Num' ],
     [ q{my $a = $ENV{X} // 5; my $b = $a++; my $c = ++$a; my $d = $a--; my $e = --$a; print "$a $b $c $d $e\n";}, "5 5 7 7 5\n", 'a defined string, up and down (pvm unary.md)' ],
 ) {
