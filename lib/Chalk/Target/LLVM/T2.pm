@@ -120,7 +120,8 @@ sub build {
     $b->index_readers(_own_nodes($ret));
     $b->new_block('entry');
     $b->emit(op => 'SaveArgs', type => 'void');   # argv, for @ARGV
-    $b->make_mop if grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($b->{mop}, $ret);
+    # (a tie calls its class's methods too)
+    $b->make_mop if grep { $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) eq 'method' || ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' ) } _all_nodes($b->{mop}, $ret);
     $b->make_constant_arrays(_own_nodes($ret));
     $b->{jumps} = {};
     $b->walk($start);
@@ -192,6 +193,20 @@ sub walk {
         }
         elsif ($op eq 'Loop') { $ctl = $b->loop($s) }
         elsif ($op eq 'If')   { $ctl = $b->if_stmt($s) }
+        # A READ OF A TIED AGGREGATE PINNED where it runs (B::SoN): a FETCH,
+        # FETCHSIZE or EXISTS call, made here, in order.
+        elsif ($op =~ /\A(?:Subscript|Count|Exists)\z/
+               || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join)\z/) {
+            $b->value($s);
+            push @{ $b->{passed} }, $s;
+            $ctl = $s;
+        }
+        # A tie OR untie in place: every later access of the container is the new metaobject's.
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:tie|untie)\z/) {
+            $b->value($s);
+            push @{ $b->{passed} }, $s;
+            $ctl = $s;
+        }
         elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:push|unshift|shift|pop)\z/) {
             $b->array_stmt($s);
             push @{ $b->{passed} }, $s;
@@ -603,6 +618,8 @@ sub _is_version {
     my $op = $n->operation;
     return 1 if $op =~ /\A(?:MemStart|Assign|EntryWrite|Delete|CellWrite)\z/;   # a store's version
     return 1 if $op eq 'Call' && $n->can('control_in') && blessed($n->control_in);
+    # A READ OF A TIED AGGREGATE is a method call: B::SoN pins it and versions memory at it.
+    return 1 if $op =~ /\A(?:Subscript|Count|Exists)\z/ && $n->can('control_in') && blessed($n->control_in);
     return $op eq 'Phi' && Chalk::Target::LLVM::Context::_is_memory_phi($n) ? 1 : 0;
 }
 
@@ -836,6 +853,30 @@ sub array_value {
     }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin') {
         my $name = $v->name // '';
+        if ($name =~ /\A(?:tie|tied|untie)\z/) {
+            # (a tie's methods may die, and nothing after them looks: not T2's in a program with an eval)
+            out("a $name in a program with an eval") if $b->{has_eval};
+            my @args = @in;
+            pop @args if $v->can('memory_input') && $v->memory_input;
+            my ($c, $cls, @rest) = @args;
+            my $sig = blessed($c) && $c->can('sigil') && defined $c->sigil ? $c->sigil
+                : blessed($c) && $c->operation eq 'ArrayLiteral' ? '@' : blessed($c) && $c->operation eq 'HashLiteral' ? '%' : '';
+            out("a $name of a scalar") unless $sig =~ /\A[\@%]\z/;
+            my $h = $sig eq '%';
+            my $box = $h ? $b->hash_of($c) : $b->array_of($c);
+            if ($name eq 'tied') { return $b->emit(op => $h ? 'TiedH' : 'TiedA', type => '%Slot', inputs => [$box]) }
+            $b->hash_reads_settled("a $name");
+            if ($name eq 'untie') {
+                $b->emit(op => $h ? 'UntieH' : 'UntieA', type => 'void', inputs => [$box]);
+                return $b->as($b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), '%Slot');
+            }
+            my $r = $b->emit(op => 'NewArray', type => '%Array*');
+            for my $e (@rest) {
+                if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $r, $b->array_of($e) ]) }
+                else { $b->emit(op => 'APush', type => 'void', inputs => [ $r, $b->as($b->value($e), '%Slot') ]) }
+            }
+            return $b->emit(op => $h ? 'TieHash' : 'TieArray', type => '%Slot', inputs => [ $box, $b->as($b->value($cls), '%Slot'), $r ]);
+        }
         if ($name eq 'shift' || $name eq 'pop') {
             return $b->emit(op => $name eq 'shift' ? 'AShift' : 'APop', type => '%Slot', inputs => [ $b->array_of($in[0]) ]);
         }
@@ -1054,6 +1095,20 @@ sub array_of {
     return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ]);
 }
 
+# _value_read($n) -> some node takes $n's value as an input -- not only as its
+# memory version (a later read of the array) or its control.
+sub _value_read {
+    my ($b, $n) = @_;
+    for my $c (grep { blessed($_) } ( $n->consumers // [] )->@*) {
+        my @in = $c->inputs->@*;
+        my $mem = _memory_input($c) // ( $c->operation =~ /\A(?:EntryDef|PadAccess)\z/ ? $in[0] : undef );
+        my $skip = blessed($mem) && refaddr($mem) == refaddr($n) ? 1 : 0;
+        my $uses = grep { blessed($_) && refaddr($_) == refaddr($n) } @in;
+        return 1 if $uses > $skip;
+    }
+    return 0;
+}
+
 # array_stmt($Call): push or unshift, or a shift or pop whose value is not used, in its
 # place -- after every read the array's version had.
 sub array_stmt {
@@ -1064,23 +1119,40 @@ sub array_stmt {
     if ($s->name eq 'push') {
         my ($arr, @vals) = @in;
         my $a = $b->array_of($arr);
+        # MORE THAN ONE VALUE is one list pushed: a tie's PUSH gets them all at once.
+        if (@vals > 1) {
+            my $t = $b->emit(op => 'NewArray', type => '%Array*');
+            for my $e (@vals) {
+                if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $t, $b->array_of($e) ]) }
+                else { $b->emit(op => 'APush', type => 'void', inputs => [ $t, $b->as($b->value($e), '%Slot') ]) }
+            }
+            @vals = ();
+            $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $t ]);
+        }
         for my $e (@vals) {
             # A LIST PUSHED is its elements (`push @r, f()`, `push @a, @b`).
             if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->array_of($e) ]); next }
             $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($e), '%Slot') ]);
         }
-        # ITS VALUE is the array's new count (an ADJUST's last statement).
-        $b->{memo}{ refaddr($s) } = $b->emit(op => 'ALen', type => 'i64', inputs => [$a]);
+        # ITS VALUE is the array's new count (an ADJUST's last statement) --
+        # counted only where it is read: a tie's FETCHSIZE is a call perl does not make.
+        $b->{memo}{ refaddr($s) } = $b->_value_read($s) ? $b->emit(op => 'ALen', type => 'i64', inputs => [$a])
+            : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
         return;
     }
     if ($s->name eq 'unshift') {
         my ($arr, @vals) = @in;
         my $a = $b->array_of($arr);
         out('a list unshifted') if grep { _is_list($_) } @vals;
-        # the last first, so `unshift @a, x, y` leaves x, y in front
         my @v = map { $b->as($b->value($_), '%Slot') } @vals;
-        $b->emit(op => 'AUnshift', type => 'void', inputs => [ $a, $_ ]) for reverse @v;
-        $b->{memo}{ refaddr($s) } = $b->emit(op => 'ALen', type => 'i64', inputs => [$a]);
+        if (@v == 1) { $b->emit(op => 'AUnshift', type => 'void', inputs => [ $a, $v[0] ]) }
+        else {   # one list unshifted: a tie's UNSHIFT gets them all at once
+            my $t = $b->emit(op => 'NewArray', type => '%Array*');
+            $b->emit(op => 'APush', type => 'void', inputs => [ $t, $_ ]) for @v;
+            $b->emit(op => 'AUnshiftL', type => 'void', inputs => [ $a, $t ]);
+        }
+        $b->{memo}{ refaddr($s) } = $b->_value_read($s) ? $b->emit(op => 'ALen', type => 'i64', inputs => [$a])
+            : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
         return;
     }
     $b->value($s);   # shift, pop: made here, its value memoized for its reader
@@ -1319,6 +1391,8 @@ sub make_mop {
     # (ADJUST blocks run in the `new` made where it is called)
     my %called = map { ( $_->name =~ s/\A.*:://r => 1 ) }
         grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($mop, $b->{ret});
+    # A TIE'S METHODS are the runtime's to call, by these names.
+    $called{$_} = 1 for grep { my $t = $_; grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' } _all_nodes($mop, $b->{ret}) } qw(TIEARRAY TIEHASH FETCH STORE FETCHSIZE PUSH POP SHIFT UNSHIFT EXISTS DELETE CLEAR FIRSTKEY NEXTKEY);
     # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES, VERSION), else
     # perl's die ("Can't locate object method"), unless an AUTOLOAD answers.
     my %defined = map { ( $_->name => 1 ) } map { ( $_->subs, $_->methods ) } @classes;
@@ -1886,6 +1960,7 @@ sub type_of {
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) =~ /\A(?:direct|method)\z/;
     # AN OBJECT is its blessed reference; ref() of one its class, or HASH.
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless';
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:tie|tied|untie)\z/;
     return '%Str' if $op eq 'RefType';
     return 'i64' if $op eq 'Print';
     # ARITHMETIC ON A %Slot is perl's: Ints stay Ints until they overflow. Done
@@ -2348,6 +2423,13 @@ sub _line {
     return "$nm = call %Array* \@t2_hvalues(" . $arg->(@in) . ')' if $op eq 'HValues';
     return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
     return "call void \@t2_aunshift(" . $arg->(@in) . ')' if $op eq 'AUnshift';
+    return "call void \@t2_aunshiftl(" . $arg->(@in) . ')' if $op eq 'AUnshiftL';
+    return "$nm = call %Slot \@t2_tie_array(" . $arg->(@in) . ')' if $op eq 'TieArray';
+    return "$nm = call %Slot \@t2_tie_hash(" . $arg->(@in) . ')' if $op eq 'TieHash';
+    return "$nm = call %Slot \@t2_tied(" . $arg->(@in) . ')' if $op eq 'TiedA';
+    return "$nm = call %Slot \@t2_tied_h(" . $arg->(@in) . ')' if $op eq 'TiedH';
+    return "call void \@t2_untie(" . $arg->(@in) . ')' if $op eq 'UntieA';
+    return "call void \@t2_untie_h(" . $arg->(@in) . ')' if $op eq 'UntieH';
     return "call void \@t2_aappend(" . $arg->(@in) . ')' if $op eq 'AAppend';
     return "call void \@t2_apush_if(" . $arg->(@in) . ')' if $op eq 'APushIf';
     return "$nm = call %Slot \@t2_one_of(" . $arg->(@in) . ')' if $op eq 'OneOf';
@@ -2993,16 +3075,18 @@ fmt:
 }
 
 ; %Array: { len, cap, elements } -- a `my @a`, its elements %Slot.
-%Array = type { i64, i64, %Slot* }
+%Array = type { i64, i64, %Slot*, %Meta* }
 declare i8* @realloc(i8*, i64)
 declare i8* @memmove(i8*, i8*, i64)
 define internal %Array* @t2_new_array() {
-  %m = call i8* @malloc(i64 24)
+  %m = call i8* @malloc(i64 32)
   %a = bitcast i8* %m to %Array*
   store %Array zeroinitializer, %Array* %a
+  %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
+  store %Meta* @t2_meta_default, %Meta** %mp
   ret %Array* %a
 }
-define internal i64 @t2_alen(%Array* %a) {
+define internal i64 @t2_alen_d(%Array* %a) {
   %lp = getelementptr %Array, %Array* %a, i32 0, i32 0
   %n = load i64, i64* %lp
   ret i64 %n
@@ -3048,7 +3132,7 @@ done:
   store i64 %nl, i64* %lp
   ret void
 }
-define internal void @t2_apush(%Array* %a, %Slot %v) {
+define internal void @t2_apush_d(%Array* %a, %Slot %v) {
   %n = call i64 @t2_alen(%Array* %a)
   %n1 = add i64 %n, 1
   call void @t2_agrow(%Array* %a, i64 %n1)
@@ -3059,7 +3143,7 @@ define internal void @t2_apush(%Array* %a, %Slot %v) {
   ret void
 }
 ; t2_aunshift(a, v): v in front, every element one further on.
-define internal void @t2_aunshift(%Array* %a, %Slot %v) {
+define internal void @t2_aunshift_d(%Array* %a, %Slot %v) {
 entry:
   %n = call i64 @t2_alen(%Array* %a)
   %n1 = add i64 %n, 1
@@ -3082,7 +3166,7 @@ done:
   store %Slot %v, %Slot* %els
   ret void
 }
-define internal %Slot @t2_aget(%Array* %a, i64 %i) {
+define internal %Slot @t2_aget_d(%Array* %a, i64 %i) {
 entry:
   %n = call i64 @t2_alen(%Array* %a)
   %neg = icmp slt i64 %i, 0
@@ -3102,7 +3186,7 @@ undef:
   ret %Slot zeroinitializer
 }
 @lit_aset = private unnamed_addr constant [64 x i8] c"Modification of non-creatable array value attempted, subscript \00"
-define internal void @t2_aset(%Array* %a, i64 %i, %Slot %v, i8* %at, i64 %atn) {
+define internal void @t2_aset_d(%Array* %a, i64 %i, %Slot %v, i8* %at, i64 %atn) {
 entry:
   %n = call i64 @t2_alen(%Array* %a)
   %neg = icmp slt i64 %i, 0
@@ -3129,7 +3213,7 @@ die:
   call void @exit(i32 255)
   unreachable
 }
-define internal %Slot @t2_apop(%Array* %a) {
+define internal %Slot @t2_apop_d(%Array* %a) {
 entry:
   %n = call i64 @t2_alen(%Array* %a)
   %empty = icmp eq i64 %n, 0
@@ -3143,7 +3227,7 @@ pop:
 undef:
   ret %Slot zeroinitializer
 }
-define internal %Slot @t2_ashift(%Array* %a) {
+define internal %Slot @t2_ashift_d(%Array* %a) {
 entry:
   %n = call i64 @t2_alen(%Array* %a)
   %empty = icmp eq i64 %n, 0
@@ -3604,7 +3688,7 @@ push:
 done:
   ret void
 }
-define internal void @t2_aappend(%Array* %d, %Array* %s) {
+define internal void @t2_aappend_d(%Array* %d, %Array* %s) {
 entry:
   %n = call i64 @t2_alen(%Array* %s)
   br label %loop
@@ -4154,6 +4238,598 @@ die:
   call void @t2_die_unwind(%Str %full)
   ret %Slot zeroinitializer
 }
+@lit_tm_fetchsize = private unnamed_addr constant [10 x i8] c"FETCHSIZE\00"
+@lit_tm_fetch = private unnamed_addr constant [6 x i8] c"FETCH\00"
+@lit_tm_store = private unnamed_addr constant [6 x i8] c"STORE\00"
+@lit_tm_push = private unnamed_addr constant [5 x i8] c"PUSH\00"
+@lit_tm_pop = private unnamed_addr constant [4 x i8] c"POP\00"
+@lit_tm_shift = private unnamed_addr constant [6 x i8] c"SHIFT\00"
+@lit_tm_unshift = private unnamed_addr constant [8 x i8] c"UNSHIFT\00"
+@lit_tm_exists = private unnamed_addr constant [7 x i8] c"EXISTS\00"
+@lit_tm_delete = private unnamed_addr constant [7 x i8] c"DELETE\00"
+@lit_tm_firstkey = private unnamed_addr constant [9 x i8] c"FIRSTKEY\00"
+@lit_tm_nextkey = private unnamed_addr constant [8 x i8] c"NEXTKEY\00"
+@lit_tm_clear = private unnamed_addr constant [6 x i8] c"CLEAR\00"
+@lit_tm_tiearray = private unnamed_addr constant [9 x i8] c"TIEARRAY\00"
+@lit_tm_tiehash = private unnamed_addr constant [8 x i8] c"TIEHASH\00"
+; THE CONTAINER PROTOCOL (perigrin: a tie swaps a container's metaobject).
+; Every %Array -- an array, or a hash's pairs -- points at a metaobject:
+; a vtable of its operations and a datum (a tie's object). The default's
+; entries are the runtime's own functions (t2_aget_d, ...); t2_aget and the
+; rest look the operation up there. A tie's entries call the object's
+; methods; the other kind's entries stay the default's.
+%Meta = type { i8**, %Slot }
+@t2_vt_default = internal global [18 x i8*] [
+  i8* bitcast (%Slot (%Array*, i64)* @t2_aget_d to i8*),
+  i8* bitcast (void (%Array*, i64, %Slot, i8*, i64)* @t2_aset_d to i8*),
+  i8* bitcast (i64 (%Array*)* @t2_alen_d to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_apush_d to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_apop_d to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_ashift_d to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_aunshift_d to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_aappend_d to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_aunshiftl_d to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_hget_d to i8*),
+  i8* bitcast (void (%Slot, %Str, %Slot)* @t2_hset_d to i8*),
+  i8* bitcast (i1 (%Slot, %Str)* @t2_hexists_d to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_hdelete_d to i8*),
+  i8* bitcast (i64 (%Slot)* @t2_hcount_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hkeys_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hvalues_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hpairs_d to i8*),
+  i8* bitcast (void (%Slot, %Array*)* @t2_hfroma_d to i8*)
+]
+@t2_vt_tiearray = internal global [18 x i8*] [
+  i8* bitcast (%Slot (%Array*, i64)* @t2_tie_aget to i8*),
+  i8* bitcast (void (%Array*, i64, %Slot, i8*, i64)* @t2_tie_aset to i8*),
+  i8* bitcast (i64 (%Array*)* @t2_tie_alen to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_tie_apush to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_tie_apop to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_tie_ashift to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_tie_aunshift to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_tie_aappend to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_tie_aunshiftl to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_hget_d to i8*),
+  i8* bitcast (void (%Slot, %Str, %Slot)* @t2_hset_d to i8*),
+  i8* bitcast (i1 (%Slot, %Str)* @t2_hexists_d to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_hdelete_d to i8*),
+  i8* bitcast (i64 (%Slot)* @t2_hcount_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hkeys_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hvalues_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hpairs_d to i8*),
+  i8* bitcast (void (%Slot, %Array*)* @t2_hfroma_d to i8*)
+]
+@t2_vt_tiehash = internal global [18 x i8*] [
+  i8* bitcast (%Slot (%Array*, i64)* @t2_aget_d to i8*),
+  i8* bitcast (void (%Array*, i64, %Slot, i8*, i64)* @t2_aset_d to i8*),
+  i8* bitcast (i64 (%Array*)* @t2_alen_d to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_apush_d to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_apop_d to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_ashift_d to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_aunshift_d to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_aappend_d to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_aunshiftl_d to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_tie_hget to i8*),
+  i8* bitcast (void (%Slot, %Str, %Slot)* @t2_tie_hset to i8*),
+  i8* bitcast (i1 (%Slot, %Str)* @t2_tie_hexists to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_tie_hdelete to i8*),
+  i8* bitcast (i64 (%Slot)* @t2_tie_hcount to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_tie_hkeys to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_tie_hvalues to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_tie_hpairs to i8*),
+  i8* bitcast (void (%Slot, %Array*)* @t2_tie_hfroma to i8*)
+]
+@t2_meta_default = internal global %Meta { i8** getelementptr ([18 x i8*], [18 x i8*]* @t2_vt_default, i64 0, i64 0), %Slot zeroinitializer }
+; t2_meta(a) -> the metaobject a container points at
+define internal %Meta* @t2_meta(%Array* %a) {
+  %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
+  %m = load %Meta*, %Meta** %mp
+  ret %Meta* %m
+}
+define internal i8* @t2_vt(%Array* %a, i64 %k) {
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %vp = getelementptr %Meta, %Meta* %m, i32 0, i32 0
+  %vt = load i8**, i8*** %vp
+  %fp = getelementptr i8*, i8** %vt, i64 %k
+  %f = load i8*, i8** %fp
+  ret i8* %f
+}
+define internal %Slot @t2_aget(%Array* %p0, i64 %p1) {
+  %a = bitcast %Array* %p0 to %Array*
+  %f = call i8* @t2_vt(%Array* %a, i64 0)
+  %fn = bitcast i8* %f to %Slot (%Array*, i64)*
+  %r = call %Slot %fn(%Array* %p0, i64 %p1)
+  ret %Slot %r
+}
+define internal void @t2_aset(%Array* %p0, i64 %p1, %Slot %p2, i8* %p3, i64 %p4) {
+  %a = bitcast %Array* %p0 to %Array*
+  %f = call i8* @t2_vt(%Array* %a, i64 1)
+  %fn = bitcast i8* %f to void (%Array*, i64, %Slot, i8*, i64)*
+  call void %fn(%Array* %p0, i64 %p1, %Slot %p2, i8* %p3, i64 %p4)
+  ret void
+}
+define internal i64 @t2_alen(%Array* %p0) {
+  %a = bitcast %Array* %p0 to %Array*
+  %f = call i8* @t2_vt(%Array* %a, i64 2)
+  %fn = bitcast i8* %f to i64 (%Array*)*
+  %r = call i64 %fn(%Array* %p0)
+  ret i64 %r
+}
+define internal void @t2_apush(%Array* %p0, %Slot %p1) {
+  %a = bitcast %Array* %p0 to %Array*
+  %f = call i8* @t2_vt(%Array* %a, i64 3)
+  %fn = bitcast i8* %f to void (%Array*, %Slot)*
+  call void %fn(%Array* %p0, %Slot %p1)
+  ret void
+}
+define internal %Slot @t2_apop(%Array* %p0) {
+  %a = bitcast %Array* %p0 to %Array*
+  %f = call i8* @t2_vt(%Array* %a, i64 4)
+  %fn = bitcast i8* %f to %Slot (%Array*)*
+  %r = call %Slot %fn(%Array* %p0)
+  ret %Slot %r
+}
+define internal %Slot @t2_ashift(%Array* %p0) {
+  %a = bitcast %Array* %p0 to %Array*
+  %f = call i8* @t2_vt(%Array* %a, i64 5)
+  %fn = bitcast i8* %f to %Slot (%Array*)*
+  %r = call %Slot %fn(%Array* %p0)
+  ret %Slot %r
+}
+define internal void @t2_aunshift(%Array* %p0, %Slot %p1) {
+  %a = bitcast %Array* %p0 to %Array*
+  %f = call i8* @t2_vt(%Array* %a, i64 6)
+  %fn = bitcast i8* %f to void (%Array*, %Slot)*
+  call void %fn(%Array* %p0, %Slot %p1)
+  ret void
+}
+define internal void @t2_aappend(%Array* %p0, %Array* %p1) {
+  %a = bitcast %Array* %p0 to %Array*
+  %f = call i8* @t2_vt(%Array* %a, i64 7)
+  %fn = bitcast i8* %f to void (%Array*, %Array*)*
+  call void %fn(%Array* %p0, %Array* %p1)
+  ret void
+}
+define internal void @t2_aunshiftl(%Array* %p0, %Array* %p1) {
+  %a = bitcast %Array* %p0 to %Array*
+  %f = call i8* @t2_vt(%Array* %a, i64 8)
+  %fn = bitcast i8* %f to void (%Array*, %Array*)*
+  call void %fn(%Array* %p0, %Array* %p1)
+  ret void
+}
+define internal %Slot @t2_hget(%Slot %p0, %Str %p1) {
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %f = call i8* @t2_vt(%Array* %a, i64 9)
+  %fn = bitcast i8* %f to %Slot (%Slot, %Str)*
+  %r = call %Slot %fn(%Slot %p0, %Str %p1)
+  ret %Slot %r
+}
+define internal void @t2_hset(%Slot %p0, %Str %p1, %Slot %p2) {
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %f = call i8* @t2_vt(%Array* %a, i64 10)
+  %fn = bitcast i8* %f to void (%Slot, %Str, %Slot)*
+  call void %fn(%Slot %p0, %Str %p1, %Slot %p2)
+  ret void
+}
+define internal i1 @t2_hexists(%Slot %p0, %Str %p1) {
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %f = call i8* @t2_vt(%Array* %a, i64 11)
+  %fn = bitcast i8* %f to i1 (%Slot, %Str)*
+  %r = call i1 %fn(%Slot %p0, %Str %p1)
+  ret i1 %r
+}
+define internal %Slot @t2_hdelete(%Slot %p0, %Str %p1) {
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %f = call i8* @t2_vt(%Array* %a, i64 12)
+  %fn = bitcast i8* %f to %Slot (%Slot, %Str)*
+  %r = call %Slot %fn(%Slot %p0, %Str %p1)
+  ret %Slot %r
+}
+define internal i64 @t2_hcount(%Slot %p0) {
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %f = call i8* @t2_vt(%Array* %a, i64 13)
+  %fn = bitcast i8* %f to i64 (%Slot)*
+  %r = call i64 %fn(%Slot %p0)
+  ret i64 %r
+}
+define internal %Array* @t2_hkeys(%Slot %p0) {
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %f = call i8* @t2_vt(%Array* %a, i64 14)
+  %fn = bitcast i8* %f to %Array* (%Slot)*
+  %r = call %Array* %fn(%Slot %p0)
+  ret %Array* %r
+}
+define internal %Array* @t2_hvalues(%Slot %p0) {
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %f = call i8* @t2_vt(%Array* %a, i64 15)
+  %fn = bitcast i8* %f to %Array* (%Slot)*
+  %r = call %Array* %fn(%Slot %p0)
+  ret %Array* %r
+}
+define internal %Array* @t2_hpairs(%Slot %p0) {
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %f = call i8* @t2_vt(%Array* %a, i64 16)
+  %fn = bitcast i8* %f to %Array* (%Slot)*
+  %r = call %Array* %fn(%Slot %p0)
+  ret %Array* %r
+}
+define internal void @t2_hfroma(%Slot %p0, %Array* %p1) {
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %f = call i8* @t2_vt(%Array* %a, i64 17)
+  %fn = bitcast i8* %f to void (%Slot, %Array*)*
+  call void %fn(%Slot %p0, %Array* %p1)
+  ret void
+}
+; t2_tie_obj(a) -> the object a tied container's metaobject holds
+define internal %Slot @t2_tie_obj(%Array* %a) {
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %dp = getelementptr %Meta, %Meta* %m, i32 0, i32 1
+  %d = load %Slot, %Slot* %dp
+  ret %Slot %d
+}
+; t2_tie_call(args, name) -> the method name of args[0] called with args, in scalar context
+define internal %Slot @t2_tie_call(%Array* %args, %Str %m) {
+  %o = call %Slot @t2_aget(%Array* %args, i64 0)
+  %e = call %Str @t2_str(i8* null, i64 0)
+  %fp = call i8* @t2_mresolve(%Slot %o, %Str %m, %Str %e, %Str %e, i8 0)
+  %w = load i1, i1* @t2_want
+  store i1 0, i1* @t2_want
+  %f = bitcast i8* %fp to %Slot (%Array*)*
+  %r = call %Slot %f(%Array* %args)
+  store i1 %w, i1* @t2_want
+  ret %Slot %r
+}
+define internal i64 @t2_tie_alen(%Array* %p0) {
+entry:
+  %a = bitcast %Array* %p0 to %Array*
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %t0.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t0.args, %Slot %o)
+  %t0.m = call %Str @t2_str(i8* getelementptr ([10 x i8], [10 x i8]* @lit_tm_fetchsize, i64 0, i64 0), i64 9)
+  %t0 = call %Slot @t2_tie_call(%Array* %t0.args, %Str %t0.m)
+  %n = call i64 @t2_slot_i64(%Slot %t0)
+  ret i64 %n
+}
+define internal %Slot @t2_tie_aget(%Array* %p0, i64 %p1) {
+entry:
+  %a = bitcast %Array* %p0 to %Array*
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %neg = icmp slt i64 %p1, 0
+  br i1 %neg, label %fix, label %go
+fix:
+  %sz = call i64 @t2_tie_alen(%Array* %a)
+  %j0 = add i64 %p1, %sz
+  br label %go
+go:
+  %j = phi i64 [ %p1, %entry ], [ %j0, %fix ]
+  %js = call %Slot @t2_box_i64(i64 %j)
+  %t1.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t1.args, %Slot %o)
+  call void @t2_apush(%Array* %t1.args, %Slot %js)
+  %t1.m = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_tm_fetch, i64 0, i64 0), i64 5)
+  %t1 = call %Slot @t2_tie_call(%Array* %t1.args, %Str %t1.m)
+  ret %Slot %t1
+}
+define internal void @t2_tie_aset(%Array* %p0, i64 %p1, %Slot %p2, i8* %p3, i64 %p4) {
+entry:
+  %a = bitcast %Array* %p0 to %Array*
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %neg = icmp slt i64 %p1, 0
+  br i1 %neg, label %fix, label %go
+fix:
+  %sz = call i64 @t2_tie_alen(%Array* %a)
+  %j0 = add i64 %p1, %sz
+  br label %go
+go:
+  %j = phi i64 [ %p1, %entry ], [ %j0, %fix ]
+  %js = call %Slot @t2_box_i64(i64 %j)
+  %t2.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t2.args, %Slot %o)
+  call void @t2_apush(%Array* %t2.args, %Slot %js)
+  call void @t2_apush(%Array* %t2.args, %Slot %p2)
+  %t2.m = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_tm_store, i64 0, i64 0), i64 5)
+  %t2 = call %Slot @t2_tie_call(%Array* %t2.args, %Str %t2.m)
+  ret void
+}
+define internal void @t2_tie_apush(%Array* %p0, %Slot %p1) {
+entry:
+  %a = bitcast %Array* %p0 to %Array*
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %t3.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t3.args, %Slot %o)
+  call void @t2_apush(%Array* %t3.args, %Slot %p1)
+  %t3.m = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_tm_push, i64 0, i64 0), i64 4)
+  %t3 = call %Slot @t2_tie_call(%Array* %t3.args, %Str %t3.m)
+  ret void
+}
+define internal %Slot @t2_tie_apop(%Array* %p0) {
+entry:
+  %a = bitcast %Array* %p0 to %Array*
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %t4.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t4.args, %Slot %o)
+  %t4.m = call %Str @t2_str(i8* getelementptr ([4 x i8], [4 x i8]* @lit_tm_pop, i64 0, i64 0), i64 3)
+  %t4 = call %Slot @t2_tie_call(%Array* %t4.args, %Str %t4.m)
+  ret %Slot %t4
+}
+define internal %Slot @t2_tie_ashift(%Array* %p0) {
+entry:
+  %a = bitcast %Array* %p0 to %Array*
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %t5.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t5.args, %Slot %o)
+  %t5.m = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_tm_shift, i64 0, i64 0), i64 5)
+  %t5 = call %Slot @t2_tie_call(%Array* %t5.args, %Str %t5.m)
+  ret %Slot %t5
+}
+define internal void @t2_tie_aunshift(%Array* %p0, %Slot %p1) {
+entry:
+  %a = bitcast %Array* %p0 to %Array*
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %t6.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t6.args, %Slot %o)
+  call void @t2_apush(%Array* %t6.args, %Slot %p1)
+  %t6.m = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_tm_unshift, i64 0, i64 0), i64 7)
+  %t6 = call %Slot @t2_tie_call(%Array* %t6.args, %Str %t6.m)
+  ret void
+}
+define internal void @t2_tie_aappend(%Array* %p0, %Array* %p1) {
+entry:
+  %a = bitcast %Array* %p0 to %Array*
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %args, %Slot %o)
+  call void @t2_aappend(%Array* %args, %Array* %p1)
+  %m = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_tm_push, i64 0, i64 0), i64 4)
+  %r = call %Slot @t2_tie_call(%Array* %args, %Str %m)
+  ret void
+}
+define internal void @t2_tie_aunshiftl(%Array* %p0, %Array* %p1) {
+entry:
+  %a = bitcast %Array* %p0 to %Array*
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %args, %Slot %o)
+  call void @t2_aappend(%Array* %args, %Array* %p1)
+  %m = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_tm_unshift, i64 0, i64 0), i64 7)
+  %r = call %Slot @t2_tie_call(%Array* %args, %Str %m)
+  ret void
+}
+define internal %Slot @t2_tie_hget(%Slot %p0, %Str %p1) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %ks = call %Slot @t2_box_str(%Str %p1)
+  %t7.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t7.args, %Slot %o)
+  call void @t2_apush(%Array* %t7.args, %Slot %ks)
+  %t7.m = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_tm_fetch, i64 0, i64 0), i64 5)
+  %t7 = call %Slot @t2_tie_call(%Array* %t7.args, %Str %t7.m)
+  ret %Slot %t7
+}
+define internal void @t2_tie_hset(%Slot %p0, %Str %p1, %Slot %p2) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %ks = call %Slot @t2_box_str(%Str %p1)
+  %t8.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t8.args, %Slot %o)
+  call void @t2_apush(%Array* %t8.args, %Slot %ks)
+  call void @t2_apush(%Array* %t8.args, %Slot %p2)
+  %t8.m = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_tm_store, i64 0, i64 0), i64 5)
+  %t8 = call %Slot @t2_tie_call(%Array* %t8.args, %Str %t8.m)
+  ret void
+}
+define internal i1 @t2_tie_hexists(%Slot %p0, %Str %p1) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %ks = call %Slot @t2_box_str(%Str %p1)
+  %t9.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t9.args, %Slot %o)
+  call void @t2_apush(%Array* %t9.args, %Slot %ks)
+  %t9.m = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_tm_exists, i64 0, i64 0), i64 6)
+  %t9 = call %Slot @t2_tie_call(%Array* %t9.args, %Str %t9.m)
+  %b = call i1 @t2_truth_slot(%Slot %t9)
+  ret i1 %b
+}
+define internal %Slot @t2_tie_hdelete(%Slot %p0, %Str %p1) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %ks = call %Slot @t2_box_str(%Str %p1)
+  %t10.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t10.args, %Slot %o)
+  call void @t2_apush(%Array* %t10.args, %Slot %ks)
+  %t10.m = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_tm_delete, i64 0, i64 0), i64 6)
+  %t10 = call %Slot @t2_tie_call(%Array* %t10.args, %Str %t10.m)
+  ret %Slot %t10
+}
+define internal %Array* @t2_tie_hkeys(%Slot %p0) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %ks = call %Array* @t2_new_array()
+  %t11.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t11.args, %Slot %o)
+  %t11.m = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_tm_firstkey, i64 0, i64 0), i64 8)
+  %t11 = call %Slot @t2_tie_call(%Array* %t11.args, %Str %t11.m)
+  br label %loop
+loop:
+  %k = phi %Slot [ %t11, %entry ], [ %t12, %more ]
+  %kt = extractvalue %Slot %k, 0
+  %done = icmp eq i8 %kt, 0
+  br i1 %done, label %end, label %more
+more:
+  call void @t2_apush(%Array* %ks, %Slot %k)
+  %t12.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t12.args, %Slot %o)
+  call void @t2_apush(%Array* %t12.args, %Slot %k)
+  %t12.m = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_tm_nextkey, i64 0, i64 0), i64 7)
+  %t12 = call %Slot @t2_tie_call(%Array* %t12.args, %Str %t12.m)
+  br label %loop
+end:
+  ret %Array* %ks
+}
+define internal i64 @t2_tie_hcount(%Slot %p0) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %ks = call %Array* @t2_tie_hkeys(%Slot %p0)
+  %n = call i64 @t2_alen(%Array* %ks)
+  ret i64 %n
+}
+define internal %Array* @t2_tie_hvalues(%Slot %p0) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %ks = call %Array* @t2_tie_hkeys(%Slot %p0)
+  %n = call i64 @t2_alen(%Array* %ks)
+  %out = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %go = icmp slt i64 %i, %n
+  br i1 %go, label %body, label %end
+body:
+  %k = call %Slot @t2_aget(%Array* %ks, i64 %i)
+  %t13.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t13.args, %Slot %o)
+  call void @t2_apush(%Array* %t13.args, %Slot %k)
+  %t13.m = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_tm_fetch, i64 0, i64 0), i64 5)
+  %t13 = call %Slot @t2_tie_call(%Array* %t13.args, %Str %t13.m)
+  call void @t2_apush(%Array* %out, %Slot %t13)
+  %i2 = add i64 %i, 1
+  br label %loop
+end:
+  ret %Array* %out
+}
+define internal %Array* @t2_tie_hpairs(%Slot %p0) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %ks = call %Array* @t2_tie_hkeys(%Slot %p0)
+  %n = call i64 @t2_alen(%Array* %ks)
+  %out = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %go = icmp slt i64 %i, %n
+  br i1 %go, label %body, label %end
+body:
+  %k = call %Slot @t2_aget(%Array* %ks, i64 %i)
+  call void @t2_apush(%Array* %out, %Slot %k)
+  %t14.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t14.args, %Slot %o)
+  call void @t2_apush(%Array* %t14.args, %Slot %k)
+  %t14.m = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_tm_fetch, i64 0, i64 0), i64 5)
+  %t14 = call %Slot @t2_tie_call(%Array* %t14.args, %Str %t14.m)
+  call void @t2_apush(%Array* %out, %Slot %t14)
+  %i2 = add i64 %i, 1
+  br label %loop
+end:
+  ret %Array* %out
+}
+define internal void @t2_tie_hfroma(%Slot %p0, %Array* %p1) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %p0)
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %t15.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t15.args, %Slot %o)
+  %t15.m = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_tm_clear, i64 0, i64 0), i64 5)
+  %t15 = call %Slot @t2_tie_call(%Array* %t15.args, %Str %t15.m)
+  %n = call i64 @t2_alen(%Array* %p1)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %go = icmp slt i64 %i, %n
+  br i1 %go, label %body, label %end
+body:
+  %k = call %Slot @t2_aget(%Array* %p1, i64 %i)
+  %i1 = add i64 %i, 1
+  %val = call %Slot @t2_aget(%Array* %p1, i64 %i1)
+  %t16.args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %t16.args, %Slot %o)
+  call void @t2_apush(%Array* %t16.args, %Slot %k)
+  call void @t2_apush(%Array* %t16.args, %Slot %val)
+  %t16.m = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_tm_store, i64 0, i64 0), i64 5)
+  %t16 = call %Slot @t2_tie_call(%Array* %t16.args, %Str %t16.m)
+  %i2 = add i64 %i, 2
+  br label %loop
+end:
+  ret void
+}
+; t2_tie(a, vt, class, args, ctor) -> the object ctor (TIEARRAY/TIEHASH) made; a now points at a tie's metaobject holding it
+define internal %Slot @t2_tie(%Array* %a, i8** %vt, %Slot %cls, %Array* %rest, %Str %ctor) {
+  %args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %args, %Slot %cls)
+  call void @t2_aappend(%Array* %args, %Array* %rest)
+  %o = call %Slot @t2_tie_call(%Array* %args, %Str %ctor)
+  %mm = call i8* @malloc(i64 32)
+  %m = bitcast i8* %mm to %Meta*
+  %vp = getelementptr %Meta, %Meta* %m, i32 0, i32 0
+  store i8** %vt, i8*** %vp
+  %dp = getelementptr %Meta, %Meta* %m, i32 0, i32 1
+  store %Slot %o, %Slot* %dp
+  %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
+  store %Meta* %m, %Meta** %mp
+  ret %Slot %o
+}
+define internal %Slot @t2_tie_array(%Array* %a, %Slot %cls, %Array* %rest) {
+  %c = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_tm_tiearray, i64 0, i64 0), i64 8)
+  %r = call %Slot @t2_tie(%Array* %a, i8** getelementptr ([18 x i8*], [18 x i8*]* @t2_vt_tiearray, i64 0, i64 0), %Slot %cls, %Array* %rest, %Str %c)
+  ret %Slot %r
+}
+define internal %Slot @t2_tie_hash(%Slot %h, %Slot %cls, %Array* %rest) {
+  %a = call %Array* @t2_harr(%Slot %h)
+  %c = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_tm_tiehash, i64 0, i64 0), i64 7)
+  %r = call %Slot @t2_tie(%Array* %a, i8** getelementptr ([18 x i8*], [18 x i8*]* @t2_vt_tiehash, i64 0, i64 0), %Slot %cls, %Array* %rest, %Str %c)
+  ret %Slot %r
+}
+; t2_tied(a) -> the tie's object, or undef where a has the default metaobject
+define internal %Slot @t2_tied(%Array* %a) {
+entry:
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %d = icmp eq %Meta* %m, @t2_meta_default
+  br i1 %d, label %no, label %yes
+no:
+  ret %Slot zeroinitializer
+yes:
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  ret %Slot %o
+}
+; t2_untie(a): a back to the default metaobject (its own elements, untouched by the tie)
+define internal void @t2_untie(%Array* %a) {
+  %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
+  store %Meta* @t2_meta_default, %Meta** %mp
+  ret void
+}
+define internal void @t2_aunshiftl_d(%Array* %a, %Array* %l) {
+entry:
+  %n = call i64 @t2_alen(%Array* %l)
+  br label %loop
+loop:
+  %i = phi i64 [ %n, %entry ], [ %im, %body ]
+  %more = icmp sgt i64 %i, 0
+  br i1 %more, label %body, label %done
+body:
+  %im = sub i64 %i, 1
+  %v = call %Slot @t2_aget(%Array* %l, i64 %im)
+  call void @t2_aunshift_d(%Array* %a, %Slot %v)
+  br label %loop
+done:
+  ret void
+}
+define internal %Slot @t2_tied_h(%Slot %h) {
+  %a = call %Array* @t2_harr(%Slot %h)
+  %r = call %Slot @t2_tied(%Array* %a)
+  ret %Slot %r
+}
+define internal void @t2_untie_h(%Slot %h) {
+  %a = call %Array* @t2_harr(%Slot %h)
+  call void @t2_untie(%Array* %a)
+  ret void
+}
 ; t2_mresolve(invocant, method, " at FILE line N.\n", start, mode) -> the method's code,
 ; looked up from (mode 0) the invocant's class, (1) start, a qualified name's
 ; package, or (2) start's @ISA, a SUPER:: call's; where perl dies (no class,
@@ -4238,7 +4914,7 @@ define internal %Slot @t2_nomethod(%Array* %args) {
 entry:
   ret %Slot zeroinitializer
 }
-define internal %Slot @t2_hget(%Slot %h, %Str %k) {
+define internal %Slot @t2_hget_d(%Slot %h, %Str %k) {
 entry:
   %a = call %Array* @t2_harr(%Slot %h)
   %i = call i64 @t2_hfind(%Array* %a, %Str %k)
@@ -4251,14 +4927,14 @@ get:
 undef:
   ret %Slot zeroinitializer
 }
-define internal i1 @t2_hexists(%Slot %h, %Str %k) {
+define internal i1 @t2_hexists_d(%Slot %h, %Str %k) {
   %a = call %Array* @t2_harr(%Slot %h)
   %i = call i64 @t2_hfind(%Array* %a, %Str %k)
   %e = icmp sge i64 %i, 0
   ret i1 %e
 }
 ; t2_hdelete(h, k) -> k's value (undef if none), its pair taken out.
-define internal %Slot @t2_hdelete(%Slot %h, %Str %k) {
+define internal %Slot @t2_hdelete_d(%Slot %h, %Str %k) {
 entry:
   %a = call %Array* @t2_harr(%Slot %h)
   %i = call i64 @t2_hfind(%Array* %a, %Str %k)
@@ -4291,7 +4967,7 @@ done:
   store i64 %n2, i64* %lp
   ret %Slot %v
 }
-define internal void @t2_hfroma(%Slot %h, %Array* %l) {
+define internal void @t2_hfroma_d(%Slot %h, %Array* %l) {
 entry:
   %n = call i64 @t2_alen(%Array* %l)
   br label %loop
@@ -4310,7 +4986,7 @@ body:
 done:
   ret void
 }
-define internal i64 @t2_hcount(%Slot %h) {
+define internal i64 @t2_hcount_d(%Slot %h) {
   %a = call %Array* @t2_harr(%Slot %h)
   %n = call i64 @t2_alen(%Array* %a)
   %p = sub i64 %n, 1
@@ -4337,7 +5013,7 @@ body:
 done:
   ret %Array* %r
 }
-define internal %Array* @t2_hpairs(%Slot %h) {
+define internal %Array* @t2_hpairs_d(%Slot %h) {
 entry:
   %a = call %Array* @t2_harr(%Slot %h)
   %n = call i64 @t2_alen(%Array* %a)
@@ -4355,15 +5031,15 @@ body:
 done:
   ret %Array* %r
 }
-define internal %Array* @t2_hkeys(%Slot %h) {
+define internal %Array* @t2_hkeys_d(%Slot %h) {
   %r = call %Array* @t2_hpick(%Slot %h, i64 1)
   ret %Array* %r
 }
-define internal %Array* @t2_hvalues(%Slot %h) {
+define internal %Array* @t2_hvalues_d(%Slot %h) {
   %r = call %Array* @t2_hpick(%Slot %h, i64 2)
   ret %Array* %r
 }
-define internal void @t2_hset(%Slot %h, %Str %k, %Slot %v) {
+define internal void @t2_hset_d(%Slot %h, %Str %k, %Slot %v) {
 entry:
   %a = call %Array* @t2_harr(%Slot %h)
   %i = call i64 @t2_hfind(%Array* %a, %Str %k)
