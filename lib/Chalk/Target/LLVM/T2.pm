@@ -1319,12 +1319,11 @@ sub make_mop {
     # (ADJUST blocks run in the `new` made where it is called)
     my %called = map { ( $_->name =~ s/\A.*:://r => 1 ) }
         grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($mop, $b->{ret});
-    # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES), else perl's die
-    # ("Can't locate object method"), unless it is VERSION (not T2's) or an
-    # AUTOLOAD answers.
+    # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES, VERSION), else
+    # perl's die ("Can't locate object method"), unless an AUTOLOAD answers.
     my %defined = map { ( $_->name => 1 ) } map { ( $_->subs, $_->methods ) } @classes;
     $defined{new} = 1 if grep { _is_feature_class($_) } @classes;   # made where it is called
-    out("a method no package defines ($_)") for grep { !$defined{$_} && ( $_ eq 'VERSION' || $defined{AUTOLOAD} ) } sort keys %called;
+    out("a method no package defines ($_)") for grep { !$defined{$_} && $defined{AUTOLOAD} } sort keys %called;
     out('an AUTOLOAD') if $defined{AUTOLOAD};
     # UNIVERSAL, at the root of every lookup, first: a package of that name here would be wiped.
     out('a UNIVERSAL package of the program\'s own') if $cls{UNIVERSAL};
@@ -1339,6 +1338,14 @@ sub make_mop {
             my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
             $b->emit(op => 'MopDef', type => 'void', inputs => [ $cs, $b->const_str($sub->name) ], attr => { fn => $fn->{name} });
         }
+    }
+    # EACH PACKAGE'S $VERSION, by its name, for UNIVERSAL::VERSION (after the
+    # classes: making a class's stash empties it).
+    if ($called{VERSION}) {
+        my %pkg = map { ( ( $_->package // 'main' ) => $_ ) }
+            grep { $_->operation eq 'EntryDef' && ( $_->sigil // '' ) eq '$' && ( $_->symbol // '' ) eq 'VERSION' && $_->can('package') }
+            _all_nodes($mop, $b->{ret});
+        $b->emit(op => 'MopVar', type => 'void', inputs => [ $b->const_str($_) ], attr => { global => $b->global_of( $pkg{$_} ) }) for sort keys %pkg;
     }
 }
 
@@ -2320,6 +2327,7 @@ sub _line {
     return "$nm = call %Slot \@t2_bless(" . $arg->(@in) . ')' if $op eq 'Bless';
     return "$nm = call %Str \@t2_reftype(" . $arg->(@in) . ')' if $op eq 'RefType';
     return "call void \@t2_universal_setup()" if $op eq 'MopUniversal';
+    return "call void \@t2_mop_var(" . $arg->(@in) . ", %Slot* $a{global})" if $op eq 'MopVar';
     return "call void \@t2_mop_class(" . $arg->(@in) . ')' if $op eq 'MopClass';
     return "call void \@t2_mop_isa(" . $arg->(@in) . ')' if $op eq 'MopIsa';
     return "$nm = call %Array* \@t2_mop_isa_arr(" . $arg->(@in) . ')' if $op eq 'MopIsaArr';
@@ -3845,7 +3853,7 @@ none:
   ret i8* null
 }
 ; UNIVERSAL: perl's stash at the root of every method lookup, holding isa,
-; can and DOES (VERSION is not T2's). t2_universal_setup makes it.
+; can, DOES and VERSION. t2_universal_setup makes it.
 @lit_universal = private unnamed_addr constant [10 x i8] c"UNIVERSAL\00"
 @lit_u_isa = private unnamed_addr constant [4 x i8] c"isa\00"
 @lit_u_can = private unnamed_addr constant [4 x i8] c"can\00"
@@ -3863,6 +3871,8 @@ define internal void @t2_universal_setup() {
   call void @t2_mop_def(%Str %u, %Str %c, i8* bitcast (%Slot (%Array*)* @t2_u_can_w to i8*))
   %d = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_u_does, i64 0, i64 0), i64 4)
   call void @t2_mop_def(%Str %u, %Str %d, i8* bitcast (%Slot (%Array*)* @t2_u_isa_w to i8*))
+  %v = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_vname, i64 0, i64 0), i64 7)
+  call void @t2_mop_def(%Str %u, %Str %v, i8* bitcast (%Slot (%Array*)* @t2_u_version_w to i8*))
   ret void
 }
 ; t2_mfind_u(class, m, skip) -> as t2_mfind1, and failing that UNIVERSAL's.
@@ -3987,12 +3997,170 @@ code:
   %cn = call %Slot @t2_list_of(%Slot %cv, i1 %w)
   ret %Slot %cn
 }
+@lit_vkey = private unnamed_addr constant [9 x i8] c"$VERSION\00"
+@lit_vname = private unnamed_addr constant [8 x i8] c"VERSION\00"
+@lit_vver = private unnamed_addr constant [10 x i8] c" version \00"
+@lit_vreq = private unnamed_addr constant [33 x i8] c" required--this is only version \00"
+@lit_vnodef = private unnamed_addr constant [19 x i8] c" does not define $\00"
+@lit_vnodef2 = private unnamed_addr constant [32 x i8] c"::VERSION--version check failed\00"
+@lit_vneither = private unnamed_addr constant [59 x i8] c" defines neither package nor VERSION--version check failed\00"
+; the call site t2_mresolve last saw (" at FILE line N.\n"): a UNIVERSAL method's die names it
+@t2_call_at = internal global %Str zeroinitializer
+; t2_mop_var(class, global): class's $VERSION is that global (VERSION reads it by the class's name).
+define internal void @t2_mop_var(%Str %c, %Slot* %g) {
+  %s = call %Slot @t2_stash(%Str %c)
+  %k = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_vkey, i64 0, i64 0), i64 8)
+  %gi = ptrtoint %Slot* %g to i64
+  %gs = call %Slot @t2_slot(i8 1, i64 %gi)
+  call void @t2_hset(%Slot %s, %Str %k, %Slot %gs)
+  ret void
+}
+; t2_vnum(version) -> perl's number for it: decimal ("1.10" is 1.1), or dotted
+; ("1.2.3", "v1.2": each part a thousandth of the one before).
+define internal double @t2_vnum(%Str %s) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %some = icmp sgt i64 %n, 0
+  br i1 %some, label %first, label %decimal
+first:
+  %c0 = load i8, i8* %p
+  %isv = icmp eq i8 %c0, 118
+  br i1 %isv, label %dotted, label %count
+count:
+  %ci = phi i64 [ 0, %first ], [ %ci2, %cstep ]
+  %dots = phi i64 [ 0, %first ], [ %dots2, %cstep ]
+  %cmore = icmp slt i64 %ci, %n
+  br i1 %cmore, label %cstep, label %counted
+cstep:
+  %cp = getelementptr i8, i8* %p, i64 %ci
+  %cc = load i8, i8* %cp
+  %isdot = icmp eq i8 %cc, 46
+  %inc = zext i1 %isdot to i64
+  %dots2 = add i64 %dots, %inc
+  %ci2 = add i64 %ci, 1
+  br label %count
+counted:
+  %many = icmp sgt i64 %dots, 1
+  br i1 %many, label %dotted, label %decimal
+decimal:
+  %sl = call %Slot @t2_box_str(%Str %s)
+  %d = call double @t2_slot_num(%Slot %sl)
+  ret double %d
+dotted:
+  %st0 = load i8, i8* %p
+  %lead = icmp eq i8 %st0, 118
+  %i0 = zext i1 %lead to i64
+  br label %loop
+loop:
+  %i = phi i64 [ %i0, %dotted ], [ %inext, %digit ], [ %inext, %dot ]
+  %part = phi i64 [ 0, %dotted ], [ %part2, %digit ], [ 0, %dot ]
+  %acc = phi double [ 0.0, %dotted ], [ %acc, %digit ], [ %acc2, %dot ]
+  %scale = phi double [ 1.0, %dotted ], [ %scale, %digit ], [ %scale2, %dot ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %ch, label %end
+ch:
+  %chp = getelementptr i8, i8* %p, i64 %i
+  %chv = load i8, i8* %chp
+  %inext = add i64 %i, 1
+  %isd = icmp eq i8 %chv, 46
+  br i1 %isd, label %dot, label %digit
+dot:
+  %pf = sitofp i64 %part to double
+  %add = fmul double %pf, %scale
+  %acc2 = fadd double %acc, %add
+  %scale2 = fdiv double %scale, 1000.0
+  br label %loop
+digit:
+  %dv = zext i8 %chv to i64
+  %dd = sub i64 %dv, 48
+  %p10 = mul i64 %part, 10
+  %part2 = add i64 %p10, %dd
+  br label %loop
+end:
+  %pf2 = sitofp i64 %part to double
+  %add2 = fmul double %pf2, %scale
+  %r = fadd double %acc, %add2
+  ret double %r
+}
+; UNIVERSAL::VERSION: the class's own $VERSION; with a wanted version,
+; perl's check, dying as perl does where it fails.
+define internal %Slot @t2_u_version_w(%Array* %args) {
+entry:
+  %w = load i1, i1* @t2_want
+  %inv = call %Slot @t2_aget(%Array* %args, i64 0)
+  %c = call %Str @t2_inv_class(%Slot %inv)
+  %tb = call %Slot @t2_stash_table()
+  %s = call %Slot @t2_hget(%Slot %tb, %Str %c)
+  %st = extractvalue %Slot %s, 0
+  %known = icmp eq i8 %st, 5
+  br i1 %known, label %look, label %check
+look:
+  %k = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_vkey, i64 0, i64 0), i64 8)
+  %g = call %Slot @t2_hget(%Slot %s, %Str %k)
+  %gt = extractvalue %Slot %g, 0
+  %hasv = icmp eq i8 %gt, 1
+  br i1 %hasv, label %load, label %check
+load:
+  %gi = extractvalue %Slot %g, 1
+  %gp = inttoptr i64 %gi to %Slot*
+  %vl = load %Slot, %Slot* %gp
+  %vt = extractvalue %Slot %vl, 0
+  %vdef = icmp ne i8 %vt, 0
+  %vk = select i1 %vdef, i8 2, i8 1
+  br label %check
+check:
+  %v = phi %Slot [ zeroinitializer, %entry ], [ zeroinitializer, %look ], [ %vl, %load ]
+  %kind = phi i8 [ 0, %entry ], [ 1, %look ], [ %vk, %load ]
+  %na = call i64 @t2_alen(%Array* %args)
+  %req = icmp sgt i64 %na, 1
+  br i1 %req, label %need, label %give
+give:
+  %rn = call %Slot @t2_list_of(%Slot %v, i1 %w)
+  ret %Slot %rn
+need:
+  %want = call %Slot @t2_aget(%Array* %args, i64 1)
+  %rs = call %Str @t2_slot_str(%Slot %want)
+  switch i8 %kind, label %cmp [ i8 0, label %neither i8 1, label %nodef ]
+cmp:
+  %vs = call %Str @t2_slot_str(%Slot %v)
+  %vn = call double @t2_vnum(%Str %vs)
+  %wn = call double @t2_vnum(%Str %rs)
+  %ok = fcmp oge double %vn, %wn
+  br i1 %ok, label %give, label %low
+low:
+  %l0 = call %Str @t2_str(i8* getelementptr ([10 x i8], [10 x i8]* @lit_vver, i64 0, i64 0), i64 9)
+  %l1 = call %Str @t2_concat(%Str %c, %Str %l0)
+  %l2 = call %Str @t2_concat(%Str %l1, %Str %rs)
+  %l3 = call %Str @t2_str(i8* getelementptr ([33 x i8], [33 x i8]* @lit_vreq, i64 0, i64 0), i64 32)
+  %l4 = call %Str @t2_concat(%Str %l2, %Str %l3)
+  %l5 = call %Str @t2_concat(%Str %l4, %Str %vs)
+  br label %die
+nodef:
+  %n0 = call %Str @t2_str(i8* getelementptr ([19 x i8], [19 x i8]* @lit_vnodef, i64 0, i64 0), i64 18)
+  %n1 = call %Str @t2_concat(%Str %c, %Str %n0)
+  %n2 = call %Str @t2_concat(%Str %n1, %Str %c)
+  %n3 = call %Str @t2_str(i8* getelementptr ([32 x i8], [32 x i8]* @lit_vnodef2, i64 0, i64 0), i64 31)
+  %n4 = call %Str @t2_concat(%Str %n2, %Str %n3)
+  br label %die
+neither:
+  %e0 = call %Str @t2_str(i8* getelementptr ([59 x i8], [59 x i8]* @lit_vneither, i64 0, i64 0), i64 58)
+  %e1 = call %Str @t2_concat(%Str %c, %Str %e0)
+  br label %die
+die:
+  %m = phi %Str [ %l5, %low ], [ %n4, %nodef ], [ %e1, %neither ]
+  %at = load %Str, %Str* @t2_call_at
+  %full = call %Str @t2_concat(%Str %m, %Str %at)
+  call void @t2_die_unwind(%Str %full)
+  ret %Slot zeroinitializer
+}
 ; t2_mresolve(invocant, method, " at FILE line N.\n", start, mode) -> the method's code,
 ; looked up from (mode 0) the invocant's class, (1) start, a qualified name's
 ; package, or (2) start's @ISA, a SUPER:: call's; where perl dies (no class,
 ; no method), a die naming that class, and t2_nomethod's code.
 define internal i8* @t2_mresolve(%Slot %inv, %Str %m, %Str %at, %Str %start, i8 %mode) {
 entry:
+  store %Str %at, %Str* @t2_call_at
   %t = extractvalue %Slot %inv, 0
   switch i8 %t, label %named [ i8 0, label %undef i8 5, label %ref i8 6, label %unbl i8 7, label %unbl i8 8, label %unbl ]
 undef:
