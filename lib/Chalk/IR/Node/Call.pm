@@ -141,6 +141,10 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     field $line :reader = undef;
     method set_site($f, $l) { ($file, $line) = ($f, $l); return }
 
+    # AN XS CALLEE (B::SoN's xs): there is no Perl source to compile it from.
+    field $xs :reader = 0;
+    method set_xs($v) { $xs = $v ? 1 : 0; return }
+
     # The block eval whose body this call is in (B::SoN's eval_id), or
     # undef: the callee's own die names no eval.
     field $eval_id :reader = undef;

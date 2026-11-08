@@ -861,6 +861,7 @@ sub _deserialize_graph ($method_data) {
         # (a method call's too: where no class answers it, perl's message names it)
         $node->set_site($nd->{fields}{file}, $nd->{fields}{line})
             if ( $op eq 'Unwind' || $op eq 'Call' ) && defined $nd->{fields} && defined $nd->{fields}{line};
+        $node->set_xs(1) if $op eq 'Call' && $nd->{fields} && $nd->{fields}{xs};
         # A block eval's id, on its join and on each die it lexically holds.
         $node->set_eval_id($nd->{fields}{eval_id})
             if ($op eq 'Region' || $op eq 'Unwind' || $op eq 'Call') && defined $nd->{fields}

@@ -1403,6 +1403,7 @@ sub call {
         return $b->code_call($c, $b->value( $anon[0] ), @args);
     }
     my $sub = $c->target;
+    out( $c->name . ' is XS: there is no Perl source to compile' ) if $c->can('xs') && $c->xs;
     out('a direct call with no sub') unless blessed($sub) && $sub->can('graph') && $sub->graph;
     my $fn = $b->func($sub, $c->name);
     my @args = $c->inputs->@*;
