@@ -157,6 +157,20 @@ my %OP_PER_POSITION_REPR = (
 my @CONTROL_CHAIN_OPS = qw(Print Assign Return Call Unwind);
 my %CONTROL_CHAIN_OP = map { $_ => 1 } @CONTROL_CHAIN_OPS;
 
+# A PURE BUILTIN CALL floats as a value op does (B::SoN pins only what runs
+# code or writes): join, keys, values, and a sort perl folded into a numeric or
+# string comparison. `each` advances an iterator and a sort with a comparator
+# body runs code -- both pinned, both checked.
+my %FLOATING_BUILTIN = map { $_ => 1 } qw(join keys values sort reverse);
+sub _floating_builtin {
+    my ($n) = @_;
+    return 0 unless $n->operation eq 'Call' && ( $n->can('dispatch_kind') ? $n->dispatch_kind // '' : '' ) eq 'builtin';
+    my $name = $n->can('name') ? $n->name // '' : '';
+    return 0 unless $FLOATING_BUILTIN{$name};
+    return 0 if $name eq 'sort' && $n->can('sort_cmp_body') && defined $n->sort_cmp_body;
+    return 1;
+}
+
 # _check_repr_for_position($op, $i, $allowed_ref, $input, $violations_ref)
 #
 # $allowed_ref is an arrayref of allowed repr strings for position $i.
@@ -281,7 +295,8 @@ sub check_nodes {
         #   - It only receives the graph's node set (via $nodes->@*, i.e.
         #     $g->nodes), so an effect reachable ONLY through control (not
         #     present in that node list) is invisible to it.
-        if ($CONTROL_CHAIN_OP{$op} && $node->can('control_in')) {
+        if ($CONTROL_CHAIN_OP{$op} && $node->can('control_in')
+            && !_floating_builtin($node)) {
             unless (defined $node->control_in) {
                 push @violations, {
                     node_id => $node->id(),

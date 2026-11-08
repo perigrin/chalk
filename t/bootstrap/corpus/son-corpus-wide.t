@@ -563,6 +563,6 @@ cmp_ok($tally{gate_green}, q{>=}, 220, q{gate-green floor (220; RAISED FROM 215 
 # the fallback (lower_program's $PATH, on the pipeline's unit). "A fallback each
 # slice shrinks" (perigrin) is this number rising; it must never fall. Raise it
 # as slices land. (186 of 209 gate-green, 2026-11-08; 198 units T2 took.)
-cmp_ok($tally{t2_gate_green}, q{>=}, 192, q{T2 gate-green floor (192, raised from 186 2026-11-08: T2's share of gate-green; raise it as T2 grows, never lower it)});
+cmp_ok($tally{t2_gate_green}, q{>=}, 193, q{T2 gate-green floor (193, raised from 186 2026-11-08: T2's share of gate-green; raise it as T2 grows, never lower it)});
 
 done_testing();
