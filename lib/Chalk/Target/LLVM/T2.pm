@@ -1051,6 +1051,11 @@ sub array_value {
     return $b->array_var($v) if _array_var($v);
     return $b->emit(op => 'Argv', type => '%Array*') if _argv($v);
     return $b->{argsarr} // out('@_ outside a sub taking it as a list') if $op eq 'ArgsSource';
+    # A HASH COUNTED is its keys (perl 5.26+), not its pairs flattened (4 for 2).
+    if ($op eq 'Count' && blessed($in[0]) && ( _named_hash($in[0]) || $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%' || $in[0]->operation eq 'FieldAccess' && ( $b->field_of($in[0]) )[1] eq '%' )) {
+        my $h = $in[0]->operation eq 'PostfixDeref' ? $b->hash_of($in[0]->inputs->[0]) : $b->hash_of($in[0]);
+        return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]);
+    }
     return $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($in[0]) ]) if $op eq 'Count';
     if ($op eq 'Subscript') {
         out('a hash element') unless ( $v->can('kind') ? $v->kind // 'array' : 'array' ) eq 'array';
