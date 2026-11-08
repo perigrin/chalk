@@ -116,14 +116,29 @@ context: scalar
 
 ```ir
 %start = Start()
-%s      = Constant("foobar") :Str
-%result = RegexSubst(%s, pattern: "foo", replacement: "baz") :Str
+%nc     = Constant("s") :Str
+%val    = Constant("foobar") :Str
+%vd     = VarDecl(%nc, %val) :Str
+%pa1    = PadAccess(%vd, "$s") :Scalar
+%subst  = RegexSubst(%pa1, pattern: "foo", replacement: "baz") :Str
+%pa2    = PadAccess(%vd, "$s") :Str
+control: %vd -> %subst
 %nl = Constant("\n") :Str
-%p  = Print(%result, %nl)
+%p  = Print(%pa2, %nl)
 return %p
 control: %start -> %p
 L: GREEN
 ```
+
+Re-measured 2026-11-08. `s///` changes `$s` in place, and `say($s)` reads `$s`
+again after it. The graph says so: a PadAccess of `$s` feeds the RegexSubst,
+and a second PadAccess of `$s`, after it, feeds the Print. The earlier spec
+printed the RegexSubst node itself, which is not what perl does (`s///`
+returns a count, not the string).
+
+Limit: the shape check rejects a Print of the RegexSubst, but it does not tell
+the two reads of `$s` apart. A spec printing the read from before the subst
+also passes. The behavior leg (`bazbar`) is what pins the order.
 
 ## R4 anchored match (^)
 

@@ -451,7 +451,11 @@ only a const-range rv2av (A8) and a bare padav (A9-A11); an rv2av over a padsv
 bound to a literal ArrayRef wrapped the single ref as ONE element, so
 `scalar @b` returned 1 (a silent miscompile). The rv2av-flatten path now also
 fires over a padsv kid in list context. A `@$r` over a RUNTIME ref (not a
-literal ArrayRef node) stays a loud producer GAP. zhi 019f5e42.
+
+SHAPE 2026-11-08: the ref is no longer folded away. B::SoN keeps the
+`ArrayLiteral :ArrayRef` and its `PostfixDeref :Array` (a deref names its die
+site now), and Count reads the deref. The answer is the same; the graph says
+what perl does.
 
 ```perl
 # source
@@ -472,7 +476,8 @@ context: scalar
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
-%arr   = ArrayLiteral(%c1, %c2, %c3) :Array
+%ref   = ArrayLiteral(%c1, %c2, %c3) :ArrayRef
+%arr   = PostfixDeref(%ref, sigil: "@") :Array
 %len   = Count(%arr) :Int
 %nl = Constant("\n") :Str
 %co_p  = Coerce(%len : Int -> Str) :Str

@@ -446,26 +446,35 @@ context: scalar
 ```ir
 %start = Start()
 %cls       = MOP::Class(name: "Box")
-%mf_val    = MOP::Field(class: %cls, name: "val",    fieldix: 0, param: true,  reader: false, has_default: false, type: "Int")
-%mf_dbl    = MOP::Field(class: %cls, name: "double", fieldix: 1, param: false, reader: false, has_default: false, type: "Int")
-%fa_val    = FieldAccess(field_index: 0, field_stash: "Box") :Int
+%mf_val    = MOP::Field(class: %cls, name: "val",    fieldix: 0, param: true,  reader: false, has_default: true,  type: "Scalar")
+%mf_dbl    = MOP::Field(class: %cls, name: "double", fieldix: 1, param: false, reader: false, has_default: false, type: "Unknown")
+%fa_val    = FieldAccess(field_index: 0, field_stash: "Box") :Scalar
+%val_num   = Coerce(%fa_val : Scalar -> Num) :Num
 %two       = Constant(2) :Int
-%dbl_val   = Multiply(%fa_val, %two) :Int
-%fa_dbl_lv = FieldAccess(field_index: 1, field_stash: "Box") :Int
-%fw_dbl    = Assign(%fa_dbl_lv, %dbl_val) :Int
+%dbl_val   = Multiply(%val_num, %two) :Num
+%fa_dbl_lv = FieldAccess(field_index: 1, field_stash: "Box") :Unknown
+%fw_dbl    = Assign(%fa_dbl_lv, %dbl_val) :Num
 %adj       = MOP::Adjust(class: %cls, body: [%fw_dbl])
-%fa_dbl    = FieldAccess(field_index: 1, field_stash: "Box") :Int
+%fa_dbl    = FieldAccess(field_index: 1, field_stash: "Box") :Unknown
 %mi_dbl    = MOP::Method(class: %cls, name: "double", body: %fa_dbl, return_repr: "Int")
 %seven     = Constant(7) :Int
 %new_b     = Call(%seven, dispatch_kind: "method", name: "new", class: "Box", param_names: "val") :Object
-%result    = Call(%new_b, dispatch_kind: "method", name: "double", class: "Box") :Int
+%result    = Call(%new_b, dispatch_kind: "method", name: "double", class: "Box") :Unknown
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%result : Int -> Str) :Str
+%co_p  = Coerce(%result : Unknown -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
 L: GREEN
 ```
+
+Re-measured 2026-11-08. B::SoN no longer guesses `Int` here. `$val :param = 0`
+is `Scalar`, because a caller can pass any value; so `$val * 2` is `Num`.
+`$double` has no default and is written only in ADJUST, so B::SoN leaves it
+`Unknown`, and `double()` returns `Unknown`. All wider than before, none wrong:
+the case prints perl's `14` through T2. Open: `$double` could be narrowed to
+`Num`, since ADJUST is its only writer. The MOP::Field lines are not checked
+by the shape leg; they are kept to the wire anyway.
 
 ## conditional-void-call
 

@@ -921,10 +921,11 @@ context: scalar
 %start = Start()
 %ka    = Constant("a") :Str
 %v1    = Constant(1) :Int
-%hash  = HashLiteral(%ka, %v1) :Hash
+%ref   = HashLiteral(%ka, %v1) :HashRef
+%hash  = PostfixDeref(%ref, sigil: "%") :Hash
 %lk    = Constant("a") :Str
-%r     = Subscript(%hash, %lk) :Int
-%co    = Coerce(%r : Int -> Str) :Str
+%r     = Subscript(%hash, %lk) :Scalar
+%co    = Coerce(%r : Scalar -> Str) :Str
 %nl    = Constant("\n") :Str
 %p     = Print(%co, %nl)
 return %p
@@ -932,25 +933,18 @@ control: %start -> %p
 L: GREEN
 ```
 
-Written from the measured graph. Two things it records that a guess would miss:
+Re-measured 2026-11-08. B::SoN now keeps the ref: `HashLiteral :HashRef`, then
+a `PostfixDeref :Hash` (a deref names its die site now), then the Subscript.
+The earlier spec had a bare `:Hash` literal and no deref, because the round trip
+used to propagate away before B::SoN walked. That is no longer the graph.
 
-The `HashLiteral` is `:Hash`, not the `:HashRef` that R5's `my $r = {a=>1}`
-carries. The whole `{a=>1}` / `->%*` / `my %c` round trip propagates away in the
-optree before B::SoN walks -- the hash is never materialised as a ref -- so the
-real graph reaches `$c{a}` as a direct Subscript over the literal.
+The element comes back `:Scalar`, not `:Int`. Through the deref the literal's
+value types are not carried to the read. That is wider, not wrong: the case
+prints perl's `1`.
 
-There is NO `PostfixDeref` node, and naming one would be wrong twice over. The
-deref-scaffolding rule subsumes a spec PostfixDeref whenever the real graph
-carries none, so the line would be unenforced -- its `sigil:` never compared,
-making an `@` deref indistinguishable from a `%` one. Worse, it would not be
-valid IR: PostfixDeref requires a ref-typed input, and the propagated aggregate
-here is a plain `:Hash`, so the spec-invariant leg rejects the block outright.
-R5 can name a PostfixDeref because its `$r` really is a `:HashRef`; this case
-has no ref left to deref.
-
-The enforced content is therefore the aggregate kind, the key Constant, the
-Subscript operand ORDER, and the `:Int` element repr -- each confirmed to FAIL
-the check when perturbed.
+The PostfixDeref line is enforced: with `sigil: "%"` swapped for `"@"` and
+`:Hash` for `:Array`, the check fails. The spec-invariant leg passes, because
+the deref's input really is a `:HashRef` now.
 
 ## F22 polymorphic callee: one sub called with Int and with Str
 
