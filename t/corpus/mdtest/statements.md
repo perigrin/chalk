@@ -365,6 +365,10 @@ bug as 0cc04737) un-vacuoused the check and the disagreement surfaced.
 The gate went 224 -> 223 as a result. That is a FALSE POSITIVE BEING RETIRED,
 not a regression: the case was counted green by a leg that never examined it.
 
+FIXED 2026-11-08: the type is Maybe[Boolean] (Boolean|Undef), narrower than
+Scalar and still admitting undef. B::SoN stamps it; chalk's loader keeps it and
+holds it as a %Slot. (The narrowing to Boolean was the loader's.)
+
 ```perl
 # source
 use 5.42.0;
@@ -380,9 +384,9 @@ context: scalar
 ```ir
 %start = Start()
 %s0   = Constant("x\n") :Str
-%p    = Print(%s0) :Scalar
+%p    = Print(%s0) :Maybe[Boolean]
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%p : Scalar -> Str) :Str
+%co_p  = Coerce(%p : Maybe[Boolean] -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p

@@ -2232,7 +2232,7 @@ context: scalar
 %start = Start()
 %z  = Constant(5) :Int
 %sb = Constant("b\n") :Str
-%pb = Print(%sb) :Boolean
+%pb = Print(%sb) :Maybe[Boolean]
 return %pb
 control: %start -> %pb
 L: GREEN
@@ -2264,7 +2264,7 @@ context: scalar
 ```ir
 %start = Start()
 %si = Constant("in\n") :Str
-%pi = Print(%si) :Boolean
+%pi = Print(%si) :Maybe[Boolean]
 return %pi
 control: %start -> %pi
 L: GREEN

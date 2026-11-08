@@ -2093,7 +2093,7 @@ sub phi_type {
     # last value in the other): an array, each arm's value a list of it.
     return '%Array*' if grep { blessed($_) && $_->operation eq 'Return' && $_->inputs->@* == 2 && refaddr( $_->inputs->[0] ) == refaddr($phi) }
         ( $phi->consumers // [] )->@*;
-    return '%Slot' if $st =~ /\A(?:Str|Unknown|None|Scalar)\z/;
+    return '%Slot' if $st =~ /\A(?:Str|Unknown|None|Scalar)\z/ || $st =~ /\AMaybe\[/;   # a Maybe: T or undef
     # A LIST A LOOP BUILDS (map, grep): one array, its back edge a ListAppend
     # to it. Another array phi (`@p = ()` in a loop) is not this.
     if ($st =~ /\A(?:Array|List)\z/) {
@@ -2275,6 +2275,7 @@ sub type_of {
         return keys %t == 1 ? ( keys %t )[0] : '%Slot';
     }
     my $st = $v->stamp // ''; # static type
+    return '%Slot' if $st =~ /\AMaybe\[/;   # T or undef: a %Slot
     return $SCALAR{$st} // out("a value stamped $st ($op)");
 }
 

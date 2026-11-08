@@ -503,7 +503,7 @@ context: scalar
 %start = Start()
 %v  = Constant("AB") :Str
 %nl = Constant("\n") :Str
-%p  = Print(%v, %nl) :Boolean
+%p  = Print(%v, %nl) :Maybe[Boolean]
 return %p
 control: %start -> %p
 L: GREEN

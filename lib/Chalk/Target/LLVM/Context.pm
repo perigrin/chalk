@@ -4344,6 +4344,7 @@ sub _lower_coerce {
     my ($self, $node) = @_;
 
     my $to = $node->to_repr;
+    $to = 'Scalar' if $to =~ /\AMaybe\[/;   # held as a %Slot (_repr_of)
 
     # A qr// AS A STRING is perl's stringification of it, (?^FLAGS:pattern)
     # (pvm 389).
@@ -4457,6 +4458,9 @@ sub _lower_coerce {
 sub _emit_coercion {
     my ($self, $input_ref, $from, $to, $what) = @_;
 
+    # A MAYBE[T] is held as a %Slot, as Scalar is: into one boxes, out of one
+    # reads the cell (_repr_of).
+    $_ = 'Scalar' for grep { /\AMaybe\[/ } $from, $to;
     return $input_ref if $from eq $to;   # nothing to bridge
 
     my $ref = $self->_fresh;
@@ -7413,6 +7417,8 @@ my %_REPR_NO_MACHINE_TYPE = (
 
 sub _repr_to_llvm_type ($repr //= die "node reached machine-type selection with NO representation (undef) — fix TypeInference so this node carries an explicit repr before lowering.") {
     return $_REPR_LLVM_TYPE{$repr} if exists $_REPR_LLVM_TYPE{$repr};
+    # A MAYBE[T] is T or undef: held as a %Slot, as Scalar is.
+    return $_REPR_LLVM_TYPE{Scalar} if $repr =~ /\AMaybe\[/;
 
     die "LLVM backend: $_REPR_NO_MACHINE_TYPE{$repr}\n"
         if exists $_REPR_NO_MACHINE_TYPE{$repr};

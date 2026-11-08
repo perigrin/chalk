@@ -418,10 +418,10 @@ context: scalar
 %xa = Constant("a") :Str
 %eq = StrEq(%xa, %xa) :Boolean
 %s0 = Constant("y\n") :Str
-%p  = Print(%s0) :Boolean
-%r  = And(%eq, %p) :Scalar
+%p  = Print(%s0) :Maybe[Boolean]
+%r  = And(%eq, %p) :Maybe[Boolean]
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Scalar -> Str) :Str
+%co_p  = Coerce(%r : Maybe[Boolean] -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p
@@ -464,10 +464,10 @@ context: scalar
 %xa = Constant("a") :Str
 %ne = StrNe(%xa, %xa) :Boolean
 %s0 = Constant("y\n") :Str
-%p  = Print(%s0) :Boolean
-%r  = Or(%ne, %p) :Scalar
+%p  = Print(%s0) :Maybe[Boolean]
+%r  = Or(%ne, %p) :Maybe[Boolean]
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%r : Scalar -> Str) :Str
+%co_p  = Coerce(%r : Maybe[Boolean] -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p

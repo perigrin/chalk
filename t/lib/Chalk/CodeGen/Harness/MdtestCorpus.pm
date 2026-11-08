@@ -251,7 +251,7 @@ sub build_graph_from_ir {
 
             # Parse optional :Repr at end of rhs
             my $repr;
-            if ($rhs =~ s/\s*:(\w+)\s*$//) {
+            if ($rhs =~ s/\s*:(\w+(?:\[\w+\])?)\s*$//) {   # Maybe[T] too
                 $repr = $1;
             }
 
@@ -476,7 +476,7 @@ sub _build_node_from_rhs {
     my ($factory, $sym, $name, $rhs, $build) = @_;
 
     # Coerce(%x : From -> To)
-    if ($rhs =~ /^Coerce\(\s*(%\w+)\s*:\s*(\w+)\s*->\s*(\w+)\s*\)/) {
+    if ($rhs =~ /^Coerce\(\s*(%\w+)\s*:\s*(\w+(?:\[\w+\])?)\s*->\s*(\w+(?:\[\w+\])?)\s*\)/) {
         my ($input_name, $from, $to) = ($1, $2, $3);
         croak "build_graph_from_ir: Coerce references undefined '$input_name' at $name"
             unless exists $sym->{$input_name};
