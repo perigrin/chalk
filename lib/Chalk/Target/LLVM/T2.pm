@@ -2301,7 +2301,6 @@ sub _value {
         pop @in if $v->can('memory_input') && $v->memory_input;
         # ONE ARGUMENT blesses into the package the bless is in: not known here.
         out('a bless of one argument') unless @in == 2;
-        out('a bless of what is not a hash or array') if ( $in[0]->stamp // '' ) =~ /\A(?:ScalarRef|CodeRef)\z/; # static type
         return $b->emit(op => 'Bless', type => '%Slot',
             inputs => [ $b->as($b->value($in[0]), '%Slot'), $b->as($b->value($in[1]), '%Str') ]);
     }
@@ -3371,7 +3370,9 @@ h:
   %blessed = icmp eq i8 %ct, 3
   br i1 %blessed, label %obj, label %fmt
 obj:
-  %eh = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_eqhash, i64 0, i64 0), i64 5)
+  %eq = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_eqhash, i64 0, i64 0), i64 1)
+  %bt = call %Str @t2_basetype(%Slot %s)
+  %eh = call %Str @t2_concat(%Str %eq, %Str %bt)
   %ck = call %Str @t2_concat(%Str %kind, %Str %eh)
   br label %fmt
 fmt:
@@ -3717,7 +3718,18 @@ entry:
   %ish = icmp eq i8 %t, 5
   %isa = icmp eq i8 %t, 6
   %ok = or i1 %ish, %isa
-  br i1 %ok, label %set, label %bad
+  br i1 %ok, label %set, label %other
+other:
+  %issc = icmp eq i8 %t, 9
+  %iscd = icmp eq i8 %t, 8
+  %side = or i1 %issc, %iscd
+  br i1 %side, label %table, label %bad
+table:
+  %tb = call %Slot @t2_ghash(%Slot* @t2_blessings)
+  %k = call %Str @t2_addr_key(%Slot %h)
+  %tcs = call %Slot @t2_box_str(%Str %c)
+  call void @t2_hset(%Slot %tb, %Str %k, %Slot %tcs)
+  ret %Slot %h
 bad:
   call void @t2_stop(i8* getelementptr ([78 x i8], [78 x i8]* @msg_blessnot, i64 0, i64 0), i64 77)
   unreachable
@@ -3737,15 +3749,34 @@ entry:
   %ish = icmp eq i8 %t, 5
   %isa = icmp eq i8 %t, 6
   %ok = or i1 %ish, %isa
-  br i1 %ok, label %agg, label %none
+  br i1 %ok, label %agg, label %other
 agg:
   %v = extractvalue %Slot %s, 1
   %a = inttoptr i64 %v to %Array*
   %cp = getelementptr %Array, %Array* %a, i32 0, i32 4
   %c = load %Slot, %Slot* %cp
   ret %Slot %c
+other:
+  %issc = icmp eq i8 %t, 9
+  %iscd = icmp eq i8 %t, 8
+  %side = or i1 %issc, %iscd
+  br i1 %side, label %table, label %none
+table:
+  %tb = call %Slot @t2_ghash(%Slot* @t2_blessings)
+  %k = call %Str @t2_addr_key(%Slot %s)
+  %tc = call %Slot @t2_hget(%Slot %tb, %Str %k)
+  ret %Slot %tc
 none:
   ret %Slot zeroinitializer
+}
+; A SCALAR OR CODE REFERENCE'S CLASS: no header to hold it, so a table keyed
+; by its address (t2_addr_key).
+@t2_blessings = internal global %Slot zeroinitializer
+define internal %Str @t2_addr_key(%Slot %s) {
+  %a = extractvalue %Slot %s, 1
+  %b = call %Slot @t2_box_i64(i64 %a)
+  %k = call %Str @t2_slot_str(%Slot %b)
+  ret %Str %k
 }
 ; A SCALAR REFERENCE (`\$x`) is a %Slot of tag 9 whose payload is the
 ; variable's heap cell.
@@ -3847,38 +3878,38 @@ done:
 ; t2_reftype(s) -> perl's ref(): an object's class, HASH, or "" for no reference.
 define internal %Str @t2_reftype(%Slot %s) {
 entry:
-  %t = extractvalue %Slot %s, 0
-  %iscode = icmp eq i8 %t, 8
-  br i1 %iscode, label %code, label %notcode
-code:
-  %cs = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_code, i64 0, i64 0), i64 4)
-  ret %Str %cs
-notcode:
   %c = call %Slot @t2_class_of(%Slot %s)
   %ct = extractvalue %Slot %c, 0
   %blessed = icmp eq i8 %ct, 3
   br i1 %blessed, label %obj, label %plain
-plain:
-  %issc = icmp eq i8 %t, 9
-  br i1 %issc, label %sc, label %plain2
-sc:
-  %ss = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_scalar, i64 0, i64 0), i64 6)
-  ret %Str %ss
-plain2:
-  %isarr = icmp eq i8 %t, 6
-  br i1 %isarr, label %arr, label %nota
-arr:
-  %as = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_array, i64 0, i64 0), i64 5)
-  ret %Str %as
-nota:
-  %isref = icmp eq i8 %t, 5
-  br i1 %isref, label %hash, label %none
 obj:
   %cn = call %Str @t2_slot_str(%Slot %c)
   ret %Str %cn
+plain:
+  %b = call %Str @t2_basetype(%Slot %s)
+  ret %Str %b
+}
+; t2_basetype(s) -> what s refers to, blessed or not: HASH, ARRAY, CODE,
+; SCALAR, or "" for no reference.
+define internal %Str @t2_basetype(%Slot %s) {
+entry:
+  %t = extractvalue %Slot %s, 0
+  switch i8 %t, label %none [ i8 5, label %hash
+                              i8 6, label %arr
+                              i8 8, label %code
+                              i8 9, label %sc ]
 hash:
   %h = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_hash, i64 0, i64 0), i64 4)
   ret %Str %h
+arr:
+  %a = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_array, i64 0, i64 0), i64 5)
+  ret %Str %a
+code:
+  %k = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_code, i64 0, i64 0), i64 4)
+  ret %Str %k
+sc:
+  %q = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_scalar, i64 0, i64 0), i64 6)
+  ret %Str %q
 none:
   %e = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_hash, i64 0, i64 0), i64 0)
   ret %Str %e
@@ -5610,7 +5641,7 @@ define internal i8* @t2_mresolve(%Slot %inv, %Str %m, %Str %at, %Str %start, i8 
 entry:
   store %Str %at, %Str* @t2_call_at
   %t = extractvalue %Slot %inv, 0
-  switch i8 %t, label %named [ i8 0, label %undef i8 5, label %ref i8 6, label %ref i8 7, label %unbl i8 8, label %unbl i8 9, label %unbl ]
+  switch i8 %t, label %named [ i8 0, label %undef i8 5, label %ref i8 6, label %ref i8 7, label %unbl i8 8, label %ref i8 9, label %ref ]
 undef:
   %u0 = call %Str @t2_str(i8* getelementptr ([20 x i8], [20 x i8]* @lit_cm, i64 0, i64 0), i64 19)
   %u1 = call %Str @t2_concat(%Str %u0, %Str %m)
