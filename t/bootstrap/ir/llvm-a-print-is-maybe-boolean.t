@@ -24,6 +24,11 @@ for my $src (
     q{my $n = print("a") + 1; print "$n\n";},
     q{print "x" and print "y\n";},
     q{my $ok = print ""; print $ok ? "yes\n" : "no\n";},
+    # a defined guard narrows its arm (B::SoN stamps these Boolean)
+    q{my $r = print NOWHERE "x"; my $x = defined $r && $r; print defined($x) ? "d" : "u", "[$x]\n";},
+    q{my $r = print ""; my $x = defined $r && $r; print defined($x) ? "d" : "u", "[$x]\n";},
+    q{my $r = print NOWHERE "x"; my $x = defined $r ? $r : !1; print defined($x) ? "d" : "u", "[$x]\n";},
+    q{my $r = print ""; my $x = defined $r ? $r : !1; print defined($x) ? "d" : "u", "[$x]\n";},
 ) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src; close $fh;

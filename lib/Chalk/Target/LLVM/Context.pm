@@ -6132,7 +6132,7 @@ sub _lower_ternary {
     # representation looks like on the machine is not this site's question.
     die "LLVM backend: TernaryExpr branches have mismatched or unsupported types "
       . "(true=$true_repr, false=$fals_repr)"
-        unless ($true_repr eq 'Int' || $true_repr eq 'Num')
+        unless ($true_repr eq 'Int' || $true_repr eq 'Num' || $true_repr eq 'Boolean')   # an i1 selects too
             && $true_repr eq $fals_repr;
     my $branch_type = _repr_to_llvm_type($true_repr);
 
