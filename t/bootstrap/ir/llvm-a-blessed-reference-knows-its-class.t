@@ -52,11 +52,11 @@ for my $case (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
-# A REBLESSED REFERENCE: which class ref() reads would depend on where it is
-# lowered, not where it stands. Refused by name.
+# A REBLESSED REFERENCE: ref() reads the class where it stands -- T2 keeps it
+# in the aggregate's header, which the second bless rewrites -- or refused by name.
 {
-    eval { through_llvm(q{my $o = bless {}, "A"; my $p = $o; bless $o, "B"; print ref($p), "\n";}) };
-    like($@, qr/GAP: ref\(\) of a reference that a bless elsewhere changes/, 'a rebless is refused');
+    my $got = eval { through_llvm(q{my $o = bless {}, "A"; my $p = $o; bless $o, "B"; print ref($p), "\n";}) };
+    ok(( defined $got && $got eq "B\n" ) || $@ =~ /GAP: ref\(\) of a reference that a bless elsewhere changes/, 'a rebless: perl\'s B, or refused') or diag $got // $@;
 }
 
 done_testing;

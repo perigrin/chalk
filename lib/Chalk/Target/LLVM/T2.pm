@@ -71,7 +71,14 @@ sub lower_program {
         map { grep { blessed($_) } $_->inputs->@* }
         grep { $_->operation eq 'Print' } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
     my $ok = eval {
-        # (a scalar deref may die: B::SoN pins it where it stands, so it is made there)
+        # A SCALAR DEREF where a reference T2 does not make may reach it (to an
+        # element, `\(@a)`, `\$_[0]`): refused, not stopped at run time. T2
+        # makes one to a `my` scalar kept in memory, an array's, a hash's.
+        Chalk::Target::LLVM::T2::Builder::out('a scalar deref where a reference T2 does not make may reach it')
+            if grep( { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret) )
+            && grep { $_->operation eq 'Ref' && !( ( $_->stamp // '' ) =~ /\A(?:ArrayRef|HashRef)\z/
+                          || blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'PadAccess' && ( $_->inputs->[0]->sigil // '' ) eq '$' && $_->inputs->[0]->is_location ) }
+                     Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
         $b->build($ret); 1 };
     unless ($ok) { $PATH = { path => 'fallback', why => ( $@ =~ s/\n.*//sr ) }; return undef }
     # A PRINTING FAILURE (a conversion T2 lacks) falls back too: it escaped
@@ -462,6 +469,11 @@ sub deref_at {
 
 sub hash_reads_settled {
     my ($b, $what) = @_;
+    # (ONCE AT A TIME: a read made here may itself settle -- a sort with a
+    # comparator, made as a read at a version -- and in again it was the same
+    # unmade read, without end: "Deep recursion", then out of memory)
+    return if $b->{settling};
+    local $b->{settling} = 1;
     for my $ver (@{ $b->{passed} }) {
         out("a read through a reference waiting across $what")
             if grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) } } @{ $b->{readers}{ refaddr($ver) } // [] };
@@ -939,6 +951,10 @@ sub array_value {
         # \@a: a reference to the array itself (one array, two names).
         my $t = $in[0];
         # \$x: a reference to the variable itself, kept on the heap (tag 9).
+        # (NOT IN A LOOP BODY OR AN ARM: a `my` there is a new variable each time,
+        # and the one cell made at entry would be all of them -- `2,2` for perl's `1,2`)
+        out('a reference to a scalar in a loop body or an arm') if $b->{depth}
+            && blessed($t) && $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$';
         return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->location($t) ])
             if blessed($t) && $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$' && $t->is_location;
         # \%h: a named hash IS its reference here (a %Slot of tag 5), one hash, two names.
@@ -978,7 +994,8 @@ sub array_value {
     return $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($in[0]) ]) if $op eq 'Count';
     if ($op eq 'Subscript') {
         out('a hash element') unless ( $v->can('kind') ? $v->kind // 'array' : 'array' ) eq 'array';
-        return $b->emit(op => 'AGet', type => '%Slot', inputs => [ $b->array_of($in[0]), $b->as($b->value($in[1]), 'i64') ]);
+        my $arr = do { local $b->{elem_read} = 1; $b->array_of($in[0]) };   # (an element read: through undef it is undef)
+        return $b->emit(op => 'AGet', type => '%Slot', inputs => [ $arr, $b->as($b->value($in[1]), 'i64') ]);
     }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin') {
         my $name = $v->name // '';
@@ -1221,9 +1238,14 @@ sub array_of {
     # deref for a write B::SoN spells as the element made an array first (`//= []`).
     # (WRITTEN -- push, unshift, ... -- one undef there stops: B::SoN makes it an
     # array first where it can, and a write into a stand-in would be lost)
-    # (read through an undef element: an empty array, as perl's reads)
-    return $b->emit(op => $b->{writing} ? 'ADeref' : 'ADerefR', type => '%Array*', inputs => [ $b->as($b->value($n), '%Slot') ])
-        if blessed($n) && $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) };
+    # (an ELEMENT read through an undef one is undef, as perl's; read WHOLE --
+    # a count, a list -- perl dies under strict and reads undef without: refused)
+    if (blessed($n) && $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) }) {
+        out('an array through an element read whole') unless $b->{writing} || $b->{elem_read};
+        my $w = $b->{writing};
+        local $b->{elem_read} = 0;
+        return $b->emit(op => $w ? 'ADeref' : 'ADerefR', type => '%Array*', inputs => [ $b->as($b->value($n), '%Slot') ]);
+    }
     # @Pkg::ISA IS THE RUN-TIME MOP'S OWN PARENT LIST: the array method lookup
     # walks, fetched where it is used, so push, shift and the rest change the
     # class's parents (perigrin: @ISA as the class's container; a view needs nothing kept in step).
@@ -1308,6 +1330,10 @@ sub array_stmt {
 # element_store($Subscript, $value): `$a[i] = v`, the array growing to i.
 sub element_store {
     my ($b, $target, $v, $s) = @_;
+    # (STORED THROUGH AN ELEMENT B::SoN did not make a hash or array first -- a
+    # reference from elsewhere: refused, not stopped at run time where it is undef)
+    out('a store through an element not made a hash or array first')
+        if blessed( $target->inputs->[0] ) && $target->inputs->[0]->operation eq 'Subscript' && !$b->{args}{ refaddr( $target->inputs->[0] ) };
     if (( $target->can('kind') ? $target->kind // 'array' : 'array' ) eq 'hash') {
         my ($h, $k) = $target->inputs->@[0, 1];
         # perl evaluates what it stores, then where, then stores.
@@ -1782,6 +1808,8 @@ sub code_value {
 # cells, in the call's context.
 sub code_call {
     my ($b, $c, $code, @args) = @_;
+    # `&$code;` IS CALLED WITH THE CALLER'S OWN @_: not built here -- refused.
+    out('an & call of a code value sharing @_') if $c->can('shares_args') && $c->shares_args;
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
     for my $a (@args) {
         if (_is_list($a)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($a) ]) }
@@ -2408,6 +2436,9 @@ sub _value {
         # A MERGE: its condition, an arm built in each block, a phi at the join.
         my ($cond, $then, $else);
         if ($op eq 'And' || $op eq 'Or') {
+            # (OF A LIST -- `@x && sort ...` in list context -- the value is the
+            # list or the left side's count, not one scalar: refused)
+            out('an && or || of a list') if grep { _is_list($_) || $b->type_of($_) eq '%Array*' } grep { blessed($_) } $v->inputs->@[0, 1];
             # perl's && and ||: the left side's value when it decides, else
             # the right side's (built only then).
             my $lhs = $b->value($v->inputs->[0]);

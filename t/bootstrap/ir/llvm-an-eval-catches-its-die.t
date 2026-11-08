@@ -73,7 +73,8 @@ for my $case (
 # a message with its file and line in it: inside an eval, refused by name.
 {
     my $got = eval { through_llvm(q{my $x = $ENV{NO_SUCH_VAR} // [1]; my $r = eval { my $v = $$x; 1 }; print defined $r ? "ran\n" : "died\n";}) };
-    like($@, qr/GAP: .*inside a block eval/, 'a deref that can die in an eval is refused');
+    # (T2 makes it where it stands, B::SoN pinning it, and dies as perl's)
+    ok(( defined $got && $got eq "died\n" ) || $@ =~ /GAP: .*inside a block eval/, 'a deref that can die in an eval: perl\'s, or refused') or diag $got // $@;
 }
 
 # ONLY $@ IS A GLOBAL HERE. Another punctuation variable is perl's to set

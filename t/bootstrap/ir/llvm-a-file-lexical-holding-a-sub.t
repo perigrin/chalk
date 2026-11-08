@@ -47,14 +47,16 @@ for my $src (
     is($got, $want, "perl's answer for $src") or diag $@;
 }
 
-# Which sub it holds is not one store's: refused.
+# Which sub it holds is not one store's: perl's answer (T2 keeps a file lexical
+# in one global, as perl's one variable), or refused by name.
 for my $src (
     q{my $f = sub { 1 }; $f = sub { 2 } if @ARGV; sub g { return $f->() } print g(), "\n";},
     q{my $f = sub { 1 }; my $r = \$f; sub g { return $f->() } print g(), "\n";},
     q{my $n = 3; my $f = sub { $n }; sub g { return $f->() } print g(), "\n";},
 ) {
     my $got = eval { through_llvm($src) };
-    like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';
+    my $want = qx($^X -e '$src');
+    ok(( defined $got && $got eq $want ) || $@ =~ /GAP/, "perl's answer, or refused by name: $src") or diag "got: ", $got // $@;
 }
 
 done_testing;
