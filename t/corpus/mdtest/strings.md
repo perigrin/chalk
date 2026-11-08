@@ -36,7 +36,7 @@ context: scalar
 %nc  = Constant("s") :Str
 %val = Constant("hello") :Str
 %vd  = VarDecl(%nc, %val) :Str
-%pa  = PadAccess(%vd, "s") :Str
+%pa  = PadAccess(%vd, "$s") :Str
 control: %vd
 %nl = Constant("\n") :Str
 %p  = Print(%pa, %nl)
@@ -66,7 +66,7 @@ context: scalar
 %nc  = Constant("s") :Str
 %val = Constant("hello world") :Str
 %vd  = VarDecl(%nc, %val) :Str
-%pa  = PadAccess(%vd, "s") :Str
+%pa  = PadAccess(%vd, "$s") :Str
 control: %vd
 %nl = Constant("\n") :Str
 %p  = Print(%pa, %nl)
@@ -128,11 +128,11 @@ context: scalar
 %nc   = Constant("s") :Str
 %va   = Constant("a") :Str
 %vd   = VarDecl(%nc, %va) :Str
-%pa1  = PadAccess(%vd, "s") :Str
+%pa1  = PadAccess(%vd, "$s") :Str
 %vb   = Constant("b") :Str
 %cat  = Concat(%pa1, %vb) :Str
 %asgn = Assign(%pa1, %cat) :Str
-%pa2  = PadAccess(%vd, "s") :Str
+%pa2  = PadAccess(%vd, "$s") :Str
 control: %vd -> %asgn
 %nl = Constant("\n") :Str
 %p  = Print(%pa2, %nl)

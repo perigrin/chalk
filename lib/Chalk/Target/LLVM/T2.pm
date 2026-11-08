@@ -467,7 +467,9 @@ sub deref_at {
     my ($b, $v) = @_;
     my $msg = " at " . ( $v->can('file') && $v->file // '-' ) . " line " . ( $v->can('line') && $v->line // 0 ) . ".\n";
     $b->{strs}{$msg} //= scalar keys %{ $b->{strs} };
-    return { msg => $msg, id => $b->{strs}{$msg} };
+    my $pk = ( $v->can('package') ? $v->package : undef ) // 'main';
+    $b->{strs}{$pk} //= scalar keys %{ $b->{strs} };
+    return { msg => $msg, id => $b->{strs}{$msg}, pk => $pk, pkid => $b->{strs}{$pk} };
 }
 
 sub hash_reads_settled {
@@ -2595,6 +2597,19 @@ sub print_module {
         push @L, sprintf('@s%d = private unnamed_addr constant [%d x i8] c"%s\00"', $strs->{$s}, $len + 1, _c($s));
     }
     push @L, "$_ = internal global %Slot zeroinitializer" for sort values %{ $bld->{globals} // {} };
+    # THE PROGRAM'S PACKAGE SCALARS BY NAME, for a string used as a reference
+    # without strict refs (t2_symref).
+    {
+        my @add;
+        my $n = 0;
+        for my $name (sort grep { /\A[\w:]+::\w+\z/ && !/\Amy::/ } keys %{ $bld->{globals} // {} }) {
+            my $len = do { use bytes; length $name };
+            push @L, sprintf('@sym%d = private unnamed_addr constant [%d x i8] c"%s\00"', $n, $len + 1, $name);
+            push @add, sprintf('  call void @t2_symtab_add(i8* getelementptr ([%d x i8], [%d x i8]* @sym%d, i64 0, i64 0), i64 %d, %%Slot* %s)', $len + 1, $len + 1, $n, $len, $bld->{globals}{$name});
+            $n++;
+        }
+        push @L, 'define internal void @t2_symtab_init() {', @add, '  ret void', '}';
+    }
     push @L, 'define i32 @main(i32 %argc, i8** %argv) {', _blocks($bld->{blocks}), '}', '';
     # EACH SUB A FUNCTION: `%Slot (%Slot %a0, ...)`, its blocks printed alike.
     for my $fn (sort { $a->{name} cmp $b->{name} } values %{ $bld->{funcs} // {} }) {
@@ -2712,6 +2727,8 @@ sub _line {
     if ($op eq 'SDeref' || $op eq 'SStore') {
         my $len = do { use bytes; length $a{msg} };
         my $at = "i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len";
+        my $pl = do { use bytes; length $a{pk} };
+        $at .= ", i8* getelementptr ([" . ( $pl + 1 ) . " x i8], [" . ( $pl + 1 ) . " x i8]* \@s$a{pkid}, i64 0, i64 0), i64 $pl";
         return "$nm = call %Slot \@t2_sderef(" . $arg->(@in) . ", i1 $a{strict}, $at)" if $op eq 'SDeref';
         return "call void \@t2_sstore(" . $arg->(@in) . ", i1 $a{strict}, $at)";
     }
@@ -3840,7 +3857,7 @@ define internal %Slot @t2_sref(%Slot* %c) {
 @msg_symref = private unnamed_addr constant [65 x i8] c"chalk: refused at run time: a string as a reference (no strict)\0A\00"
 ; t2_sderef_cell(r, strict, at, n) -> the cell r refers to; null after
 ; perl's die (what r is named), a stop for a name without strict refs.
-define internal %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n) {
+define internal %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n, i8* %pk, i64 %pkn) {
 entry:
   %t = extractvalue %Slot %r, 0
   switch i8 %t, label %str [ i8 9, label %ok
@@ -3864,8 +3881,10 @@ not:
 str:
   br i1 %strict, label %strdie, label %sym
 sym:
-  call void @t2_stop(i8* getelementptr ([65 x i8], [65 x i8]* @msg_symref, i64 0, i64 0), i64 64)
-  unreachable
+  %nm0 = call %Str @t2_slot_str(%Slot %r)
+  %pks = call %Str @t2_str(i8* %pk, i64 %pkn)
+  %cell = call %Slot* @t2_symref(%Str %nm0, %Str %pks)
+  ret %Slot* %cell
 strdie:
   %sv = call %Str @t2_slot_str(%Slot %r)
   %sl = extractvalue %Str %sv, 1
@@ -3893,8 +3912,94 @@ die:
 none:
   ret %Slot* null
 }
-define internal %Slot @t2_sderef(%Slot %r, i1 %strict, i8* %at, i64 %n) {
-  %c = call %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n)
+; THE PROGRAM'S PACKAGE SCALARS BY NAME ("main::x" -> a SCALAR reference to its
+; global), for a string used as a reference without strict refs; one no one
+; named is made on first use, as perl's. t2_symtab_init (the printer's) fills it.
+@t2_symtab = internal global %Slot zeroinitializer
+@t2_symtab_ready = internal global i1 0
+@lit_colons = private unnamed_addr constant [3 x i8] c"::\00"
+@lit_mainpk = private unnamed_addr constant [5 x i8] c"main\00"
+define internal void @t2_symtab_add(i8* %p, i64 %n, %Slot* %g) {
+  %t = call %Slot @t2_ghash(%Slot* @t2_symtab)
+  %k = call %Str @t2_str(i8* %p, i64 %n)
+  %s = call %Slot @t2_sref(%Slot* %g)
+  call void @t2_hset(%Slot %t, %Str %k, %Slot %s)
+  ret void
+}
+; t2_has_colons(s) -> whether s holds "::"
+define internal i1 @t2_has_colons(%Str %s) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %last = sub i64 %n, 1
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %next ]
+  %more = icmp slt i64 %i, %last
+  br i1 %more, label %look, label %no
+look:
+  %a = getelementptr i8, i8* %p, i64 %i
+  %c = load i8, i8* %a
+  %i2 = add i64 %i, 1
+  %b = getelementptr i8, i8* %p, i64 %i2
+  %d = load i8, i8* %b
+  %c1 = icmp eq i8 %c, 58
+  %d1 = icmp eq i8 %d, 58
+  %both = and i1 %c1, %d1
+  br i1 %both, label %yes, label %next
+next:
+  br label %loop
+yes:
+  ret i1 1
+no:
+  ret i1 0
+}
+define internal %Slot* @t2_symref(%Str %name, %Str %pk) {
+entry:
+  %ready = load i1, i1* @t2_symtab_ready
+  br i1 %ready, label %go, label %init
+init:
+  store i1 1, i1* @t2_symtab_ready
+  call void @t2_symtab_init()
+  br label %go
+go:
+  %q = call i1 @t2_has_colons(%Str %name)
+  br i1 %q, label %qual, label %unq
+qual:
+  %np = extractvalue %Str %name, 0
+  %c0 = load i8, i8* %np
+  %lead = icmp eq i8 %c0, 58
+  br i1 %lead, label %lead_main, label %have
+lead_main:
+  %m = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_mainpk, i64 0, i64 0), i64 4)
+  %ml = call %Str @t2_concat(%Str %m, %Str %name)
+  br label %have
+unq:
+  %cc = call %Str @t2_str(i8* getelementptr ([3 x i8], [3 x i8]* @lit_colons, i64 0, i64 0), i64 2)
+  %p1 = call %Str @t2_concat(%Str %pk, %Str %cc)
+  %p2 = call %Str @t2_concat(%Str %p1, %Str %name)
+  br label %have
+have:
+  %full = phi %Str [ %name, %qual ], [ %ml, %lead_main ], [ %p2, %unq ]
+  %t = call %Slot @t2_ghash(%Slot* @t2_symtab)
+  %s = call %Slot @t2_hget(%Slot %t, %Str %full)
+  %st = extractvalue %Slot %s, 0
+  %found = icmp eq i8 %st, 9
+  br i1 %found, label %old, label %new
+old:
+  %v = extractvalue %Slot %s, 1
+  %oc = inttoptr i64 %v to %Slot*
+  ret %Slot* %oc
+new:
+  %mem = call i8* @malloc(i64 16)
+  %nc = bitcast i8* %mem to %Slot*
+  store %Slot zeroinitializer, %Slot* %nc
+  %ns = call %Slot @t2_sref(%Slot* %nc)
+  call void @t2_hset(%Slot %t, %Str %full, %Slot %ns)
+  ret %Slot* %nc
+}
+define internal %Slot @t2_sderef(%Slot %r, i1 %strict, i8* %at, i64 %n, i8* %pk, i64 %pkn) {
+  %c = call %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n, i8* %pk, i64 %pkn)
   %z = icmp eq %Slot* %c, null
   br i1 %z, label %undef, label %load
 undef:
@@ -3904,7 +4009,7 @@ load:
   ret %Slot %v
 }
 @msg_sstore_undef = private unnamed_addr constant [75 x i8] c"chalk: refused at run time: a store through an undefined scalar reference\0A\00"
-define internal void @t2_sstore(%Slot %r, %Slot %v, i1 %strict, i8* %at, i64 %n) {
+define internal void @t2_sstore(%Slot %r, %Slot %v, i1 %strict, i8* %at, i64 %n, i8* %pk, i64 %pkn) {
 entry:
   %t = extractvalue %Slot %r, 0
   %u = icmp eq i8 %t, 0
@@ -3913,7 +4018,7 @@ viv:
   call void @t2_stop(i8* getelementptr ([75 x i8], [75 x i8]* @msg_sstore_undef, i64 0, i64 0), i64 74)
   unreachable
 go:
-  %c = call %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n)
+  %c = call %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n, i8* %pk, i64 %pkn)
   %z = icmp eq %Slot* %c, null
   br i1 %z, label %done, label %st
 st:

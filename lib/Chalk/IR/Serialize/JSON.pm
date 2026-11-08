@@ -745,6 +745,7 @@ sub _deserialize_graph ($method_data) {
             if (defined $fields->{line}) {
                 @args{qw(eval_id file line)} = @{$fields}{qw(eval_id file line)};
                 $args{strict} = $fields->{strict} ? 1 : 0;
+                $args{package} = $fields->{package} if defined $fields->{package};
             }
         }
         elsif ($op eq 'EntryDef') {

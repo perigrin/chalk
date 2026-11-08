@@ -17,6 +17,7 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
     field $file    :param :reader = undef;
     field $line    :param :reader = undef;
     field $strict  :param :reader = 0;
+    field $package :param :reader = undef;   # (without strict refs a string names its variable)
 
     method operation() { 'PostfixDeref' }
     method staleness_kind() { 'transparent' }
