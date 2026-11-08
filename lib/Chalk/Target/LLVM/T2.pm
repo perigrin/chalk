@@ -169,6 +169,9 @@ sub walk {
         out('a control node with ' . scalar(@s) . ' successors') if @s > 1;
         my $s = $s[0];
         my $op = $s->operation;
+        # (WHERE EACH STATEMENT STANDS: its turn and its block -- hash_reads_settled
+        # makes a waiting read at the store right after the read's own version)
+        $b->{at}{ refaddr($s) } = [ ++$b->{seq}, refaddr( $b->{cur} // 0 ) ];
         # A STATEMENT A READ TAKES AS ITS MEMORY must be a version T2 orders
         # reads by (_is_version): a new store kind missing there let reads after
         # it be made after the next store (three wrong answers, slices 14-15).
@@ -475,10 +478,33 @@ sub hash_reads_settled {
     return if $b->{settling};
     local $b->{settling} = 1;
     for my $ver (@{ $b->{passed} }) {
+        my @waiting = grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) } } @{ $b->{readers}{ refaddr($ver) } // [] };
+        next unless @waiting;
+        # MADE HERE WHERE NOTHING RAN BETWEEN: the read's version is the
+        # statement just before this one, in this block, and the read is under
+        # no ?:, &&, || or // -- so here it reads (or dies) as perl's did there.
+        my $at = $b->{at}{ refaddr($ver) }
+            // ( $ver->operation eq 'MemStart' ? [ 0, refaddr( $b->{blocks}[0] // 0 ) ] : undef );   # (the function's entry: before its first statement)
+        my $next = $at && $at->[0] == $b->{seq} - 1 && $at->[1] == refaddr( $b->{cur} // 0 );
         out("a read through a reference waiting across $what")
-            if grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) } } @{ $b->{readers}{ refaddr($ver) } // [] };
+            unless $next && !grep { _guarded($_, {}) } @waiting;
+        $b->value($_) for @waiting;
     }
     $b->reads_before($_) for @{ $b->{passed} };
+}
+
+# _guarded($n) -> true when a value $n flows into a choice (?:, &&, ||, //, a
+# phi): made unconditionally, it might be made where perl's is not.
+sub _guarded {
+    my ($n, $seen) = @_;
+    return 0 if $seen->{ refaddr($n) }++;
+    for my $c (grep { blessed($_) } @{ $n->consumers // [] }) {
+        my $op = $c->operation;
+        return 1 if $op =~ /\A(?:TernaryExpr|And|Or|DefinedOr|Phi)\z/;
+        next if _is_version($c) || $op =~ /\A(?:Return|Print)\z/;
+        return 1 if _guarded($c, $seen);
+    }
+    return 0;
 }
 
 # _through_ref($read) -> true for a read through a reference: a hash element,
@@ -1933,6 +1959,7 @@ sub func {
         Chalk::Target::LLVM::Context::_graph_component($g);
     local $b->{blocks} = $fn->{blocks};
     local $b->{cur};
+    local $b->{seq} = 0;   # (its own statements' turns: its entry is turn 0)
     local $b->{locs} = {};
     local $b->{memo} = {};
     local $b->{args} = $is_method ? { map { ( $_ => $argn[ $margs{$_} ] ) } grep { $_ ne 'np' } keys %margs }
