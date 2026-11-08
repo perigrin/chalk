@@ -1214,8 +1214,10 @@ sub array_of {
         if blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%';
     # THROUGH AN ELEMENT (`$a[1][0]`, `@{$h{l}}`): the array the element holds. A
     # deref for a write B::SoN spells as the element made an array first (`//= []`).
+    # (WRITTEN -- push, unshift, ... -- one undef there stops: B::SoN makes it an
+    # array first where it can, and a write into a stand-in would be lost)
     # (read through an undef element: an empty array, as perl's reads)
-    return $b->emit(op => 'ADerefR', type => '%Array*', inputs => [ $b->as($b->value($n), '%Slot') ])
+    return $b->emit(op => $b->{writing} ? 'ADeref' : 'ADerefR', type => '%Array*', inputs => [ $b->as($b->value($n), '%Slot') ])
         if blessed($n) && $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) };
     # @Pkg::ISA IS THE RUN-TIME MOP'S OWN PARENT LIST: the array method lookup
     # walks, fetched where it is used, so push, shift and the rest change the
@@ -1248,6 +1250,7 @@ sub _value_read {
 # place -- after every read the array's version had.
 sub array_stmt {
     my ($b, $s) = @_;
+    local $b->{writing} = 1;
     # ITS OWN ARRAY is read before it runs: one through a reference (`push
     # @{$r->{l}}, 4`) is made first, not refused as a read waiting across it.
     my ($own) = $s->inputs->@*;
