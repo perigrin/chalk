@@ -11,6 +11,12 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
     # A COPY, not an alias: `my %p = %$h` is a new hash with %$h's entries,
     # which a later store through $h does not reach (B::SoN `copy`).
     field $copy  :param :reader = 0;
+    # A SCALAR DEREF'S SITE (B::SoN's): perl's die names it; under `strict
+    # refs` a string there dies, without it it is a name.
+    field $eval_id :param :reader = undef;
+    field $file    :param :reader = undef;
+    field $line    :param :reader = undef;
+    field $strict  :param :reader = 0;
 
     method operation() { 'PostfixDeref' }
     method staleness_kind() { 'transparent' }
@@ -18,6 +24,7 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
 
     method content_hash() {
         return join('|', 'PostfixDeref', "sigil=$sigil", ($copy ? 'copy' : ()),
+            ( defined $line ? ( 'site', $eval_id // '', $file, $line, $strict ? 'strict' : '' ) : () ),
             $self->_serialize_inputs());
     }
 }

@@ -688,6 +688,7 @@ sub _deserialize_graph ($method_data) {
             # A FILE LEXICAL A NAMED SUB SHARES is a location, read and written
             # through memory -- the backend lowers it to a module global.
             $args{shared} = 1 if $fields->{shared};
+            $args{file} = 1 if $fields->{file};
             # ...and what it holds is whatever was last stored, from any graph:
             # a Scalar, which the backend reads as its Slot. Unknown (nothing
             # typed it) is what a read stamped where no store is in sight says.
@@ -741,6 +742,10 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'PostfixDeref') {
             $args{sigil} = $fields->{sigil};
             $args{copy}  = 1 if $fields->{copy};
+            if (defined $fields->{line}) {
+                @args{qw(eval_id file line)} = @{$fields}{qw(eval_id file line)};
+                $args{strict} = $fields->{strict} ? 1 : 0;
+            }
         }
         elsif ($op eq 'EntryDef') {
             $args{package} = $fields->{package} // '';

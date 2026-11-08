@@ -67,11 +67,7 @@ sub lower_program {
         map { grep { blessed($_) } $_->inputs->@* }
         grep { $_->operation eq 'Print' } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
     my $ok = eval {
-        # A SCALAR DEREF dies in perl on a non-SCALAR reference, even where its
-        # value is dead and T2 never lowers it: refused in a program with an eval.
-        Chalk::Target::LLVM::T2::Builder::out('a scalar deref in a program with an eval')
-            if $b->{has_eval} && grep { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' }
-            Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
+        # (a scalar deref may die: B::SoN pins it where it stands, so it is made there)
         $b->build($ret); 1 };
     return undef unless $ok;
     # A PRINTING FAILURE (a conversion T2 lacks) falls back too: it escaped
@@ -195,14 +191,14 @@ sub walk {
         elsif ($op eq 'If')   { $ctl = $b->if_stmt($s) }
         # A READ OF A TIED AGGREGATE PINNED where it runs (B::SoN): a FETCH,
         # FETCHSIZE or EXISTS call, made here, in order.
-        elsif ($op =~ /\A(?:Subscript|Count|Exists)\z/
-               || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join)\z/) {
+        elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref)\z/
+               || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join|sort)\z/) {
             $b->value($s);
             push @{ $b->{passed} }, $s;
             $ctl = $s;
         }
         # A tie OR untie in place: every later access of the container is the new metaobject's.
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:tie|untie)\z/) {
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:tie|untie|bless)\z/) {
             $b->value($s);
             push @{ $b->{passed} }, $s;
             $ctl = $s;
@@ -312,6 +308,9 @@ sub walk {
         elsif ($op eq 'ArrayLiteral' && ( $s->stamp // '' ) =~ /\A(?:Array|ArrayRef)\z/) { $b->value($s); $ctl = $s }   # static type
         # A `{...}` PINNED WHERE IT RUNS: a fresh hash there, each time.
         elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'HashRef') { $b->value($s); $ctl = $s }   # static type
+        # A `my %h = (...)` LIST PINNED where it runs: made by the assign that
+        # stores it into its hash, in place.
+        elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'Hash') { $ctl = $s }
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands.
         elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || ( $s->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/ )) {
@@ -448,6 +447,14 @@ sub after_call {
 # store, a call), no read through one, of a version it replaces, may still be
 # to make -- made after, it would see the new value. Refused if one is. Every
 # other read waiting is made now (reads_before).
+# deref_at($deref) -> { msg, id }: " at FILE line N.\n", for its die.
+sub deref_at {
+    my ($b, $v) = @_;
+    my $msg = " at " . ( $v->can('file') && $v->file // '-' ) . " line " . ( $v->can('line') && $v->line // 0 ) . ".\n";
+    $b->{strs}{$msg} //= scalar keys %{ $b->{strs} };
+    return { msg => $msg, id => $b->{strs}{$msg} };
+}
+
 sub hash_reads_settled {
     my ($b, $what) = @_;
     for my $ver (@{ $b->{passed} }) {
@@ -572,6 +579,15 @@ sub args_assign {
 # undef until stored. Only a plain scalar `my` of this function.
 sub location {
     my ($b, $pad) = @_;
+    # A FILE LEXICAL SHARED WITH A NAMED SUB (B::SoN's shared, and no MakeCell
+    # here owns it): one variable for the whole program -- the file's scope
+    # runs once -- so one global, by its name (B::SoN spells a second `my` of
+    # one name apart: `c__2`). The program and each sub reach the same one.
+    # shortcut: a file lexical made anew in a loop is one variable here; refuse if a program needs it.
+    if (blessed($pad) && $pad->operation eq 'PadAccess' && $pad->can('file') && $pad->file && $pad->is_location
+            && ( $pad->sigil // '$' ) eq '$') {
+        return $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_named( 'my::' . $pad->symbol ) });
+    }
     out('a variable that is not a `my` scalar kept here (' . ( blessed($pad) ? $pad->operation . ' ' . ( $pad->can('sigil') ? $pad->sigil // '' : '' )
         . ( $pad->can('symbol') ? $pad->symbol // '' : '' ) . ( $pad->can('shared') && $pad->shared ? ' shared' : '' )
         . ( $pad->can('is_location') && !$pad->is_location ? ' not-location' : '' ) : 'none' ) . ')')
@@ -589,6 +605,8 @@ sub location {
         # (captured: marked shared, or named by a MakeCell here -- `my ($k) = @_`
         # captured was not marked, and its closure read freed stack: "0 0")
         my $captured = $pad->shared || grep { $_->operation eq 'MakeCell' && ( $_->cell_name // '' ) eq $pad->name } @{ $b->{own_nodes} // [] };
+        # (REFERENCED -- `\$x` -- it outlives the call too)
+        $captured ||= grep { $_->operation eq 'Ref' && grep { blessed($_) && $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' && ( $_->symbol // '' ) eq ( $pad->symbol // '' ) } $_->inputs->@* } @{ $b->{own_nodes} // [] };
         my $p = Chalk::Target::LLVM::T2::_n(op => ( $captured ? 'HeapCell' : 'Alloca' ), type => '%Slot*', attr => { name => $pad->name });
         unshift @{ $b->{blocks}[0]{nodes} }, $p;
         $p;
@@ -690,6 +708,16 @@ sub assign {
     out('a local') if $s->can('local') && $s->local;
     my ($target, $v) = $s->inputs->@[0, 1];
     return $b->element_store($target, $v, $s) if blessed($target) && $target->operation eq 'Subscript';
+    # $$r = v: into the variable r refers to; perl's die where r is none.
+    if (blessed($target) && $target->operation eq 'PostfixDeref' && ( $target->sigil // '' ) eq '$') {
+        my $r = $b->as($b->value($target->inputs->[0]), '%Slot');
+        my $val = $b->as($b->value($v), '%Slot');
+        $b->hash_reads_settled('a store through a reference');
+        $b->emit(op => 'SStore', type => 'void', inputs => [ $r, $val ],
+            attr => { strict => ( $target->can('strict') && $target->strict ? 1 : 0 ), %{ $b->deref_at($target) } });
+        $b->after_call;
+        return;
+    }
     if (blessed($target) && $target->operation eq 'FieldAccess') {
         # A FIELD WRITTEN: what it is given, then the store into its object.
         my ($key, $sg) = $b->field_of($target);
@@ -795,8 +823,24 @@ sub hash_value {
     # list. A sort with its own comparator is not T2's yet.
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:sort|reverse)\z/
             && ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/) {   # static type
-        out('a sort with its own comparator') if $v->name eq 'sort'
-            && ( ( $v->can('sort_cmp_body') && $v->sort_cmp_body ) || !( $v->can('sort_cmp') && defined $v->sort_cmp ) );
+        # A SORT WITH ITS OWN COMPARATOR (a block, a named sub): a function of
+        # no arguments, called for each pair with $a and $b -- the sort
+        # package's -- set to it; its number orders the pair.
+        my $by = $v->name eq 'sort' && ( ( $v->can('sort_cmp_body') && $v->sort_cmp_body ) || !( $v->can('sort_cmp') && defined $v->sort_cmp ) );
+        my $cmp_fn;
+        if ($by) {
+            my $sub = $v->can('sort_cmp_sub') ? $v->sort_cmp_sub : undef;
+            out('a sort comparator with no body') unless blessed($sub) && $sub->can('graph') && $sub->graph;
+            # ONE WITH AN EFFECT -- a die, a print, a store, a call, a division
+            # that may die -- shows the order perl's merge sort compares in,
+            # which this sort does not keep: refused (Context's rule too).
+            out('a sort comparator with an effect (perl\'s comparison order shows)')
+                if grep { $_->operation =~ /\A(?:Unwind|Print|Assign|EntryWrite|CellWrite|Divide|Modulo|LocalAlias)\z/
+                          || $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) ne 'builtin' || $_->can('control_in') && blessed($_->control_in) ) }
+                   Chalk::Target::LLVM::Context::_graph_component($sub->graph);
+            $cmp_fn = $b->func($sub, $v->sort_cmp_body // 'sort comparator');
+            out('a sort comparator reading @_') if $cmp_fn->{list} || $cmp_fn->{nargs};
+        }
         my @l = @in;
         pop @l if $v->can('memory_input') && $v->memory_input;
         my $arr = $b->emit(op => 'NewArray', type => '%Array*');
@@ -805,6 +849,12 @@ sub hash_value {
             else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($e), '%Slot') ]) }
         }
         return $b->emit(op => 'ARev', type => '%Array*', inputs => [$arr]) if $v->name eq 'reverse';
+        if ($cmp_fn) {
+            my $pk = ( $v->can('sort_package') ? $v->sort_package : undef ) // 'main';
+            $b->hash_reads_settled('a sort comparator');
+            return $b->emit_call(op => 'ASortBy', type => '%Array*', inputs => [$arr],
+                attr => { fn => $cmp_fn->{name}, ga => $b->global_named("${pk}::a"), gb => $b->global_named("${pk}::b") });
+        }
         return $b->emit(op => 'ASort', type => '%Array*', inputs => [$arr],
             attr => { num => ( $v->sort_cmp eq 'numeric' ? 1 : 0 ), desc => ( ( $v->can('sort_order') ? $v->sort_order // '' : '' ) eq 'descending' ? 1 : 0 ) });
     }
@@ -815,14 +865,26 @@ sub hash_value {
 # its function's entry -- as a `my @a` is.
 sub _hash_var {
     my ($n) = @_;
-    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '%' && !$n->inputs->@*;
+    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '%' && ( !$n->inputs->@* || $n->can('file') && $n->file );   # (a file's, read at a memory version: the one hash)
 }
 sub _named_hash {
     my ($n) = @_;
     return _hash_var($n) || blessed($n) && $n->operation eq 'HashLiteral' && ( $n->stamp // '' ) eq 'Hash'; # static type
 }
+# emit_entry(%n): a node made at the function's entry (first block's start),
+# where each `my` aggregate of the function is made.
+sub emit_entry {
+    my ($b, %a) = @_;
+    my $n = Chalk::Target::LLVM::T2::_n(%a);
+    unshift @{ $b->{blocks}[0]{nodes} }, $n;
+    return $n;
+}
 sub hash_var {
     my ($b, $pad) = @_;
+    # A FILE'S HASH (shared with a sub, a sort block): one, in a global, made
+    # at its first use from any function.
+    return $b->{locs}{ '%file#' . $pad->symbol } //= $b->emit_entry(op => 'GHash', type => '%Slot', attr => { global => $b->global_named( 'my::%' . $pad->symbol ) })
+        if $pad->can('file') && $pad->file;
     out('a hash a closure shares') if $pad->can('shared') && $pad->shared;
     my $key = '%' . $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
     return $b->{locs}{$key} //= do {
@@ -844,7 +906,8 @@ sub hash_of {
         my (undef, $sg) = $b->field_of($n);
         return $b->value($n) if $sg eq '%';
     }
-    out('a hash element through an element') if $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) };   # $_[N] is an argument
+    # THROUGH AN ELEMENT (`$h{x}{y}`): the reference the element holds. A deref
+    # for a write B::SoN spells as the element made a hash first (`//= {}`).
     out('a hash element of a named hash') if ( $n->can('sigil') ? $n->sigil // '' : '' ) eq '%'
         || $n->operation eq 'EntryDef' || $n->operation eq 'Constant';   # a package hash by name: $ENV{K}
     return $b->as($b->value($n), '%Slot');
@@ -870,6 +933,9 @@ sub array_value {
     if ($op eq 'Ref') {
         # \@a: a reference to the array itself (one array, two names).
         my $t = $in[0];
+        # \$x: a reference to the variable itself, kept on the heap (tag 9).
+        return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->location($t) ])
+            if blessed($t) && $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$' && $t->is_location;
         # \%h: a named hash IS its reference here (a %Slot of tag 5), one hash, two names.
         return $b->value($t) if blessed($t) && _named_hash($t) && ( $v->stamp // '' ) eq 'HashRef';   # static type
         out('a reference to what is not an array') unless blessed($t)
@@ -987,10 +1053,10 @@ sub _aderef {
 }
 
 # A PACKAGE SCALAR (`our $g`, `$::s`, `$P::v`): one global %Slot every sub
-# reads and writes. perl's own ($/, $", $0, $_, $a/$b of sort, ...) are not.
+# reads and writes. perl's own ($/, $", $0, $_, ...) are not. ($a and $b ARE: a sort sets them before each call of its comparator.)
 # ($_ is one: B::SoN spells a foreach's aliasing as stores to it, the
 # element written back, and its value restored after.)
-my %PERLS_OWN = map { ( $_ => 1 ) } qw(ARGV ENV INC STDIN STDOUT STDERR 0 a b AUTOLOAD);
+my %PERLS_OWN = map { ( $_ => 1 ) } qw(ARGV ENV INC STDIN STDOUT STDERR 0 AUTOLOAD);
 sub _pkg_scalar {
     my ($n) = @_;
     return blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) eq '$'
@@ -1000,6 +1066,10 @@ sub global_of {
     my ($b, $n) = @_;
     return '@t2_err' if $n->symbol eq '@';
     my $name = ( ( $n->can('package') ? $n->package : undef ) // 'main' ) . '::' . $n->symbol;
+    return $b->global_named($name);
+}
+sub global_named {
+    my ($b, $name) = @_;
     ( my $id = $name ) =~ s/\W+/_/g;
     return $b->{globals}{$name} //= "\@g_$id";
 }
@@ -1077,11 +1147,14 @@ sub _list_use {
 # function's entry: fresh each call. A closure's (shared) is not T2's.
 sub _array_var {
     my ($n) = @_;
-    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '@' && !$n->inputs->@*;
+    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '@' && ( !$n->inputs->@* || $n->can('file') && $n->file );
 }
 
 sub array_var {
     my ($b, $pad) = @_;
+    # A FILE'S ARRAY: likewise, the global holding its reference.
+    return $b->{locs}{ '@file#' . $pad->symbol } //= $b->emit_entry(op => 'GArray', type => '%Array*', attr => { global => $b->global_named( 'my::@' . $pad->symbol ) })
+        if $pad->can('file') && $pad->file;
     out('an array a closure shares') if $pad->can('shared') && $pad->shared;
     my $key = '@' . $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
     return $b->{locs}{$key} //= do {
@@ -1139,9 +1212,11 @@ sub array_of {
         || blessed($n) && $n->operation eq 'FieldAccess' && ( $b->field_of($n) )[1] eq '%';
     return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n->inputs->[0]) ])
         if blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%';
-    # THROUGH AN ELEMENT (`$a[1][0]`, not `$_[N]`) perl makes the element an
-    # array when it is undef -- a store inside a read: not T2's yet.
-    out('an array through an element') if blessed($n) && $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) };
+    # THROUGH AN ELEMENT (`$a[1][0]`, `@{$h{l}}`): the array the element holds. A
+    # deref for a write B::SoN spells as the element made an array first (`//= []`).
+    # (read through an undef element: an empty array, as perl's reads)
+    return $b->emit(op => 'ADerefR', type => '%Array*', inputs => [ $b->as($b->value($n), '%Slot') ])
+        if blessed($n) && $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) };
     # @Pkg::ISA IS THE RUN-TIME MOP'S OWN PARENT LIST: the array method lookup
     # walks, fetched where it is used, so push, shift and the rest change the
     # class's parents (perigrin: @ISA as the class's container; a view needs nothing kept in step).
@@ -1173,6 +1248,10 @@ sub _value_read {
 # place -- after every read the array's version had.
 sub array_stmt {
     my ($b, $s) = @_;
+    # ITS OWN ARRAY is read before it runs: one through a reference (`push
+    # @{$r->{l}}, 4`) is made first, not refused as a read waiting across it.
+    my ($own) = $s->inputs->@*;
+    $b->value($own) if blessed($own) && $own->can('operation') && $b->_through_ref($own);
     $b->hash_reads_settled('a ' . $s->name);   # (it may store through a reference: `push @$r, 1`)
     my @in = $s->inputs->@*;
     pop @in if $s->can('memory_input') && $s->memory_input;
@@ -2040,6 +2119,7 @@ sub type_of {
     # AN ARRAY REFERENCE is a %Slot (tag 6) over an %Array: a scalar.
     return '%Slot' if $op eq 'ArrayLiteral' && ( $v->stamp // '' ) eq 'ArrayRef'; # static type
     return '%Slot' if $op eq 'Ref';
+    return '%Slot' if $op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '$';
     return '%Array*' if $op eq 'ArrayLiteral' || _aderef($v) || _array_var($v) || $op eq 'ArgsSource' || $op eq 'ListAppend';
     return 'i64' if $op eq 'Count';
     return '%Slot' if $op eq 'Subscript';
@@ -2073,7 +2153,7 @@ sub type_of {
     return '%Slot' if $op eq 'Increment' || $op eq 'Decrement';
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) =~ /\A(?:direct|method)\z/;
     # AN OBJECT is its blessed reference; ref() of one its class, or HASH.
-    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless';
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless' || $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'blessed';
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:tie|tied|untie)\z/;
     return '%Str' if $op eq 'RefType';
     return 'i64' if $op eq 'Print';
@@ -2158,9 +2238,25 @@ sub _value {
         pop @in if $v->can('memory_input') && $v->memory_input;
         # ONE ARGUMENT blesses into the package the bless is in: not known here.
         out('a bless of one argument') unless @in == 2;
-        out('a bless of what is not a hash') if $in[0]->operation eq 'ArrayLiteral' || ( $in[0]->stamp // '' ) =~ /\A(?:ArrayRef|ScalarRef|CodeRef)\z/; # static type
+        out('a bless of what is not a hash or array') if ( $in[0]->stamp // '' ) =~ /\A(?:ScalarRef|CodeRef)\z/; # static type
         return $b->emit(op => 'Bless', type => '%Slot',
             inputs => [ $b->as($b->value($in[0]), '%Slot'), $b->as($b->value($in[1]), '%Str') ]);
+    }
+    # blessed($x): the class a reference was blessed into, else undef.
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'blessed') {
+        my @in = grep { blessed($_) } $v->inputs->@*;
+        pop @in if $v->can('memory_input') && $v->memory_input;
+        out('a blessed of other than one argument') unless @in == 1;
+        return $b->emit(op => 'ClassOf', type => '%Slot', inputs => [ $b->as($b->value($in[0]), '%Slot') ]);
+    }
+    # $$r: what the variable r refers to holds; perl's die where r is no SCALAR
+    # reference (a string under strict refs; undef too), its eval's to catch.
+    if ($op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '$') {
+        my $at = $b->deref_at($v);
+        my $r = $b->emit(op => 'SDeref', type => '%Slot', inputs => [ $b->as($b->value($v->inputs->[0]), '%Slot') ],
+            attr => { strict => ( $v->can('strict') && $v->strict ? 1 : 0 ), %$at });
+        $b->after_call;
+        return $b->as($r, $ty);
     }
     if ($op eq 'RefType') {
         return $b->emit(op => 'RefType', type => '%Str', inputs => [ $b->as($b->value($v->inputs->[0]), '%Slot') ]);
@@ -2275,6 +2371,14 @@ sub _value {
         my @in = map { $b->value($_) } $v->inputs->@[0, 1];
         my $t = ( grep { $_->type ne 'i64' } @in ) ? 'double' : 'i64';
         return $b->emit(op => 'Cmp', type => 'i1', inputs => [ map { $b->as($_, $t) } @in ], attr => { op => $c });
+    }
+    # <=>: -1, 0 or 1, as (x > y) - (x < y).
+    # shortcut: a NaN operand gives 0, perl's undef; return a %Slot if a NaN program needs it.
+    if ($op eq 'NumCmp') {
+        my @in = map { $b->value($_) } $v->inputs->@[0, 1];
+        my $t = ( grep { $_->type ne 'i64' } @in ) ? 'double' : 'i64';
+        my ($gt, $lt) = map { my $c = $_; $b->as($b->emit(op => 'Cmp', type => 'i1', inputs => [ map { $b->as($_, $t) } @in ], attr => { op => $c }), 'i64') } qw(gt lt);
+        return $b->as($b->emit(op => 'Arith', type => 'i64', inputs => [ $gt, $lt ], attr => { op => 'sub' }), $ty);
     }
     # PERL'S STRING COMPARISONS: bytewise, a shorter prefix first (cmp's
     # -1, 0 or 1; the others it against 0).
@@ -2495,6 +2599,13 @@ sub _line {
         my $len = do { use bytes; length $a{msg} };
         return "$nm = call i64 \@t2_mod(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
     }
+    if ($op eq 'SDeref' || $op eq 'SStore') {
+        my $len = do { use bytes; length $a{msg} };
+        my $at = "i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len";
+        return "$nm = call %Slot \@t2_sderef(" . $arg->(@in) . ", i1 $a{strict}, $at)" if $op eq 'SDeref';
+        return "call void \@t2_sstore(" . $arg->(@in) . ", i1 $a{strict}, $at)";
+    }
+    return "$nm = call %Slot \@t2_sref(%Slot* " . $in[0]->name . ')' if $op eq 'SRef';
     if ($op eq 'Div') {
         my $len = do { use bytes; length $a{msg} };
         return "$nm = call double \@t2_div(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
@@ -2511,9 +2622,13 @@ sub _line {
     return "store i1 " . $in[0]->name . ", i1* \@t2_want" if $op eq 'SetWant';
     return "$nm = select i1 " . $in[0]->name . ', ' . $arg->( @in[ 1, 2 ] ) if $op eq 'Select';
     return "$nm = load %Slot, %Slot* $a{global}" if $op eq 'GLoad';
+    return "$nm = call %Slot \@t2_ghash(%Slot* $a{global})" if $op eq 'GHash';
+    return "$nm = call %Array* \@t2_garray(%Slot* $a{global})" if $op eq 'GArray';
+    return "$nm = getelementptr %Slot, %Slot* $a{global}, i64 0" if $op eq 'GAddr';
     return "store %Slot " . $in[0]->name . ", %Slot* $a{global}" if $op eq 'GStore';
     return "$nm = call %Array* \@t2_argv()" if $op eq 'Argv';
     return "$nm = call %Slot \@t2_bless(" . $arg->(@in) . ')' if $op eq 'Bless';
+    return "$nm = call %Slot \@t2_class_of(" . $arg->(@in) . ')' if $op eq 'ClassOf';
     return "$nm = call %Str \@t2_reftype(" . $arg->(@in) . ')' if $op eq 'RefType';
     return "call void \@t2_universal_setup()" if $op eq 'MopUniversal';
     return "call void \@t2_mop_var(" . $arg->(@in) . ", %Slot* $a{global})" if $op eq 'MopVar';
@@ -2541,6 +2656,7 @@ sub _line {
     return "call void \@t2_args_min(%Array* " . $in[0]->name . ", i64 $a{n})" if $op eq 'ArgsMin';
     return "call void \@t2_args_pairs(%Array* " . $in[0]->name . ", i64 $a{n})" if $op eq 'ArgsPairs';
     return "$nm = call %Array* \@t2_asort(" . $arg->(@in) . ", i1 $a{num}, i1 $a{desc})" if $op eq 'ASort';
+    return "$nm = call %Array* \@t2_asort_by(" . $arg->(@in) . ", %Slot ()* $a{fn}, %Slot* $a{ga}, %Slot* $a{gb})" if $op eq 'ASortBy';
     return "$nm = call %Slot \@t2_hderef_r(" . $arg->(@in) . ')' if $op eq 'HDerefR';
     return "$nm = call %Array* \@t2_arev(" . $arg->(@in) . ')' if $op eq 'ARev';
     return "call void \@t2_aassign(" . $arg->(@in) . ')' if $op eq 'AAssign';
@@ -2557,6 +2673,7 @@ sub _line {
     return "$nm = call %Slot \@t2_one_of(" . $arg->(@in) . ')' if $op eq 'OneOf';
     return "$nm = call %Slot \@t2_aref(" . $arg->(@in) . ')' if $op eq 'ARef';
     return "$nm = call %Array* \@t2_aderef(" . $arg->(@in) . ')' if $op eq 'ADeref';
+    return "$nm = call %Array* \@t2_aderef_r(" . $arg->(@in) . ')' if $op eq 'ADerefR';
     if ($op eq 'ASet') {
         my $len = do { use bytes; length $a{msg} };
         return "call void \@t2_aset(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
@@ -2741,7 +2858,8 @@ entry:
                                i8 3, label %str
                                i8 5, label %ref
                                i8 6, label %ref
-                               i8 8, label %ref ]
+                               i8 8, label %ref
+                               i8 9, label %ref ]
 same:
   ret %Slot %s
 str:
@@ -3029,7 +3147,8 @@ entry:
                                i8 3, label %str
                                i8 5, label %ref
                                i8 6, label %ref
-                               i8 8, label %ref ]
+                               i8 8, label %ref
+                               i8 9, label %ref ]
 int:
   %di = sitofp i64 %v to double
   ret double %di
@@ -3150,7 +3269,8 @@ entry:
                                i8 3, label %str
                                i8 5, label %ref
                                i8 6, label %ref
-                               i8 8, label %ref ]
+                               i8 8, label %ref
+                               i8 9, label %ref ]
 int:
   %si = call %Str @t2_i64_str(i64 %v)
   ret %Str %si
@@ -3178,11 +3298,9 @@ entry:
   %t = extractvalue %Slot %s, 0
   %addr = extractvalue %Slot %s, 1
   %kind = call %Str @t2_reftype(%Slot %s)
-  %ishash = icmp eq i8 %t, 5
-  br i1 %ishash, label %h, label %fmt
+  %c = call %Slot @t2_class_of(%Slot %s)
+  br label %h
 h:
-  %a = call %Array* @t2_harr(%Slot %s)
-  %c = call %Slot @t2_aget(%Array* %a, i64 0)
   %ct = extractvalue %Slot %c, 0
   %blessed = icmp eq i8 %ct, 3
   br i1 %blessed, label %obj, label %fmt
@@ -3191,7 +3309,7 @@ obj:
   %ck = call %Str @t2_concat(%Str %kind, %Str %eh)
   br label %fmt
 fmt:
-  %pre = phi %Str [ %kind, %entry ], [ %kind, %h ], [ %ck, %obj ]
+  %pre = phi %Str [ %kind, %h ], [ %ck, %obj ]
   %pp = extractvalue %Str %pre, 0
   %pl = extractvalue %Str %pre, 1
   %pl32 = trunc i64 %pl to i32
@@ -3204,11 +3322,12 @@ fmt:
 }
 
 ; %Array: { len, cap, elements } -- a `my @a`, its elements %Slot.
-%Array = type { i64, i64, %Slot*, %Meta* }
+; (field 4: the class a bless gave it, undef until -- an array's or a hash's)
+%Array = type { i64, i64, %Slot*, %Meta*, %Slot }
 declare i8* @realloc(i8*, i64)
 declare i8* @memmove(i8*, i8*, i64)
 define internal %Array* @t2_new_array() {
-  %m = call i8* @malloc(i64 32)
+  %m = call i8* @malloc(i64 48)
   %a = bitcast i8* %m to %Array*
   store %Array zeroinitializer, %Array* %a
   %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
@@ -3434,7 +3553,8 @@ entry:
                                i8 3, label %str
                                i8 5, label %ref
                                i8 6, label %ref
-                               i8 8, label %ref ]
+                               i8 8, label %ref
+                               i8 9, label %ref ]
 int:
   %bi = icmp ne i64 %v, 0
   ret i1 %bi
@@ -3460,6 +3580,7 @@ declare i32 @memcmp(i8*, i8*, i64)
 @lit_hash = private unnamed_addr constant [5 x i8] c"HASH\00"
 @lit_array = private unnamed_addr constant [6 x i8] c"ARRAY\00"
 @lit_code = private unnamed_addr constant [5 x i8] c"CODE\00"
+@lit_scalar = private unnamed_addr constant [7 x i8] c"SCALAR\00"
 @msg_notanarray = private unnamed_addr constant [78 x i8] c"chalk: refused at run time: an array element read through no ARRAY reference\0A\00"
 @msg_refstr = private unnamed_addr constant [62 x i8] c"chalk: refused at run time: a reference read as a str or num\0A\00"
 define internal void @t2_stop(i8* %m, i64 %n) {
@@ -3523,13 +3644,139 @@ found:
 none:
   ret i64 -1
 }
+@msg_blessnot = private unnamed_addr constant [78 x i8] c"chalk: refused at run time: a bless of what is not a hash or array reference\0A\00"
 define internal %Slot @t2_bless(%Slot %h, %Str %c) {
-  %a = call %Array* @t2_harr(%Slot %h)
+entry:
+  %t = extractvalue %Slot %h, 0
+  %ish = icmp eq i8 %t, 5
+  %isa = icmp eq i8 %t, 6
+  %ok = or i1 %ish, %isa
+  br i1 %ok, label %set, label %bad
+bad:
+  call void @t2_stop(i8* getelementptr ([78 x i8], [78 x i8]* @msg_blessnot, i64 0, i64 0), i64 77)
+  unreachable
+set:
   %cs = call %Slot @t2_box_str(%Str %c)
-  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
-  %els = load %Slot*, %Slot** %ep
-  store %Slot %cs, %Slot* %els
+  %v = extractvalue %Slot %h, 1
+  %a = inttoptr i64 %v to %Array*
+  %cp = getelementptr %Array, %Array* %a, i32 0, i32 4
+  store %Slot %cs, %Slot* %cp
   ret %Slot %h
+}
+; t2_class_of(s) -> the class a hash or array reference was blessed into
+; (a boxed Str), else undef.
+define internal %Slot @t2_class_of(%Slot %s) {
+entry:
+  %t = extractvalue %Slot %s, 0
+  %ish = icmp eq i8 %t, 5
+  %isa = icmp eq i8 %t, 6
+  %ok = or i1 %ish, %isa
+  br i1 %ok, label %agg, label %none
+agg:
+  %v = extractvalue %Slot %s, 1
+  %a = inttoptr i64 %v to %Array*
+  %cp = getelementptr %Array, %Array* %a, i32 0, i32 4
+  %c = load %Slot, %Slot* %cp
+  ret %Slot %c
+none:
+  ret %Slot zeroinitializer
+}
+; A SCALAR REFERENCE (`\$x`) is a %Slot of tag 9 whose payload is the
+; variable's heap cell.
+define internal %Slot @t2_sref(%Slot* %c) {
+  %i = ptrtoint %Slot* %c to i64
+  %s = call %Slot @t2_slot(i8 9, i64 %i)
+  ret %Slot %s
+}
+@lit_sc_undef = private unnamed_addr constant [51 x i8] c"Can't use an undefined value as a SCALAR reference\00"
+@lit_sc_not = private unnamed_addr constant [23 x i8] c"Not a SCALAR reference\00"
+@lit_sc_str0 = private unnamed_addr constant [20 x i8] c"Can't use string (\22\00"
+@lit_sc_str1 = private unnamed_addr constant [46 x i8] c"\22) as a SCALAR ref while \22strict refs\22 in use\00"
+@lit_sc_more = private unnamed_addr constant [5 x i8] c"\22...\00"
+@msg_symref = private unnamed_addr constant [65 x i8] c"chalk: refused at run time: a string as a reference (no strict)\0A\00"
+; t2_sderef_cell(r, strict, at, n) -> the cell r refers to; null after
+; perl's die (what r is named), a stop for a name without strict refs.
+define internal %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n) {
+entry:
+  %t = extractvalue %Slot %r, 0
+  switch i8 %t, label %str [ i8 9, label %ok
+                             i8 0, label %undef
+                             i8 5, label %not
+                             i8 6, label %not
+                             i8 7, label %not
+                             i8 8, label %not ]
+ok:
+  %v = extractvalue %Slot %r, 1
+  %c = inttoptr i64 %v to %Slot*
+  ret %Slot* %c
+undef:
+  br i1 %strict, label %undefdie, label %none
+undefdie:
+  %u = call %Str @t2_str(i8* getelementptr ([51 x i8], [51 x i8]* @lit_sc_undef, i64 0, i64 0), i64 50)
+  br label %die
+not:
+  %nm = call %Str @t2_str(i8* getelementptr ([23 x i8], [23 x i8]* @lit_sc_not, i64 0, i64 0), i64 22)
+  br label %die
+str:
+  br i1 %strict, label %strdie, label %sym
+sym:
+  call void @t2_stop(i8* getelementptr ([65 x i8], [65 x i8]* @msg_symref, i64 0, i64 0), i64 64)
+  unreachable
+strdie:
+  %sv = call %Str @t2_slot_str(%Slot %r)
+  %sl = extractvalue %Str %sv, 1
+  %long = icmp ugt i64 %sl, 32
+  %cut = select i1 %long, i64 32, i64 %sl
+  %sp = extractvalue %Str %sv, 0
+  %head = call %Str @t2_str(i8* %sp, i64 %cut)
+  %p0 = call %Str @t2_str(i8* getelementptr ([20 x i8], [20 x i8]* @lit_sc_str0, i64 0, i64 0), i64 19)
+  %p1 = call %Str @t2_concat(%Str %p0, %Str %head)
+  %more = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_sc_more, i64 0, i64 0), i64 4)
+  %p2 = call %Str @t2_concat(%Str %p1, %Str %more)
+  %p1b = call %Str @t2_str(i8* getelementptr ([20 x i8], [20 x i8]* @lit_sc_str0, i64 0, i64 0), i64 0)
+  %tail0 = call %Str @t2_str(i8* getelementptr ([46 x i8], [46 x i8]* @lit_sc_str1, i64 0, i64 0), i64 45)
+  %tail1 = call %Str @t2_str(i8* getelementptr ([46 x i8], [46 x i8]* @lit_sc_str1, i64 0, i64 1), i64 44)
+  %lp = select i1 %long, %Str %p2, %Str %p1
+  %tl = select i1 %long, %Str %tail1, %Str %tail0
+  %sm = call %Str @t2_concat(%Str %lp, %Str %tl)
+  br label %die
+die:
+  %m0 = phi %Str [ %u, %undefdie ], [ %nm, %not ], [ %sm, %strdie ]
+  %as = call %Str @t2_str(i8* %at, i64 %n)
+  %m = call %Str @t2_concat(%Str %m0, %Str %as)
+  call void @t2_die_unwind(%Str %m)
+  ret %Slot* null
+none:
+  ret %Slot* null
+}
+define internal %Slot @t2_sderef(%Slot %r, i1 %strict, i8* %at, i64 %n) {
+  %c = call %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n)
+  %z = icmp eq %Slot* %c, null
+  br i1 %z, label %undef, label %load
+undef:
+  ret %Slot zeroinitializer
+load:
+  %v = load %Slot, %Slot* %c
+  ret %Slot %v
+}
+@msg_sstore_undef = private unnamed_addr constant [75 x i8] c"chalk: refused at run time: a store through an undefined scalar reference\0A\00"
+define internal void @t2_sstore(%Slot %r, %Slot %v, i1 %strict, i8* %at, i64 %n) {
+entry:
+  %t = extractvalue %Slot %r, 0
+  %u = icmp eq i8 %t, 0
+  br i1 %u, label %viv, label %go
+viv:
+  call void @t2_stop(i8* getelementptr ([75 x i8], [75 x i8]* @msg_sstore_undef, i64 0, i64 0), i64 74)
+  unreachable
+go:
+  %c = call %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n)
+  %z = icmp eq %Slot* %c, null
+  br i1 %z, label %done, label %st
+st:
+  store %Slot %v, %Slot* %c
+  br label %done
+done:
+  ret void
 }
 ; t2_reftype(s) -> perl's ref(): an object's class, HASH, or "" for no reference.
 define internal %Str @t2_reftype(%Slot %s) {
@@ -3541,6 +3788,17 @@ code:
   %cs = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_code, i64 0, i64 0), i64 4)
   ret %Str %cs
 notcode:
+  %c = call %Slot @t2_class_of(%Slot %s)
+  %ct = extractvalue %Slot %c, 0
+  %blessed = icmp eq i8 %ct, 3
+  br i1 %blessed, label %obj, label %plain
+plain:
+  %issc = icmp eq i8 %t, 9
+  br i1 %issc, label %sc, label %plain2
+sc:
+  %ss = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_scalar, i64 0, i64 0), i64 6)
+  ret %Str %ss
+plain2:
   %isarr = icmp eq i8 %t, 6
   br i1 %isarr, label %arr, label %nota
 arr:
@@ -3548,13 +3806,7 @@ arr:
   ret %Str %as
 nota:
   %isref = icmp eq i8 %t, 5
-  br i1 %isref, label %ref, label %none
-ref:
-  %a = call %Array* @t2_harr(%Slot %s)
-  %c = call %Slot @t2_aget(%Array* %a, i64 0)
-  %ct = extractvalue %Slot %c, 0
-  %blessed = icmp eq i8 %ct, 3
-  br i1 %blessed, label %obj, label %hash
+  br i1 %isref, label %hash, label %none
 obj:
   %cn = call %Str @t2_slot_str(%Slot %c)
   ret %Str %cn
@@ -3638,6 +3890,20 @@ define internal %Slot @t2_aref(%Array* %a) {
   %i = ptrtoint %Array* %a to i64
   %s = call %Slot @t2_slot(i8 6, i64 %i)
   ret %Slot %s
+}
+; t2_aderef_r(s) -> for an element read through it: the array s refers to; an
+; undef s reads as an empty one (perl's makes it), anything else stops.
+define internal %Array* @t2_aderef_r(%Slot %s) {
+entry:
+  %t = extractvalue %Slot %s, 0
+  %u = icmp eq i8 %t, 0
+  br i1 %u, label %undef, label %go
+undef:
+  %e = call %Array* @t2_new_array()
+  ret %Array* %e
+go:
+  %a = call %Array* @t2_aderef(%Slot %s)
+  ret %Array* %a
 }
 define internal %Array* @t2_aderef(%Slot %s) {
 entry:
@@ -4105,11 +4371,12 @@ root:
 define internal %Str @t2_inv_class(%Slot %inv) {
 entry:
   %t = extractvalue %Slot %inv, 0
-  %isref = icmp eq i8 %t, 5
+  %ish = icmp eq i8 %t, 5
+  %isa = icmp eq i8 %t, 6
+  %isref = or i1 %ish, %isa
   br i1 %isref, label %ref, label %name
 ref:
-  %a = call %Array* @t2_harr(%Slot %inv)
-  %cl = call %Slot @t2_aget(%Array* %a, i64 0)
+  %cl = call %Slot @t2_class_of(%Slot %inv)
   %cn = call %Str @t2_slot_str(%Slot %cl)
   ret %Str %cn
 name:
@@ -4526,7 +4793,16 @@ define internal void @t2_aunshiftl(%Array* %p0, %Array* %p1) {
   call void %fn(%Array* %p0, %Array* %p1)
   ret void
 }
+; (a read through undef is undef, as perl's -- which makes the hash; a write
+; through one B::SoN spells as the hash made first)
 define internal %Slot @t2_hget(%Slot %p0, %Str %p1) {
+entry:
+  %t = extractvalue %Slot %p0, 0
+  %u = icmp eq i8 %t, 0
+  br i1 %u, label %undef, label %go
+undef:
+  ret %Slot zeroinitializer
+go:
   %a = call %Array* @t2_harr(%Slot %p0)
   %f = call i8* @t2_vt(%Array* %a, i64 9)
   %fn = bitcast i8* %f to %Slot (%Slot, %Str)*
@@ -4541,6 +4817,13 @@ define internal void @t2_hset(%Slot %p0, %Str %p1, %Slot %p2) {
   ret void
 }
 define internal i1 @t2_hexists(%Slot %p0, %Str %p1) {
+entry:
+  %t = extractvalue %Slot %p0, 0
+  %u = icmp eq i8 %t, 0
+  br i1 %u, label %undef, label %go
+undef:
+  ret i1 0
+go:
   %a = call %Array* @t2_harr(%Slot %p0)
   %f = call i8* @t2_vt(%Array* %a, i64 11)
   %fn = bitcast i8* %f to i1 (%Slot, %Str)*
@@ -5094,6 +5377,86 @@ placed:
 done:
   ret %Array* %r
 }
+; t2_asort_by(a, f, ga, gb) -> a new list of a's elements in the order f
+; gives: for each pair $a (ga) and $b (gb) are set, f called, and a number
+; above 0 puts $a after $b (stable). $a and $b are as they were after.
+define internal %Array* @t2_asort_by(%Array* %a, %Slot ()* %f, %Slot* %ga, %Slot* %gb) {
+entry:
+  %oa = load %Slot, %Slot* %ga
+  %ob = load %Slot, %Slot* %gb
+  %r = call %Array* @t2_new_array()
+  call void @t2_aappend(%Array* %r, %Array* %a)
+  %n = call i64 @t2_alen(%Array* %r)
+  br label %outer
+outer:
+  %i = phi i64 [ 1, %entry ], [ %i2, %placed ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %take, label %done
+take:
+  %v = call %Slot @t2_aget(%Array* %r, i64 %i)
+  br label %inner
+inner:
+  %j = phi i64 [ %i, %take ], [ %jm, %shift ]
+  %atstart = icmp eq i64 %j, 0
+  br i1 %atstart, label %place, label %look
+look:
+  %jm = sub i64 %j, 1
+  %p = call %Slot @t2_aget(%Array* %r, i64 %jm)
+  store %Slot %p, %Slot* %ga
+  store %Slot %v, %Slot* %gb
+  %c = call %Slot %f()
+  %d = load i1, i1* @t2_dying
+  br i1 %d, label %done, label %judge
+judge:
+  %cn = call double @t2_slot_num(%Slot %c)
+  %after = fcmp ogt double %cn, 0.0
+  br i1 %after, label %shift, label %place
+shift:
+  call void @t2_aset(%Array* %r, i64 %j, %Slot %p, i8* null, i64 0)
+  br label %inner
+place:
+  call void @t2_aset(%Array* %r, i64 %j, %Slot %v, i8* null, i64 0)
+  br label %placed
+placed:
+  %i2 = add i64 %i, 1
+  br label %outer
+done:
+  store %Slot %oa, %Slot* %ga
+  store %Slot %ob, %Slot* %gb
+  ret %Array* %r
+}
+; t2_ghash(g) / t2_garray(g): the file's hash or array a global holds, made
+; the first time any function reaches it.
+define internal %Slot @t2_ghash(%Slot* %g) {
+entry:
+  %v = load %Slot, %Slot* %g
+  %t = extractvalue %Slot %v, 0
+  %has = icmp eq i8 %t, 5
+  br i1 %has, label %done, label %make
+make:
+  %h = call %Slot @t2_hnew()
+  store %Slot %h, %Slot* %g
+  ret %Slot %h
+done:
+  ret %Slot %v
+}
+define internal %Array* @t2_garray(%Slot* %g) {
+entry:
+  %v = load %Slot, %Slot* %g
+  %t = extractvalue %Slot %v, 0
+  %has = icmp eq i8 %t, 6
+  br i1 %has, label %done, label %make
+make:
+  %a = call %Array* @t2_new_array()
+  %i = ptrtoint %Array* %a to i64
+  %s = call %Slot @t2_slot(i8 6, i64 %i)
+  store %Slot %s, %Slot* %g
+  ret %Array* %a
+done:
+  %p = extractvalue %Slot %v, 1
+  %r = inttoptr i64 %p to %Array*
+  ret %Array* %r
+}
 ; t2_arev(a) -> a new list of a's elements, last first.
 define internal %Array* @t2_arev(%Array* %a) {
 entry:
@@ -5181,7 +5544,7 @@ define internal i8* @t2_mresolve(%Slot %inv, %Str %m, %Str %at, %Str %start, i8 
 entry:
   store %Str %at, %Str* @t2_call_at
   %t = extractvalue %Slot %inv, 0
-  switch i8 %t, label %named [ i8 0, label %undef i8 5, label %ref i8 6, label %unbl i8 7, label %unbl i8 8, label %unbl ]
+  switch i8 %t, label %named [ i8 0, label %undef i8 5, label %ref i8 6, label %ref i8 7, label %unbl i8 8, label %unbl i8 9, label %unbl ]
 undef:
   %u0 = call %Str @t2_str(i8* getelementptr ([20 x i8], [20 x i8]* @lit_cm, i64 0, i64 0), i64 19)
   %u1 = call %Str @t2_concat(%Str %u0, %Str %m)
@@ -5189,8 +5552,7 @@ undef:
   %u3 = call %Str @t2_concat(%Str %u1, %Str %u2)
   br label %die
 ref:
-  %a = call %Array* @t2_harr(%Slot %inv)
-  %cl = call %Slot @t2_aget(%Array* %a, i64 0)
+  %cl = call %Slot @t2_class_of(%Slot %inv)
   %ct = extractvalue %Slot %cl, 0
   %blessed = icmp eq i8 %ct, 3
   br i1 %blessed, label %obj, label %unbl

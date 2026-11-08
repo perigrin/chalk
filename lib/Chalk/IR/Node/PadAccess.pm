@@ -24,6 +24,9 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     # memory rather than an SSA value. Its symbol is unique in the program
     # (the producer spells a second of one name apart).
     field $shared :param :reader = 0;
+    # ...and of those, the FILE's (B::SoN `file`): the program's own, or one a
+    # named sub reaches out to -- not a sub's own aggregate a closure captures.
+    field $file :param :reader = 0;
 
     method operation() { 'PadAccess' }
     sub identity_kind { q(hash_consed) }
