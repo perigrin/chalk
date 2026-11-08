@@ -15616,6 +15616,14 @@ sub _lower_builtin_sort {
         if $custom && $custom->can('graph') && $custom->graph
             && grep { blessed($_) && $_->operation eq 'Unwind' }
                     Chalk::IR::Analysis::_all_graph_nodes($custom->graph);
+    # A COMPARATOR WITH ANY OTHER EFFECT (a store, a print): its effects
+    # are perl's merge order's, which this sort does not keep -- T2's does
+    # (t2_asort_by); here refused (a count came out 396 for perl's 173).
+    die "GAP: a sort comparator with an effect is not lowered here (T2 keeps perl's order)\n"
+        if $custom && $custom->can('graph') && $custom->graph
+            && grep { blessed($_) && ( $_->operation =~ /\A(?:Print|Assign|EntryWrite|CellWrite|LocalAlias)\z/
+                                       ) }
+                    Chalk::IR::Analysis::_all_graph_nodes($custom->graph);
 
     my $op_repr = $operand isa Chalk::IR::Node ? ($operand->stamp // '') : ''; # static type
 

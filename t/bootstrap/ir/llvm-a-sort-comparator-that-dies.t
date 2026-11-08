@@ -32,13 +32,13 @@ sub through_llvm ($src, $env) {
     close $lf;
     local @ENV{ keys %$env } = values %$env;
     my $out = qx(timeout 20 $LLI $ll 2>&1);
-    die "lli exited " . ($? >> 8) . ": $out" if $?;
-    return ($out, $pl);
+    return ("exit " . ($? >> 8) . ": $out", $pl);
 }
 
 sub perl_says ($pl, $env) {
     local @ENV{ keys %$env } = values %$env;
-    return scalar qx($^X $pl 2>/dev/null);
+    my $out = qx($^X $pl 2>&1);
+    return "exit " . ($? >> 8) . ": $out";
 }
 
 

@@ -49,20 +49,4 @@ for my $case (
     is($got->[2], $want->[2], "$name: perl's exit code");
 }
 
-# A COMPARATOR WITH AN EFFECT shows the order perl's merge sort compares in (`$a`
-# is never 2 in this sort's order): T2 refuses it by name.
-{
-    require Chalk::Target::LLVM::T2;
-    my $why;
-    no warnings 'redefine';
-    my $orig = \&Chalk::Target::LLVM::T2::lower_program;
-    local *Chalk::Target::LLVM::T2::lower_program = sub { my $r = $orig->(@_); $why = $r ? 'taken' : ( $@ =~ s/\n.*//sr ); $r };
-    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-    print $fh q{my @r = sort { die "boom\n" if $a == 2; $a <=> $b } 3, 1, 2; print "[@r]\n";};
-    close $fh;
-    my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null);
-    Chalk::CodeGen::Pipeline->new->run_detail($json, sub ($graphs, $mop) { my $g = $graphs->{'main::__PROGRAM__'} or return (); ([ 'main::__PROGRAM__', $g->returns->[0] ]) }, program_mode => 1);
-    like($why, qr/a sort comparator with an effect/, 'a comparator that dies: refused by name');
-}
-
 done_testing;
