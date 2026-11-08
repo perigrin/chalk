@@ -2293,6 +2293,11 @@ sub value {
 
 sub _value {
     my ($b, $v) = @_;
+    # A PRINT THAT RAN AS A STATEMENT (in an arm of && or ||) read as a value
+    # after the join: perl's print returns 1, and the merge reads it only on
+    # the path where it ran.
+    return $b->emit(op => 'Const', type => 'i64', attr => { value => 1 })
+        if $v->operation eq 'Print' && $v->can('control_in') && blessed($v->control_in);
     # AN ARGUMENT READ (a shift, $_[N], a signature parameter) is the argument.
     if (my $arg = $b->{args}{ refaddr($v) }) { return $arg }
     # (a read after the Assign takes it as input; a target read is its input)
