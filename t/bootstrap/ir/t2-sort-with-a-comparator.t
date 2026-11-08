@@ -28,6 +28,8 @@ for my $case (
     [ q{my %h = (x => 3, y => 1, z => 2); my $r = \%h; print join(",", sort { $r->{$a} <=> $r->{$b} } keys %h), "\n";}, 'a block reading a hash through a reference' ],
     [ q{package P; sub s2 { my @x = sort { $a <=> $b } @_; "@x" } package main; print P::s2(3, 1, 2), "\n";}, 'a numeric block in another package' ],
     [ q{package P; sub s3 { my @x = sort { length($a) <=> length($b) } @_; "@x" } package main; print P::s3("ccc", "a", "bb"), "\n";}, 'a block in another package: its own $a and $b' ],
+    [ q{sub g { my %h = (x => 3, y => 1, z => 2); join(",", sort { $h{$a} <=> $h{$b} } keys %h) } print g(), " ", g(), "\n";}, 'a block reading a hash of its sub (the sort hands it over)' ],
+    [ q{sub g { my ($k) = @_; my %w = (a => $k, b => 1); join(",", sort { $w{$a} <=> $w{$b} or $a cmp $b } keys %w) } print g(0), " ", g(5), "\n";}, 'a block reading a hash its sub fills from its arguments' ],
 ) {
     my ($src, $name) = @$case;
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);

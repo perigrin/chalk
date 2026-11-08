@@ -620,8 +620,21 @@ sub args_assign {
 # A `my` VARIABLE KEPT IN MEMORY (B::SoN's location: passed to a sub, written
 # in a loop around a call) is an alloca'd %Slot in its function's entry,
 # undef until stored. Only a plain scalar `my` of this function.
+# _own_shared($pad) -> true for a variable B::SoN shares that is this function's
+# own: not the file's, in a function that is no closure and makes none -- one
+# its sort comparator reads (the sort hands it over: @t2_cmp_env).
+sub _own_shared {
+    my ($b, $pad) = @_;
+    return !( $pad->can('file') && $pad->file ) && !$b->{env}
+        && !grep { $_->operation eq 'AnonSub' } @{ $b->{own_nodes} // [] };
+}
 sub location {
     my ($b, $pad) = @_;
+    # (in a sort comparator, a variable of the sub sorting: its cell, from the env)
+    if (blessed($pad) && defined( my $i = ( $b->{cmp_env} // {} )->{ refaddr($pad) } )) {
+        my $s = $b->emit(op => 'CmpEnv', type => '%Slot', attr => { index => $i });
+        return $b->emit(op => 'SCell', type => '%Slot*', inputs => [$s]);
+    }
     # A FILE LEXICAL SHARED WITH A NAMED SUB (B::SoN's shared, and no MakeCell
     # here owns it): one variable for the whole program -- the file's scope
     # runs once -- so one global, by its name (B::SoN spells a second `my` of
@@ -639,7 +652,7 @@ sub location {
         # A SHARED VARIABLE is this function's only where a MakeCell here
         # captures it (it owns it); a named sub's view of an outer `my` is not
         # (its own cell would be another variable: 3 wrong answers).
-        && ( !$pad->shared || grep { $_->operation eq 'MakeCell' && ( $_->cell_name // '' ) eq $pad->name } @{ $b->{own_nodes} // [] } );
+        && ( !$pad->shared || grep( { $_->operation eq 'MakeCell' && ( $_->cell_name // '' ) eq $pad->name } @{ $b->{own_nodes} // [] } ) || $b->_own_shared($pad) );
     my $key = $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
     return $b->{locs}{$key} //= do {
         # A VARIABLE A CLOSURE CAPTURES (shared) lives on the heap -- made at
@@ -871,6 +884,7 @@ sub hash_value {
         # package's -- set to it; its number orders the pair.
         my $by = $v->name eq 'sort' && ( ( $v->can('sort_cmp_body') && $v->sort_cmp_body ) || !( $v->can('sort_cmp') && defined $v->sort_cmp ) );
         my $cmp_fn;
+        my (%cmp_env, $cmp_envpads);
         if ($by) {
             my $sub = $v->can('sort_cmp_sub') ? $v->sort_cmp_sub : undef;
             out('a sort comparator with no body') unless blessed($sub) && $sub->can('graph') && $sub->graph;
@@ -881,7 +895,18 @@ sub hash_value {
                 if grep { $_->operation =~ /\A(?:Unwind|Print|Assign|EntryWrite|CellWrite|Divide|Modulo|LocalAlias)\z/
                           || $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) ne 'builtin' || $_->can('control_in') && blessed($_->control_in) ) }
                    Chalk::Target::LLVM::Context::_graph_component($sub->graph);
-            $cmp_fn = $b->func($sub, $v->sort_cmp_body // 'sort comparator');
+            # A SUB'S VARIABLES ITS COMPARATOR READS (B::SoN's shared, not the
+            # file's): the sorting sub's own, reached through an environment the
+            # sort sets for the comparator's calls (@t2_cmp_env), by position.
+            my (%idx, @envpad);
+            for my $p (grep { $_->operation eq 'PadAccess' && $_->can('shared') && $_->shared && !( $_->can('file') && $_->file ) }
+                       Chalk::Target::LLVM::Context::_graph_component($sub->graph)) {
+                my $k = ( $p->sigil // '$' ) . $p->name . '#' . ( $p->can('targ') ? $p->targ // '' : '' );
+                $idx{$k} //= do { push @envpad, $p; $#envpad };
+                $cmp_env{ refaddr($p) } = $idx{$k};
+            }
+            $cmp_fn = do { local $b->{cmp_env} = \%cmp_env; $b->func($sub, $v->sort_cmp_body // 'sort comparator') };
+            $cmp_envpads = \@envpad;
             out('a sort comparator reading @_') if $cmp_fn->{list} || $cmp_fn->{nargs};
         }
         my @l = @in;
@@ -895,7 +920,15 @@ sub hash_value {
         if ($cmp_fn) {
             my $pk = ( $v->can('sort_package') ? $v->sort_package : undef ) // 'main';
             $b->hash_reads_settled('a sort comparator');
-            return $b->emit_call(op => 'ASortBy', type => '%Array*', inputs => [$arr],
+            my $env = $b->emit(op => 'NewArray', type => '%Array*');
+            for my $p (@{ $cmp_envpads // [] }) {
+                my $sg = $p->sigil // '$';
+                my $e = $sg eq '$' ? $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->location($p) ])
+                      : $sg eq '%' ? $b->hash_var($p)
+                      : $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->array_var($p) ]);
+                $b->emit(op => 'APush', type => 'void', inputs => [ $env, $e ]);
+            }
+            return $b->emit_call(op => 'ASortBy', type => '%Array*', inputs => [ $arr, $env ],
                 attr => { fn => $cmp_fn->{name}, ga => $b->global_named("${pk}::a"), gb => $b->global_named("${pk}::b") });
         }
         return $b->emit(op => 'ASort', type => '%Array*', inputs => [$arr],
@@ -908,7 +941,7 @@ sub hash_value {
 # its function's entry -- as a `my @a` is.
 sub _hash_var {
     my ($n) = @_;
-    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '%' && ( !$n->inputs->@* || $n->can('file') && $n->file );   # (a file's, read at a memory version: the one hash)
+    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '%' && ( !$n->inputs->@* || $n->can('shared') && $n->shared );   # (a shared one, read at a memory version: the one hash; hash_var says whose)
 }
 sub _named_hash {
     my ($n) = @_;
@@ -924,11 +957,12 @@ sub emit_entry {
 }
 sub hash_var {
     my ($b, $pad) = @_;
+    if (blessed($pad) && defined( my $i = ( $b->{cmp_env} // {} )->{ refaddr($pad) } )) { return $b->emit(op => 'CmpEnv', type => '%Slot', attr => { index => $i }) }
     # A FILE'S HASH (shared with a sub, a sort block): one, in a global, made
     # at its first use from any function.
     return $b->{locs}{ '%file#' . $pad->symbol } //= $b->emit_entry(op => 'GHash', type => '%Slot', attr => { global => $b->global_named( 'my::%' . $pad->symbol ) })
         if $pad->can('file') && $pad->file;
-    out('a hash a closure shares') if $pad->can('shared') && $pad->shared;
+    out('a hash a closure shares') if $pad->can('shared') && $pad->shared && !$b->_own_shared($pad);
     my $key = '%' . $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
     return $b->{locs}{$key} //= do {
         my $h = Chalk::Target::LLVM::T2::_n(op => 'HNew', type => '%Slot');
@@ -1195,15 +1229,16 @@ sub _list_use {
 # function's entry: fresh each call. A closure's (shared) is not T2's.
 sub _array_var {
     my ($n) = @_;
-    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '@' && ( !$n->inputs->@* || $n->can('file') && $n->file );
+    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '@' && ( !$n->inputs->@* || $n->can('shared') && $n->shared );
 }
 
 sub array_var {
     my ($b, $pad) = @_;
+    if (blessed($pad) && defined( my $i = ( $b->{cmp_env} // {} )->{ refaddr($pad) } )) { return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->emit(op => 'CmpEnv', type => '%Slot', attr => { index => $i }) ]) }
     # A FILE'S ARRAY: likewise, the global holding its reference.
     return $b->{locs}{ '@file#' . $pad->symbol } //= $b->emit_entry(op => 'GArray', type => '%Array*', attr => { global => $b->global_named( 'my::@' . $pad->symbol ) })
         if $pad->can('file') && $pad->file;
-    out('an array a closure shares') if $pad->can('shared') && $pad->shared;
+    out('an array a closure shares') if $pad->can('shared') && $pad->shared && !$b->_own_shared($pad);
     my $key = '@' . $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
     return $b->{locs}{$key} //= do {
         my $a = Chalk::Target::LLVM::T2::_n(op => 'NewArray', type => '%Array*');
@@ -2671,6 +2706,7 @@ sub _line {
         return "call void \@t2_sstore(" . $arg->(@in) . ", i1 $a{strict}, $at)";
     }
     return "$nm = call %Slot \@t2_sref(%Slot* " . $in[0]->name . ')' if $op eq 'SRef';
+    if ($op eq 'SCell') { my $p = $in[0]->name; return "$nm.p = extractvalue %Slot $p, 1\n  $nm = inttoptr i64 $nm.p to %Slot*" }
     if ($op eq 'Div') {
         my $len = do { use bytes; length $a{msg} };
         return "$nm = call double \@t2_div(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
@@ -2722,6 +2758,7 @@ sub _line {
     return "call void \@t2_args_pairs(%Array* " . $in[0]->name . ", i64 $a{n})" if $op eq 'ArgsPairs';
     return "$nm = call %Array* \@t2_asort(" . $arg->(@in) . ", i1 $a{num}, i1 $a{desc})" if $op eq 'ASort';
     return "$nm = call %Array* \@t2_asort_by(" . $arg->(@in) . ", %Slot ()* $a{fn}, %Slot* $a{ga}, %Slot* $a{gb})" if $op eq 'ASortBy';
+    return "$nm = call %Slot \@t2_cmp_env_at(i64 $a{index})" if $op eq 'CmpEnv';
     return "$nm = call %Slot \@t2_hderef_r(" . $arg->(@in) . ')' if $op eq 'HDerefR';
     return "$nm = call %Array* \@t2_arev(" . $arg->(@in) . ')' if $op eq 'ARev';
     return "call void \@t2_aassign(" . $arg->(@in) . ')' if $op eq 'AAssign';
@@ -5477,8 +5514,16 @@ done:
 ; t2_asort_by(a, f, ga, gb) -> a new list of a's elements in the order f
 ; gives: for each pair $a (ga) and $b (gb) are set, f called, and a number
 ; above 0 puts $a after $b (stable). $a and $b are as they were after.
-define internal %Array* @t2_asort_by(%Array* %a, %Slot ()* %f, %Slot* %ga, %Slot* %gb) {
+@t2_cmp_env = internal global %Array* null
+define internal %Slot @t2_cmp_env_at(i64 %i) {
+  %e = load %Array*, %Array** @t2_cmp_env
+  %s = call %Slot @t2_aget(%Array* %e, i64 %i)
+  ret %Slot %s
+}
+define internal %Array* @t2_asort_by(%Array* %a, %Array* %env, %Slot ()* %f, %Slot* %ga, %Slot* %gb) {
 entry:
+  %oe = load %Array*, %Array** @t2_cmp_env
+  store %Array* %env, %Array** @t2_cmp_env
   %oa = load %Slot, %Slot* %ga
   %ob = load %Slot, %Slot* %gb
   %r = call %Array* @t2_new_array()
@@ -5520,6 +5565,7 @@ placed:
 done:
   store %Slot %oa, %Slot* %ga
   store %Slot %ob, %Slot* %gb
+  store %Array* %oe, %Array** @t2_cmp_env
   ret %Array* %r
 }
 ; t2_ghash(g) / t2_garray(g): the file's hash or array a global holds, made
