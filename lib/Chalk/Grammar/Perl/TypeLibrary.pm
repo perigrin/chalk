@@ -325,6 +325,10 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # `Unknown` the producer sends.
     sub is_lattice_type($name) {
         return false unless defined $name;
+        if (defined( my $t = _maybe_of($name) )) {
+            return is_lattice_type($t) && !defined _maybe_of($t)
+                && $t ne 'None' && $t ne 'Unknown' && !is_subtype('Undef', $t) ? true : false;
+        }
         return true if $name eq 'Unknown' || $name eq 'None';
         return exists $PARENT{$name} ? true : false;
     }
@@ -335,6 +339,16 @@ class Chalk::Grammar::Perl::TypeLibrary {
     sub is_subtype($child, $parent) {
         return true if $child eq $parent;
         return true if $child eq 'None';
+
+        # MAYBE[T] IS T|Undef, written as rules rather than %PARENT edges: Int
+        # would need two parents (Num and Maybe[Int]), and %PARENT is a tree.
+        if (defined( my $pt = _maybe_of($parent) )) {
+            return true if $child eq 'Undef';
+            return is_subtype(_maybe_of($child) // $child, $pt);
+        }
+        if (defined( my $ct = _maybe_of($child) )) {
+            return is_subtype('Undef', $parent) && is_subtype($ct, $parent) ? true : false;
+        }
 
         # O(1) bitwise check: (parent_bits & child_bits) == child_bits
         my $child_bits  = $TYPE_BITSET{$child};
@@ -400,6 +414,15 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # failed to infer cannot manufacture information.
         return 'Unknown' if $left eq 'Unknown' || $right eq 'Unknown';
 
+        # A Maybe absorbs Undef and joins its T with the other side's.
+        # shortcut: join(T, Undef) with no Maybe on either side is still the tree
+        # join (Scalar); making it Maybe[T] is stage 2 (t1-shape-from-t2.md).
+        my ($lm, $rm) = (_maybe_of($left), _maybe_of($right));
+        if (defined $lm || defined $rm) {
+            my ($l, $r) = ($lm // $left, $rm // $right);
+            return maybe_type($r eq 'Undef' ? $l : $l eq 'Undef' ? $r : join_types($l, $r));
+        }
+
         return $right if is_subtype($left, $right);
         return $left  if is_subtype($right, $left);
 
@@ -432,8 +455,32 @@ class Chalk::Grammar::Perl::TypeLibrary {
         return $left  if is_subtype($left, $right);
         return $right if is_subtype($right, $left);
 
+        # Maybe[A] meets B in two parts: A with B, and Undef with B.
+        for my $pair ([ $left, $right ], [ $right, $left ]) {
+            my ($m, $other) = @$pair;
+            my $t = _maybe_of($m) // next;
+            my ($d, $u) = (meet_types($t, $other), meet_types('Undef', $other));
+            return $u if $d eq 'None';
+            return $d if $u eq 'None';
+            return maybe_type($d);
+        }
+
         # Neither contains the other: nothing inhabits both.
         return 'None';
+    }
+
+    # _maybe_of($type) -> T for `Maybe[T]`, else undef.
+    sub _maybe_of($type) {
+        return defined $type && $type =~ /\AMaybe\[(.+)\]\z/ ? $1 : undef;
+    }
+
+    # maybe_type($t) -> T|Undef, normalised: a type that already holds undef
+    # (Scalar, List, a Maybe) is itself; Undef or None alone is Undef.
+    sub maybe_type($t) {
+        return 'Unknown' if $t eq 'Unknown';
+        return 'Undef'   if $t eq 'None' || $t eq 'Undef';
+        return $t if defined _maybe_of($t) || is_subtype('Undef', $t);
+        return "Maybe[$t]";
     }
 
     # Narrows a type based on evaluation context.
