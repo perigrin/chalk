@@ -967,9 +967,12 @@ sub _deserialize_graph ($method_data) {
         # A Print carries no stamp (the producer leaves it unstamped), but perl's
         # print returns a genuine boolean (builtin::is_bool true), so a
         # value-context `my $ok = print ...` reads Bool:1. Seed the repr as Boolean
-        # so the return epilogue tags it correctly.
+        # so the return epilogue tags it correctly. A Maybe[Boolean] from the wire
+        # is kept: it is the honest type (a failed print returns undef).
+        # shortcut: a wire `Scalar` is still overridden; it goes when B::SoN
+        # stamps Print Maybe[Boolean] (stage 1 of Maybe[T], t1-shape-from-t2.md).
         if ($op eq 'Print') {
-            $node->set_stamp('Boolean');
+            $node->set_stamp('Boolean') unless ( $nd->{stamp} // '' ) eq 'Maybe[Boolean]';
             $node->set_has_filehandle(1) if $fields->{has_filehandle};
         }
 
