@@ -1912,6 +1912,7 @@ sub lower_with_elaboration {
         my $ir = Chalk::Target::LLVM::T2->lower_program($return_node, mop => $opts{mop});
         return $ir if defined $ir;
     }
+    else { $Chalk::Target::LLVM::T2::PATH = { path => 'fallback', why => 'a phase block' } }
 
     # Build the class registry that drives class-type declarations, vtable
     # globals, and method body emission — all of which must appear BEFORE

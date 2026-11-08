@@ -131,6 +131,7 @@ method _run ($json, $select, %opts) {
     for my $pair ($select->($graphs, $mop)) {
         my ($label, $ret) = $pair->@*;
         my $ll;
+        local $Chalk::Target::LLVM::T2::PATH;
         my $err;
         try {
             $ll = Chalk::Target::LLVM->lower($ret,
@@ -142,6 +143,9 @@ method _run ($json, $select, %opts) {
             ok    => ($ll ? true : false),
             ll    => $ll,
             err   => $err // ($ll ? undef : 'lower produced no output'),
+            # WHICH PATH it took: T2, or the fallback and T2's reason (T2's $PATH).
+            path     => ( $Chalk::Target::LLVM::T2::PATH // { path => 'fallback', why => 'T2 not tried' } )->{path},
+            path_why => ( $Chalk::Target::LLVM::T2::PATH // { why => 'T2 not tried' } )->{why},
         };
     }
     return (\@units, $graphs, $mop, undef);
