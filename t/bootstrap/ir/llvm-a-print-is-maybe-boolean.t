@@ -31,6 +31,8 @@ for my $src (
     q{my $r = print ""; my $x = defined $r ? $r : !1; print defined($x) ? "d" : "u", "[$x]\n";},
     q{my $r = print NOWHERE "x"; if (defined $r) { print "[$r]\n" } print "end\n";},
     q{my $r = print ""; if (defined $r) { print "[$r]\n" } print "end\n";},
+    q{my $r = print NOWHERE "x"; my $x = !defined $r || $r; print defined($x) ? "d" : "u", "[$x]\n";},
+    q{my $r = print ""; my $x = !defined $r || $r; print defined($x) ? "d" : "u", "[$x]\n";},
 ) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src; close $fh;
