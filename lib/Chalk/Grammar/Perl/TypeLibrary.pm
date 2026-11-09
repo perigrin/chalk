@@ -82,8 +82,12 @@ class Chalk::Grammar::Perl::TypeLibrary {
         VString   => 'Str',         # v-strings: Str carrying 'V' magic
         DualVar   => 'Scalar',      # in Scalar but in neither Str nor Num
         Ref       => 'Scalar',
-        Object    => 'Ref',
-        Regex     => 'Object',      # compiled patterns: blessed into Regexp
+        # BlessedRef: any blessed reference. Object: the class feature's
+        # instance (reftype OBJECT) under it. A qr// is blessed Regexp but its
+        # reftype is REGEXP: a BlessedRef, not an Object. (2026-11-09)
+        BlessedRef => 'Ref',
+        Object    => 'BlessedRef',
+        Regex     => 'BlessedRef',  # compiled patterns: blessed into Regexp
         ScalarRef => 'Ref',
         LValueRef => 'ScalarRef',   # \substr: aliases a RANGE, not a whole scalar
         ArrayRef  => 'Ref',
@@ -174,6 +178,7 @@ class Chalk::Grammar::Perl::TypeLibrary {
         $TYPE_BITSET{Num} = (1 << $bit++);
         $TYPE_BITSET{Str} = (1 << $bit++);
         $TYPE_BITSET{Object} = (1 << $bit++);
+        $TYPE_BITSET{BlessedRef} = (1 << $bit++);   # above Object and Regex (2026-11-09)
         $TYPE_BITSET{ScalarRef} = (1 << $bit++);
         $TYPE_BITSET{Ref} = (1 << $bit++);
         $TYPE_BITSET{Scalar} = (1 << $bit++);

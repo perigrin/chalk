@@ -8,6 +8,10 @@ use lib 'lib';
 
 use Chalk::Grammar::Perl::TypeLibrary;
 
+# A class-feature instance, the witness for Object <: BlessedRef (reftype OBJECT).
+use experimental 'class';
+class Lattice::WitnessClass { field $x = 1; }
+
 # WHAT THIS FILE IS FOR, and how it differs from type-library.t.
 #
 # type-library.t asserts `is_subtype('Int','Num')` and friends. That is a
@@ -98,7 +102,8 @@ my %STRUCTURALLY_IS = (
     CodeRef   => sub { (reftype($_[0]) // '') eq 'CODE'  },
     GlobRef   => sub { (reftype($_[0]) // '') eq 'GLOB'  },
     LValueRef => sub { (reftype($_[0]) // '') eq 'LVALUE' },
-    Object    => sub { defined blessed($_[0]) },
+    BlessedRef => sub { defined blessed($_[0]) },
+    Object    => sub { (reftype($_[0]) // '') eq 'OBJECT' },   # the class feature's instance
     Regex     => sub { (reftype($_[0]) // '') eq 'REGEXP' },
     Undef     => sub { !defined $_[0] },
     # Scalar is the top of the single-value branch: anything holding one value.
@@ -175,6 +180,11 @@ my %OPERATIONS_OF = (
         [ 'deref'    => sub { my $v = ${ $_[0] };       1 } ],
         [ 'assign'   => sub { ${ $_[0] } = ${ $_[0] };  1 } ],
     ],
+    BlessedRef => [
+        [ 'blessed'  => sub { my $c = blessed $_[0];    1 } ],
+        [ 'can'      => sub { my $m = $_[0]->can('x');  1 } ],
+        [ 'isa'      => sub { my $b = $_[0]->isa('X');  1 } ],
+    ],
     Object => [
         [ 'blessed'  => sub { my $c = blessed $_[0];    1 } ],
         [ 'can'      => sub { my $m = $_[0]->can('x');  1 } ],
@@ -239,9 +249,11 @@ my @EDGES = (
       witnesses => [ ['sub{1}', sub {1}] ] },
     { child => 'GlobRef',   parent => 'Ref',
       witnesses => [ ['\\*STDOUT', \*STDOUT] ] },
-    { child => 'Object',    parent => 'Ref',
+    { child => 'BlessedRef', parent => 'Ref',
       witnesses => [ ['bless {}', bless({}, 'Lattice::Witness')] ] },
-    { child => 'Regex',     parent => 'Object',
+    { child => 'Object',    parent => 'BlessedRef',
+      witnesses => [ ['class instance', Lattice::WitnessClass->new] ] },
+    { child => 'Regex',     parent => 'BlessedRef',
       witnesses => [ ['qr/x/', qr/x/] ] },
     # LValueRef <: ScalarRef IS THE REFERENCE BRANCH'S BOOLEAN, and this suite
     # found it on its first run: factor 2 HOLDS (both `$$lv` and assignment

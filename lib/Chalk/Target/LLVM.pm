@@ -1926,14 +1926,17 @@ sub _context_sees_maybe_as_scalar {
             grep { $_ } map { $_->graph // ( $_->sub && $_->sub->can('graph') ? $_->sub->graph : undef ) }
             grep { $_->operation eq 'AnonSub' } @new;
     }
-    my $s = sub { ( $_[0] // '' ) =~ /\AMaybe\[/ ? 'Scalar' : $_[0] };
+    # What Context saw before: a Maybe[T] was Scalar; a BlessedRef (bless's
+    # return, from pvm's CORE.tpm, 2026-11-09) was Unknown.
+    my $s = sub { my $t = $_[0] // return undef;
+        $t =~ /\AMaybe\[/ ? 'Scalar' : $t eq 'BlessedRef' ? 'Unknown' : $t };
     for my $n (@all) {
-        if ( ( $n->stamp // '' ) =~ /\AMaybe\[/ ) {
+        if ( defined $n->stamp && $s->( $n->stamp ) ne $n->stamp ) {
             my $was = $n->stamp;
             push @undo, sub { $n->set_stamp($was) };
-            $n->set_stamp('Scalar');
+            $n->set_stamp( $s->($was) );
         }
-        if ( $n->operation eq 'Coerce' && grep { /\AMaybe\[/ } $n->from_repr // '', $n->to_repr // '' ) {
+        if ( $n->operation eq 'Coerce' && grep { ( $s->($_) // '' ) ne ( $_ // '' ) } $n->from_repr, $n->to_repr ) {
             my @was = ( $n->from_repr, $n->to_repr );
             push @undo, sub { $n->set_reprs(@was) };
             $n->set_reprs( map { $s->($_) } @was );
@@ -1941,10 +1944,10 @@ sub _context_sees_maybe_as_scalar {
     }
     # a sub's or method's recorded return type (the MOP, not a node)
     for my $r ( $mop ? map { ( $_->subs, $_->can('methods') ? $_->methods : () ) } $mop->classes : () ) {
-        next unless $r->can('return_type') && ( $r->return_type // '' ) =~ /\AMaybe\[/;
+        next unless $r->can('return_type') && defined $r->return_type && $s->( $r->return_type ) ne $r->return_type;
         my $was = $r->return_type;
         push @undo, sub { $r->shim_return_type($was) };
-        $r->shim_return_type('Scalar');
+        $r->shim_return_type( $s->($was) );
     }
     return bless \@undo, 'Chalk::Target::LLVM::_MaybeView';
 }
