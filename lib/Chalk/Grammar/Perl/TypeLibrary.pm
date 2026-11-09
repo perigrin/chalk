@@ -414,9 +414,14 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # failed to infer cannot manufacture information.
         return 'Unknown' if $left eq 'Unknown' || $right eq 'Unknown';
 
+        # A SCALAR T WITH UNDEF IS Maybe[T] (stage 2, 2026-11-08), the least
+        # upper bound, below Scalar. An aggregate keeps the tree join.
+        for ([ $left, $right ], [ $right, $left ]) {
+            my ($u, $t) = @$_;
+            return maybe_type($t) if $u eq 'Undef' && is_subtype($t, 'Scalar');
+        }
+
         # A Maybe absorbs Undef and joins its T with the other side's.
-        # shortcut: join(T, Undef) with no Maybe on either side is still the tree
-        # join (Scalar); making it Maybe[T] is stage 2 (t1-shape-from-t2.md).
         my ($lm, $rm) = (_maybe_of($left), _maybe_of($right));
         if (defined $lm || defined $rm) {
             my ($l, $r) = ($lm // $left, $rm // $right);

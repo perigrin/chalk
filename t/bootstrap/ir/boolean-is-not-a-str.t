@@ -93,8 +93,8 @@ subtest 'a Boolean joined with a string-spine type is a Scalar' => sub {
 
     # Already siblings by another route; unchanged, and asserted so a future
     # edit that moves Undef is caught here too.
-    is(Chalk::Grammar::Perl::TypeLibrary::join_types('Boolean', 'Undef'), 'Scalar',
-        'join(Boolean, Undef) = Scalar (unchanged)');
+    is(Chalk::Grammar::Perl::TypeLibrary::join_types('Boolean', 'Undef'), 'Maybe[Boolean]',
+        'join(Boolean, Undef) = Maybe[Boolean] (was Scalar until Maybe[T], 2026-11-09)');
 
     # The string spine still joins among itself -- if this moved, the change
     # would be wider than one edge.

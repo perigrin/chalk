@@ -21611,7 +21611,8 @@ sub _lower_regex_subst_count {
 # Scalar (a %Slot) when it is stamped Maybe -- perl's print is true, or undef
 # when it fails, and only a %Slot can say undef.
 sub _print_repr ($n) {
-    return ( $n->stamp // '' ) =~ /\AMaybe\[/ ? 'Scalar' : 'Boolean'; # static type
+    # (Scalar too: the Maybe shim, LLVM.pm _context_sees_maybe_as_scalar)
+    return ( $n->stamp // '' ) =~ /\A(?:Maybe\[|Scalar\z)/ ? 'Scalar' : 'Boolean'; # static type
 }
 
 # _lower_print_value($print) -> its value: the i1 _lower_print makes, boxed

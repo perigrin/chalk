@@ -23,6 +23,10 @@ class Chalk::IR::Node::Coerce :isa(Chalk::IR::Value) {
     # (undef: from_repr is it). A list print reads one it called a list.
     field $wire_from :param :reader = undef;
 
+    # For the Context shim only (LLVM.pm _context_sees_maybe_as_scalar), which
+    # puts the reprs back when it is done.
+    method set_reprs($f, $t) { ($from_repr, $to_repr) = ($f, $t); return }
+
     method operation() { 'Coerce' }
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }

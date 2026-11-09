@@ -23,8 +23,10 @@ use Chalk::Grammar::Perl::TypeLibrary;
 # The empty-arm `return undef` stays. No arms is not a join with an answer.
 
 subtest 'a pair with no dominating arm still has a join' => sub {
-    is Chalk::IR::Analysis::_join_repr('Undef', 'Int'), 'Scalar',
-        'Undef and Int are siblings under Scalar -- the join is Scalar, not undef';
+    # Was Scalar until 2026-11-08: Maybe[Int] (= Int|Undef) is the least upper
+    # bound, below Scalar (maybe-is-t-or-undef.t).
+    is Chalk::IR::Analysis::_join_repr('Undef', 'Int'), 'Maybe[Int]',
+        'Undef and Int join at Maybe[Int], not undef and not Scalar';
 
     is Chalk::IR::Analysis::_join_repr('ArrayRef', 'Int'), 'Scalar',
         'a reference and an Int join at Scalar';

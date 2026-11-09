@@ -84,6 +84,9 @@ sub _require_repr {
     die "GAP: $where reached LLVM backend with NO representation (undef) — "
       . "fix TypeInference so this node carries an explicit repr before lowering."
         unless defined $r;
+    # A MAYBE[T] (T or undef) is held as Scalar is, a %Slot: what the backend
+    # saw for it before Maybe[T] was a type (Context::_repr_of alike).
+    return 'Scalar' if $r =~ /\AMaybe\[/;
     return $r;
 }
 
@@ -1899,6 +1902,57 @@ sub _process_control_chain {
 # — the list of { block_id, vd_id, incoming => [...] } records that the
 # elaboration pass determined should be phi nodes at merge blocks. The LLVM
 # backend places phis using the dominator-tree scoped value map.
+# _context_sees_maybe_as_scalar($ret, $mop) -> a guard; while it lives, every
+# Maybe[T] stamp (and Coerce end) in the program reads Scalar, and when it goes
+# out of scope they are put back.
+#
+# shortcut: a shim for Context, the fallback being retired. Stage 2 of Maybe[T]
+# (join(T, Undef) = Maybe[T]) relabelled values Context tests as `eq 'Scalar'`
+# in ~78 places; teaching each is work on a backend we are removing. T2 and the
+# type checks see Maybe[T]; Context sees what it saw before. Delete it with
+# Context (perigrin, 2026-11-09).
+sub _context_sees_maybe_as_scalar {
+    my ($ret, $mop) = @_;
+    require Chalk::Target::LLVM::T2;
+    my @nodes = Chalk::Target::LLVM::T2::Builder::_all_nodes($mop, $ret);
+    for my $m ( $mop ? map { $_->can('methods') ? $_->methods : () } $mop->classes : () ) {
+        push @nodes, Chalk::Target::LLVM::Context::_graph_component($m->graph) if $m->can('graph') && $m->graph;
+    }
+    my ( %seen, @undo, @all );
+    # an anonymous sub's body is a graph of its own (closures nest: repeat)
+    while (my @new = grep { blessed($_) && !$seen{ refaddr($_) }++ } @nodes) {
+        push @all, @new;
+        @nodes = map { Chalk::Target::LLVM::Context::_graph_component($_) }
+            grep { $_ } map { $_->graph // ( $_->sub && $_->sub->can('graph') ? $_->sub->graph : undef ) }
+            grep { $_->operation eq 'AnonSub' } @new;
+    }
+    my $s = sub { ( $_[0] // '' ) =~ /\AMaybe\[/ ? 'Scalar' : $_[0] };
+    for my $n (@all) {
+        if ( ( $n->stamp // '' ) =~ /\AMaybe\[/ ) {
+            my $was = $n->stamp;
+            push @undo, sub { $n->set_stamp($was) };
+            $n->set_stamp('Scalar');
+        }
+        if ( $n->operation eq 'Coerce' && grep { /\AMaybe\[/ } $n->from_repr // '', $n->to_repr // '' ) {
+            my @was = ( $n->from_repr, $n->to_repr );
+            push @undo, sub { $n->set_reprs(@was) };
+            $n->set_reprs( map { $s->($_) } @was );
+        }
+    }
+    # a sub's or method's recorded return type (the MOP, not a node)
+    for my $r ( $mop ? map { ( $_->subs, $_->can('methods') ? $_->methods : () ) } $mop->classes : () ) {
+        next unless $r->can('return_type') && ( $r->return_type // '' ) =~ /\AMaybe\[/;
+        my $was = $r->return_type;
+        push @undo, sub { $r->shim_return_type($was) };
+        $r->shim_return_type('Scalar');
+    }
+    return bless \@undo, 'Chalk::Target::LLVM::_MaybeView';
+}
+
+package Chalk::Target::LLVM::_MaybeView {
+    sub DESTROY { $_->() for reverse @{ $_[0] } }
+}
+
 sub lower_with_elaboration {
     my ($class, $return_node, $elab, %opts) = @_;
     # The regex code block bodies this lowering's matches call (see below).
@@ -1913,6 +1967,9 @@ sub lower_with_elaboration {
         return $ir if defined $ir;
     }
     else { $Chalk::Target::LLVM::T2::PATH = { path => 'fallback', why => 'a phase block' } }
+
+    # Context sees a Maybe[T] as Scalar, as it did before Maybe[T] was a type.
+    my $maybe_view = _context_sees_maybe_as_scalar($return_node, $opts{mop});
 
     # Build the class registry that drives class-type declarations, vtable
     # globals, and method body emission — all of which must appear BEFORE

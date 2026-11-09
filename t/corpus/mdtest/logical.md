@@ -182,13 +182,17 @@ context: scalar
 ```ir
 %undef = Constant(undef) :Undef
 %seven = Constant(7) :Int
-%dor   = DefinedOr(%undef, %seven) :Scalar
-%co    = Coerce(%dor : Scalar -> Str) :Str
+%dor   = DefinedOr(%undef, %seven) :Maybe[Int]
+%co    = Coerce(%dor : Maybe[Int] -> Str) :Str
 %nl    = Constant("\n") :Str
 %p     = Print(%co, %nl)
 return %p
 L: GREEN
 ```
+
+Re-typed 2026-11-09: join(Int, Undef) is Maybe[Int] (Int or undef), the least
+upper bound, below the Scalar it was. Held as the same %Slot; the answer is
+unchanged.
 
 ## L3c defined-or with an early-return fallback
 
@@ -244,11 +248,15 @@ context: scalar
 %p   = Print(%co, %nl)
 %reg = Region(%p)
 %und = Constant(undef) :Undef
-%phi = Phi(%c99, %und) :Scalar
+%phi = Phi(%c99, %und) :Maybe[Int]
 return %phi
 control: %start -> %p
 L: GREEN
 ```
+
+Re-typed 2026-11-09: join(Int, Undef) is Maybe[Int] (Int or undef), the least
+upper bound, below the Scalar it was. Held as the same %Slot; the answer is
+unchanged.
 
 THE ACCEPTANCE CRITERION THIS CASE CARRIED IS MET (2026-09-03). Its GAP said
 "Restoring this case to GREEN is T2's acceptance criterion -- T2 is not done

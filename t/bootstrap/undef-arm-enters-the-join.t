@@ -47,9 +47,9 @@ sub dor_repr ( $left_repr, $right_repr ) {
     return $d->stamp;
 }
 
-subtest 'an Undef arm widens the merge to Scalar' => sub {
-    is dor_repr( 'Undef', 'Int' ), 'Scalar',
-        'DefinedOr(Undef, Int) is Scalar -- the join of two siblings, not Int';
+subtest 'an Undef arm widens the merge to Maybe[Int]' => sub {
+    is dor_repr( 'Undef', 'Int' ), 'Maybe[Int]',
+        'DefinedOr(Undef, Int) is Maybe[Int] -- Int or undef, not Int (Scalar until 2026-11-09)';
 };
 
 # BILATERAL. Without this, the subtest above passes against a join that answers

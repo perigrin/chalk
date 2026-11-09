@@ -847,6 +847,9 @@ sub _assert_value_nodes_are_typed ($graphs) {
 sub _is_narrowed ($repr) {
     return false if !defined $repr;
     return false if $repr eq 'Unknown' || $repr eq 'Scalar';
+    # A MAYBE[T] is refinable as Scalar is (2026-11-09): it is what a join
+    # with Undef yields, and it can still narrow to T, one step down.
+    return false if $repr =~ /\AMaybe\[/;
     return true;
 }
 
@@ -2117,8 +2120,9 @@ sub _narrow_unknown_coercions ($graphs) {
                 # treats from_repr as a fallback -- but a node whose recorded
                 # type disagrees with its operand is exactly what the shape leg
                 # exists to catch.
+                # A Maybe[T] is an answer for the same reason (2026-11-09).
                 next unless _is_narrowed($repr)
-                         || (defined $repr && $repr eq 'Scalar');
+                         || (defined $repr && $repr =~ /\A(?:Scalar\z|Maybe\[)/);
 
                 # The operand is ALREADY the target type: the coercion is an
                 # identity edge and the consumer can read the operand directly.

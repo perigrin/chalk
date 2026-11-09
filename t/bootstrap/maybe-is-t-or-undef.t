@@ -36,6 +36,9 @@ subtest 'a join keeps the Maybe' => sub {
     is $join->('Maybe[Int]', 'Num'),         'Maybe[Num]',     'joins the T parts';
     is $join->('Maybe[Int]', 'Maybe[Num]'),  'Maybe[Num]',     'two Maybes';
     is $join->('Maybe[Boolean]', 'Str'),     'Scalar',         'Maybe[Scalar] is Scalar: it already holds undef';
+    is $join->('Boolean', 'Undef'),          'Maybe[Boolean]', 'stage 2: join(T, Undef) is Maybe[T]';
+    is $join->('Undef', 'Int'),              'Maybe[Int]',     '... either side';
+    is $join->('Array', 'Undef'),            'List',           'an aggregate with Undef keeps the tree join';
 };
 
 subtest 'a meet narrows it' => sub {

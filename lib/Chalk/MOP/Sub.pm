@@ -53,6 +53,11 @@ class Chalk::MOP::Sub {
     # determined type, which is exactly what t/bootstrap/loader-return-type.t
     # forbids: "may only NARROW it, never weaken it." `Unknown` and undef are not
     # determined types, so any answer replaces them.
+    # The Maybe shim only (LLVM.pm _context_sees_maybe_as_scalar): it shows
+    # Context Scalar for a Maybe[T] and puts it back -- not a narrowing, so
+    # it does not go through set_return_type. Delete it with Context.
+    method shim_return_type($type) { $return_type = $type; return }
+
     method set_return_type($type) {
         die "MOP: return type must be defined\n" unless defined $type;
 

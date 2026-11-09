@@ -83,7 +83,7 @@ subtest 'a Scalar-joined merge settles instead of re-joining forever' => sub {
         my $n = $f->make( 'Constant', const_type => 'integer', value => ++$i );
         $n->set_stamp($_);
         $n;
-    } ( 'Undef', 'Int' );
+    } ( 'Boolean', 'Str' );   # join at Scalar (Undef, Int is Maybe[Int] since 2026-11-09)
 
     my $d = $f->make( 'DefinedOr', inputs => \@in );
     my $g = Chalk::IR::Graph->new;

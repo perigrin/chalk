@@ -18,15 +18,15 @@ subtest 'a join that folds the old value is MONOTONE -- it only ascends' => sub 
     # incomparable-ish siblings under Scalar: without folding, a node stamped
     # Int whose inputs later say Undef would be REWRITTEN to Undef, and could
     # be rewritten back -- neither is a fixpoint.
-    is($join->('Int', 'Undef'), 'Scalar',
+    is($join->('Int', 'Undef'), 'Maybe[Int]',   # Scalar until Maybe[T], 2026-11-09
        'joining the two gives their upper bound, which is stable');
 
     # Folding makes each successive store >= the last, so the sequence is an
     # ascending chain in a lattice of height ~6 and must halt.
     my $prev = 'Int';
     my $next = $join->($prev, 'Undef');
-    is($next, 'Scalar', 'Int then Undef ascends to Scalar');
-    is($join->($next, 'Int'), 'Scalar',
+    is($next, 'Maybe[Int]', 'Int then Undef ascends to Maybe[Int]');
+    is($join->($next, 'Int'), 'Maybe[Int]',
        'and a later Int does NOT drag it back down -- the chain is monotone');
 };
 
