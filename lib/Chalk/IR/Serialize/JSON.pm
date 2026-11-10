@@ -1030,6 +1030,7 @@ sub _deserialize_graph ($method_data) {
 
 # _reachable_methods(\%methods) -> the names of the graphs the program may run.
 # from_json loads only these: what is never run is neither compiled nor read.
+# Dies when one runs a module sub B::SoN refused (`refused`), in its words.
 # Its own graphs all may; a followed module's sub (marked `module` on the wire)
 # only once a graph that may run calls it -- by its name, or (a method call,
 # dispatched at run time) by its sub name -- or it is a body lifted from one.
@@ -1037,8 +1038,12 @@ sub _deserialize_graph ($method_data) {
 # does not change its stash by loading POSIX, nor need it compiled.
 # shortcut: a call by a computed name (&{"POSIX::$f"}) does not reach a module
 # sub; such a call is refused elsewhere, and reaching would need its names.
-sub _reachable_methods ($methods, $classes = {}) {
-    my %seen = map { $_ => 1 } grep { !defined $methods->{$_}{module} } keys %$methods;
+sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
+    # SURE: the program's own graphs, and what a sure graph calls by name, by a
+    # named class's method, or lifts. A method call on an unknown invocant only
+    # MAY reach a sub of its name: loaded, but never reason to refuse.
+    my %sure = map { $_ => 1 } grep { !defined $methods->{$_}{module} } keys %$methods;
+    my %seen = %sure;
     my @work = keys %seen;
     my %by_sub;
     for my $name (keys %$methods) {
@@ -1046,7 +1051,7 @@ sub _reachable_methods ($methods, $classes = {}) {
         push @{ $by_sub{$sub} }, $name;
     }
     while (defined( my $g = shift @work )) {
-        my @next;
+        my ( @sure, @maybe );
         for my $n ( _wire_nodes( $methods->{$g} ) ) {
             next unless ( $n->{op} // '' ) eq 'Call';
             my $f    = $n->{fields} // {};
@@ -1057,14 +1062,28 @@ sub _reachable_methods ($methods, $classes = {}) {
             if ( ( $f->{dispatch_kind} // '' ) eq 'method' && defined( my $c = $f->{class_name} ) ) {
                 my %walked;
                 while ( defined $c && !$walked{$c}++ ) {
-                    if ( $methods->{"${c}::$name"} ) { $hit = "${c}::$name"; last }
+                    my $k = "${c}::$name";
+                    if ( $methods->{$k} || $refused->{$k} ) { $hit = $k; last }
                     $c = ( $classes->{$c} // {} )->{parent};
                 }
             }
-            push @next, $hit // ( $name, @{ $by_sub{ $name =~ s/\A.*:://r } // [] } );
+            my $runs = $hit // ( ( $f->{dispatch_kind} // '' ) eq 'direct' ? $name : undef );
+            # A REFUSED MODULE SUB a sure graph runs (wire `refused`): the
+            # program cannot be compiled without it -- say why, in its words.
+            die "GAP: $runs, which the program calls, is refused in its module: $refused->{$runs}\n"
+                if $sure{$g} && defined $runs && defined $refused->{$runs};
+            if ( defined $runs ) { push @sure, $runs }
+            else { push @maybe, $name, @{ $by_sub{ $name =~ s/\A.*:://r } // [] } }
         }
-        push @next, grep { /\A\Q$g\E::__(?:ANON|SORTCMP|SUBSTREPL)__:/ } keys %$methods;
-        for (@next) { next if $seen{$_} || !$methods->{$_}; $seen{$_} = 1; push @work, $_ }
+        push @sure, grep { /\A\Q$g\E::__(?:ANON|SORTCMP|SUBSTREPL)__:/ } keys %$methods;
+        for my $k (@sure, @maybe) {
+            next unless $methods->{$k};
+            my $up = $sure{$g} && !$sure{$k} && grep { $_ eq $k } @sure;
+            $sure{$k} = 1 if $up;
+            next if $seen{$k} && !$up;
+            $seen{$k} = 1;
+            push @work, $k;
+        }
     }
     return keys %seen;
 }
@@ -1245,7 +1264,7 @@ sub from_json ($json_string) {
         $USED_MODULES{$module} = 1 if $is_use && defined $module;
     }
     # A FOLLOWED MODULE'S SUB the program never reaches is not loaded.
-    my %run = map { $_ => 1 } _reachable_methods( $data->{methods} // {}, $data->{classes} // {} );
+    my %run = map { $_ => 1 } _reachable_methods( $data->{methods} // {}, $data->{classes} // {}, $data->{refused} // {} );
     my @gone = grep { !$run{$_} } keys %{ $data->{methods} // {} };
     delete @{ $data->{methods} }{@gone};
     # ...and its class's record of it: a module's class keeps its shape.
