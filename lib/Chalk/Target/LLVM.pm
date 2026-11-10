@@ -1102,13 +1102,13 @@ sub _emit_class_registry_ir {
         next unless $reg->{is_class};
 
         # Vtable type: { i8* class-name, i8* slot0, i8* slot1, ... }
-        my $vt_type = '%' . $cname . '.vt';
+        my $vt_type = '%"' . $cname . '.vt"';
         my @vt_elems = ('i8*');  # slot 0 = class-name ptr
         push @vt_elems, ('i8*') x scalar(@$methods);
         push @lines, "$vt_type = type { " . join(', ', @vt_elems) . " }  ; vtable for $cname";
 
         # Object struct type: { %Cls.vt*, %Slot, %Slot, ... }
-        my $obj_type = '%' . $cname . '.obj';
+        my $obj_type = '%"' . $cname . '.obj"';
         my @obj_elems = ($vt_type . '*');  # slot 0 = vtable ptr
         push @obj_elems, ('%Slot') x scalar(@$fields);  # one %Slot per field
         push @lines, "$obj_type = type { " . join(', ', @obj_elems) . " }  ; object struct for $cname";
@@ -1143,11 +1143,11 @@ sub _emit_class_registry_ir {
         # Sort fields by field_index to ensure consistent struct layout
         my @sorted_fields = sort { ($a->{field_index} // 0) <=> ($b->{field_index} // 0) } @$fields;
 
-        my $vt_type  = '%' . $cname . '.vt';
-        my $obj_type = '%' . $cname . '.obj';
+        my $vt_type  = '%"' . $cname . '.vt"';
+        my $obj_type = '%"' . $cname . '.obj"';
 
         # Class-name string constant
-        my $cn_name_global = '@' . $cname . '__class_name';
+        my $cn_name_global = '@"' . $cname . '__class_name"';
         my $cn_bytes = length($cname) + 1;  # +1 for NUL
         my $cn_enc   = _encode_c_string($cname);
         push @lines, "$cn_name_global = private unnamed_addr constant [$cn_bytes x i8] c\"$cn_enc\\00\", align 1"
@@ -1156,7 +1156,7 @@ sub _emit_class_registry_ir {
         # Method body functions (one define per method)
         for my $minfo (@$methods) {
             my $mname     = $minfo->{name};
-            my $fn_name   = '@' . $cname . '__' . $mname;
+            my $fn_name   = '@"' . $cname . '__' . $mname . '"';
             my $ret_repr  = $minfo->{return_repr};
             my $fn_ret    = _method_fn_llvm_ret_type($ret_repr);
 
@@ -1207,12 +1207,12 @@ sub _emit_class_registry_ir {
                 my $fi_pay = Chalk::Target::LLVM::Context::_slot_idx('payload');
                 push @lines, "define internal $fn_ret $fn_name(i8* %self) {  ; :reader for field $fidx";
                 push @lines, 'entry:';
-                push @lines, "  %obj = bitcast i8* %self to %${cname}.obj*";
+                push @lines, "  %obj = bitcast i8* %self to %\"${cname}.obj\"*";
                 # Load defined bit
-                push @lines, "  %def_gep = getelementptr inbounds %${cname}.obj, %${cname}.obj* %obj, i64 0, i32 $slot_idx, i32 $fi_def";
+                push @lines, "  %def_gep = getelementptr inbounds %\"${cname}.obj\", %\"${cname}.obj\"* %obj, i64 0, i32 $slot_idx, i32 $fi_def";
                 push @lines, '  %def = load i1, i1* %def_gep';
                 # Load payload
-                push @lines, "  %pay_gep = getelementptr inbounds %${cname}.obj, %${cname}.obj* %obj, i64 0, i32 $slot_idx, i32 $fi_pay";
+                push @lines, "  %pay_gep = getelementptr inbounds %\"${cname}.obj\", %\"${cname}.obj\"* %obj, i64 0, i32 $slot_idx, i32 $fi_pay";
                 push @lines, '  %pay = load i64, i64* %pay_gep';
                 if ($ret_repr eq 'Str') {
                     # payload = StrPair* (as i64) -> cast back and return {ptr, len}
@@ -1525,7 +1525,7 @@ sub _emit_class_registry_ir {
         for my $sinfo (grep { $emit_sub_defines || _sub_has_define($registry, $cname, $_) } @{ $reg->{subs} // [] }) {
             _settle_recursive_return($registry, $cname, $sinfo);
             my $sname    = $sinfo->{name};
-            my $fn_name  = '@' . $cname . '__' . $sname;
+            my $fn_name  = '@"' . $cname . '__' . $sname . '"';
             my $ret_repr = $sinfo->{return_repr};
             my $fn_ret   = _method_fn_llvm_ret_type($ret_repr);
 
@@ -1647,7 +1647,7 @@ sub _emit_class_registry_ir {
             # invisible to the $ctx that declares the type. absorb_need_flags_from
             # below covers _need_str_type along with every other NEED_FLAG.
 
-            push @lines, "define internal void \@${cname}__ADJUST(i8* %self) {  ; ADJUST blocks for $cname";
+            push @lines, "define internal void \@\"${cname}__ADJUST\"(i8* %self) {  ; ADJUST blocks for $cname";
             push @lines, 'entry:';
             push @lines, $adj_ctx->render_blocks(1);
             push @lines, '  ret void';
@@ -1665,12 +1665,12 @@ sub _emit_class_registry_ir {
         # not emitted either.
         next unless $is_instantiable;
 
-        my $vt_global = '@' . $cname . '__vtable';
+        my $vt_global = '@"' . $cname . '__vtable"';
         my @vt_init;
         push @vt_init, "i8* getelementptr inbounds ([$cn_bytes x i8], [$cn_bytes x i8]* $cn_name_global, i64 0, i64 0)";
         for my $minfo (@$methods) {
             my $mname   = $minfo->{name};
-            my $fn_name = '@' . $cname . '__' . $mname;
+            my $fn_name = '@"' . $cname . '__' . $mname . '"';
             my $ret_repr = $minfo->{return_repr};
             my $fn_type_str = Chalk::Target::LLVM::Context::_method_fn_type(
                 $ret_repr, $minfo->{param_reprs});

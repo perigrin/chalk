@@ -1028,6 +1028,47 @@ sub _deserialize_graph ($method_data) {
 
 
 
+# _reachable_methods(\%methods) -> the names of the graphs the program may run.
+# from_json loads only these: what is never run is neither compiled nor read.
+# Its own graphs all may; a followed module's sub (marked `module` on the wire)
+# only once a graph that may run calls it -- by its name, or (a method call,
+# dispatched at run time) by its sub name -- or it is a body lifted from one.
+# POSIX's AUTOLOAD makes names symbolically; a program that never calls it
+# does not change its stash by loading POSIX, nor need it compiled.
+# shortcut: a call by a computed name (&{"POSIX::$f"}) does not reach a module
+# sub; such a call is refused elsewhere, and reaching would need its names.
+sub _reachable_methods ($methods, $classes = {}) {
+    my %seen = map { $_ => 1 } grep { !defined $methods->{$_}{module} } keys %$methods;
+    my @work = keys %seen;
+    my %by_sub;
+    for my $name (keys %$methods) {
+        my ($sub) = $name =~ /::(\w+)\z/ or next;
+        push @{ $by_sub{$sub} }, $name;
+    }
+    while (defined( my $g = shift @work )) {
+        my @next;
+        for my $n ( _wire_nodes( $methods->{$g} ) ) {
+            next unless ( $n->{op} // '' ) eq 'Call';
+            my $f    = $n->{fields} // {};
+            my $name = $f->{name} // next;
+            # A METHOD CALL ON A NAMED CLASS dispatches through that class's
+            # chain; the first sub of the name there is the one it runs.
+            my $hit;
+            if ( ( $f->{dispatch_kind} // '' ) eq 'method' && defined( my $c = $f->{class_name} ) ) {
+                my %walked;
+                while ( defined $c && !$walked{$c}++ ) {
+                    if ( $methods->{"${c}::$name"} ) { $hit = "${c}::$name"; last }
+                    $c = ( $classes->{$c} // {} )->{parent};
+                }
+            }
+            push @next, $hit // ( $name, @{ $by_sub{ $name =~ s/\A.*:://r } // [] } );
+        }
+        push @next, grep { /\A\Q$g\E::__(?:ANON|SORTCMP|SUBSTREPL)__:/ } keys %$methods;
+        for (@next) { next if $seen{$_} || !$methods->{$_}; $seen{$_} = 1; push @work, $_ }
+    }
+    return keys %seen;
+}
+
 # from_json($json_string) — deserialize JSON to named Chalk::IR::Graph instances.
 # -----------------------------------------------------------------------
 # _stash_changes($data) -> what in the program may change %main:: while it
@@ -1202,6 +1243,18 @@ sub from_json ($json_string) {
         die "GAP: a $p->{phase} block with effects of its own is not lowered "
           . "(a BEGIN or END block runs outside the main program)\n" if @effects;
         $USED_MODULES{$module} = 1 if $is_use && defined $module;
+    }
+    # A FOLLOWED MODULE'S SUB the program never reaches is not loaded.
+    my %run = map { $_ => 1 } _reachable_methods( $data->{methods} // {}, $data->{classes} // {} );
+    my @gone = grep { !$run{$_} } keys %{ $data->{methods} // {} };
+    delete @{ $data->{methods} }{@gone};
+    # ...and its class's record of it: a module's class keeps its shape.
+    my %gone = map { $_ => 1 } @gone;
+    for my $cd ( values %{ $data->{classes} // {} } ) {
+        for my $kind (qw(subs methods)) {
+            my $h = $cd->{$kind} or next;
+            delete @$h{ grep { $gone{ ref $h->{$_} eq 'HASH' ? $h->{$_}{graph} // '' : $h->{$_} // '' } } keys %$h };
+        }
     }
     our $STASH_CHANGES = _stash_changes($data);
 

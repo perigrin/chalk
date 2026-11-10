@@ -5450,22 +5450,22 @@ sub _lower_assign {
             // die "LLVM MOP: Assign(FieldAccess-lvalue) used outside method/ADJUST body context "
                  . "— _method_self_name not set";
         my $obj_typed = $self->_fresh;
-        $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; Assign(FieldAccess-lvalue): typed self");
+        $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %\"${class_name}.obj\"*  ; Assign(FieldAccess-lvalue): typed self");
         # A VALUE READ BY ITS TAG is a whole %Slot: it IS the field's cell, tag
         # and all (`$count++` on an Int field is a Scalar, pvm 242).
         if ($val_repr =~ /\A(?:Scalar|Slot)\z/) {
             my $cell = $self->_fresh;
-            $self->_emit("  $cell = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx  ; FieldAccess-lvalue[$field_index] cell");
+            $self->_emit("  $cell = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_typed, i64 0, i32 $slot_idx  ; FieldAccess-lvalue[$field_index] cell");
             $self->_emit("  store %Slot $rhs_ref, %Slot* $cell  ; FieldAccess-lvalue[$field_index] = a Scalar");
             return $self->{cache}{ $node->id } = $rhs_ref;
         }
         # Store defined=true
         my $def_gep = $self->_fresh;
-        $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_def  ; FieldAccess-lvalue[$field_index] defined");
+        $self->_emit("  $def_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_def  ; FieldAccess-lvalue[$field_index] defined");
         $self->_emit("  store i1 true, i1* $def_gep  ; FieldAccess-lvalue[$field_index] defined=true");
         my $tag_gep = $self->_fresh;
         my $tag_nm  = _slot_tag_for_repr($val_repr);
-        $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_tag  ; FieldAccess-lvalue[$field_index] tag");
+        $self->_emit("  $tag_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_tag  ; FieldAccess-lvalue[$field_index] tag");
         $self->_emit("  store i8 " . _slot_tag_value($tag_nm) . ", i8* $tag_gep  ; FieldAccess-lvalue[$field_index] tag=$tag_nm");
 
         # Store payload — the repr-dispatched boxing (Str StrPair, Boolean zext,
@@ -5474,7 +5474,7 @@ sub _lower_assign {
         # boxes a given repr identically. The Assign expression's value is what
         # the helper returns (the i8* for Str, the boxed i64 otherwise).
         my $pay_gep = $self->_fresh;
-        $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_pay  ; FieldAccess-lvalue[$field_index] payload");
+        $self->_emit("  $pay_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_pay  ; FieldAccess-lvalue[$field_index] payload");
         my $stored = $self->_store_field_payload($rhs_ref, $val_repr, $pay_gep,
                                                  "FieldAccess-lvalue[$field_index]");
         $self->{cache}{ $node->id } = $stored;
@@ -17842,13 +17842,13 @@ sub _lower_call_new {
     # malloc the object
     my $raw     = $self->_fresh;
     my $obj_ref = $self->_fresh;
-    $self->_emit("  $raw     = call i8* \@malloc(i64 ptrtoint (%${class_name}.obj* getelementptr (%${class_name}.obj, %${class_name}.obj* null, i64 1) to i64))  ; Call(new) $class_name: sizeof");
-    $self->_emit("  $obj_ref = bitcast i8* $raw to %${class_name}.obj*  ; Call(new) $class_name: typed ptr");
+    $self->_emit("  $raw     = call i8* \@malloc(i64 ptrtoint (%\"${class_name}.obj\"* getelementptr (%\"${class_name}.obj\", %\"${class_name}.obj\"* null, i64 1) to i64))  ; Call(new) $class_name: sizeof");
+    $self->_emit("  $obj_ref = bitcast i8* $raw to %\"${class_name}.obj\"*  ; Call(new) $class_name: typed ptr");
 
     # Store vtable pointer
     my $vt_gep = $self->_fresh;
-    $self->_emit("  $vt_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 0  ; vtable ptr slot");
-    $self->_emit("  store %${class_name}.vt* \@${class_name}__vtable, %${class_name}.vt** $vt_gep  ; store vtable");
+    $self->_emit("  $vt_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 0  ; vtable ptr slot");
+    $self->_emit("  store %\"${class_name}.vt\"* \@\"${class_name}__vtable\", %\"${class_name}.vt\"** $vt_gep  ; store vtable");
 
     # Bind :param fields
     my $fields = $reg->{fields} // [];
@@ -17917,15 +17917,15 @@ sub _lower_call_new {
         my $val_ref = $self->lower_value($pval);
 
         my $def_gep = $self->_fresh;
-        $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; field[$fidx] defined bit");
+        $self->_emit("  $def_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; field[$fidx] defined bit");
         $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' defined=true");
         my $tag_gep = $self->_fresh;
         my $tag_nm  = _slot_tag_for_repr($repr);
-        $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag  ; field[$fidx] tag");
+        $self->_emit("  $tag_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag  ; field[$fidx] tag");
         $self->_emit("  store i8 " . _slot_tag_value($tag_nm) . ", i8* $tag_gep  ; field '$pname' tag=$tag_nm");
 
         my $pay_gep = $self->_fresh;
-        $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay  ; field[$fidx] payload");
+        $self->_emit("  $pay_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay  ; field[$fidx] payload");
 
         $self->_store_field_payload($val_ref, $repr, $pay_gep, $pname);
     }
@@ -17986,15 +17986,15 @@ sub _lower_call_new {
             }
             else { $def_ref = $self->lower_value($def_node) }
             my $def_gep = $self->_fresh;
-            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; default field[$fidx] defined");
+            $self->_emit("  $def_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; default field[$fidx] defined");
             $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' default defined=true");
             my $tag_gep = $self->_fresh;
             my $tag_nm  = _slot_tag_for_repr($def_repr =~ s{\A(Array|Hash)\z}{${1}Ref}r);
-            $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag  ; default field[$fidx] tag");
+            $self->_emit("  $tag_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag  ; default field[$fidx] tag");
             $self->_emit("  store i8 " . _slot_tag_value($tag_nm) . ", i8* $tag_gep  ; field '$pname' default tag=$tag_nm");
 
             my $pay_gep = $self->_fresh;
-            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay  ; default field[$fidx] payload");
+            $self->_emit("  $pay_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay  ; default field[$fidx] payload");
             # Box the default the same way a :param value is (Str -> StrPair,
             # Boolean -> zext, else identity) via the shared payload-store helper.
             $self->_store_field_payload($def_ref, $def_repr, $pay_gep, $pname);
@@ -18003,25 +18003,25 @@ sub _lower_call_new {
             my $kind = $1 eq '%' ? 'Hash' : 'Array';
             my $new  = $kind eq 'Hash' ? $self->_emit_empty_hash("field '$pname'") : $self->_emit_array_of([]);
             my ($def_gep, $tag_gep, $pay_gep, $raw) = map { $self->_fresh } 1 .. 4;
-            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def");
+            $self->_emit("  $def_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def");
             $self->_emit("  store i1 true, i1* $def_gep  ; field '$pname' defined");
-            $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag");
+            $self->_emit("  $tag_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag");
             $self->_emit("  store i8 " . _slot_tag_value("${kind}Ref") . ", i8* $tag_gep  ; field '$pname' tag=${kind}Ref");
-            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay");
+            $self->_emit("  $pay_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay");
             $self->_emit("  $raw = ptrtoint %${kind}* $new to i64");
             $self->_emit("  store i64 $raw, i64* $pay_gep  ; field '$pname' = an empty \L$kind\E of its own");
         } else {
             my $def_gep = $self->_fresh;
-            $self->_emit("  $def_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; uninit field[$fidx] defined");
+            $self->_emit("  $def_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_def  ; uninit field[$fidx] defined");
             $self->_emit("  store i1 false, i1* $def_gep  ; field '$pname' not initialized");
             # defined=false, so the reading IS established: the cell is undef.
             # That is Undef, not Opaque -- Opaque means no reading was determined.
             my $tag_gep = $self->_fresh;
-            $self->_emit("  $tag_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag  ; uninit field[$fidx] tag");
+            $self->_emit("  $tag_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_tag  ; uninit field[$fidx] tag");
             $self->_emit("  store i8 " . _slot_tag_value('Undef') . ", i8* $tag_gep  ; field '$pname' tag=Undef");
 
             my $pay_gep = $self->_fresh;
-            $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay  ; uninit field[$fidx] payload");
+            $self->_emit("  $pay_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_ref, i64 0, i32 $slot_idx, i32 $fi_pay  ; uninit field[$fidx] payload");
             $self->_emit("  store i64 0, i64* $pay_gep  ; field '$pname' payload=0");
         }
     }
@@ -18034,12 +18034,12 @@ sub _lower_call_new {
     my $adjusts = $reg->{adjusts} // [];
     if (grep { $_->{body_return} || @{ $_->{body_nodes} // [] } } @$adjusts) {
         $self->_refuse_inside_eval("a constructor that runs ADJUST");
-        $self->_emit("  call void \@${class_name}__ADJUST(i8* $raw)  ; run ADJUST blocks");
+        $self->_emit("  call void \@\"${class_name}__ADJUST\"(i8* $raw)  ; run ADJUST blocks");
     }
 
     # Return the raw i8* pointer (Object repr)
     my $result = $self->_fresh;
-    $self->_emit("  $result = bitcast %${class_name}.obj* $obj_ref to i8*  ; Call(new) $class_name: -> Object (i8*)");
+    $self->_emit("  $result = bitcast %\"${class_name}.obj\"* $obj_ref to i8*  ; Call(new) $class_name: -> Object (i8*)");
     $self->{cache}{ $node->id } = $result;
     return $result;
 }
@@ -19725,16 +19725,16 @@ sub _lower_call_method {
 
     # Load vtable pointer
     my $obj_typed = $self->_fresh;
-    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; Call(method) $method_name: typed obj");
+    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %\"${class_name}.obj\"*  ; Call(method) $method_name: typed obj");
     my $vt_gep = $self->_fresh;
-    $self->_emit("  $vt_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 0  ; vtable ptr slot");
+    $self->_emit("  $vt_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_typed, i64 0, i32 0  ; vtable ptr slot");
     my $vt_ptr = $self->_fresh;
-    $self->_emit("  $vt_ptr = load %${class_name}.vt*, %${class_name}.vt** $vt_gep  ; load vtable ptr");
+    $self->_emit("  $vt_ptr = load %\"${class_name}.vt\"*, %\"${class_name}.vt\"** $vt_gep  ; load vtable ptr");
 
     # Load opaque fn ptr from vtable slot
     my $fn_slot_llvm = 1 + $slot_idx;
     my $fn_gep = $self->_fresh;
-    $self->_emit("  $fn_gep = getelementptr inbounds %${class_name}.vt, %${class_name}.vt* $vt_ptr, i64 0, i32 $fn_slot_llvm  ; method '$method_name' fn ptr slot");
+    $self->_emit("  $fn_gep = getelementptr inbounds %\"${class_name}.vt\", %\"${class_name}.vt\"* $vt_ptr, i64 0, i32 $fn_slot_llvm  ; method '$method_name' fn ptr slot");
     my $opaque_fn = $self->_fresh;
     $self->_emit("  $opaque_fn = load i8*, i8** $fn_gep  ; load opaque fn ptr for '$method_name'");
 
@@ -19912,13 +19912,13 @@ sub _lower_ref_of_object {
     # This is the runtime-verifiable path (load from actual vtable).
     my $obj_raw = $self->lower_value($obj_node);
     my $obj_typed = $self->_fresh;
-    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; ref(obj): typed obj");
+    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %\"${class_name}.obj\"*  ; ref(obj): typed obj");
     my $vt_gep = $self->_fresh;
-    $self->_emit("  $vt_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 0  ; vtable ptr slot");
+    $self->_emit("  $vt_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_typed, i64 0, i32 0  ; vtable ptr slot");
     my $vt_ptr = $self->_fresh;
-    $self->_emit("  $vt_ptr = load %${class_name}.vt*, %${class_name}.vt** $vt_gep  ; load vtable");
+    $self->_emit("  $vt_ptr = load %\"${class_name}.vt\"*, %\"${class_name}.vt\"** $vt_gep  ; load vtable");
     my $cn_gep = $self->_fresh;
-    $self->_emit("  $cn_gep = getelementptr inbounds %${class_name}.vt, %${class_name}.vt* $vt_ptr, i64 0, i32 0  ; class-name ptr slot");
+    $self->_emit("  $cn_gep = getelementptr inbounds %\"${class_name}.vt\", %\"${class_name}.vt\"* $vt_ptr, i64 0, i32 0  ; class-name ptr slot");
     my $cn_ptr = $self->_fresh;
     $self->_emit("  $cn_ptr = load i8*, i8** $cn_gep  ; load class-name ptr");
 
@@ -21863,9 +21863,9 @@ sub _lower_field_access_in_method {
         (_slot_idx('defined'), _slot_idx('tag'), _slot_idx('payload'));
     my $obj_raw   = $self->{_method_self_name} // '%self';
     my $obj_typed = $self->_fresh;
-    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %${class_name}.obj*  ; FieldAccess: typed self");
+    $self->_emit("  $obj_typed = bitcast i8* $obj_raw to %\"${class_name}.obj\"*  ; FieldAccess: typed self");
     my $pay_gep   = $self->_fresh;
-    $self->_emit("  $pay_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_pay  ; field[$field_index] payload");
+    $self->_emit("  $pay_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_typed, i64 0, i32 $slot_idx, i32 $fi_pay  ; field[$field_index] payload");
     my $pay       = $self->_fresh;
     $self->_emit("  $pay = load i64, i64* $pay_gep  ; load field[$field_index] payload");
 
@@ -21914,7 +21914,7 @@ sub _lower_field_access_in_method {
         #
         # It wants the whole cell, not the payload word, so load the aggregate.
         my $slot_gep = $self->_fresh;
-        $self->_emit("  $slot_gep = getelementptr inbounds %${class_name}.obj, %${class_name}.obj* $obj_typed, i64 0, i32 $slot_idx  ; field[$field_index] cell");
+        $self->_emit("  $slot_gep = getelementptr inbounds %\"${class_name}.obj\", %\"${class_name}.obj\"* $obj_typed, i64 0, i32 $slot_idx  ; field[$field_index] cell");
         my $slot = $self->_fresh;
         $self->_emit("  $slot = load %Slot, %Slot* $slot_gep  ; load field[$field_index] cell");
 
