@@ -66,4 +66,13 @@ for my $src (
     like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';
 }
 
+# A REQUIRE OF A NAME COMPUTED AT RUN TIME cannot be followed: which module it
+# loads is not known when the program compiles. Refused by name, not dropped.
+{
+    my $src = q{my $m = $ENV{M} // "Text/Wrap.pm"; require $m; print "loaded\n";};
+    my $got = eval { through_llvm($src) };
+    like($@, qr/GAP: a require of a name computed at run time/, "refused by name: $src")
+        or diag "got: ", $got // $@;
+}
+
 done_testing;

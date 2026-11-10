@@ -2208,8 +2208,12 @@ sub lower_value {
     # then holds its key (_lower_inc_read).
     elsif ($op eq 'Call' && ($node->dispatch_kind // '') eq 'builtin' && ($node->name // '') eq 'require') {
         my ($k) = _require_key($node);
+        # A NAME COMPUTED AT RUN TIME cannot be followed (B::SoN follows what
+        # %INC names when the program compiles): refused as what it is.
+        die "GAP: a require of a name computed at run time is not followed -- which module "
+          . "it loads is not known when the program compiles\n" unless defined $k;
         die "GAP: require of what is not a pure pragma (strict, warnings, utf8, feature) is not "
-          . "lowered -- loading a module runs its code\n" unless defined $k && $_PURE_PRAGMA{$k};
+          . "lowered -- loading a module runs its code\n" unless $_PURE_PRAGMA{$k};
         $node->set_stamp('Int') if ( $node->stamp // 'Unknown' ) eq 'Unknown'; # static type
         $self->{cache}{ 'repr:' . $id } = 'Int';
         return $self->{cache}{$id} = '1';
