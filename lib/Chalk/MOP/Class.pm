@@ -48,6 +48,16 @@ class Chalk::MOP::Class {
     method class_scope_vars() { return @class_scope_vars }
     method use_constants() { return @use_constants }
 
+    # UNLOADED: a followed module's subs the program never reaches -- named in
+    # its stash (can() answers by name), their bodies not loaded.
+    field @unloaded;
+    method unloaded() { return @unloaded }
+    method declare_unloaded($sub_name) {
+        $self->_assert_unsealed('declare_unloaded');
+        push @unloaded, $sub_name;
+        return;
+    }
+
     method declare_field($field_name, %opts) {
         $self->_assert_unsealed('declare_field');
         my $field = Chalk::MOP::Field->new(

@@ -2468,6 +2468,8 @@ sub _replay_classes ($classes, $graphs) {
             my $ag = $graphs->{$aref} or next;
             $cls->declare_adjust(graph => $ag);
         }
+        # A followed module's subs the program never reaches: names only.
+        $cls->declare_unloaded($_) for sort @{ $cd->{unloaded} // [] };
     }
 
     $mop->seal;

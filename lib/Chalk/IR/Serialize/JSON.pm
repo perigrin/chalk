@@ -1052,6 +1052,7 @@ sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
     }
     while (defined( my $g = shift @work )) {
         my ( @sure, @maybe );
+        my %by_id = map { ( $_->{id} // '' ) => $_ } _wire_nodes( $methods->{$g} );
         for my $n ( _wire_nodes( $methods->{$g} ) ) {
             next unless ( $n->{op} // '' ) eq 'Call';
             my $f    = $n->{fields} // {};
@@ -1074,6 +1075,14 @@ sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
                 if $sure{$g} && defined $runs && defined $refused->{$runs};
             if ( defined $runs ) { push @sure, $runs }
             else { push @maybe, $name, @{ $by_sub{ $name =~ s/\A.*:://r } // [] } }
+            # UNIVERSAL::can BY A NAME KNOWN HERE: the sub it names may be
+            # handed back and run, so it is loaded. (A name not known here
+            # reaches none: an unreached sub stays in its stash by name.)
+            if ( ( $f->{dispatch_kind} // '' ) eq 'method' && $name eq 'can' && !defined $hit ) {
+                my $arg = $by_id{ ( $n->{inputs} // [] )->[1] // '' } // {};
+                push @maybe, @{ $by_sub{ $arg->{fields}{value} } // [] }
+                    if ( $arg->{op} // '' ) eq 'Constant' && defined $arg->{fields}{value};
+            }
         }
         push @sure, grep { /\A\Q$g\E::__(?:ANON|SORTCMP|SUBSTREPL)__:/ } keys %$methods;
         for my $k (@sure, @maybe) {
@@ -1267,12 +1276,15 @@ sub from_json ($json_string) {
     my %run = map { $_ => 1 } _reachable_methods( $data->{methods} // {}, $data->{classes} // {}, $data->{refused} // {} );
     my @gone = grep { !$run{$_} } keys %{ $data->{methods} // {} };
     delete @{ $data->{methods} }{@gone};
-    # ...and its class's record of it: a module's class keeps its shape.
+    # ...and its class's record of it: a module's class keeps its shape, and
+    # the name stays in its stash, unloaded (can() asks by name).
     my %gone = map { $_ => 1 } @gone;
     for my $cd ( values %{ $data->{classes} // {} } ) {
         for my $kind (qw(subs methods)) {
             my $h = $cd->{$kind} or next;
-            delete @$h{ grep { $gone{ ref $h->{$_} eq 'HASH' ? $h->{$_}{graph} // '' : $h->{$_} // '' } } keys %$h };
+            my @out = grep { $gone{ ref $h->{$_} eq 'HASH' ? $h->{$_}{graph} // '' : $h->{$_} // '' } } keys %$h;
+            push @{ $cd->{unloaded} }, @out;
+            delete @$h{@out};
         }
     }
     our $STASH_CHANGES = _stash_changes($data);

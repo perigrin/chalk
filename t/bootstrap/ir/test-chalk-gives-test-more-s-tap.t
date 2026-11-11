@@ -28,6 +28,14 @@ sub same_as_test_more ($body, $name) {
 }
 
 same_as_test_more( qq{ok(1, 'a');\nok(1);\ndone_testing;\n}, 'ok passing' );
+
+# A VERSION ASKED OF IT (`use Test::More 0.88`) is one Test::Chalk answers:
+# it stands in for Test::More of that version.
+{
+    my ( $fh, $tc ) = tempfile( SUFFIX => '.t', UNLINK => 1 );
+    print $fh "use lib 't/lib';\nuse Test::Chalk 0.88;\nok(1);\ndone_testing;\n"; close $fh;
+    is Chalk::CodeGen::Harness::TapDiff->compare($tc)->{verdict}, 'SAME', 'use Test::Chalk 0.88';
+}
 same_as_test_more( qq{ok(1, 'a');\nok(0, 'b');\nok(0);\ndone_testing;\n}, 'ok failing, with and without a name' );
 same_as_test_more( qq{my \$nope = \$ENV{NOPE};\nok(\$nope, 'c');\ndone_testing;\n}, 'one failure: "test", not "tests"' );
 

@@ -465,7 +465,12 @@ sub close_eval {
     # anything else is refused (the 1 one try made was the next try's: "does
     # not dominate all uses"). One made in the first block is before any die.
     my %first = map { ( refaddr($_) => 1 ) } @{ $f->{start}{nodes} };
-    $b->{past_eval}{$_} = 1 for grep { my $m = $b->{memo}{$_}; !$f->{made_before}{$_} && !( ref $m && $first{ refaddr($m) } ) } keys %{ $b->{memo} };
+    # (dropped here, not at that read: one made first in an arm went with the
+    # arm's copy, and the next eval read this one -- "does not dominate")
+    for my $k (grep { my $m = $b->{memo}{$_}; !$f->{made_before}{$_} && !( ref $m && $first{ refaddr($m) } ) } keys %{ $b->{memo} }) {
+        $b->{past_eval}{$k} = 1;
+        delete $b->{memo}{$k};
+    }
     $b->{cur} = $join;
     for my $i (0 .. $#in) {
         my ($p, $ty, $nv) = @{ $in[$i] };
@@ -1789,6 +1794,13 @@ sub make_mop {
             my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
             $b->emit(op => 'MopDef', type => 'void', inputs => [ $cs, $b->const_str($sub->name) ], attr => { fn => $fn->{name} });
         }
+        # AN UNLOADED SUB (a module's, never reached) is in its stash by name,
+        # for can(): its code is never run, unless a code value can() handed
+        # back is called -- refused where one may be.
+        my @unloaded = $called{can} ? grep { !$sub{$_} } $cls->unloaded : ();
+        out('a code value called where can() may hand back a sub not loaded')
+            if @unloaded && grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'indirect' } _all_nodes($mop, $b->{ret});
+        $b->emit(op => 'MopDef', type => 'void', inputs => [ $cs, $b->const_str($_) ], attr => { fn => '@t2_unloaded' }) for @unloaded;
     }
     # EACH PACKAGE'S $VERSION, by its name, for UNIVERSAL::VERSION (after the
     # classes: making a class's stash empties it).
@@ -2426,10 +2438,8 @@ sub type_of {
 # value($t1) -> the T2 node for a T1 value, built once.
 sub value {
     my ($b, $v) = @_;
-    if (delete $b->{past_eval}{ refaddr($v) }) {
-        out('a value an eval made, read past its end') unless $v->operation eq 'Constant';
-        delete $b->{memo}{ refaddr($v) };
-    }
+    out('a value an eval made, read past its end')
+        if delete $b->{past_eval}{ refaddr($v) } and $v->operation ne 'Constant';
     return $b->{memo}{ refaddr($v) } //= $b->_value($v);
 }
 
@@ -5041,6 +5051,12 @@ entry:
   %f = bitcast %Slot** %env to %Slot (%Array*)*
   %r = call %Slot %f(%Array* %args)
   ret %Slot %r
+}
+; t2_unloaded_w: an unloaded sub's stash entry (can() finds it by name). Never
+; called: a program that may call what can() hands back is refused.
+define internal %Slot @t2_unloaded_w(%Array* %args) {
+entry:
+  unreachable
 }
 ; UNIVERSAL::can: the method as a code value, or undef. (A list context gets a
 ; list, as a sub's wrapper gives: "[", A->can("x"), "]" read past its end.)

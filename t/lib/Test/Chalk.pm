@@ -17,6 +17,10 @@ package Test::Chalk;
 # you failed ..." at END; here done_testing does it, so a test with a plan and
 # no done_testing gives no summary on failure. Grow it when T2 runs END blocks.
 
+# THE Test::More IT STANDS IN FOR: `use Test::More 0.88` asks this at compile
+# time, where it is answered (the one top-level value that matters).
+our $VERSION = '1.302210';
+
 use Exporter 'import';
 our @EXPORT = qw(ok is isnt pass fail diag note plan done_testing BAIL_OUT isa_ok can_ok cmp_ok skip is_deeply subtest like unlike);
 
