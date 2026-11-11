@@ -18,7 +18,7 @@ package Test::Chalk;
 # no done_testing gives no summary on failure. Grow it when T2 runs END blocks.
 
 use Exporter 'import';
-our @EXPORT = qw(ok is isnt pass fail diag note plan done_testing BAIL_OUT);
+our @EXPORT = qw(ok is isnt pass fail diag note plan done_testing BAIL_OUT isa_ok can_ok cmp_ok skip);
 
 our $COUNT;     # tests run
 our $FAILED;    # of them, failed
@@ -61,6 +61,104 @@ sub isnt {
     return 1 if _ok( !$same, $name, $file, $line );
     print STDERR "#          got: " . _shown($got) . "\n#     expected: anything else\n";
     return 0;
+}
+
+# isa_ok($thing, $class, $name) -- an object or a class by ->isa, a plain
+# reference by its type; named as Test::More names each.
+sub isa_ok {
+    my ( $thing, $class, $name ) = @_;
+    my ( undef, $file, $line ) = caller;
+    my $what = !defined $thing ? 'undef' : ref $thing ? ( _blessed($thing) ? 'object' : 'reference' ) : 'class';
+    my $ok;
+    if    ( $what eq 'undef' )     { $ok = 0 }
+    elsif ( $what eq 'reference' ) { $ok = ref($thing) eq $class }
+    else                           { $ok = $thing->isa($class) }
+    my ( $label, $diag );
+    if ( defined $name ) {
+        $label = "'" . $name . "'";
+        $diag  = defined $thing ? $label . " isn't a '" . $class . "'" : $label . " isn't defined";
+    }
+    elsif ( $what eq 'object' ) {
+        $label = "An object of class '" . ref($thing) . "'";
+        $diag  = "The object of class '" . ref($thing) . "' isn't a '" . $class . "'";
+    }
+    elsif ( $what eq 'reference' ) {
+        $label = "A reference of type '" . ref($thing) . "'";
+        $diag  = "The reference of type '" . ref($thing) . "' isn't a '" . $class . "'";
+    }
+    elsif ( $what eq 'undef' ) {
+        $label = 'undef';
+        $diag  = "undef isn't defined";
+    }
+    else {
+        $label = "The class (or class-like) '" . $thing . "'";
+        $diag  = $label . " isn't a '" . $class . "'";
+    }
+    return 1 if _ok( $ok, $label . " isa '" . $class . "'", $file, $line );
+    print STDERR "#     " . $diag . "\n";
+    return 0;
+}
+
+# can_ok($class_or_object, @methods) -- each method found by ->can.
+sub can_ok {
+    my ( $proto, @methods ) = @_;
+    my ( undef, $file, $line ) = caller;
+    my $class = ref($proto) ? ref($proto) : $proto;
+    my $failed = '';
+    for my $m (@methods) {
+        $failed = $failed . "#     " . $class . "->can('" . $m . "') failed\n" unless $proto->can($m);
+    }
+    my $label = scalar(@methods) == 1 ? $class . "->can('" . $methods[0] . "')" : $class . "->can(...)";
+    return 1 if _ok( $failed eq '', $label, $file, $line );
+    print STDERR $failed;
+    return 0;
+}
+
+# cmp_ok($got, $op, $expected, $name) -- the comparison named by $op, and
+# Test::More's diagnostic for it.
+sub cmp_ok {
+    my ( $got, $op, $expected, $name ) = @_;
+    my ( undef, $file, $line ) = caller;
+    my $ok;
+    if    ( $op eq '==' ) { $ok = $got == $expected }
+    elsif ( $op eq '!=' ) { $ok = $got != $expected }
+    elsif ( $op eq '<' )  { $ok = $got < $expected }
+    elsif ( $op eq '>' )  { $ok = $got > $expected }
+    elsif ( $op eq '<=' ) { $ok = $got <= $expected }
+    elsif ( $op eq '>=' ) { $ok = $got >= $expected }
+    elsif ( $op eq 'eq' ) { $ok = $got eq $expected }
+    elsif ( $op eq 'ne' ) { $ok = $got ne $expected }
+    elsif ( $op eq 'lt' ) { $ok = $got lt $expected }
+    elsif ( $op eq 'gt' ) { $ok = $got gt $expected }
+    elsif ( $op eq 'le' ) { $ok = $got le $expected }
+    elsif ( $op eq 'ge' ) { $ok = $got ge $expected }
+    else  { die "Test::Chalk: cmp_ok's $op is not supported\n" }
+    return 1 if _ok( $ok, $name, $file, $line );
+    if ( $op eq '==' || $op eq 'eq' ) {
+        print STDERR "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: " . _cmp_shown( $expected, $op ) . "\n";
+    }
+    elsif ( $op eq '!=' || $op eq 'ne' ) {
+        print STDERR "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: anything else\n";
+    }
+    else {
+        print STDERR "#     " . _shown($got) . "\n#         " . $op . "\n#     " . _shown($expected) . "\n";
+    }
+    return 0;
+}
+
+# skip($why, $count) -- in a SKIP: block, $count tests passed as skipped, and
+# the block left (as Test::More: `last SKIP`, from inside this sub).
+sub skip {
+    my ( $why, $count ) = @_;
+    $count = 1 unless defined $count;
+    my $i = 0;
+    while ( $i < $count ) {
+        $COUNT = $COUNT + 1;
+        print "ok " . $COUNT . " # skip " . $why . "\n";
+        $i = $i + 1;
+    }
+    no warnings 'exiting';
+    last SKIP;
 }
 
 # diag(@msg) to STDERR and note(@msg) to STDOUT, each line "# "-prefixed.
@@ -125,6 +223,26 @@ sub _ok {
         print STDERR "#   Failed test at " . $file . " line " . $line . ".\n";
     }
     return 0;
+}
+
+# _cmp_shown($v, $op) -- as cmp_ok shows a value: a string op's quoted, a
+# number op's bare, undef as undef.
+sub _cmp_shown {
+    my ( $v, $op ) = @_;
+    return 'undef' unless defined $v;
+    return "'" . $v . "'" if $op eq 'eq' || $op eq 'ne';
+    return $v;
+}
+
+# _blessed($ref) -- true for an object: a reference whose ref() is not one of
+# perl's own types.
+# shortcut: an object blessed into a class named like a type (`bless [], 'HASH'`)
+# reads as a plain reference; use Scalar::Util's blessed once T2 provides it.
+sub _blessed {
+    my ($r) = @_;
+    my $t = ref $r;
+    return 0 if $t eq 'SCALAR' || $t eq 'ARRAY' || $t eq 'HASH' || $t eq 'CODE' || $t eq 'REF' || $t eq 'GLOB' || $t eq 'LVALUE' || $t eq 'FORMAT' || $t eq 'IO' || $t eq 'VSTRING';
+    return 1;
 }
 
 # _shown($v) -- a value as is() shows it: quoted, or undef.

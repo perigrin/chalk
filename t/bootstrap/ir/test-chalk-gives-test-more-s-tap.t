@@ -41,4 +41,24 @@ same_as_test_more( qq{plan(tests => 2);\nok(1);\nok(1, 'two');\n}, 'a plan first
 same_as_test_more( qq{plan(skip_all => 'not here');\nok(1);\n}, 'skip_all' );
 same_as_test_more( qq{ok(1);\nBAIL_OUT('stop');\nok(1);\n}, 'BAIL_OUT' );
 
+
+# THE MEDIUM TIER: isa_ok, can_ok, cmp_ok, skip.
+my $classes = qq{package Foo;\nsub new { my (\$c) = \@_; return bless {}, \$c }\nsub bar { 1 }\npackage main;\n};
+same_as_test_more( $classes . qq{my \$o = Foo->new;\nisa_ok(\$o, 'Foo');\nisa_ok(\$o, 'Bar');\nisa_ok(\$o, 'Foo', 'the thing');\nisa_ok(\$o, 'Bar', 'the thing');\ndone_testing;\n}, 'isa_ok an object' );
+same_as_test_more( qq{my \$r = [];\nisa_ok(\$r, 'ARRAY');\nisa_ok(\$r, 'HASH');\nisa_ok(undef, 'Foo');\ndone_testing;\n}, 'isa_ok a reference and undef' );
+same_as_test_more( $classes . qq{isa_ok('Foo', 'Foo');\nisa_ok('Foo', 'Bar');\ndone_testing;\n}, 'isa_ok a class' );
+same_as_test_more( $classes . qq{can_ok('Foo', 'bar');\ncan_ok(Foo->new, 'bar', 'new');\ncan_ok('Foo', 'baz');\ncan_ok('Foo', 'x', 'new', 'y');\ndone_testing;\n}, 'can_ok' );
+same_as_test_more( qq{my \$one = 1;\ncmp_ok(\$one, '==', 1, 'eq num');\ncmp_ok(\$one, '==', 2, 'ne num');\ncmp_ok(\$one, '<', 0);\ncmp_ok('a', 'eq', 'b');\ncmp_ok('a', 'lt', 'b');\ncmp_ok(3, '!=', 3);\ncmp_ok('a', 'ne', 'a');\ncmp_ok(2, '>=', 3, 'ge');\ncmp_ok(undef, '==', 0);\ncmp_ok('x', 'eq', undef);\ncmp_ok(2, '>', 1);\ncmp_ok(1, '<=', 1);\ncmp_ok('b', 'gt', 'a');\ncmp_ok('a', 'le', 'a');\ncmp_ok('b', 'ge', 'c');\ndone_testing;\n}, 'cmp_ok' );
+# skip LEAVES ITS CALLER'S SKIP: BLOCK (`last SKIP` from inside the sub), which
+# nothing compiles yet: refused by name -- the producer once dropped it, and
+# the skipped tests ran.
+{
+    my ( $fh, $tc ) = tempfile( SUFFIX => '.t', UNLINK => 1 );
+    print $fh "use lib 't/lib';\nuse Test::Chalk;\nSKIP: {\n    skip 'no reason', 2 if \$ENV{NOPE} // 1;\n    ok(0);\n}\ndone_testing;\n";
+    close $fh;
+    my $r = Chalk::CodeGen::Harness::TapDiff->compare($tc);
+    is $r->{verdict}, 'REFUSED', 'skip: refused';
+    like $r->{why} // '', qr/Test::Chalk::skip, which the program calls, is refused in its module: GAP: a `last` with no loop of its sub to leave/, '... by name';
+}
+
 done_testing;
