@@ -74,7 +74,7 @@ subtest 'T0 literal match: "foobar" =~ /foo/ => prints 1' => sub {
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
 
     is($out, '1', 'matched literal substring => prints 1');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
     ok($ll !~ /Perl_|(?<![A-Za-z0-9_])SV(?![A-Za-z0-9_])|sv_|libperl|\bAV\b|\bHV\b/,
         'matcher .ll is libperl-free');
 };
@@ -90,7 +90,7 @@ subtest 'T0 literal non-match: "foobar" =~ /xyz/ => prints empty' => sub {
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
 
     is($out, '', 'non-matching literal => prints empty (false)');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 # T0: match not at offset 0 — "xfoo" =~ /foo/ is true (slide loop finds it).
@@ -104,7 +104,7 @@ subtest 'T0 literal match mid-string: "xfoo" =~ /foo/ => prints 1' => sub {
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
 
     is($out, '1', 'matched substring at non-zero offset => prints 1');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 # ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ subtest 'T1 ^anchor: "foobar" =~ /^foo/ => prints 1 (matches at start)' => sub {
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '1', '/^foo/ matches "foobar" at offset 0');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T1 ^anchor non-match: "xfoo" =~ /^foo/ => prints empty (not at start)' => sub {
@@ -132,7 +132,7 @@ subtest 'T1 ^anchor non-match: "xfoo" =~ /^foo/ => prints empty (not at start)' 
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '', '/^foo/ does NOT match "xfoo" (foo is not at offset 0)');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T1 $anchor: "foobar" =~ /bar$/ => prints 1 (matches at end)' => sub {
@@ -143,7 +143,7 @@ subtest 'T1 $anchor: "foobar" =~ /bar$/ => prints 1 (matches at end)' => sub {
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '1', '/bar$/ matches "foobar" at the end');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T1 $anchor non-match: "foobar" =~ /foo$/ => prints empty (not at end)' => sub {
@@ -154,7 +154,7 @@ subtest 'T1 $anchor non-match: "foobar" =~ /foo$/ => prints empty (not at end)' 
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '', '/foo$/ does NOT match "foobar" (foo is not at the end)');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T1 full-string ^...$: "foo" =~ /^foo$/ => prints 1' => sub {
@@ -165,7 +165,7 @@ subtest 'T1 full-string ^...$: "foo" =~ /^foo$/ => prints 1' => sub {
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '1', '/^foo$/ matches exactly "foo"');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T1 full-string non-match: "foobar" =~ /^foo$/ => prints empty' => sub {
@@ -176,7 +176,7 @@ subtest 'T1 full-string non-match: "foobar" =~ /^foo$/ => prints empty' => sub {
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '', '/^foo$/ does NOT match "foobar"');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 # ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ subtest 'T2 class range: "a9z" =~ /[0-9]/ => prints 1' => sub {
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '1', '/[0-9]/ finds the digit in "a9z"');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T2 class range non-match: "abc" =~ /[0-9]/ => prints empty' => sub {
@@ -203,7 +203,7 @@ subtest 'T2 class range non-match: "abc" =~ /[0-9]/ => prints empty' => sub {
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '', '/[0-9]/ does NOT match "abc"');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T2 multi-range class: "_x" =~ /^[A-Za-z_]/ => prints 1' => sub {
@@ -214,7 +214,7 @@ subtest 'T2 multi-range class: "_x" =~ /^[A-Za-z_]/ => prints 1' => sub {
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '1', '/^[A-Za-z_]/ matches "_x" (underscore in class)');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T2 multi-range class non-match: "9x" =~ /^[A-Za-z_]/ => prints empty' => sub {
@@ -225,7 +225,7 @@ subtest 'T2 multi-range class non-match: "9x" =~ /^[A-Za-z_]/ => prints empty' =
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '', '/^[A-Za-z_]/ does NOT match "9x"');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T2 negated class: "abc" =~ /[^0-9]/ => prints 1' => sub {
@@ -236,7 +236,7 @@ subtest 'T2 negated class: "abc" =~ /[^0-9]/ => prints 1' => sub {
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '1', '/[^0-9]/ matches a non-digit in "abc"');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T2 negated class non-match: "123" =~ /[^0-9]/ => prints empty' => sub {
@@ -247,7 +247,7 @@ subtest 'T2 negated class non-match: "123" =~ /[^0-9]/ => prints empty' => sub {
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '', '/[^0-9]/ does NOT match an all-digit subject');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T2 \\d shorthand: "x7" =~ /\\d/ => prints 1' => sub {
@@ -258,7 +258,7 @@ subtest 'T2 \\d shorthand: "x7" =~ /\\d/ => prints 1' => sub {
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '1', '/\\d/ finds the digit in "x7"');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T2 \\w shorthand: "--a" =~ /\\w/ => prints 1; "---" => prints empty' => sub {
@@ -268,7 +268,7 @@ subtest 'T2 \\w shorthand: "--a" =~ /\\w/ => prints 1; "---" => prints empty' =>
     my ($o1, $l1) = eval { lli_run($r1) };
     ok(!$@, "lowering + lli succeeded (match)") or do { diag("error: $@"); return };
     is($o1, '1', '/\\w/ matches the word char in "--a"');
-    like($l1, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($l1, qr/^; chalk T2/m, "T2's: the pattern a graph of its own");
 
     my $f2 = _mk();
     my $m2 = match_node($f2, '---', '\\w');
@@ -276,7 +276,7 @@ subtest 'T2 \\w shorthand: "--a" =~ /\\w/ => prints 1; "---" => prints empty' =>
     my ($o2, $l2) = eval { lli_run($r2) };
     ok(!$@, "lowering + lli succeeded (non-match)") or do { diag("error: $@"); return };
     is($o2, '', '/\\w/ does NOT match "---"');
-    like($l2, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($l2, qr/^; chalk T2/m, "T2's: the pattern a graph of its own");
 };
 
 subtest 'T2 dot: "ab" =~ /a.b/ vs "axb" — . matches any char' => sub {
@@ -286,7 +286,7 @@ subtest 'T2 dot: "ab" =~ /a.b/ vs "axb" — . matches any char' => sub {
     my ($out, $ll) = eval { lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '1', '/a.b/ matches "axb" (dot = any char)');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 subtest 'T2 escaped literal: "a.b" =~ /a\\.b/ => prints 1; "axb" => prints empty' => sub {
@@ -296,7 +296,7 @@ subtest 'T2 escaped literal: "a.b" =~ /a\\.b/ => prints 1; "axb" => prints empty
     my ($o1, $l1) = eval { lli_run($r1) };
     ok(!$@, "lowering + lli succeeded (escaped dot match)") or do { diag("error: $@"); return };
     is($o1, '1', '/a\\.b/ matches literal "a.b"');
-    like($l1, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($l1, qr/^; chalk T2/m, "T2's: the pattern a graph of its own");
 
     my $f2 = _mk();
     my $m2 = match_node($f2, 'axb', 'a\\.b');
@@ -304,7 +304,7 @@ subtest 'T2 escaped literal: "a.b" =~ /a\\.b/ => prints 1; "axb" => prints empty
     my ($o2, $l2) = eval { lli_run($r2) };
     ok(!$@, "lowering + lli succeeded (escaped dot non-match)") or do { diag("error: $@"); return };
     is($o2, '', '/a\\.b/ does NOT match "axb" (escaped dot is literal)');
-    like($l2, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($l2, qr/^; chalk T2/m, "T2's: the pattern a graph of its own");
 };
 
 # ---------------------------------------------------------------------------
@@ -325,7 +325,7 @@ sub try_match {
     my ($out, $ll) = eval { lli_run($ret) };
     if ($@) { fail("$label: lowering/lli failed: $@"); return }
     is($out, $want, $label);
-    like($ll, qr/Coerce\[Boolean->Str\]/,
+    like($ll, qr/^; chalk T2/m,
         "$label: match stringified through the BOOLEAN face, not Int");
 }
 
@@ -381,12 +381,14 @@ subtest 'T3 class quantifier: /\d+/ finds a digit run' => sub {
 # consumed by s///$N (see llvm-regex-subst.t) and later by G7's $1.
 # ---------------------------------------------------------------------------
 
+# (Print(Coerce(match)) is B::SoN's `print $s =~ /(..)/`: LIST context, so a
+# match with a group prints its group, as perl does -- not its truth.)
 subtest 'T4 groups transparent to matching' => sub {
-    try_match('xfoo',  '(foo)',      '1', '"xfoo" =~ /(foo)/ (group does not change matching)');
+    try_match('xfoo',  '(foo)',      'foo', '"xfoo" =~ /(foo)/ (group does not change matching)');
     try_match('xyz',   '(foo)',      '',  '"xyz"  !~ /(foo)/');
-    try_match('ab',    'a(b)',       '1', '"ab"   =~ /a(b)/');
+    try_match('ab',    'a(b)',       'b', '"ab"   =~ /a(b)/');
     try_match('a1b',   'a(\\d)b',    '1', '"a1b"  =~ /a(\\d)b/ (class inside group)');
-    try_match('aXXb',  'a(X+)b',     '1', '"aXXb" =~ /a(X+)b/ (quantifier inside group)');
+    try_match('aXXb',  'a(X+)b',     'XX', '"aXXb" =~ /a(X+)b/ (quantifier inside group)');
     try_match('ab',    'a(?:b)',     '1', '"ab"   =~ /a(?:b)/ (non-capturing transparent)');
 };
 
@@ -494,7 +496,7 @@ subtest 'qr//: Constant(regex) + Match — "foobar" =~ qr/foo/ => prints 1' => s
     eval { ($out, $ll) = lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '1', 'qr-value applied via Match matches');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
     ok($ll !~ /Perl_|(?<![A-Za-z0-9_])SV(?![A-Za-z0-9_])|sv_|libperl|\bAV\b|\bHV\b/,
         'qr matcher .ll is libperl-free');
 };
@@ -512,7 +514,7 @@ subtest 'qr// non-match: "xyz" =~ qr/foo/ => prints empty' => sub {
     my ($out, $ll) = eval { lli_run($ret) };
     ok(!$@, "lowering + lli succeeded") or do { diag("error: $@"); return };
     is($out, '', 'qr-value non-match is false');
-    like($ll, qr/Coerce\[Boolean->Str\]/, "match stringified through the BOOLEAN face, not Int");
+    like($ll, qr/^; chalk T2/m, "T2's: the pattern a graph of its own (its truth printed 1 or empty, above)");
 };
 
 done_testing;

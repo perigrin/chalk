@@ -51,10 +51,11 @@ for my $c (
     is($got, $want, "perl's answer for $src") or diag $@;
 }
 
-# A REGEX is refused by name.
+# A REGEX separator: its pattern's own graph (T2's split).
 {
-    eval { through_llvm(q{my $s = $ENV{NOPE} // "a1b22c"; my @f = split /\d+/, $s; print "@f\n";}) };
-    like($@, qr/GAP: /, 'a regex separator is refused');
+    my $src = q{my $s = $ENV{NOPE} // "a1b22c"; my @f = split /\d+/, $s; print "@f\n";};
+    my $got = eval { through_llvm($src) };
+    is($got, scalar qx($^X -e '$src'), 'a regex separator: perl\'s answer') or diag $@;
 }
 
 done_testing;

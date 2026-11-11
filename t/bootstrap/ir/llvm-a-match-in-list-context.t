@@ -54,10 +54,13 @@ for my $src (
 }
 
 # A group that may not take part (an alternation, an optional group) is undef
-# in perl, which the captured text would not say: refused.
+# in perl: the pattern's own graph (T2) gives undef there, as perl does.
 for my $src (q{my ($a) = "x" =~ /(y)?x/; print defined $a ? "d" : "u", "\n";}, q{my ($a, $b) = "x" =~ /(x)|(y)/; print defined $b ? "d" : "u", "\n";}) {
+    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $src;
+    close $fh;
     my $got = eval { through_llvm($src) };
-    like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';
+    is($got, scalar qx($^X $pl 2>/dev/null), "perl's answer for $src") or diag $@;
 }
 
 done_testing;

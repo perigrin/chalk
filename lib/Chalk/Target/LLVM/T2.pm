@@ -106,6 +106,10 @@ sub lower_program {
 
 package Chalk::Target::LLVM::T2::Builder;
 
+use Chalk::Regex::Graph;   # a constant regex as its own graph
+use Chalk::MOP::Sub;
+require Chalk::IR::Serialize::JSON;
+
 use Scalar::Util qw(blessed refaddr);
 
 sub out { die "T2: out of its slices ($_[0])\n" }
@@ -232,8 +236,9 @@ sub walk {
         elsif ($op eq 'If')   { $ctl = $b->if_stmt($s) }
         # A READ OF A TIED AGGREGATE PINNED where it runs (B::SoN): a FETCH,
         # FETCHSIZE or EXISTS call, made here, in order.
-        elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref)\z/
-               || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join|sort|caller)\z/) {
+        elsif ($op eq 'RegexSubst' || $op eq 'Transliterate') { $b->regex_subst_stmt($s); push @{ $b->{passed} }, $s; $ctl = $s }
+        elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref|RegexMatch|Match)\z/
+               || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join|sort|caller|pos)\z/) {
             $b->value($s);
             push @{ $b->{passed} }, $s;
             $ctl = $s;
@@ -776,6 +781,10 @@ sub _is_version {
     return 1 if $op eq 'Call' && $n->can('control_in') && blessed($n->control_in);
     # A READ OF A TIED AGGREGATE is a method call: B::SoN pins it and versions memory at it.
     return 1 if $op =~ /\A(?:Subscript|Count|Exists)\z/ && $n->can('control_in') && blessed($n->control_in);
+    # A PINNED MATCH: B::SoN versions memory at it (a /g's pos); no value changes there.
+    return 1 if $op =~ /\A(?:RegexMatch|Match)\z/ && $n->can('control_in') && blessed($n->control_in);
+    # A PINNED s/// stores its subject's new string (in place).
+    return 1 if $op =~ /\A(?:RegexSubst|Transliterate)\z/ && $n->can('control_in') && blessed($n->control_in);
     return $op eq 'Phi' && Chalk::Target::LLVM::Context::_is_memory_phi($n) ? 1 : 0;
 }
 
@@ -867,10 +876,18 @@ sub assign {
         $b->emit(op => $h ? 'HAssign' : 'AAssign', type => 'void', inputs => [ $h ? $b->hash_of($target) : $b->array_of($target), $list ]);
         return;
     }
+    # pos($s) = N: where its next m//g starts
+    if (blessed($target) && $target->operation eq 'Call' && ( $target->dispatch_kind // '' ) eq 'builtin' && ( $target->name // '' ) eq 'pos') {
+        my ( $pc, $zc ) = $b->pos_cells( $target->inputs->[0] );
+        $b->emit(op => 'Store', type => 'void', inputs => [ $b->as($b->value($v), '%Slot'), $pc ]);
+        $b->emit(op => 'Store', type => 'void', inputs => [ $b->emit(op => 'Undef', type => '%Slot'), $zc ]);
+        return;
+    }
     my $ptr = $b->location($target);
     $b->reads_before($target->inputs->[0]);
     my $val = $b->as($b->value($v), '%Slot');
     $b->emit(op => 'Store', type => 'void', inputs => [ $val, $ptr ]);
+    $b->pos_reset($target);
 }
 
 # list_assign($Assign): `my ($x, undef, $y) = LIST`. Its inputs are its
@@ -1259,9 +1276,38 @@ sub _is_list {
     # use decides, not its stamp (a call stamped List is a scalar's in `my $n =`).
     return _list_use($n) if $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/;
     return 1 if ( $n->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
+    # A MATCH IN LIST CONTEXT (B::SoN stamps it Boolean): by what takes it.
+    return _match_in_list($n) if $n->operation =~ /\A(?:RegexMatch|Match)\z/;
     return 1 if $n->operation eq 'PadAccess' && ( $n->sigil // '' ) =~ /\A[@%]\z/;
     return 1 if $Chalk::Target::LLVM::T2::Builder::LIST_FIELD{ refaddr($n) };
     return 0;
+}
+
+# _match_in_list($match) -> 1 if what takes the match takes a list: print (a
+# Coerce B::SoN put there is no scalar context), a list's element, a sub
+# call's argument, push/unshift/join/sprintf/die/warn, a list assignment.
+# Returned, its context is the caller's: refused.
+my %LIST_BUILTIN = map { ( $_ => 1 ) } qw(push unshift join sprintf die warn printf);
+sub _match_in_list {
+    my ($n) = @_;
+    my $list = 0;
+    for my $c ( grep { blessed($_) } ( $n->consumers // [] )->@* ) {
+        my $op = $c->operation;
+        # (a value it takes: not its memory input -- a statement after a
+        # pinned match takes the match as its memory version)
+        my @args = $c->inputs->@*;
+        pop @args if $c->can('memory_input') && $c->memory_input;
+        next unless grep { blessed($_) && refaddr($_) == refaddr($n) } @args;
+        my $is_in = sub ($x) { grep { blessed($_) && refaddr($_) == refaddr($x) } @args };
+        Chalk::Target::LLVM::T2::Builder::out('a match returned (its context is its caller\'s)') if $op eq 'Return';
+        if ( $op eq 'Coerce' && grep { blessed($_) && $_->operation eq 'Print' } ( $c->consumers // [] )->@* ) { $list = 1; next }
+        $list = 1 if $op =~ /\A(?:Print|ArrayLiteral|ListAppend)\z/ && $is_in->($n);
+        $list = 1 if $op eq 'Call' && ( $c->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/;
+        $list = 1 if $op eq 'Call' && ( $c->dispatch_kind // '' ) eq 'builtin' && $LIST_BUILTIN{ $c->name // '' };
+        $list = 1 if $op eq 'Assign' && blessed( $c->inputs->[-1] ) && refaddr( $c->inputs->[-1] ) == refaddr($n)
+            && ( ( $c->can('targets') && defined $c->targets ) || grep { blessed($_) && $_->can('sigil') && ( $_->sigil // '' ) =~ /\A[\@%]\z/ } @{ $c->inputs }[ 0 .. $#{ $c->inputs } - 1 ] );
+    }
+    return $list;
 }
 
 # _aderef($n): `@$r`, `@{...}`, `$r->@*` -- an array deref (a `${...}` is a
@@ -1390,6 +1436,13 @@ sub array_var {
 # array_of($n) -> the %Array* a T1 node names (an ArrayLiteral, a deref of one).
 sub array_of {
     my ($b, $n) = @_;
+    # A split: its fields, from its pattern's graph (the split flavor).
+    return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->regex_split($n) ])
+        if blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) eq 'split';
+    # A MATCH IN LIST CONTEXT: its groups (or 1), or with /g every match's --
+    # the list its pattern's graph (the list or all flavor) makes.
+    return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->regex_list($n) ])
+        if blessed($n) && $n->operation =~ /\A(?:RegexMatch|Match)\z/;
     # A SLURPY ARRAY PARAMETER: its copy, made at the sub's entry (args_rest).
     return $b->{memo}{ refaddr($n) } if blessed($n) && $n->operation eq 'Parameter' && $b->{memo}{ refaddr($n) };
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
@@ -1587,6 +1640,7 @@ sub if_stmt {
         $blk{$i} = $blk;
         local $b->{memo} = { %{ $b->{memo} } };   # an arm's values are the arm's
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
+        local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $if->inputs->[1], $i );
         $end{$i} = $b->walk($proj{$i});
         # The arm's memo is kept: its phi inputs are read from it (a call made
         # in the arm is that value, not made again).
@@ -1627,6 +1681,7 @@ sub if_stmt {
             my $arm = $arm_of[$k];
             local $b->{cur} = $vals{$arm}{block};
             local $b->{memo} = $vals{$arm}{memo};
+            local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $if->inputs->[1], $arm );   # (its phi input made in that arm)
             push @in, [ $ty eq '%Array*' ? $b->as_list( $p->inputs->[$k] ) : $b->as($b->value($p->inputs->[$k]), $ty), $arm ];
             # MAKING IT MAY MAKE BLOCKS (a ?: B::SoN folded an inner if into):
             # the arm ends where that left off (it ended before, a phi from
@@ -2029,6 +2084,328 @@ sub code_call {
 }
 
 # func($sub, $name) -> the T2 function a sub is: `%Slot (%Slot args...)`, its
+# REGEXES ARE GRAPHS. regex_result($match) -> the %Slot its matcher returns
+# ([start, end, g1s, g1e, ...] or undef), made once where the match is.
+sub regex_result {
+    my ($b, $m) = @_;
+    my $k = 'rx' . refaddr($m);
+    return $b->{memo}{$k} if $b->{memo}{$k};
+    out('a regex match with code blocks') if $m->can('code_bodies') && $m->code_bodies && @{ $m->code_bodies };
+    my $subj = $b->as( $b->value( $m->inputs->[0] ), '%Slot' );
+    my ( $pat, $flags ) = ( $m->can('pattern') ? $m->pattern : undef, $m->flags // '' );
+    my $rlits;
+    if ( $m->operation eq 'Match' ) {
+        my $re = $m->inputs->[1];
+        # INTERPOLATED: constants B::SoN folded, and \Q$x\E literals (arguments).
+        if ( my ( $cp, $lits ) = _pattern_parts($re) ) { ( $pat, $rlits ) = ( $cp, $lits ) }
+        else {
+        # AGAINST A qr VALUE made elsewhere: its matcher, called (a string
+        # there is a pattern built at run time: a stop where it is matched).
+        unless ( blessed($re) && $re->operation eq 'Constant' && ( $re->const_type // '' ) eq 'regex' ) {
+            # (a string by what makes it -- not by its stamp: B::SoN stamps a
+            # qr value Str where it is also joined to one -- a pattern built at run time)
+            out('a match against a pattern built at run time') if _made_a_string($re);
+            out('a match against a qr value with flags of its own (' . $flags . ')') if $flags =~ /[^u]/;
+            return $b->{memo}{$k} = $b->emit_call(op => 'QrMatch', type => '%Slot', inputs => [ $b->as( $b->value($re), '%Slot' ), $subj ]);
+        }
+        ( $pat, $flags ) = ( $re->value // '', join '', ( $re->can('flags') ? $re->flags // '' : '' ), $flags );
+        }
+    }
+    my @lit = map { $b->as( $b->value($_), '%Slot' ) } @{ $rlits // [] };
+    my %ro = @lit ? ( rlits => scalar @lit ) : ();
+    # m//g IN SCALAR CONTEXT, AND \G: from the subject's pos(), which a /g
+    # match then moves (a failed one resets it, unless /c).
+    if ( $flags =~ /g/ || ( $pat // '' ) =~ /\\G/ ) {
+        my ( $pc, $zc ) = $b->pos_cells( $m->inputs->[0] );
+        my $fn = $b->regex_fn( $pat // '', $flags, 'gscalar', %ro );
+        my $r = $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $subj, $b->emit(op => 'Load', type => '%Slot', inputs => [$pc]), $b->emit(op => 'Load', type => '%Slot', inputs => [$zc]), @lit ], attr => { fn => $fn->{name} });
+        $b->emit(op => 'PosUpdate', type => 'void', inputs => [ $r, $pc, $zc ], attr => { keep => $flags =~ /c/ ? 1 : 0 }) if $flags =~ /g/;
+        return $b->{memo}{$k} = $r;
+    }
+    my $fn = $b->regex_fn( $pat // '', $flags, 'scalar', %ro );
+    return $b->{memo}{$k} = $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $subj, @lit ], attr => { fn => $fn->{name} });
+}
+
+# pos_cells($pad) -> the two cells of a variable's pos(): where its next m//g
+# starts (undef: none) and where its last /g match was empty (perl's /g does
+# not match empty there again). Made at the function's entry, undef.
+sub pos_cells {
+    my ($b, $pad) = @_;
+    out('a pos() of what is not a `my` scalar kept here')
+        unless blessed($pad) && $pad->operation eq 'PadAccess' && ( $pad->sigil // '$' ) eq '$' && $pad->is_location;
+    my $key = 'pos#' . $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
+    return @{ $b->{locs}{$key} //= [ map {
+        my $p = Chalk::Target::LLVM::T2::_n(op => 'Alloca', type => '%Slot*', attr => { name => "pos(" . $pad->name . ")$_" });
+        unshift @{ $b->{blocks}[0]{nodes} }, $p;
+        $p
+    } 1, 2 ] };
+}
+
+# pos_reset($pad): a variable written has no pos() (perl's), if it keeps one.
+sub pos_reset {
+    my ($b, $pad) = @_;
+    return unless blessed($pad) && $pad->operation eq 'PadAccess';
+    my $name = $pad->name;
+    return unless grep {
+        my $x = $_->operation =~ /\A(?:RegexMatch|Match)\z/ && ( ( $_->flags // '' ) =~ /g/ || ( $_->can('pattern') ? $_->pattern // '' : '' ) =~ /\\G/ ) ? $_->inputs->[0]
+              : $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'pos' ? $_->inputs->[0] : undef;
+        blessed($x) && $x->operation eq 'PadAccess' && ( $x->name // '' ) eq $name
+    } @{ $b->{own_nodes} // [] };
+    $b->emit(op => 'Store', type => 'void', inputs => [ $b->emit(op => 'Undef', type => '%Slot'), $_ ]) for $b->pos_cells($pad);
+}
+
+# regex_list($match) -> an array ref of what the match gives in list context.
+sub regex_list {
+    my ($b, $m) = @_;
+    my $k = 'rxl' . refaddr($m);
+    return $b->{memo}{$k} if $b->{memo}{$k};
+    out('a regex match with code blocks') if $m->can('code_bodies') && $m->code_bodies && @{ $m->code_bodies };
+    my ( $pat, $flags ) = ( $m->can('pattern') ? $m->pattern : undef, $m->flags // '' );
+    my $rlits;
+    if ( $m->operation eq 'Match' ) {
+        my $re = $m->inputs->[1];
+        if ( my ( $cp, $lits ) = _pattern_parts($re) ) { ( $pat, $rlits ) = ( $cp, $lits ) }
+        else {
+            out('a match in list context against a qr value made elsewhere')
+                unless blessed($re) && $re->operation eq 'Constant' && ( $re->const_type // '' ) eq 'regex';
+            ( $pat, $flags ) = ( $re->value // '', join '', ( $re->can('flags') ? $re->flags // '' : '' ), $flags );
+        }
+    }
+    my @lit = map { $b->as( $b->value($_), '%Slot' ) } @{ $rlits // [] };
+    my $fn = $b->regex_fn( $pat // '', $flags, $flags =~ /g/ ? 'all' : 'list', @lit ? ( rlits => scalar @lit ) : () );
+    my $subj = $b->as( $b->value( $m->inputs->[0] ), '%Slot' );
+    return $b->{memo}{$k} = $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $subj, @lit ], attr => { fn => $fn->{name} });
+}
+
+# regex_split($Call) -> an array ref of split's fields: its pattern's graph
+# (the split flavor) given the subject and the limit. A pattern built at run
+# time has no graph: refused.
+sub regex_split {
+    my ($b, $c) = @_;
+    my $k = 'rxp' . refaddr($c);
+    return $b->{memo}{$k} if $b->{memo}{$k};
+    my ( $pat, $subj, $limit ) = grep { blessed($_) && !_is_version($_) } $c->inputs->@*;
+    out('a split of no subject') unless blessed($subj);
+    my $fn;
+    if ( blessed($pat) && $pat->operation eq 'Constant' && ( $pat->const_type // '' ) eq 'string' && ( $pat->value // '' ) eq ' ' ) {
+        $fn = $b->regex_fn( ' ', '', 'split', awk => 1 );
+    }
+    my @lit;
+    if ( blessed($pat) && $pat->operation eq 'Constant' && ( $pat->const_type // '' ) eq 'regex' ) {
+        $fn = $b->regex_fn( $pat->value // '', ( $pat->can('flags') ? $pat->flags // '' : '' ), 'split' );
+    }
+    elsif ( !$fn && ( my ( $cp, $lits ) = _pattern_parts($pat) ) ) {
+        @lit = map { $b->as( $b->value($_), '%Slot' ) } @$lits;
+        $fn = $b->regex_fn( $cp, '', 'split', @lit ? ( rlits => scalar @lit ) : () );
+    }
+    out('a split by a pattern built at run time') unless $fn;
+    my @args = ( $b->as( $b->value($subj), '%Slot' ), blessed($limit) ? $b->as( $b->value($limit), '%Slot' ) : $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }), '%Slot' ), @lit );
+    return $b->{memo}{$k} = $b->emit_call(op => 'Call', type => '%Slot', inputs => \@args, attr => { fn => $fn->{name} });
+}
+
+# regex_subst($RegexSubst) -> the %Slot its graph (the subst flavor) gives:
+# [the new string, how many it replaced], made once where it stands.
+sub regex_subst {
+    my ($b, $s) = @_;
+    my $k = 'rxs' . refaddr($s);
+    return $b->{memo}{$k} if $b->{memo}{$k};
+    out('an s/// with code blocks') if $s->can('code_bodies') && $s->code_bodies && @{ $s->code_bodies };
+    out('an s/// whose replacement is computed per match (/ge)') if $s->can('replacement_body') && defined $s->replacement_body;
+    out('an s/// with an empty pattern (the last pattern that matched)') if ( $s->pattern // '' ) eq '';
+    # A COMPUTED REPLACEMENT is an input between the subject and the memory
+    # version: B::SoN makes it in the arm of a match of its own -- ONCE.
+    my @in = grep { blessed($_) } @{ $s->inputs }[ 1 .. $#{ $s->inputs } ];
+    my $repl = @in && !_is_version( $in[0] ) && !Chalk::Target::LLVM::Context::_is_memory_phi( $in[0] ) ? $in[0] : undef;
+    my $flags = $s->flags // '';
+    out('an s///g whose replacement is made per match (B::SoN computes it once)') if $repl && $flags =~ /g/;
+    $flags =~ s/[er]//g;
+    my $fn = $b->regex_fn( $s->pattern, $flags, 'subst', $repl ? ( computed => 1 ) : ( replacement => $s->replacement // '' ) );
+    my @args = ( $b->as( $b->value( $s->inputs->[0] ), '%Slot' ) );
+    push @args, $b->as( $b->value($repl), '%Slot' ) if $repl;
+    return $b->{memo}{$k} = $b->emit_call(op => 'Call', type => '%Slot', inputs => \@args, attr => { fn => $fn->{name} });
+}
+
+# translit($Transliterate) -> the %Slot tr's graph gives: [the new string,
+# how many characters it matched], made once where it stands.
+sub translit {
+    my ($b, $t) = @_;
+    my $k = 'rxt' . refaddr($t);
+    return $b->{memo}{$k} if $b->{memo}{$k};
+    my $key = join "\0", 'tr', $t->from // '', $t->to // '', $t->flags // '';
+    my $sub = $b->{rxsub}{$key} //= do {
+        my $w = eval { Chalk::Regex::Graph::translit( $t->from // '', $t->to // '', ( $t->flags // '' ) =~ s/r//gr ) };
+        out( 'a tr: ' . ( $@ =~ s/\A(?:GAP: )?//r =~ s/\n.*//sr ) ) unless $w;
+        Chalk::MOP::Sub->new( name => 'tr', class => undef, graph => Chalk::IR::Serialize::JSON::_deserialize_graph($w), params => ['@_'], uses_args => 1 );
+    };
+    my $fn = $b->func( $sub, 'tr_' . scalar keys %{ $b->{rxsub} } );
+    return $b->{memo}{$k} = $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $b->as( $b->value( $t->inputs->[0] ), '%Slot' ) ], attr => { fn => $fn->{name} });
+}
+
+# regex_subst_part($RegexSubst, $i) -> element i of what it gives (0 the new string)
+sub regex_subst_part {
+    my ($b, $s, $i) = @_;
+    my $arr = $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $s->operation eq 'Transliterate' ? $b->translit($s) : $b->regex_subst($s) ]);
+    return $b->emit(op => 'AGet', type => '%Slot', inputs => [ $arr, $b->emit(op => 'Const', type => 'i64', attr => { value => $i }) ]);
+}
+
+# regex_subst_count($RegexSubst) -> what s/// gives in place: how many it
+# replaced, or "" (perl's false) for none.
+sub regex_subst_count {
+    my ($b, $s) = @_;
+    my $n = $b->regex_subst_part( $s, 1 );
+    return $n if $s->operation eq 'Transliterate';   # (tr's count is a number: 0 too)
+    my $none = $b->emit(op => 'Cmp', type => 'i1', inputs => [ $b->as( $n, 'i64' ), $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }) ], attr => { op => 'eq' });
+    return $b->emit(op => 'Select', type => '%Slot', inputs => [ $none, $b->as( $b->const_str(''), '%Slot' ), $n ]);
+}
+
+# _in_place($node) -> an s/// or tr that writes its subject: pinned, not /r,
+# of a variable (B::SoN gives a copy's -- `(my $t = $s) =~ s///` -- as the
+# value it was given: the node's value is then the new string).
+sub _in_place {
+    my ($s) = @_;
+    my $subj = $s->inputs->[0];
+    return ( $s->flags // '' ) !~ /r/ && $s->can('control_in') && blessed( $s->control_in )
+        && blessed($subj) && $subj->operation eq 'PadAccess';
+}
+
+# regex_subst_stmt($RegexSubst): an s/// where it stands -- in place (not /r):
+# its new string stored into its subject, a `my` scalar kept here.
+sub regex_subst_stmt {
+    my ($b, $s) = @_;
+    my $subj = $s->inputs->[0];
+    my $new = $b->regex_subst_part( $s, 0 );
+    return unless _in_place($s);   # (its value is the new string: what reads it reads)
+    out('an s/// or tr in place of what is not a `my` scalar kept here')
+        unless $subj->operation eq 'PadAccess' && ( $subj->sigil // '' ) eq '$' && $subj->is_location;
+    my $ptr = $b->location($subj);
+    $b->reads_before( $subj->inputs->[0] );
+    $b->emit(op => 'Store', type => 'void', inputs => [ $new, $ptr ]);
+    $b->pos_reset($subj);
+}
+
+# qr_value($Constant) -> a qr// value: an object of class Regexp holding perl's
+# string of it (`pattern`) and its matcher, the pattern's graph, as a code
+# value (`matcher`) -- a match against the value calls it (QrMatch).
+sub qr_value {
+    my ($b, $c) = @_;
+    my $flags = $c->can('flags') ? $c->flags // '' : '';
+    my $fn = $b->regex_fn( $c->value // '', $flags );
+    my %f = map { ( $_ => 1 ) } split //, $flags;
+    my $str = '(?^' . ( $f{u} ? 'u' : '' ) . join( '', grep { $f{$_} } qw(m s i x) ) . ':' . ( $c->value // '' ) . ')';
+    my $h = $b->emit(op => 'HNew', type => '%Slot');
+    $b->emit(op => 'HSet', type => 'void', inputs => [ $h, $b->const_str('pattern'), $b->as( $b->const_str($str), '%Slot' ) ]);
+    $b->emit(op => 'HSet', type => 'void', inputs => [ $h, $b->const_str('matcher'), $b->emit(op => 'CodeOfFn', type => '%Slot', attr => { fn => $fn->{name} }) ]);
+    return $b->emit(op => 'Bless', type => '%Slot', inputs => [ $h, $b->const_str('Regexp') ]);
+}
+
+# regex_fn($pattern, $flags) -> the function its graph (Chalk::Regex::Graph) is,
+# one per pattern and flags.
+sub regex_fn {
+    my ($b, $pat, $flags, $flavor, %o) = @_;
+    $flavor //= 'scalar';
+    my $key = join "\0", $flavor, $flags, $pat, map { ( $_, $o{$_} ) } sort keys %o;
+    return $b->func( $b->{rxsub}{$key}, 'regex' ) if $b->{rxsub}{$key};
+    my $w = eval { Chalk::Regex::Graph::matcher( $pat, $flags, $flavor, %o ) };
+    out( 'a regex: ' . ( $@ =~ s/\A(?:GAP: )?//r =~ s/\n.*//sr ) ) unless $w;
+    my $sub = $b->{rxsub}{$key} = Chalk::MOP::Sub->new(
+        name => 'regex', class => undef, graph => Chalk::IR::Serialize::JSON::_deserialize_graph($w),
+        params => ['@_'], uses_args => 1 );
+    return $b->func( $sub, 'regex_' . scalar keys %{ $b->{rxsub} } );
+}
+
+# regex_capture($RegexCapture) -> $N of the match it names: undef where its
+# group took no part. Read only where that match is known to have succeeded
+# (an if's or ?:'s arm on it): elsewhere perl reads the last match that did.
+sub regex_capture {
+    my ($b, $c) = @_;
+    my $m = $c->inputs->[0];
+    out('a capture of no regex match') unless blessed($m) && $m->operation =~ /\A(?:RegexMatch|Match)\z/;
+    out('a capture read where its match may have failed (perl reads the last match that succeeded)')
+        unless ( $b->{rx_ok} // {} )->{ refaddr($m) };
+    my $n = $c->n;
+    out('a capture of no group of its pattern') if $n < 1;
+    my $arr = $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->regex_result($m) ]);
+    my ( $s, $e ) = map { $b->as( $b->emit(op => 'AGet', type => '%Slot', inputs => [ $arr, $b->emit(op => 'Const', type => 'i64', attr => { value => 2 * $n + $_ }) ]), 'i64' ) } 0, 1;
+    my $str = $b->as( $b->value( $m->inputs->[0] ), '%Str' );
+    my $len = $b->emit(op => 'Arith', type => 'i64', inputs => [ $e, $s ], attr => { op => 'sub' });
+    my $sub = $b->emit(op => 'Substr', type => '%Slot', inputs => [ $str, $s, $len, $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }) ]);
+    my $none = $b->emit(op => 'Cmp', type => 'i1', inputs => [ $s, $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }) ], attr => { op => 'lt' });
+    return $b->as( $b->emit(op => 'Select', type => '%Slot', inputs => [ $none, $b->emit(op => 'Undef', type => '%Slot'), $sub ]), $b->type_of($c) );
+}
+
+# _pattern_parts($node) -> (pattern, [nodes]): an interpolated pattern of
+# constants (B::SoN folded them) and \Q$x\E pieces -- each a literal known at
+# run time, a placeholder in the pattern (Chalk::Regex::Parse::$RLIT + k) and
+# an argument of its graph. () when it is anything else.
+sub _pattern_parts {
+    my ($n) = @_;
+    my @lits;
+    my $walk;
+    $walk = sub ($x) {
+        return undef unless blessed($x);
+        my $op = $x->operation;
+        return $x->value // '' if $op eq 'Constant' && ( $x->const_type // '' ) =~ /\A(?:string|integer)\z/;
+        return $walk->( $x->inputs->[0] ) if $op eq 'Coerce';
+        if ( $op eq 'Concat' ) {
+            my @p = map { $walk->($_) } grep { blessed($_) } $x->inputs->@*;
+            return undef if grep { !defined } @p;
+            return join '', @p;
+        }
+        if ( $op eq 'Call' && ( $x->dispatch_kind // '' ) eq 'builtin' && ( $x->name // '' ) eq 'quotemeta' ) {
+            my ($arg) = grep { blessed($_) } $x->inputs->@*;
+            my $c = _const_pattern($arg);
+            return quotemeta $c if defined $c;    # (known here: quoted here)
+            return undef if @lits >= 32;
+            push @lits, $arg;
+            return chr( $Chalk::Regex::Parse::RLIT + $#lits );
+        }
+        return undef;
+    };
+    my $pat = $walk->($n);
+    return defined $pat ? ( $pat, \@lits ) : ();
+}
+
+# _made_a_string($node) -> 1 where what makes it makes a string, never a qr
+# value: input (%ENV), a concatenation, a string builtin, a default of those.
+sub _made_a_string {
+    my ($n) = @_;
+    return 0 unless blessed($n);
+    my $op = $n->operation;
+    return 1 if $op =~ /\A(?:EnvRead|Concat|Interpolate)\z/;
+    return 1 if $op eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:string|integer)\z/;
+    return 1 if $op eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:join|sprintf|lc|uc|lcfirst|ucfirst|substr|quotemeta|sprintf)\z/;
+    return _made_a_string( $n->inputs->[0] ) && _made_a_string( $n->inputs->[1] ) if $op eq 'DefinedOr';
+    return 0;
+}
+
+# _const_pattern($node) -> the string an interpolated pattern is where B::SoN
+# folded it to constants (a string, or strings joined), else undef.
+sub _const_pattern {
+    my ($n) = @_;
+    return undef unless blessed($n);
+    my $op = $n->operation;
+    return $n->value // '' if $op eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:string|integer)\z/;
+    return _const_pattern( $n->inputs->[0] ) if $op eq 'Coerce';
+    if ( $op eq 'Concat' ) {
+        my @p = map { _const_pattern($_) } grep { blessed($_) } $n->inputs->@*;
+        return undef if grep { !defined } @p;
+        return join '', @p;
+    }
+    return undef;
+}
+
+# _rx_arm(\%ok, $cond, $arm) -> the matches known to have succeeded in arm
+# $arm (0 the true one) of a branch on $cond: a match, or not a match.
+sub _rx_arm {
+    my ($ok, $cond, $arm) = @_;
+    my %ok = %{ $ok // {} };
+    if ( blessed($cond) && $cond->operation =~ /\A(?:RegexMatch|Match)\z/ ) { $ok{ refaddr($cond) } = 1 if $arm == 0 }
+    elsif ( blessed($cond) && $cond->operation eq 'Not' && blessed( $cond->inputs->[0] ) && $cond->inputs->[0]->operation =~ /\A(?:RegexMatch|Match)\z/ ) {
+        $ok{ refaddr( $cond->inputs->[0] ) } = 1 if $arm == 1;
+    }
+    return \%ok;
+}
+
 # body built in its own blocks, made before them so a call of itself finds it.
 sub func {
     my ($b, $sub, $name, %o) = @_;
@@ -2303,6 +2680,7 @@ sub loop {
         # A value made in the body is the body's: not seen after the loop.
         local $b->{memo} = { %{ $b->{memo} } };
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
+        local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $cond[0], 0 );   # (a body runs where its condition held)
         $b->walk($bodyp);
         @back = map { $b->as($b->value($phis[$_]->inputs->[1]), $t2[$_]->type) } 0 .. $#phis;
     }
@@ -2361,7 +2739,15 @@ sub loop_type { my ($b, $phi) = @_; return $b->phi_type($phi) }
 sub type_of {
     my ($b, $v) = @_;
     my $op = $v->operation;
-    return '%Slot' if $op eq 'EnvRead' || $op eq 'DefinedOr';   # may be undef
+    return '%Slot' if $op eq 'EnvRead' || $op eq 'DefinedOr' || $op eq 'RegexCapture';   # may be undef (a capture: its group took no part)
+    return '%Slot' if ( $v->stamp // '' ) eq 'Regex';   # a qr value: an object of class Regexp
+    return '%Array*' if $op =~ /\A(?:RegexMatch|Match)\z/ && _is_list($v);   # a match in list context: its list
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'split') {
+        # IN SCALAR CONTEXT split gives its count of fields (not T2's yet)
+        out('a split in scalar context') if grep { blessed($_) && $_->operation eq 'Assign' && !( $_->can('targets') && defined $_->targets )
+            && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->can('sigil') ? $_->inputs->[0]->sigil // '$' : '$' ) eq '$' } ( $v->consumers // [] )->@*;
+        return '%Array*';
+    }
     # A SUB'S ARGUMENT AND RESULT are whatever its callers pass and it returns:
     # T1 types them per call site (add(2,3) Int, though add(0.5,1) is 1.5),
     # so in T2 each is a %Slot, read by its tag.
@@ -2445,6 +2831,12 @@ sub value {
 
 sub _value {
     my ($b, $v) = @_;
+    # $& $` $' $+ @- @+ %+: of the last match that succeeded -- B::SoN gives
+    # them as package variables, of no match: never read as one.
+    out( 'the match variable ' . ( $v->sigil // '$' ) . $v->symbol . ' (B::SoN ties it to no match)' )
+        if $v->operation eq 'EntryDef' && ( $v->symbol // '' ) =~ /\A(?:[&`'+-]|\d+)\z/;
+    # A qr// VALUE (a regex constant read as a value): an object of class Regexp.
+    return $b->qr_value($v) if $v->operation eq 'Constant' && ( $v->const_type // '' ) eq 'regex';
     # A PRINT THAT RAN AS A STATEMENT (in an arm of && or ||) read as a value
     # after the join: perl's print returns 1, and the merge reads it only on
     # the path where it ran.
@@ -2684,6 +3076,7 @@ sub _value {
         my $tb = $b->new_block('then');
         my ($tv, $ev);
         { local $b->{memo} = { %{ $b->{memo} } };
+          local $b->{rx_ok} = $v->operation eq 'TernaryExpr' ? _rx_arm( $b->{rx_ok}, $v->inputs->[0], 0 ) : $b->{rx_ok};
           $tv = $b->as( blessed($then) && $then->isa('Chalk::Target::LLVM::T2::Node') ? $then : $b->value($then), $ty ); }
         my $tend = $b->{cur};
         my $eb = $b->new_block('else');
@@ -2716,6 +3109,21 @@ sub _value {
         my $pos = @a > 2 ? $b->as( $b->value( $a[2] ), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
         return $b->emit(op => 'Index', type => 'i64', inputs => [ $str, $b->as( $b->value( $a[1] ), '%Str' ), $pos ]);
     }
+    # A REGEX MATCH OF A CONSTANT PATTERN is a call of its own graph
+    # (Chalk::Regex::Graph): [start, end, groups...] or undef; it is true when
+    # that is defined. A capture reads the offsets of the match it names.
+    if ($op eq 'RegexSubst' || $op eq 'Transliterate') {
+        # IN PLACE (pinned, of a `my` scalar): how many it replaced. Else --
+        # /r, floating, or of a value B::SoN folded a copy into -- the new string.
+        return $b->as( _in_place($v) ? $b->regex_subst_count($v) : $b->regex_subst_part( $v, 0 ), $ty );
+    }
+    return $b->as( $b->regex_subst_count( $v->inputs->[0] ), $ty ) if $op eq 'RegexSubstCount' || $op eq 'TransliterateCount';
+    # pos($s): its cell (undef where no m//g left it)
+    return $b->as( $b->emit(op => 'Load', type => '%Slot', inputs => [ ( $b->pos_cells( $v->inputs->[0] ) )[0] ]), $ty )
+        if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'pos';
+    return $b->array_of($v) if ( $op eq 'RegexMatch' || $op eq 'Match' ) && _is_list($v);
+    return $b->as($b->emit(op => 'Defined', type => 'i1', inputs => [ $b->regex_result($v) ]), $ty) if $op eq 'RegexMatch' || $op eq 'Match';
+    return $b->regex_capture($v) if $op eq 'RegexCapture';
     # A REGEX MATCH, literal or a qr value: no engine in T2 yet (the fallback has one).
     out('a regex match: T2 has no regex engine yet') if $op =~ /\A(?:RegexMatch|Match|RegexSubst|Subst|QrConst|Split)\z/;
     out($op . ( $op eq 'Call' ? ' ' . ( $v->dispatch_kind // '' ) . ' ' . ( $v->name // '' ) : '' ));
@@ -2928,6 +3336,9 @@ sub _line {
     return "store %Slot " . $in[0]->name . ", %Slot* $a{global}" if $op eq 'GStore';
     return "$nm = call %Array* \@t2_argv()" if $op eq 'Argv';
     return "$nm = call %Slot \@t2_bless(" . $arg->(@in) . ')' if $op eq 'Bless';
+    return "$nm = call %Slot \@t2_code_new(i8* bitcast (%Slot (%Array*, %Slot**)* \@t2_stash_tramp to i8*), %Slot** bitcast (%Slot (%Array*)* $a{fn}_w to %Slot**))" if $op eq 'CodeOfFn';
+    return "$nm = call %Slot \@t2_qr_match(" . $arg->(@in) . ')' if $op eq 'QrMatch';
+    return "call void \@t2_pos_update(%Slot " . $in[0]->name . ", %Slot* " . $in[1]->name . ", %Slot* " . $in[2]->name . ", i1 " . ( $a{keep} ? 1 : 0 ) . ")" if $op eq 'PosUpdate';
     return "$nm = call %Slot \@t2_class_of(" . $arg->(@in) . ')' if $op eq 'ClassOf';
     return "$nm = call %Str \@t2_reftype(" . $arg->(@in) . ')' if $op eq 'RefType';
     return "call void \@t2_universal_setup()" if $op eq 'MopUniversal';
@@ -3781,13 +4192,24 @@ h:
   %blessed = icmp eq i8 %ct, 3
   br i1 %blessed, label %obj, label %fmt
 obj:
+  %cn = call %Str @t2_slot_str(%Slot %c)
+  %rxn = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_regexp, i64 0, i64 0), i64 6)
+  %rxc = call i64 @t2_strcmp(%Str %cn, %Str %rxn)
+  %isrx = icmp eq i64 %rxc, 0
+  br i1 %isrx, label %qr, label %obj2
+qr:
+  %pk = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_qrpat, i64 0, i64 0), i64 7)
+  %pv = call %Slot @t2_hget(%Slot %s, %Str %pk)
+  %ps = call %Str @t2_slot_str(%Slot %pv)
+  ret %Str %ps
+obj2:
   %eq = call %Str @t2_str(i8* getelementptr ([6 x i8], [6 x i8]* @lit_eqhash, i64 0, i64 0), i64 1)
   %bt = call %Str @t2_basetype(%Slot %s)
   %eh = call %Str @t2_concat(%Str %eq, %Str %bt)
   %ck = call %Str @t2_concat(%Str %kind, %Str %eh)
   br label %fmt
 fmt:
-  %pre = phi %Str [ %kind, %h ], [ %ck, %obj ]
+  %pre = phi %Str [ %kind, %h ], [ %ck, %obj2 ]
   %pp = extractvalue %Str %pre, 0
   %pl = extractvalue %Str %pre, 1
   %pl32 = trunc i64 %pl to i32
@@ -5043,6 +5465,64 @@ entry:
   %r = call %Slot @t2_bool(i1 %b)
   %rn = call %Slot @t2_list_of(%Slot %r, i1 %w)
   ret %Slot %rn
+}
+; t2_qr_match(re, subject) -> what a qr value's matcher gives: [start, end,
+; groups...] or undef. A value of no class Regexp is a pattern built at run
+; time: there is no graph of it -- stopped.
+@lit_regexp = private unnamed_addr constant [7 x i8] c"Regexp\00"
+@lit_matcher = private unnamed_addr constant [8 x i8] c"matcher\00"
+@lit_qrpat = private unnamed_addr constant [8 x i8] c"pattern\00"
+@msg_qr_runtime = private unnamed_addr constant [63 x i8] c"chalk: refused at run time: a regex pattern built at run time\0A\00"
+define internal %Slot @t2_qr_match(%Slot %re, %Slot %subj) {
+entry:
+  %c = call %Slot @t2_class_of(%Slot %re)
+  %cs = call %Str @t2_slot_str(%Slot %c)
+  %rx = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_regexp, i64 0, i64 0), i64 6)
+  %cmp = call i64 @t2_strcmp(%Str %cs, %Str %rx)
+  %is = icmp eq i64 %cmp, 0
+  br i1 %is, label %call, label %stop
+stop:
+  call void @t2_stop(i8* getelementptr ([63 x i8], [63 x i8]* @msg_qr_runtime, i64 0, i64 0), i64 62)
+  unreachable
+call:
+  %mk = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_matcher, i64 0, i64 0), i64 7)
+  %code = call %Slot @t2_hget(%Slot %re, %Str %mk)
+  %args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %args, %Slot %subj)
+  store i1 0, i1* @t2_want
+  %e = call %Slot** @t2_code_env(%Slot %code)
+  %p = call i8* @t2_code_fn(%Slot %code)
+  %f = bitcast i8* %p to %Slot (%Array*, %Slot**)*
+  %r = call %Slot %f(%Array* %args, %Slot** %e)
+  ret %Slot %r
+}
+; t2_pos_update(r, pos, z, keep): after an m//g -- matched ([start, end, ..]):
+; pos is end, z end where the match was empty (else none); failed: both reset,
+; unless /c (keep).
+define internal void @t2_pos_update(%Slot %r, %Slot* %pc, %Slot* %zc, i1 %keep) {
+entry:
+  %t = extractvalue %Slot %r, 0
+  %ok = icmp ne i8 %t, 0
+  br i1 %ok, label %hit, label %miss
+hit:
+  %a = call %Array* @t2_aderef(%Slot %r)
+  %s = call %Slot @t2_aget(%Array* %a, i64 0)
+  %e = call %Slot @t2_aget(%Array* %a, i64 1)
+  store %Slot %e, %Slot* %pc
+  %si = extractvalue %Slot %s, 1
+  %ei = extractvalue %Slot %e, 1
+  %emp = icmp eq i64 %si, %ei
+  %zz = select i1 %emp, %Slot %e, %Slot zeroinitializer
+  store %Slot %zz, %Slot* %zc
+  ret void
+miss:
+  br i1 %keep, label %done, label %reset
+reset:
+  store %Slot zeroinitializer, %Slot* %pc
+  store %Slot zeroinitializer, %Slot* %zc
+  br label %done
+done:
+  ret void
 }
 ; t2_stash_tramp(args, env): a stash method called as a code value -- its
 ; code rides in env.

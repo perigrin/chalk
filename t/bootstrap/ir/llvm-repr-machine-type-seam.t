@@ -145,7 +145,6 @@ my @ALLOWED = (
 
     # `double` as an English word in diagnostic prose, not a type name.
     [ qr/fdiv double\) not i64 sdiv/        => 'diagnostic text in the Int-repr Divide GAP message' ],
-    [ qr/double quantifier/                => 'English: a doubled regex quantifier' ],
     [ qr/double-quotish/                   => 'English: double-quotish escapes' ],
 );
 

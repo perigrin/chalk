@@ -67,14 +67,13 @@ for my $case (
     like($LAST_LL, qr/^; chalk T2/m, "$name: lowered through T2");
 }
 
-# Out of T2's slices (a regex match; a hash was, until slice 14): the
-# fallback, unchanged.
+# A REGEX MATCH is T2's: the pattern is a graph of its own, called.
 {
     my $src = q{my $s = $ENV{NOPE} // "ab"; print $s =~ /b/ ? 21 : 2, "\n";};
     $LAST_LL = '';
     my ($got, $pl) = eval { through_llvm($src, {}) };
     is($got, perl_says($pl // write_pl($src), {}), "a regex: perl's answer") or diag $@;
-    unlike($LAST_LL, qr/^; chalk T2/m, 'a regex: not T2 (falls back)');
+    like($LAST_LL, qr/^; chalk T2/m, 'a regex: T2\'s');
 }
 
 

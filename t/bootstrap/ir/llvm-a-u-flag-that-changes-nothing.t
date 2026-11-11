@@ -52,11 +52,12 @@ for my $src (
     is($got, perl_of($src), "perl's answer: " . ( $src =~ s/\n/ /gr )) or diag $@;
 }
 
-# \w under u matches a byte past ASCII that it does not without: refused.
+# \w under u matches a byte past ASCII that it does not without: the
+# pattern's graph (T2) stops on such a subject; on an ASCII one, perl's answer.
 {
     my $src = qq{use v5.36;\nmy \$s = \$ENV{X} // "a";\nprint \$s =~ /\\w/ ? "y" : "n", "\\n";\n};
-    my $err = do { local $@; eval { through_llvm($src) }; $@ };
-    like($err, qr/GAP/, 'a \w under the u flag: refused');
+    my $got = eval { through_llvm($src) };
+    is($got, perl_of($src), 'a \w under the u flag, an ASCII subject: perl\'s answer') or diag $@;
 }
 
 done_testing;
