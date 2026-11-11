@@ -18,7 +18,7 @@ package Test::Chalk;
 # no done_testing gives no summary on failure. Grow it when T2 runs END blocks.
 
 use Exporter 'import';
-our @EXPORT = qw(ok is isnt pass fail diag note plan done_testing BAIL_OUT isa_ok can_ok cmp_ok skip is_deeply subtest);
+our @EXPORT = qw(ok is isnt pass fail diag note plan done_testing BAIL_OUT isa_ok can_ok cmp_ok skip is_deeply subtest like unlike);
 
 our $COUNT;     # tests run
 our $FAILED;    # of them, failed
@@ -62,6 +62,29 @@ sub isnt {
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
     return 1 if _ok( !$same, $name, $file, $line );
     _err( "#          got: " . _shown($got) . "\n#     expected: anything else\n" );
+    return 0;
+}
+
+# like($got, qr/.../, $name) and unlike -- a match of the regex (undef read
+# as ''), and Test::More's diagnostic. (T2 has no regex engine yet: a program
+# calling these is refused there, by name.)
+sub like {
+    my ( $got, $re, $name ) = @_;
+    my ( undef, $file, $line ) = caller;
+    my $s = defined $got ? $got : '';
+    my $ok = $s =~ $re ? 1 : 0;
+    return 1 if _ok( $ok, $name, $file, $line );
+    _err( "#                   " . _shown($got) . "\n#     doesn't match '" . $re . "'\n" );
+    return 0;
+}
+
+sub unlike {
+    my ( $got, $re, $name ) = @_;
+    my ( undef, $file, $line ) = caller;
+    my $s = defined $got ? $got : '';
+    my $ok = $s !~ $re ? 1 : 0;
+    return 1 if _ok( $ok, $name, $file, $line );
+    _err( "#                   " . _shown($got) . "\n#           matches '" . $re . "'\n" );
     return 0;
 }
 

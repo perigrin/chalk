@@ -72,4 +72,22 @@ same_as_test_more( qq{is_deeply([1,2,3], [1,2,3], 'same');\nis_deeply([1,2,3], [
 same_as_test_more( qq{subtest 'inner' => sub {\n    ok(1, 'i1');\n    ok(1, 'i2');\n};\nsubtest 'bad' => sub {\n    ok(0, 'b1');\n    diag("d");\n    note("n");\n};\nsubtest 'done' => sub { ok(1); done_testing; };\nok(1, 'after');\ndone_testing;\n}, 'subtest' );
 same_as_test_more( qq{subtest 'outer' => sub {\n    ok(1, 'o1');\n    subtest 'nested' => sub { ok(1, 'n1'); is(1, 2, 'n2'); };\n};\ndone_testing;\n}, 'nested subtests' );
 
+
+# like/unlike: Test::More's bytes under perl; through T2 refused by name --
+# T2 has no regex engine yet.
+{
+    my $body = qq{like('abc', qr/b/, 'has b');\nlike('abc', qr/x/, 'has x');\nunlike('abc', qr/x/);\nunlike('abc', qr/b/, 'no b');\nlike(undef, qr/x/);\nunlike(undef, qr/x/, 'undef unlike');\ndone_testing;\n};
+    my ( $fh, $tc ) = tempfile( SUFFIX => '.t', UNLINK => 1 );
+    print $fh "use lib 't/lib';\nuse Test::Chalk;\n$body"; close $fh;
+    my ( $gh, $tm ) = tempfile( SUFFIX => '.t', UNLINK => 1 );
+    print $gh "use lib 't/lib';\nuse Test::More;\n$body"; close $gh;
+    my %chalk = Chalk::CodeGen::Harness::TapDiff::_run("$^X $tc");
+    my %more  = Chalk::CodeGen::Harness::TapDiff::_run("$^X $tm");
+    $more{err} =~ s/\Q$tm\E/$tc/g;
+    is_deeply \%chalk, \%more, 'like/unlike: under perl, Test::More\'s bytes';
+    my $r = Chalk::CodeGen::Harness::TapDiff->compare($tc);
+    is $r->{verdict}, 'REFUSED', 'like/unlike: refused through T2';
+    like $r->{why} // '', qr/a regex match: T2 has no regex engine yet/, '... by name';
+}
+
 done_testing;
