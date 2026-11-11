@@ -135,11 +135,13 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     field $autoloads :reader = undef;
     method set_autoloads($v) { $autoloads = $v; return }
 
-    # A METHOD CALL'S SITE (B::SoN's): perl's message names it where no
-    # class answers it.
+    # A CALL'S SITE (B::SoN's): its statement's file, line and package --
+    # what `caller` answers in the callee, and what perl's message names
+    # where no class answers a method.
     field $file :reader = undef;
     field $line :reader = undef;
-    method set_site($f, $l) { ($file, $line) = ($f, $l); return }
+    field $site_package :reader = undef;
+    method set_site($f, $l, $p = undef) { ($file, $line, $site_package) = ($f, $l, $p); return }
 
     # AN XS CALLEE (B::SoN's xs): there is no Perl source to compile it from.
     field $xs :reader = 0;

@@ -70,7 +70,23 @@ sub lower_program {
                && ( $_->inputs->[0]->can('want') ? $_->inputs->[0]->want // '' : '' ) eq 'list' }
         map { grep { blessed($_) } $_->inputs->@* }
         grep { $_->operation eq 'Print' } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
+    # caller ANYWHERE: each call of a sub pushes its site, for caller to read.
+    local $Chalk::Target::LLVM::T2::Builder::FRAMES = scalar grep {
+        $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'caller'
+    } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
     my $ok = eval {
+        # A LIST ASSIGN TO AN ARRAY OR HASH (which takes the rest of the list)
+        # is not T2's, ON THE CHAIN OR NOT: one B::SoN left floating was never
+        # made, and its array read empty (`my ($f, @rest) = ...`: "1 " for "1 2 3").
+        Chalk::Target::LLVM::T2::Builder::out('a list assignment to an array or hash') if grep {
+            my $a = $_;
+            $a->operation eq 'Assign' && $a->can('targets') && defined $a->targets
+                # (`my ($c, @x) = @_` is T2's: the arguments, taken by place)
+                && !( blessed( $a->inputs->[-1] ) && $a->inputs->[-1]->operation eq 'ArgsSource' )
+                && grep { blessed($_) && ( $_->operation eq 'PadAccess' && ( $_->sigil // '' ) =~ /\A[\@%]\z/
+                                           || $_->operation =~ /\A(?:ArrayLiteral|HashLiteral|EntryDef)\z/ && ( $_->can('sigil') ? $_->sigil // '' : '' ) ne '$' ) }
+                         @{ $a->inputs }[ 0 .. $a->targets - 1 ]
+        } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
         # A SCALAR DEREF where a reference T2 does not make may reach it (to an
         # element, `\(@a)`, `\$_[0]`): refused, not stopped at run time. T2
         # makes one to a `my` scalar kept in memory, an array's, a hash's.
@@ -179,9 +195,19 @@ sub walk {
             if !_is_version($s) && grep { my $m = blessed($_) ? _memory_input($_) : undef; blessed($m) && refaddr($m) == refaddr($s) } ( $s->consumers // [] )->@*;
         return $ctl if $op eq 'Return';
         if ($op eq 'Print') {
+            # TO STDOUT OR STDERR BY NAME (B::SoN: has_filehandle, the glob
+            # first): file descriptor 1 or 2. Another filehandle is refused.
+            my @args = $s->inputs->@*;
+            my $fd = 1;
+            if ( $s->can('has_filehandle') && $s->has_filehandle ) {
+                my $fh = shift @args;
+                my $name = blessed($fh) && $fh->operation eq 'Constant' && ( $fh->stamp // '' ) eq 'Glob' ? $fh->value // '' : '';
+                $fd = { STDOUT => 1, STDERR => 2 }->{ $name =~ s/\A(?:main)?:://r }
+                    // out('a print to a filehandle other than STDOUT or STDERR');
+            }
             # One print of each argument, in order (perl prints the list); a
             # list's elements one after another ($, is "" until written).
-            for my $in ($s->inputs->@*) {
+            for my $in (@args) {
                 # (a list B::SoN coerced to a string for print is printed as a list;
                 # a copy: the loop variable aliases the Print's own inputs, and
                 # assigning it rewrote the graph the fallback then lowered)
@@ -192,10 +218,10 @@ sub walk {
                         $_->operation =~ /\A(?:EntryWrite|LocalAlias)\z/ && grep { blessed($_) && $_->can('symbol') && ( $_->symbol // '' ) eq ',' } ( $_, $_->inputs->@* )
                     } _all_nodes($b->{mop}, $b->{ret});
                     my $none = $b->const_str('');
-                    $b->emit(op => 'Print', type => 'void', inputs => [ $b->emit(op => 'Join', type => '%Str', inputs => [ $none, $b->array_of($x) ]) ]);
+                    $b->emit(op => 'Print', type => 'void', inputs => [ $b->emit(op => 'Join', type => '%Str', inputs => [ $none, $b->array_of($x) ]) ], attr => { fd => $fd });
                     next;
                 }
-                $b->emit(op => 'Print', type => 'void', inputs => [ $b->as($b->value($x), '%Str') ]);
+                $b->emit(op => 'Print', type => 'void', inputs => [ $b->as($b->value($x), '%Str') ], attr => { fd => $fd });
             }
             # ITS VALUE is 1 (perl's print returns true): a block's last
             # statement, a try's catch.
@@ -207,7 +233,7 @@ sub walk {
         # A READ OF A TIED AGGREGATE PINNED where it runs (B::SoN): a FETCH,
         # FETCHSIZE or EXISTS call, made here, in order.
         elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref)\z/
-               || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join|sort)\z/) {
+               || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join|sort|caller)\z/) {
             $b->value($s);
             push @{ $b->{passed} }, $s;
             $ctl = $s;
@@ -267,6 +293,22 @@ sub walk {
             $dead->{dead} = 1;
             $ctl = $s;
         }
+        # exit: the process ends with the status (0 when none is given). Like
+        # a die, nothing after it in its block runs.
+        # shortcut: END blocks are not run (T2 refuses a program with one).
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'exit') {
+            my ($x) = grep { blessed($_) } $s->inputs->@*;
+            my $v = $x && !( $s->can('memory_input') && $s->memory_input && refaddr($x) == refaddr( $s->memory_input ) )
+                ? $b->as( $b->value($x), 'i64' )
+                : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
+            $b->emit(op => 'Exit', type => 'void', inputs => [$v]);
+            $b->{cur}{term} = ['unreachable'];
+            $b->{cur}{dead} = 1;
+            my $dead = $b->new_block('dead');
+            $dead->{term} = ['unreachable'];
+            $dead->{dead} = 1;
+            $ctl = $s;
+        }
         # A STORE THROUGH A CELL (a captured variable written): what it is
         # given, then the store into the variable's storage.
         elsif ($op eq 'CellWrite') {
@@ -295,6 +337,9 @@ sub walk {
         }
         # `package X;` names the package code after it is in: nothing T2 reads.
         elsif ($op eq 'PackageMark') { $ctl = $s }
+        # A CHOICE PINNED WHERE IT RUNS (B::SoN pins one that reads memory, `$n
+        # > 1 ? ... : ...` of a package scalar): its value made here, in order.
+        elsif ($op eq 'TernaryExpr') { $b->value($s); push @{ $b->{passed} }, $s; $ctl = $s }
         # A READ OF $@ ON THE CHAIN is made where it stands: a caught die sets
         # $@ with no store in the graph, so only its place orders it.
         # (B::SoN gives two reads of $@ around a caught die one version, and
@@ -432,9 +477,20 @@ sub close_eval {
     return $r;
 }
 
+our $FRAMES;   # the program reads caller: every call of a sub says where it is
 sub emit_call {
     my ($b, %a) = @_;
+    # THE CALL'S SITE, for caller in the callee: pushed before, popped after
+    # (before a dying call unwinds, so the stack stays the calls still open).
+    my $site = delete $a{site};
+    if ($FRAMES && $site) {
+        out('a call caller would read with no site from B::SoN') unless $site->can('line') && defined $site->line;
+        $b->emit(op => 'FramePush', type => 'void', inputs => [
+            $b->const_str( $site->site_package // 'main' ), $b->const_str( $site->file // '' ),
+            $b->emit(op => 'Const', type => 'i64', attr => { value => $site->line }) ]);
+    }
     my $r = $b->emit(%a);
+    $b->emit(op => 'FramePop', type => 'void') if $FRAMES && $site;
     $b->after_call;
     return $r;
 }
@@ -608,12 +664,15 @@ sub args_assign {
     for my $t (@t) {
         my $a = $b->{args}{ refaddr($t) } // out('a `my (...) = @_` target that is not an argument');
         $arg_of{ $t->symbol } = $a;
+        $b->{lvals}{ $t->symbol } = $a;
+        $b->{args_vals}{ refaddr($a) } = 1;
         # A TARGET KEPT IN MEMORY (a closure captures it): the argument stored
         # there too -- read through its cell, it was undef ("0 0" for "10 50").
         $b->emit(op => 'Store', type => 'void', inputs => [ $b->as($a, '%Slot'), $b->location($t) ]) if $t->is_location;
     }
     for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' } ( $s->consumers // [] )->@*) {
         next if $b->{args}{ refaddr($r) };
+        next if _is_list_target($r);   # the next list assign's target, versioned by this one
         out('a read after `my (...) = @_` of no target') unless grep { blessed($_) && refaddr($_) == refaddr($s) } $r->inputs->@*;
         $b->{args}{ refaddr($r) } = $arg_of{ $r->symbol } // out('a read after `my (...) = @_` of no target');
     }
@@ -762,7 +821,7 @@ sub index_readers {
 # assign($Assign): a store of one value into a variable kept in memory.
 sub assign {
     my ($b, $s) = @_;
-    out('a list assignment') if $s->can('targets') && defined $s->targets;
+    return $b->list_assign($s) if $s->can('targets') && defined $s->targets;
     out('a local') if $s->can('local') && $s->local;
     my ($target, $v) = $s->inputs->@[0, 1];
     return $b->element_store($target, $v, $s) if blessed($target) && $target->operation eq 'Subscript';
@@ -807,6 +866,64 @@ sub assign {
     $b->reads_before($target->inputs->[0]);
     my $val = $b->as($b->value($v), '%Slot');
     $b->emit(op => 'Store', type => 'void', inputs => [ $val, $ptr ]);
+}
+
+# list_assign($Assign): `my ($x, undef, $y) = LIST`. Its inputs are its
+# targets (`targets` of them) and then the list's items: the list is made, and
+# each target is its element by place (undef past the end, as perl's). A
+# target is the node later reads are, so its value is that element; one kept in
+# memory is stored too. An array or hash target (which takes the rest) is not T2's.
+sub list_assign {
+    my ($b, $s) = @_;
+    out('a local') if $s->can('local') && $s->local;
+    my @in = $s->inputs->@*;
+    pop @in if $s->can('memory_input') && $s->memory_input;
+    my @t = splice @in, 0, $s->targets;
+    out('a list assignment to an array or hash') if grep {
+        !( blessed($_) && ( $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$'
+                            || $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'undef' ) )
+    } @t;
+    my $list = $b->emit(op => 'NewArray', type => '%Array*');
+    for my $e (grep { blessed($_) } @in) {
+        if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $list, $b->array_of($e) ]) }
+        else { $b->emit(op => 'APush', type => 'void', inputs => [ $list, $b->as($b->value($e), '%Slot') ]) }
+    }
+    my %val;
+    for my $i (0 .. $#t) {
+        my $t = $t[$i];
+        next unless $t->operation eq 'PadAccess';
+        my $v = $b->emit(op => 'AGet', type => '%Slot', inputs => [ $list, $b->emit(op => 'Const', type => 'i64', attr => { value => $i }) ]);
+        $val{ $t->symbol } = $v;
+        $b->{lvals}{ $t->symbol } = $v;
+        $b->{memo}{ refaddr($t) } = $v;
+        $b->emit(op => 'Store', type => 'void', inputs => [ $v, $b->location($t) ]) if $t->is_location;
+    }
+    # A READ MADE AFTER IT (its input this Assign): the target's element; a
+    # variable it does not assign, what the last list assign before it gave
+    # (`my ($t) = @_; my ($f) = caller; ... $t`: $t's version is this Assign).
+    for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' } ( $s->consumers // [] )->@*) {
+        next if $b->{memo}{ refaddr($r) } || $b->{args}{ refaddr($r) };
+        next if _is_list_target($r);
+        next unless grep { blessed($_) && refaddr($_) == refaddr($s) } $r->inputs->@*;
+        if ( exists $val{ $r->symbol } ) { $b->{memo}{ refaddr($r) } = $val{ $r->symbol }; next }
+        my $last = $b->{lvals}{ $r->symbol } // out('a read after a list assignment of no target (' . $r->symbol . ')');
+        # (an argument is read where it is: as `my (...) = @_` reads keep it)
+        if ( $b->{args_vals}{ refaddr($last) } ) { $b->{args}{ refaddr($r) } = $last } else { $b->{memo}{ refaddr($r) } = $last }
+    }
+    push @{ $b->{passed} }, $s;
+}
+
+# _is_list_target($pad) -> true for a `my` named as an assign's target -- a
+# list assign's, or a scalar one's (B::SoN versions it by the memory before
+# that assign): a write, not a read.
+sub _is_list_target {
+    my ($r) = @_;
+    return scalar grep {
+        my $a = $_;
+        blessed($a) && $a->operation eq 'Assign'
+            && grep { blessed($_) && refaddr($_) == refaddr($r) }
+                    @{ $a->inputs }[ 0 .. ( $a->can('targets') && defined $a->targets ? $a->targets - 1 : 0 ) ]
+    } ( $r->consumers // [] )->@*;
 }
 
 # make_constant_arrays(@nodes): an array whose literal holds only constants
@@ -867,6 +984,19 @@ sub hash_value {
         return $b->emit(op => 'HGet', type => '%Slot', inputs => [ $h, $k ]) if $op eq 'Subscript';
         return $b->emit(op => 'HExists', type => 'i1', inputs => [ $h, $k ]) if $op eq 'Exists';
         return $b->emit(op => 'HDelete', type => '%Slot', inputs => [ $h, $k ]);
+    }
+    # caller: the site of the call this sub is in, N frames up (the stack
+    # each call pushes). A package in scalar context; (package, file, line).
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'caller') {
+        my ($n) = grep { blessed($_) && !( $v->can('memory_input') && $v->memory_input && refaddr($_) == refaddr( $v->memory_input ) ) } @in;
+        my $depth = $n ? $b->as( $b->value($n), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
+        return $b->emit(op => 'CallerPkg', type => '%Slot', inputs => [$depth]) if ( $v->stamp // '' ) eq 'Scalar';   # static type
+        # caller(N) GIVES ELEVEN; T2 has the first three. Lowered only where
+        # what takes the list reads no more (a list assign of up to three).
+        out('a caller(N) read past its third value') if $n && grep {
+            !( blessed($_) && $_->operation eq 'Assign' && ( $_->can('targets') ? $_->targets // 99 : 99 ) <= 3 )
+        } ( $v->consumers // [] )->@*;
+        return $b->emit(op => 'Caller', type => '%Array*', inputs => [$depth]);
     }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
         # %$r READ WHOLE: the hash the reference holds; an undefined one is an
@@ -1206,7 +1336,9 @@ sub _list_use {
             my ($mi) = reverse grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($m) } 0 .. $#{ $u->inputs };
             @pos = grep { $_ != $mi } @pos;
         }
-        @pos = grep { $_ != $#{ $u->inputs } } @pos if $u->operation =~ /\A(?:Assign|EntryWrite|Delete|Exists)\z/;
+        # (a LIST assign's last input is its list, not its memory: `my ($x, $y) = f()`)
+        @pos = grep { $_ != $#{ $u->inputs } } @pos if $u->operation =~ /\A(?:Assign|EntryWrite|Delete|Exists)\z/
+            && !( $u->operation eq 'Assign' && $u->can('targets') && defined $u->targets );
         @pos = () if $u->operation eq 'EntryDef';   # its input is its memory ($" read after the call)
         next unless @pos;
         my $at0 = grep { $_ == 0 } @pos;   # (a bare grep in an || chain takes the rest as its list)
@@ -1216,7 +1348,8 @@ sub _list_use {
             || $op eq 'Call' && ( $u->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ && !$at0   # not the invocant, nor the code
             || $op eq 'Call' && ( $u->name // '' ) =~ /\A(?:push|unshift|join)\z/ && !$at0
             || $op eq 'ListAppend' && $at1
-            || $op eq 'Return' && $u->inputs->@* == 2 && $at0) { $list++ }
+            || $op eq 'Return' && $u->inputs->@* == 2 && $at0
+            || $op eq 'Assign' && $u->can('targets') && defined $u->targets) { $list++ }   # `my ($x, $y) = f()`
         elsif ($op eq 'Coerce' && $PRINTED{ refaddr($c) }) { }   # print's (counted above)
         elsif ($op =~ /\A(?:Phi|Return)\z/) { }   # a merge or a tail call: its own use decides
         else { $scalar++ }
@@ -1257,7 +1390,7 @@ sub array_of {
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
     if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || _aderef($n) || _array_var($n) || _argv($n)
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
-                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:keys|values|sort|reverse)\z/ )) {
+                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:keys|values|sort|reverse|caller)\z/ )) {
         my $a = $b->value($n);
         return $a if $a->type eq '%Array*';
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]
@@ -1590,7 +1723,7 @@ sub call {
         out('an & call sharing @_ of a sub not taking it as a list') unless $fn->{list} && $b->{argsarr};
         $b->hash_reads_settled('a call');
         $b->set_want($c) if $fn->{listret};
-        return $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $b->{argsarr} ], attr => { fn => $fn->{name} });
+        return $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $b->{argsarr} ], attr => { fn => $fn->{name} }, site => $c);
     }
     # A SIGNATURE WITH A SLURPY TAIL dies with too few arguments, or an odd
     # count into a slurpy hash (perl's "Too few arguments", "Odd name/value"):
@@ -1608,7 +1741,7 @@ sub call {
         }
         $b->hash_reads_settled('a call');
         $b->set_want($c) if $fn->{listret};
-        return $b->emit_call(op => 'Call', type => '%Slot', inputs => [$arr], attr => { fn => $fn->{name} });
+        return $b->emit_call(op => 'Call', type => '%Slot', inputs => [$arr], attr => { fn => $fn->{name} }, site => $c);
     }
     out('a call of a sub with a signature of another arity (perl dies)')
         if $fn->{signature} && @args != $fn->{nargs};
@@ -1617,7 +1750,7 @@ sub call {
     push @pass, $b->emit(op => 'Undef', type => '%Slot') while @pass < $fn->{nargs};
     splice @pass, $fn->{nargs};
     $b->set_want($c) if $fn->{listret};
-    return $b->emit_call(op => 'Call', type => '%Slot', inputs => \@pass, attr => { fn => $fn->{name} });
+    return $b->emit_call(op => 'Call', type => '%Slot', inputs => \@pass, attr => { fn => $fn->{name} }, site => $c);
 }
 
 # THE RUN-TIME MOP: perl's classes as data the program holds. Each package is
@@ -1792,7 +1925,7 @@ sub method_call {
     out('a method name T2 cannot split') if $m =~ /::|'/;
     my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => $mode },
         inputs => [ $inv, $b->const_str($m), $b->const_str($at), $b->const_str($start) ]);
-    return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
+    return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ], site => $c);
 }
 
 # scalar_arg($n) -> a positional argument's %Slot. A call in list context
@@ -1880,7 +2013,7 @@ sub code_call {
     }
     $b->hash_reads_settled('a call of a code value');
     $b->set_want($c);
-    return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $arr ]);
+    return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $arr ], site => $c);
 }
 
 # func($sub, $name) -> the T2 function a sub is: `%Slot (%Slot args...)`, its
@@ -2047,6 +2180,13 @@ sub func {
     out('an early exit to a merge never reached') if %{ $b->{jumps} };
     out('an eval left open at the end') if @{ $b->{evals} };
     my $v = $ret->inputs->[0];
+    # ENDED BY AN exit OR A die, NOTHING AFTER IT: the walk ends in a dead
+    # block, the Return is never reached, and what B::SoN gives as the sub's
+    # value is no value (BAIL_OUT's `exit 255` as its last statement).
+    if ($b->{cur}{dead}) {
+        $b->{cur}{term} = ['unreachable'];
+        return $fn;
+    }
     my $r;
     if ($hkv) {
         my $h = $b->hash_of( $hkv->inputs->[0] );
@@ -2231,6 +2371,10 @@ sub type_of {
     my $hk = $v->can('kind') ? $v->kind // '' : '';
     return 'i1' if $op eq 'Exists' && $hk eq 'hash';
     return '%Slot' if $op eq 'Delete' && $hk eq 'hash';
+    return ( $v->stamp // '' ) eq 'Scalar' ? '%Slot' : '%Array*'   # static type
+        if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'caller';
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'substr';
+    return 'i64'   if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'index';
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
         return $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar' ? 'i64' : '%Array*';
     }
@@ -2542,6 +2686,26 @@ sub _value {
         $eend->{term} = [ 'br', $jb ];
         return $b->emit(op => 'Phi', type => $ty, inputs => [ $tv, $ev ], attr => { from => [ $tend, $eend ] });
     }
+    # substr($s, $off, $len) READ (not an lvalue: B::SoN pins a store): from
+    # either end, the rest or a length (negative leaves that many off the end);
+    # undef outside the string, as perl's. index($s, $t, $pos): -1 for none.
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:substr|index)\z/) {
+        my @a = grep { blessed($_) } $v->inputs->@*;
+        pop @a if $v->can('memory_input') && $v->memory_input;
+        out('a ' . $v->name . ' of more than three arguments') if @a > 3;
+        my $str = $b->as( $b->value( $a[0] ), '%Str' );
+        if ($v->name eq 'substr') {
+            out('a substr of fewer than two arguments') if @a < 2;
+            my $off = $b->as( $b->value( $a[1] ), 'i64' );
+            my ( $len, $has ) = @a > 2
+                ? ( $b->as( $b->value( $a[2] ), 'i64' ), $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }) )
+                : ( $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }), $b->emit(op => 'Const', type => 'i1', attr => { value => 0 }) );
+            return $b->emit(op => 'Substr', type => '%Slot', inputs => [ $str, $off, $len, $has ]);
+        }
+        out('an index of fewer than two arguments') if @a < 2;
+        my $pos = @a > 2 ? $b->as( $b->value( $a[2] ), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
+        return $b->emit(op => 'Index', type => 'i64', inputs => [ $str, $b->as( $b->value( $a[1] ), '%Str' ), $pos ]);
+    }
     out($op . ( $op eq 'Call' ? ' ' . ( $v->dispatch_kind // '' ) . ' ' . ( $v->name // '' ) : '' ));
 }
 
@@ -2805,7 +2969,14 @@ sub _line {
     }
     my %aop = (ALen => 'i64 @t2_alen', AGet => '%Slot @t2_aget', AShift => '%Slot @t2_ashift', APop => '%Slot @t2_apop', Join => '%Str @t2_join');
     return "$nm = call $aop{$op}(" . $arg->(@in) . ')' if $aop{$op};
-    return "call void \@t2_print(" . $arg->(@in) . ')' if $op eq 'Print';
+    return "call void \@t2_" . ( ( $a{fd} // 1 ) == 2 ? 'eprint' : 'print' ) . '(' . $arg->(@in) . ')' if $op eq 'Print';
+    return "call void \@t2_exit(" . $arg->(@in) . ')' if $op eq 'Exit';
+    return "call void \@t2_frame_push(" . $arg->(@in) . ')' if $op eq 'FramePush';
+    return 'call void @t2_frame_pop()' if $op eq 'FramePop';
+    return "$nm = call %Array* \@t2_caller(" . $arg->(@in) . ')' if $op eq 'Caller';
+    return "$nm = call %Slot \@t2_caller_pkg(" . $arg->(@in) . ')' if $op eq 'CallerPkg';
+    return "$nm = call %Slot \@t2_substr(" . $arg->(@in) . ')' if $op eq 'Substr';
+    return "$nm = call i64 \@t2_index(" . $arg->(@in) . ')' if $op eq 'Index';
     return "$nm = call i1 \@t2_defined(" . $arg->(@in) . ')' if $op eq 'Defined';
     if ($op eq 'Truth') {
         my %f = ('i64' => 't2_truth_i64', double => 't2_truth_num', '%Str' => 't2_truth_str', '%Slot' => 't2_truth_slot');
@@ -2860,6 +3031,174 @@ define internal void @t2_print(%Str %s) {
   %n = extractvalue %Str %s, 1
   call i64 @write(i32 1, i8* %p, i64 %n)
   ret void
+}
+define internal void @t2_eprint(%Str %s) {
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  call i64 @write(i32 2, i8* %p, i64 %n)
+  ret void
+}
+; THE CALL STACK caller reads: three slots a frame (package, file, line),
+; pushed by each call of a sub while the program reads caller.
+@t2_frames = internal global %Array* null
+define internal %Array* @t2_frames_get() {
+  %f = load %Array*, %Array** @t2_frames
+  %z = icmp eq %Array* %f, null
+  br i1 %z, label %mk, label %ok
+mk:
+  %n = call %Array* @t2_new_array()
+  store %Array* %n, %Array** @t2_frames
+  ret %Array* %n
+ok:
+  ret %Array* %f
+}
+define internal void @t2_frame_push(%Str %p, %Str %f, i64 %l) {
+  %a = call %Array* @t2_frames_get()
+  %sp = call %Slot @t2_box_str(%Str %p)
+  call void @t2_apush_d(%Array* %a, %Slot %sp)
+  %sf = call %Slot @t2_box_str(%Str %f)
+  call void @t2_apush_d(%Array* %a, %Slot %sf)
+  %sl = call %Slot @t2_box_i64(i64 %l)
+  call void @t2_apush_d(%Array* %a, %Slot %sl)
+  ret void
+}
+define internal void @t2_frame_pop() {
+  %a = call %Array* @t2_frames_get()
+  %x = call %Slot @t2_apop_d(%Array* %a)
+  %y = call %Slot @t2_apop_d(%Array* %a)
+  %z = call %Slot @t2_apop_d(%Array* %a)
+  ret void
+}
+; t2_frame_at(n) -> the index of frame n's package (n up from the innermost), or -1.
+define internal i64 @t2_frame_at(i64 %n) {
+  %a = call %Array* @t2_frames_get()
+  %len = call i64 @t2_alen_d(%Array* %a)
+  %n1 = add i64 %n, 1
+  %k = mul i64 %n1, 3
+  %neg = icmp slt i64 %n, 0
+  %short = icmp slt i64 %len, %k
+  %no = or i1 %neg, %short
+  %base = sub i64 %len, %k
+  %r = select i1 %no, i64 -1, i64 %base
+  ret i64 %r
+}
+define internal %Array* @t2_caller(i64 %n) {
+  %r = call %Array* @t2_new_array()
+  %i = call i64 @t2_frame_at(i64 %n)
+  %no = icmp slt i64 %i, 0
+  br i1 %no, label %none, label %some
+some:
+  %a = call %Array* @t2_frames_get()
+  %p = call %Slot @t2_aget_d(%Array* %a, i64 %i)
+  call void @t2_apush_d(%Array* %r, %Slot %p)
+  %i1 = add i64 %i, 1
+  %f = call %Slot @t2_aget_d(%Array* %a, i64 %i1)
+  call void @t2_apush_d(%Array* %r, %Slot %f)
+  %i2 = add i64 %i, 2
+  %l = call %Slot @t2_aget_d(%Array* %a, i64 %i2)
+  call void @t2_apush_d(%Array* %r, %Slot %l)
+  br label %none
+none:
+  ret %Array* %r
+}
+define internal %Slot @t2_caller_pkg(i64 %n) {
+  %i = call i64 @t2_frame_at(i64 %n)
+  %no = icmp slt i64 %i, 0
+  br i1 %no, label %none, label %some
+some:
+  %a = call %Array* @t2_frames_get()
+  %p = call %Slot @t2_aget_d(%Array* %a, i64 %i)
+  ret %Slot %p
+none:
+  ret %Slot zeroinitializer
+}
+; substr(s, off[, len]): perl's translate_substr_offsets (pp.c), in signed ints --
+; a negative offset counts from the end (still before it: clamped, unless the
+; end is too). The bytes copied, NUL-ended. OUTSIDE THE STRING perl answers
+; undef with a warning under `use warnings`, which T2 does not know: stopped
+; at run time (exit 255), as the fallback does, not answered half right.
+@lit_substr_out = private unnamed_addr constant [47 x i8] c"substr outside of string: stopped (chalk, T2)\0A\00"
+define internal %Slot @t2_substr(%Str %s, i64 %off, i64 %len, i1 %has) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %oneg = icmp slt i64 %off, 0
+  %npos = icmp sgt i64 %n, 0
+  %adj = and i1 %oneg, %npos
+  %offn = add i64 %off, %n
+  %p1 = select i1 %adj, i64 %offn, i64 %off
+  %past = icmp sgt i64 %p1, %n
+  br i1 %past, label %undef, label %ends
+ends:
+  %lneg = icmp slt i64 %len, 0
+  %fromend = add i64 %n, %len
+  %p1neg = icmp slt i64 %p1, 0
+  %p1len = add i64 %p1, %len
+  %room = sub i64 %n, %p1
+  %toolong = icmp sgt i64 %len, %room
+  %fwd = select i1 %toolong, i64 %n, i64 %p1len
+  %pos2 = select i1 %p1neg, i64 %p1len, i64 %fwd
+  %withlen = select i1 %lneg, i64 %fromend, i64 %pos2
+  %p2a = select i1 %has, i64 %withlen, i64 %n
+  %p2neg = icmp slt i64 %p2a, 0
+  %both = and i1 %p2neg, %p1neg
+  br i1 %both, label %undef, label %clamp
+clamp:
+  %p2b = select i1 %p2neg, i64 0, i64 %p2a
+  %p1b = select i1 %p1neg, i64 0, i64 %p1
+  %under = icmp slt i64 %p2b, %p1b
+  %p2c = select i1 %under, i64 %p1b, i64 %p2b
+  %over = icmp sgt i64 %p2c, %n
+  %p2 = select i1 %over, i64 %n, i64 %p2c
+  %l = sub i64 %p2, %p1b
+  %l1b = add i64 %l, 1
+  %buf = call i8* @malloc(i64 %l1b)
+  %src = getelementptr i8, i8* %p, i64 %p1b
+  call i8* @memcpy(i8* %buf, i8* %src, i64 %l)
+  %end = getelementptr i8, i8* %buf, i64 %l
+  store i8 0, i8* %end
+  %r = call %Str @t2_str(i8* %buf, i64 %l)
+  %rs = call %Slot @t2_box_str(%Str %r)
+  ret %Slot %rs
+undef:
+  call i64 @write(i32 2, i8* getelementptr ([47 x i8], [47 x i8]* @lit_substr_out, i64 0, i64 0), i64 46)
+  call void @exit(i32 255)
+  unreachable
+}
+; index(s, t, pos): the first place at or after pos (clamped into the string) t is, or -1.
+define internal i64 @t2_index(%Str %s, %Str %t, i64 %pos0) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %q = extractvalue %Str %t, 0
+  %m = extractvalue %Str %t, 1
+  %pneg = icmp slt i64 %pos0, 0
+  %pa = select i1 %pneg, i64 0, i64 %pos0
+  %pbig = icmp sgt i64 %pa, %n
+  %pos = select i1 %pbig, i64 %n, i64 %pa
+  br label %loop
+loop:
+  %i = phi i64 [ %pos, %entry ], [ %i1, %next ]
+  %e = add i64 %i, %m
+  %fits = icmp sle i64 %e, %n
+  br i1 %fits, label %cmp, label %none
+cmp:
+  %at = getelementptr i8, i8* %p, i64 %i
+  %c = call i32 @memcmp(i8* %at, i8* %q, i64 %m)
+  %eq = icmp eq i32 %c, 0
+  br i1 %eq, label %found, label %next
+next:
+  %i1 = add i64 %i, 1
+  br label %loop
+found:
+  ret i64 %i
+none:
+  ret i64 -1
+}
+define internal void @t2_exit(i64 %v) {
+  %c = trunc i64 %v to i32
+  call void @exit(i32 %c)
+  unreachable
 }
 define internal %Str @t2_concat(%Str %x, %Str %y) {
   %xp = extractvalue %Str %x, 0
