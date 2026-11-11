@@ -61,4 +61,15 @@ same_as_test_more( qq{my \$one = 1;\ncmp_ok(\$one, '==', 1, 'eq num');\ncmp_ok(\
     like $r->{why} // '', qr/Test::Chalk::skip, which the program calls, is refused in its module: GAP: a `last` with no loop of its sub to leave/, '... by name';
 }
 
+
+# THE HARD TIER. is_deeply: Test::More's _deep_check, path and all (a hash's
+# keys in sorted order: perl's order is its own, so only one differing key
+# is compared here).
+same_as_test_more( qq{is_deeply([1,2,3], [1,2,3], 'same');\nis_deeply([1,2,3], [1,2,4], 'arr');\nis_deeply({a=>1,b=>[1,2]}, {a=>1,b=>[1,3]}, 'hash');\nis_deeply([1,2], [1,2,3], 'len');\nis_deeply([1,2,3], [1,2], 'shorter');\nis_deeply({a=>1}, {a=>1,b=>1}, 'keys');\nis_deeply('x', 'y', 'scalar');\nis_deeply([undef], [0]);\nis_deeply([undef], [undef], 'undefs');\nis_deeply({a=>[{b=>[1]}]}, {a=>[{b=>[1]}]}, 'deep');\nis_deeply({a=>[{b=>[1]}]}, {a=>[{b=>[2]}]}, 'deep differ');\ndone_testing;\n}, 'is_deeply' );
+
+
+# subtest: a code ref run as a test of its own, its TAP indented.
+same_as_test_more( qq{subtest 'inner' => sub {\n    ok(1, 'i1');\n    ok(1, 'i2');\n};\nsubtest 'bad' => sub {\n    ok(0, 'b1');\n    diag("d");\n    note("n");\n};\nsubtest 'done' => sub { ok(1); done_testing; };\nok(1, 'after');\ndone_testing;\n}, 'subtest' );
+same_as_test_more( qq{subtest 'outer' => sub {\n    ok(1, 'o1');\n    subtest 'nested' => sub { ok(1, 'n1'); is(1, 2, 'n2'); };\n};\ndone_testing;\n}, 'nested subtests' );
+
 done_testing;

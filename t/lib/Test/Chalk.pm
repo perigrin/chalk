@@ -18,11 +18,13 @@ package Test::Chalk;
 # no done_testing gives no summary on failure. Grow it when T2 runs END blocks.
 
 use Exporter 'import';
-our @EXPORT = qw(ok is isnt pass fail diag note plan done_testing BAIL_OUT isa_ok can_ok cmp_ok skip);
+our @EXPORT = qw(ok is isnt pass fail diag note plan done_testing BAIL_OUT isa_ok can_ok cmp_ok skip is_deeply subtest);
 
 our $COUNT;     # tests run
 our $FAILED;    # of them, failed
 our $PLANNED;   # the plan's count, once one is printed
+our ( $DIFF_AT, $DIFF_GOT, $DIFF_EXP );   # is_deeply's first difference
+our $INDENT;    # four spaces a subtest deep
 
 # ok($test, $name) -- "ok N - name", or "not ok" and where it failed.
 sub ok {
@@ -49,7 +51,7 @@ sub is {
     my ( undef, $file, $line ) = caller;
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
     return 1 if _ok( $same, $name, $file, $line );
-    print STDERR "#          got: " . _shown($got) . "\n#     expected: " . _shown($expected) . "\n";
+    _err( "#          got: " . _shown($got) . "\n#     expected: " . _shown($expected) . "\n" );
     return 0;
 }
 
@@ -59,7 +61,7 @@ sub isnt {
     my ( undef, $file, $line ) = caller;
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
     return 1 if _ok( !$same, $name, $file, $line );
-    print STDERR "#          got: " . _shown($got) . "\n#     expected: anything else\n";
+    _err( "#          got: " . _shown($got) . "\n#     expected: anything else\n" );
     return 0;
 }
 
@@ -95,7 +97,7 @@ sub isa_ok {
         $diag  = $label . " isn't a '" . $class . "'";
     }
     return 1 if _ok( $ok, $label . " isa '" . $class . "'", $file, $line );
-    print STDERR "#     " . $diag . "\n";
+    _err( "#     " . $diag . "\n" );
     return 0;
 }
 
@@ -110,7 +112,7 @@ sub can_ok {
     }
     my $label = scalar(@methods) == 1 ? $class . "->can('" . $methods[0] . "')" : $class . "->can(...)";
     return 1 if _ok( $failed eq '', $label, $file, $line );
-    print STDERR $failed;
+    _err( $failed );
     return 0;
 }
 
@@ -135,13 +137,13 @@ sub cmp_ok {
     else  { die "Test::Chalk: cmp_ok's $op is not supported\n" }
     return 1 if _ok( $ok, $name, $file, $line );
     if ( $op eq '==' || $op eq 'eq' ) {
-        print STDERR "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: " . _cmp_shown( $expected, $op ) . "\n";
+        _err( "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: " . _cmp_shown( $expected, $op ) . "\n" );
     }
     elsif ( $op eq '!=' || $op eq 'ne' ) {
-        print STDERR "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: anything else\n";
+        _err( "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: anything else\n" );
     }
     else {
-        print STDERR "#     " . _shown($got) . "\n#         " . $op . "\n#     " . _shown($expected) . "\n";
+        _err( "#     " . _shown($got) . "\n#         " . $op . "\n#     " . _shown($expected) . "\n" );
     }
     return 0;
 }
@@ -154,21 +156,142 @@ sub skip {
     my $i = 0;
     while ( $i < $count ) {
         $COUNT = $COUNT + 1;
-        print "ok " . $COUNT . " # skip " . $why . "\n";
+        _out( "ok " . $COUNT . " # skip " . $why . "\n" );
         $i = $i + 1;
     }
     no warnings 'exiting';
     last SKIP;
 }
 
+# is_deeply($got, $expected, $name) -- Test::More's _deep_check: two plain
+# values as is(); otherwise the structures walked, and where they first
+# differ named ($got->{b}[1]).
+# shortcut: a hash's keys are walked sorted (perl's own order is its own),
+# so with two keys differing Test::More may name the other one first.
+sub is_deeply {
+    my ( $got, $expected, $name ) = @_;
+    my ( undef, $file, $line ) = caller;
+    if ( !ref($got) && !ref($expected) ) {
+        my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
+        return 1 if _ok( $same, $name, $file, $line );
+        _err( "#          got: " . _shown($got) . "\n#     expected: " . _shown($expected) . "\n" );
+        return 0;
+    }
+    my $ok;
+    if ( ref($got) && ref($expected) ) {
+        $ok = _deep( $got, $expected, 0, 0, '$FOO', 0 );
+    }
+    else {
+        $ok = _differ( '$FOO', $got, $expected, 0, 0 );
+    }
+    return 1 if _ok( $ok, $name, $file, $line );
+    _err( "#     Structures begin differing at:\n"
+      . "#     " . _replace( $DIFF_AT, '$FOO', '     $got' ) . " = " . $DIFF_GOT . "\n"
+      . "#     " . _replace( $DIFF_AT, '$FOO', '$expected' ) . " = " . $DIFF_EXP . "\n" );
+    return 0;
+}
+
+# _deep($e1, $e2, $missing1, $missing2, $at, $arrow) -- 1 when the two are
+# the same; else 0, with the first difference in $DIFF_*.
+sub _deep {
+    my ( $e1, $e2, $m1, $m2, $at, $arrow ) = @_;
+    my $d1 = $m1 || defined $e1;
+    my $d2 = $m2 || defined $e2;
+    return _differ( $at, $e1, $e2, $m1, $m2 ) if ( $d1 ? 1 : 0 ) != ( $d2 ? 1 : 0 );
+    return 1 unless $d1;
+    return _differ( $at, $e1, $e2, $m1, $m2 ) if ( $m1 ? 1 : 0 ) != ( $m2 ? 1 : 0 );
+    my $r1 = ref $e1;
+    my $r2 = ref $e2;
+    return 1 if ( $r1 eq '' ) == ( $r2 eq '' ) && $e1 eq $e2;
+    return _differ( $at, $e1, $e2, 0, 0 ) if $r1 eq '' || $r2 eq '' || $r1 ne $r2;
+    die "Test::Chalk: is_deeply of an object ($r1) is not supported\n" if _blessed($e1);
+    # (EACH READ THROUGH A REFERENCE in a helper of its own: made where it is
+    # asked. T2 cannot yet place one whose value feeds a ?: across a call.)
+    if ( $r1 eq 'ARRAY' ) {
+        my $n1  = _alen($e1);
+        my $n2  = _alen($e2);
+        my $max = $n1 > $n2 ? $n1 : $n2;
+        my $i   = 0;
+        my $ok  = 1;
+        while ( $ok && $i < $max ) {
+            my $x1 = _aget( $e1, $i );   # (past its end: undef, and no element made)
+            my $x2 = _aget( $e2, $i );
+            my $gone1 = $i < $n1 ? 0 : 1;
+            my $gone2 = $i < $n2 ? 0 : 1;
+            unless ( !$gone1 && !$gone2 && _equal_plain( $x1, $x2 ) ) {
+                $ok = _deep( $x1, $x2, $gone1, $gone2, $at . ( $arrow ? '' : '->' ) . '[' . $i . ']', 1 );
+            }
+            $i = $i + 1;
+        }
+        return $ok;
+    }
+    if ( $r1 eq 'HASH' ) {
+        # THE BIGGER HASH'S KEYS (the second's on a tie), as Test::More.
+        my $keys = _hkeys($e1);
+        my $k2   = _hkeys($e2);
+        $keys = $k2 unless _alen($keys) > _alen($k2);
+        my $n = _alen($keys);
+        my $i  = 0;
+        my $ok = 1;
+        while ( $ok && $i < $n ) {
+            my $k = _aget( $keys, $i );
+            my $gone1 = _hhas( $e1, $k ) ? 0 : 1;
+            my $gone2 = _hhas( $e2, $k ) ? 0 : 1;
+            my $x1 = _hget( $e1, $k );   # (no such key: undef, and none made)
+            my $x2 = _hget( $e2, $k );
+            unless ( !$gone1 && !$gone2 && _equal_plain( $x1, $x2 ) ) {
+                $ok = _deep( $x1, $x2, $gone1, $gone2, $at . ( $arrow ? '' : '->' ) . '{' . $k . '}', 1 );
+            }
+            $i = $i + 1;
+        }
+        return $ok;
+    }
+    if ( $r1 eq 'SCALAR' || $r1 eq 'REF' ) {
+        return _deep( _sget($e1), _sget($e2), 0, 0, '${' . $at . '}', $arrow );
+    }
+    return _differ( $at, $e1, $e2, 0, 0 );
+}
+
+sub _alen  { my ($r) = @_; return scalar(@$r) }
+sub _aget  { my ( $r, $i ) = @_; return $r->[$i] }
+sub _hkeys { my ($r) = @_; return [ sort( keys %$r ) ] }
+sub _hhas  { my ( $r, $k ) = @_; return exists $r->{$k} }
+sub _hget  { my ( $r, $k ) = @_; return $r->{$k} }
+sub _sget  { my ($r) = @_; return $$r }
+
+# _equal_plain($a, $b) -- two plain values equal (Test::More's _equal_nonrefs).
+sub _equal_plain {
+    my ( $x, $y ) = @_;
+    return 0 if ref($x) || ref($y);
+    return defined $y && $x eq $y if defined $x;
+    return !defined $y;
+}
+
+# _differ($at, $e1, $e2, $missing1, $missing2) -- note the first difference.
+sub _differ {
+    my ( $at, $e1, $e2, $m1, $m2 ) = @_;
+    $DIFF_AT  = $at;
+    $DIFF_GOT = _deep_shown( $e1, $m1 );
+    $DIFF_EXP = _deep_shown( $e2, $m2 );
+    return 0;
+}
+
+sub _deep_shown {
+    my ( $v, $missing ) = @_;
+    return 'Does not exist' if $missing;
+    return 'undef' unless defined $v;
+    return "" . $v if ref $v;
+    return "'" . $v . "'";
+}
+
 # diag(@msg) to STDERR and note(@msg) to STDOUT, each line "# "-prefixed.
 sub diag {
-    print STDERR _comment( join( '', @_ ) );
+    _err( _comment( join( '', @_ ) ) );
     return 0;
 }
 
 sub note {
-    print _comment( join( '', @_ ) );
+    _out( _comment( join( '', @_ ) ) );
     return 0;
 }
 
@@ -176,12 +299,12 @@ sub note {
 sub plan {
     my ( $kind, $arg ) = @_;
     if ( $kind eq 'skip_all' ) {
-        print "1..0 # SKIP " . $arg . "\n";
+        _out( "1..0 # SKIP " . $arg . "\n" );
         exit 0;
     }
     die "Test::Chalk: plan $kind is not supported\n" unless $kind eq 'tests';
     $PLANNED = $arg;
-    print "1.." . $arg . "\n";
+    _out( "1.." . $arg . "\n" );
     return 1;
 }
 
@@ -190,11 +313,47 @@ sub plan {
 # 254 at most).
 sub done_testing {
     my $n = $COUNT + 0;
-    print "1.." . $n . "\n" unless defined $PLANNED;
+    _out( "1.." . $n . "\n" ) unless defined $PLANNED;
+    # IN A SUBTEST the plan is all: the subtest reports the rest.
+    if ( defined $INDENT && length $INDENT ) {
+        $PLANNED = $n;
+        return 1;
+    }
     return 1 unless $FAILED;
     my $tests = $FAILED == 1 ? "test" : "tests";
-    print STDERR "# Looks like you failed " . $FAILED . " " . $tests . " of " . $n . ".\n";
+    _err( "# Looks like you failed " . $FAILED . " " . $tests . " of " . $n . ".\n" );
     exit( $FAILED > 254 ? 254 : $FAILED );
+}
+
+# subtest($name, $code) -- the code run as a test of its own, its TAP four
+# spaces in, its plan after it; then one test here, passing when it did.
+# shortcut: a subtest that runs no test fails without Test::More's
+# "No tests run" diagnostic.
+sub subtest {
+    my ( $name, $code ) = @_;
+    my ( undef, $file, $line ) = caller;
+    _out( "# Subtest: " . $name . "\n" );
+    my $count   = $COUNT;
+    my $failed  = $FAILED;
+    my $planned = $PLANNED;
+    my $indent  = $INDENT;
+    $COUNT   = 0;
+    $FAILED  = 0;
+    $PLANNED = undef;
+    $INDENT  = ( defined $indent ? $indent : '' ) . '    ';
+    $code->();
+    my $n = $COUNT + 0;
+    _out( "1.." . $n . "\n" ) unless defined $PLANNED;
+    my $bad = $FAILED + 0;
+    if ($bad) {
+        my $tests = $bad == 1 ? "test" : "tests";
+        _err( "# Looks like you failed " . $bad . " " . $tests . " of " . $n . ".\n" );
+    }
+    $COUNT   = $count;
+    $FAILED  = $failed;
+    $PLANNED = $planned;
+    $INDENT  = $indent;
+    return _ok( !$bad && $n > 0, $name, $file, $line );
 }
 
 # BAIL_OUT($why) -- stop the whole run.
@@ -210,19 +369,30 @@ sub _ok {
     my $out = $test ? "ok $COUNT" : "not ok $COUNT";
     # A NAME'S # is escaped, so TAP does not read it as a directive.
     $out = $out . " - " . _replace( $name, '#', '\\#' ) if defined $name;
-    print $out . "\n";
+    _out( $out . "\n" );
     return 1 if $test;
     $FAILED = $FAILED + 1;
     # UNDER A HARNESS a newline first (Test2::Formatter::TAP): a "Failed test"
     # line on STDERR after a write to STDOUT -- here, always the "not ok".
-    print STDERR "\n" if $ENV{HARNESS_ACTIVE};
+    print STDERR "\n" if $ENV{HARNESS_ACTIVE};   # (never indented)
     if ( defined $name ) {
-        print STDERR "#   Failed test '" . $name . "'\n#   at " . $file . " line " . $line . ".\n";
+        _err( "#   Failed test '" . $name . "'\n#   at " . $file . " line " . $line . ".\n" );
     }
     else {
-        print STDERR "#   Failed test at " . $file . " line " . $line . ".\n";
+        _err( "#   Failed test at " . $file . " line " . $line . ".\n" );
     }
     return 0;
+}
+
+# _out($text), _err($text) -- to STDOUT or STDERR, each line a subtest's
+# indent in.
+sub _out { my ($t) = @_; print _indented($t); return 1 }
+sub _err { my ($t) = @_; print STDERR _indented($t); return 1 }
+
+sub _indented {
+    my ($t) = @_;
+    return $t unless defined $INDENT && length $INDENT;
+    return $INDENT . _replace( substr( $t, 0, length($t) - 1 ), "\n", "\n" . $INDENT ) . "\n";
 }
 
 # _cmp_shown($v, $op) -- as cmp_ok shows a value: a string op's quoted, a
