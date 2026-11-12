@@ -366,6 +366,24 @@ sub walk {
             push @{ $b->{passed} }, $s;
             $ctl = $s;
         }
+        # A PACKAGE ARRAY OR HASH STORED WHOLE (`@a = LIST`): its one aggregate
+        # refilled in place -- a reference taken to it sees the new contents.
+        elsif ($op eq 'EntryWrite' && _pkg_agg($s->inputs->[0]) && blessed($s->inputs->[1])
+               && $s->inputs->[1]->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/) {
+            out('a local') if $s->can('local') && $s->local;
+            my ($t, $v) = $s->inputs->@*;
+            my $h = $t->sigil eq '%';
+            my $list = $b->emit(op => 'NewArray', type => '%Array*');
+            for my $e (grep { blessed($_) } $v->inputs->@*) {
+                if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $list, $b->array_of($e) ]) }
+                else { $b->emit(op => 'APush', type => 'void', inputs => [ $list, $b->as($b->value($e), '%Slot') ]) }
+            }
+            $b->hash_reads_settled('a package store');
+            $b->reads_before($_) for @{ $b->{passed} };
+            $b->emit(op => $h ? 'HAssign' : 'AAssign', type => 'void', inputs => [ $h ? $b->hash_of($t) : $b->array_of($t), $list ]);
+            push @{ $b->{passed} }, $s;
+            $ctl = $s;
+        }
         # `@X::ISA = (...)`: the run-time MOP's parents of X, replaced.
         elsif ($op eq 'EntryWrite' && $b->isa_write($s)) { $ctl = $s }
         # A `my @a` PINNED WHERE IT RUNS (B::SoN pins one in a loop body or an
@@ -1092,6 +1110,35 @@ sub _hash_var {
     my ($n) = @_;
     return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '%' && ( !$n->inputs->@* || $n->can('shared') && $n->shared );   # (a shared one, read at a memory version: the one hash; hash_var says whose)
 }
+# _pkg_agg($n): a package array or hash read by name (`our @a`, `%P::h`) --
+# not perl's own (@ISA, @ARGV, %ENV, @INC, %SIG, @_, a stash `%main::`, a
+# punctuation name): each has its own meaning, read elsewhere or refused.
+sub _pkg_agg {
+    my ($n) = @_;
+    return blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) =~ /\A[\@%]\z/
+        && ( $n->symbol // '' ) =~ /\A[A-Za-z_]\w*\z/
+        && $n->symbol !~ /\A(?:ISA|ARGV|ARGVOUT|ENV|INC|SIG|STDIN|STDOUT|STDERR|_)\z/;
+}
+# _pkg_literal_of($n): the package aggregate a named Array/HashLiteral is
+# stored into whole (B::SoN's `@a = LIST`), or undef.
+sub _pkg_literal_of {
+    my ($n) = @_;
+    return undef unless blessed($n) && $n->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/;
+    for my $w ( ( $n->consumers // [] )->@* ) {
+        next unless blessed($w) && $w->operation eq 'EntryWrite' && blessed( $w->inputs->[1] ) && refaddr( $w->inputs->[1] ) == refaddr($n);
+        return $w->inputs->[0] if _pkg_agg( $w->inputs->[0] );
+    }
+    return undef;
+}
+# pkg_agg($n): THE ONE AGGREGATE a global holds, made at its first use from
+# any function. A whole store refills it in place, so its pointer stands.
+sub pkg_agg {
+    my ($b, $n) = @_;
+    my $h = $n->sigil eq '%';
+    my $name = ( $h ? 'pkghash::' : 'pkgarr::' ) . ( ( $n->can('package') ? $n->package : undef ) // 'main' ) . '::' . $n->symbol;
+    return $b->{locs}{$name} //= $b->emit_entry(op => $h ? 'GHash' : 'GArray', type => $h ? '%Slot' : '%Array*',
+                                                attr => { global => $b->global_named($name) });
+}
 sub _named_hash {
     my ($n) = @_;
     return _hash_var($n) || blessed($n) && $n->operation eq 'HashLiteral' && ( $n->stamp // '' ) eq 'Hash'; # static type
@@ -1127,7 +1174,7 @@ sub hash_of {
     my ($b, $n) = @_;
     # A SLURPY HASH PARAMETER: its hash, made at the sub's entry (args_rest).
     return $b->{memo}{ refaddr($n) } if blessed($n) && $n->operation eq 'Parameter' && $b->{memo}{ refaddr($n) };
-    return $b->value($n) if _named_hash($n);
+    return $b->value($n) if _named_hash($n) || _pkg_agg($n) && $n->sigil eq '%';
     if ($n->operation eq 'FieldAccess') {   # a hash field: its hash
         my (undef, $sg) = $b->field_of($n);
         return $b->value($n) if $sg eq '%';
@@ -1447,6 +1494,7 @@ sub array_of {
     return $b->{memo}{ refaddr($n) } if blessed($n) && $n->operation eq 'Parameter' && $b->{memo}{ refaddr($n) };
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
     if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || _aderef($n) || _array_var($n) || _argv($n)
+                         || _pkg_agg($n) && $n->sigil eq '@'
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
                          || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:keys|values|sort|reverse|caller)\z/ )) {
         my $a = $b->value($n);
@@ -2771,6 +2819,7 @@ sub type_of {
     # AN ARRAY is an %Array of %Slot, by pointer; a count of it an i64, an
     # element a %Slot (it holds what was stored, by its tag).
     # AN ARRAY REFERENCE is a %Slot (tag 6) over an %Array: a scalar.
+    return $v->sigil eq '@' ? '%Array*' : '%Slot' if _pkg_agg($v);   # a hash is its %Slot
     return '%Slot' if $op eq 'ArrayLiteral' && ( $v->stamp // '' ) eq 'ArrayRef'; # static type
     return '%Slot' if $op eq 'Ref';
     return '%Slot' if $op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '$';
@@ -2851,6 +2900,11 @@ sub _value {
     # them as package variables, of no match: never read as one.
     out( 'the match variable ' . ( $v->sigil // '$' ) . $v->symbol . ' (B::SoN ties it to no match)' )
         if $v->operation eq 'EntryDef' && ( $v->symbol // '' ) =~ /\A(?:[&`'+-]|\d+)\z/;
+    return $b->pkg_agg($v) if _pkg_agg($v);
+    # THE LITERAL A PACKAGE AGGREGATE WAS STORED FROM is how B::SoN gives a
+    # later read of the name: read as the aggregate, which a push or another
+    # sub may have changed since (a copy of the literal printed "1 2" for "1 2 3").
+    if (my $t = _pkg_literal_of($v)) { return $b->pkg_agg($t) }
     # A qr// VALUE (a regex constant read as a value): an object of class Regexp.
     return $b->qr_value($v) if $v->operation eq 'Constant' && ( $v->const_type // '' ) eq 'regex';
     # A PRINT THAT RAN AS A STATEMENT (in an arm of && or ||) read as a value
