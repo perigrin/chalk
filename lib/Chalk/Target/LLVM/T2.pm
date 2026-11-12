@@ -366,6 +366,36 @@ sub walk {
             push @{ $b->{passed} }, $s;
             $ctl = $s;
         }
+        # `local @a` / `local %h` (B::SoN's glob binds): THE SWAP puts a fresh
+        # aggregate in the global, the old one's reference saved first for
+        # THE RESTORE, which puts that back. A reference taken to the old one
+        # keeps its contents; a sub called inside the scope sees the new one.
+        elsif ($op eq 'EntryWrite' && $s->binds && _pkg_agg($s->inputs->[0])) {
+            my ($t, $v, $mem) = $s->inputs->@*;
+            my $h = $t->sigil eq '%';
+            $b->hash_reads_settled('a local');
+            $b->reads_before($_) for @{ $b->{passed} };
+            my $slot;
+            if (blessed($v) && $v->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && !$v->inputs->@* && !_pkg_literal_of($v)) {
+                # the save: a Ref over a read of this name at this store's memory version
+                for my $r ( grep { blessed($_) && $_->operation eq 'Ref' } _all_nodes( $b->{mop}, $b->{ret} ) ) {
+                    my $in = $r->inputs->[0];
+                    next unless _pkg_agg($in) && _pkg_agg_name($in) eq _pkg_agg_name($t)
+                        && blessed( $in->inputs->[-1] ) && refaddr( $in->inputs->[-1] ) == refaddr($mem);
+                    my $old = $b->pkg_agg($in);
+                    $b->{agg_save}{ refaddr($r) } = $h ? $old : $b->emit(op => 'ARef', type => '%Slot', inputs => [$old]);
+                }
+                $slot = $h ? $b->emit(op => 'HNew', type => '%Slot')
+                           : $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->emit(op => 'NewArray', type => '%Array*') ]);
+            }
+            elsif (blessed($v) && $v->operation eq 'Ref') {
+                $slot = $b->{agg_save}{ refaddr($v) } // out('a local aggregate restored with no save made');
+            }
+            else { out('a glob bind of a package aggregate') }
+            $b->emit(op => 'GStore', type => 'void', inputs => [$slot], attr => { global => $b->global_named( _pkg_agg_name($t) ) });
+            push @{ $b->{passed} }, $s;
+            $ctl = $s;
+        }
         # A PACKAGE ARRAY OR HASH STORED WHOLE (`@a = LIST`): its one aggregate
         # refilled in place -- a reference taken to it sees the new contents.
         elsif ($op eq 'EntryWrite' && _pkg_agg($s->inputs->[0]) && blessed($s->inputs->[1])
@@ -380,7 +410,7 @@ sub walk {
             }
             $b->hash_reads_settled('a package store');
             $b->reads_before($_) for @{ $b->{passed} };
-            $b->emit(op => $h ? 'HAssign' : 'AAssign', type => 'void', inputs => [ $h ? $b->hash_of($t) : $b->array_of($t), $list ]);
+            $b->emit(op => $h ? 'HAssign' : 'AAssign', type => 'void', inputs => [ $b->pkg_agg($t), $list ]);   # where it stands: a local may have swapped it
             push @{ $b->{passed} }, $s;
             $ctl = $s;
         }
@@ -976,11 +1006,12 @@ sub make_constant_arrays {
     my ($b, @nodes) = @_;
     for my $lit (grep { $_->operation eq 'ArrayLiteral' } @nodes) {
         next if _pinned($lit);   # a `my @a` pinned where it runs: made there
+        next if _pkg_literal_of($lit);   # a package array, read where it is read
         next if grep { !( blessed($_) && $_->operation eq 'Constant' ) } $lit->inputs->@*;
         $b->value($lit);
     }
     # A `my %h = (...)` of constants, or of @_, is made at entry too.
-    for my $lit (grep { $_->operation eq 'HashLiteral' && ( $_->stamp // '' ) eq 'Hash' && !_pinned($_) } @nodes) { # static type
+    for my $lit (grep { $_->operation eq 'HashLiteral' && ( $_->stamp // '' ) eq 'Hash' && !_pinned($_) && !_pkg_literal_of($_) } @nodes) { # static type
         next if grep { !( blessed($_) && ( $_->operation =~ /\A(?:Constant|ArgsSource)\z/ || $b->{args}{ refaddr($_) } ) ) } $lit->inputs->@*;
         $b->value($lit);
     }
@@ -1125,7 +1156,8 @@ sub _pkg_literal_of {
     my ($n) = @_;
     return undef unless blessed($n) && $n->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/;
     for my $w ( ( $n->consumers // [] )->@* ) {
-        next unless blessed($w) && $w->operation eq 'EntryWrite' && blessed( $w->inputs->[1] ) && refaddr( $w->inputs->[1] ) == refaddr($n);
+        next unless blessed($w) && $w->operation eq 'EntryWrite' && !$w->binds   # (a `local`'s fresh one is not stored, bound)
+            && blessed( $w->inputs->[1] ) && refaddr( $w->inputs->[1] ) == refaddr($n);
         return $w->inputs->[0] if _pkg_agg( $w->inputs->[0] );
     }
     return undef;
@@ -1135,9 +1167,22 @@ sub _pkg_literal_of {
 sub pkg_agg {
     my ($b, $n) = @_;
     my $h = $n->sigil eq '%';
-    my $name = ( $h ? 'pkghash::' : 'pkgarr::' ) . ( ( $n->can('package') ? $n->package : undef ) // 'main' ) . '::' . $n->symbol;
-    return $b->{locs}{$name} //= $b->emit_entry(op => $h ? 'GHash' : 'GArray', type => $h ? '%Slot' : '%Array*',
-                                                attr => { global => $b->global_named($name) });
+    my $name = _pkg_agg_name($n);
+    my %op = (op => $h ? 'GHash' : 'GArray', type => $h ? '%Slot' : '%Array*', attr => { global => $b->global_named($name) });
+    # ONE A `local` SWAPS is read where it stands: which aggregate the global
+    # holds there is the swap's, before it and after its restore the old one.
+    return $b->emit(%op) if $b->swapped->{$name};
+    return $b->{locs}{$name} //= $b->emit_entry(%op);
+}
+sub _pkg_agg_name {
+    my ($n) = @_;
+    return ( $n->sigil eq '%' ? 'pkghash::' : 'pkgarr::' ) . ( ( $n->can('package') ? $n->package : undef ) // 'main' ) . '::' . $n->symbol;
+}
+# swapped -> { name => 1 } of the package aggregates a `local` swaps anywhere.
+sub swapped {
+    my ($b) = @_;
+    return $b->{swapped} //= { map { ( _pkg_agg_name( $_->inputs->[0] ) => 1 ) }
+        grep { $_->operation eq 'EntryWrite' && $_->binds && _pkg_agg( $_->inputs->[0] ) } _all_nodes( $b->{mop}, $b->{ret} ) };
 }
 sub _named_hash {
     my ($n) = @_;
@@ -1214,9 +1259,10 @@ sub array_value {
         return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->location($t) ])
             if blessed($t) && $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$' && $t->is_location;
         # \%h: a named hash IS its reference here (a %Slot of tag 5), one hash, two names.
-        return $b->value($t) if blessed($t) && _named_hash($t) && ( $v->stamp // '' ) eq 'HashRef';   # static type
+        return $b->value($t) if blessed($t) && ( _named_hash($t) || _pkg_agg($t) && $t->sigil eq '%' ) && ( $v->stamp // '' ) eq 'HashRef';   # static type
         out('a reference to what is not an array') unless blessed($t)
-            && ( $t->operation eq 'ArrayLiteral' && ( $t->stamp // '' ) eq 'Array' || _aderef($t) || _array_var($t) || _argv($t) ) # static
+            && ( $t->operation eq 'ArrayLiteral' && ( $t->stamp // '' ) eq 'Array' || _aderef($t) || _array_var($t) || _argv($t)
+                 || _pkg_agg($t) && $t->sigil eq '@' ) # static
             && ( $v->stamp // '' ) eq 'ArrayRef';   # \(@a) is a reference to each element type
         return $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->array_of($t) ]);
     }
