@@ -66,6 +66,18 @@ sub matcher ( $pattern, $flags, $flavor = 'scalar', %o ) {
     my $g = bless { n => [], const => {}, var => {}, stamp => {}, uniq => 0, prog => [], looks => [], nslots => 2 + 2 * $p->{ngroups} }, __PACKAGE__;
     $g->{ascii} = _any_ascii( $p->{tree} );
     $g->{ng}    = $p->{ngroups};
+    # A CODE BLOCK RUNS AS OFTEN AS PERL'S OPTIMIZER TRIES A START THAT REACHES IT:
+    # in an all-literal pattern that is once, on the hit (perl finds the whole
+    # text first). The bodies are arguments (code values), called in order there.
+    if ( $g->{ncode} = $p->{ncode} // 0 ) {
+        die "GAP: a regex code block in a pattern that is not all literal -- how often it runs is perl's optimizer's\n"
+            unless _all_literal( $p->{tree} ) && !grep { $p->{flags}{$_} } qw(i m s x);
+        die "GAP: a regex code block in a match that is not one in scalar context\n" unless $flavor eq 'scalar';
+        # (each body is an argument: a matcher made without them -- a qr value's,
+        # a pattern a qr is interpolated into -- would never run them)
+        die "GAP: a regex code block whose body is not given to its matcher (a qr value, an interpolated pattern)\n"
+            unless ( $o{codes} // 0 ) == $g->{ncode};
+    }
     $g->emit_prog( $p->{tree} );
     push @{ $g->{prog} }, ['match'];
     $g->{flavor} = $flavor;
@@ -158,6 +170,7 @@ sub emit_prog ( $g, $n ) {
     if ( $t eq 'seq' ) { $g->emit_prog($_) for @{ $n->{items} }; return }
     if ( $t eq 'set' )    { $g->ins( 'set', $n ); return }
     if ( $t eq 'rlit' )   { $g->ins( 'rlit', $n->{k} ); return }
+    return if $t eq 'code';    # (zero-width: called on the hit -- accept)
     if ( $t eq 'assert' ) {
         $g->{uses_G} = 1 if $n->{kind} eq 'G';
         $g->ins( 'assert', $n->{kind} );
@@ -229,6 +242,17 @@ sub emit_prog ( $g, $n ) {
         return;
     }
     die "GAP: a regex node $t is not lowered as a graph\n";
+}
+
+# _all_literal($tree): one string and code blocks, groups unquantified -- a
+# pattern perl's optimizer finds whole before running any block.
+sub _all_literal ($n) {
+    my $t = $n->{t};
+    return 1 if $t eq 'code';
+    return !$n->{neg} && @{ $n->{ranges} } == 1 && $n->{ranges}[0][0] == $n->{ranges}[0][1] if $t eq 'set';
+    return !grep { !_all_literal($_) } @{ $n->{items} } if $t eq 'seq';
+    return _all_literal( $n->{body} ) if $t eq 'group';
+    return 0;
 }
 
 sub _may_be_empty ($n) {
@@ -362,6 +386,7 @@ sub build ( $g, $p ) {
     push @params, $g->{rv} = $g->node( 'PadAccess', f => { sigil => '$', symbol => 'rv' }, stamp => 'Scalar' )
         if $g->{segs} && grep { $_->{kind} eq 'val' } @{ $g->{segs} };
     push @params, map { $g->{rlit}[$_] = $g->node( 'PadAccess', f => { sigil => '$', symbol => "lit$_" }, stamp => 'Str' ) } 0 .. $g->{nrlit} - 1;
+    push @params, map { $g->{code}[$_] = $g->node( 'PadAccess', f => { sigil => '$', symbol => "code$_" }, stamp => 'Scalar' ) } 0 .. $g->{ncode} - 1;
     $g->node( 'Assign', in => [ @params, $g->node( 'ArgsSource', stamp => 'Array' ) ], f => { targets => scalar @params }, stamp => 'List' );
     $g->{len}   = $g->node( 'Length', in => [ $g->{s} ], stamp => 'Int' );
     $g->{stack} = $g->node( 'ArrayLiteral', stamp => 'Array' );
@@ -655,6 +680,7 @@ sub accept ($g) {
         $g->set( r1 => $pos );
         $g->set( "r$_" => $g->get("k$_") ) for 2 .. 1 + 2 * $g->{ng};
         $g->set( run => $g->int_(0) );
+        $g->stmt( 'Call', in => [$_], f => { dispatch_kind => 'indirect', name => '', param_names => [] }, stamp => 'Unknown' ) for @{ $g->{code} // [] };
     }
 }
 

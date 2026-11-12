@@ -27,6 +27,8 @@ for my $body (
     '(my $t = $s) =~ s/x*/-/g; print "$t\n";',
     '(my $t = $s) =~ s/^/>/; print "$t\n";',
     '$s =~ s/(\d+)$//; print "$s\n";',
+    '(my $t = $s) =~ s/(\d+)/$1*2/e; print "$t\n";',
+    'my $u = $s =~ s/(\d+)/$1+1/er; print "$u $s\n";',
 ) {
     my $r = tap("my \$s = \$ENV{S} // 'a1b22c333';\n$body\n");
     is $r->{verdict}, 'SAME', $body or diag $r->{why} // explain $r;

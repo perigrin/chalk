@@ -2090,7 +2090,10 @@ sub regex_result {
     my ($b, $m) = @_;
     my $k = 'rx' . refaddr($m);
     return $b->{memo}{$k} if $b->{memo}{$k};
-    out('a regex match with code blocks') if $m->can('code_bodies') && $m->code_bodies && @{ $m->code_bodies };
+    my @code = $b->code_bodies($m);
+    # A MATCH WHOSE BLOCKS RUN STORES what they store: every read of an earlier
+    # version is made before it (a read between two such matches saw the second).
+    if (@code) { $b->hash_reads_settled('a match whose code blocks run'); $b->reads_before($_) for @{ $b->{passed} } }
     my $subj = $b->as( $b->value( $m->inputs->[0] ), '%Slot' );
     my ( $pat, $flags ) = ( $m->can('pattern') ? $m->pattern : undef, $m->flags // '' );
     my $rlits;
@@ -2113,6 +2116,7 @@ sub regex_result {
     }
     my @lit = map { $b->as( $b->value($_), '%Slot' ) } @{ $rlits // [] };
     my %ro = @lit ? ( rlits => scalar @lit ) : ();
+    $ro{codes} = scalar @code if @code;
     # m//g IN SCALAR CONTEXT, AND \G: from the subject's pos(), which a /g
     # match then moves (a failed one resets it, unless /c).
     if ( $flags =~ /g/ || ( $pat // '' ) =~ /\\G/ ) {
@@ -2123,7 +2127,19 @@ sub regex_result {
         return $b->{memo}{$k} = $r;
     }
     my $fn = $b->regex_fn( $pat // '', $flags, 'scalar', %ro );
-    return $b->{memo}{$k} = $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $subj, @lit ], attr => { fn => $fn->{name} });
+    return $b->{memo}{$k} = $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $subj, @lit, @code ], attr => { fn => $fn->{name} });
+}
+
+# code_bodies($match) -> a code value of each `(?{ ... })` body B::SoN lifted
+# (in pattern order): arguments of the match's graph, which calls them.
+sub code_bodies {
+    my ($b, $m) = @_;
+    my @names = $m->can('code_bodies') && $m->code_bodies ? @{ $m->code_bodies } : ();
+    return map {
+        my $g = $Chalk::IR::Serialize::JSON::CODE_GRAPHS{$_} // out('a regex code block whose body B::SoN did not give');
+        my $sub = $b->{rxcode}{$_} //= Chalk::MOP::Sub->new( name => $_, class => undef, graph => $g, params => ['@_'], uses_args => 1 );
+        $b->emit(op => 'CodeOfFn', type => '%Slot', attr => { fn => $b->func( $sub, 'rxcode_' . scalar keys %{ $b->{rxcode} } )->{name} });
+    } @names;
 }
 
 # pos_cells($pad) -> the two cells of a variable's pos(): where its next m//g

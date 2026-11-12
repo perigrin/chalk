@@ -21,6 +21,7 @@ use Chalk::Regex::Pattern;
 #   { t => 'look',   ahead => 0|1, neg => 0|1, body => NODE, width => W (behind) }
 #   { t => 'rlit',   k => K }      the Kth literal known only at run time (\Q$x\E):
 #                    the character chr($RLIT + K) in the pattern stands for it
+#   { t => 'code',   n => N }      the Nth `(?{ ... })` block: zero-width
 #
 # Flags: i m s x (u is dropped -- see `ascii`); g c o r e are the OP's, not
 # the pattern's, and pass through untouched. Anything else dies GAP: never a
@@ -45,10 +46,10 @@ sub parse ( $pattern, $flags = '' ) {
     my @bad = grep { !/[imsxugcoreal]/ } sort keys %f;
     die "GAP: regex flags '@bad' are not lowered as a graph\n" if @bad;
     die "GAP: regex flag /$_ (a character set) is not lowered as a graph\n" for grep { $f{$_} } qw(a l);
-    my $st = { c => [ split //, $pattern ], i => 0, p => $pattern, f => \%f, ng => 0 };
+    my $st = { c => [ split //, $pattern ], i => 0, p => $pattern, f => \%f, ng => 0, nc => 0 };
     my $tree = _alt($st);
     die "GAP: unbalanced ')' in regex pattern '$pattern'\n" if $st->{i} <= $#{ $st->{c} };
-    return { tree => $tree, ngroups => $st->{ng}, flags => { map { ( $_ => $f{$_} // 0 ) } qw(i m s x) } };
+    return { tree => $tree, ngroups => $st->{ng}, ncode => $st->{nc}, flags => { map { ( $_ => $f{$_} // 0 ) } qw(i m s x) } };
 }
 
 sub _peek ( $st, $k = 0 ) { return $st->{c}[ $st->{i} + $k ] }
@@ -117,7 +118,12 @@ sub _atom ($st) {
                 return { t => 'look', ahead => 0, neg => $neg, body => $body, width => $w };
             }
             elsif ( $k eq '<' || $k eq 'P' || $k eq "'" ) { _gap( $st, 'a named capture' ) }
-            elsif ( $k eq '{' || $k eq '?' ) { _gap( $st, 'a code block' ) }
+            # A CODE BLOCK: zero-width, the Nth body B::SoN lifted (Graph calls it).
+            elsif ( $k eq '{' ) {
+                $st->{i} = Chalk::Regex::Pattern::code_block_end( $st->{c}, $st->{i} + 2 );
+                return { t => 'code', n => $st->{nc}++ };
+            }
+            elsif ( $k eq '?' ) { _gap( $st, 'a postponed subexpression (??{...})' ) }
             elsif ( $k eq '#' ) { $st->{i}++ while defined _peek($st) && _peek($st) ne ')'; $st->{i}++; return { t => 'seq', items => [] } }
             elsif ( $k eq '|' ) { _gap( $st, 'a branch reset (?|...)' ) }
             elsif ( $k eq '>' ) { _gap( $st, 'an atomic group (?>...)' ) }
