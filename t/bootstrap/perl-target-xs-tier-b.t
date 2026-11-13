@@ -32,7 +32,7 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 # ============================================================
 
 {
-    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/IR/Node/Constant.pm');
+    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/IR/Node/Constant.pm');
     ok(defined $ir, 'Constant: parse produces IR');
 
     SKIP: {
@@ -130,26 +130,7 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
     }
 }
 
-# ============================================================
-# 5. Constructor.pm — 1 field reader + method
-# ============================================================
-
-{
-    my ($ir, $sa, $sem_ctx) = parse_file_ir($gen_grammar, 'lib/Chalk/Bootstrap/IR/Node/Constructor.pm');
-    ok(defined $ir, 'Constructor: parse produces IR');
-
-    SKIP: {
-        skip 'Constructor: no IR', 4 unless defined $ir;
-
-        my $module = 'Chalk::Bootstrap::Perl::XS::TierB::Constructor';
-        my ($dist, $err) = build_and_load($ir, $sa, $sem_ctx, $module);
-        ok(defined $dist, 'Constructor: XS builds') or do {
-            diag $err;
-            skip 'Constructor: build failed', 2;
-        };
-
-        skip 'Constructor: inherits from IR::Node with required params - XS wrapper param forwarding not yet implemented', 2;
-    }
-}
+# (5. Constructor.pm was here; the file was deleted in 7586b543 -- NodeFactory
+# routes make('Constructor') through a shim -- so there is nothing to build.)
 
 done_testing();

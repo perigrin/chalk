@@ -29,12 +29,12 @@ is($call->name(), 'foo', 'Call name');
 like($call->content_hash(), qr/Call\|dispatch_kind=method\|name=foo/, 'Call content_hash');
 
 my $hr = Chalk::IR::Node::HashLiteral->new(id => 'hr_0', inputs => []);
-isa_ok($hr, 'Chalk::IR::Node::Aggregate', 'HashRef isa Aggregate');
-is($hr->operation(), 'HashRef', 'HashRef operation');
+isa_ok($hr, 'Chalk::IR::Node::Aggregate', 'HashLiteral isa Aggregate');
+is($hr->operation(), 'HashLiteral', 'HashLiteral operation');
 
 my $ar = Chalk::IR::Node::ArrayLiteral->new(id => 'ar_0', inputs => []);
-isa_ok($ar, 'Chalk::IR::Node::Aggregate', 'ArrayRef isa Aggregate');
-is($ar->operation(), 'ArrayRef', 'ArrayRef operation');
+isa_ok($ar, 'Chalk::IR::Node::Aggregate', 'ArrayLiteral isa Aggregate');
+is($ar->operation(), 'ArrayLiteral', 'ArrayLiteral operation');
 
 my $interp = Chalk::IR::Node::Interpolate->new(id => 'int_0', inputs => []);
 isa_ok($interp, 'Chalk::IR::Node::Aggregate', 'Interpolate isa Aggregate');

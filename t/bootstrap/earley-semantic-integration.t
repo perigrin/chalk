@@ -123,7 +123,7 @@ package TestRule {
 
     my $result = $actions->Identifier($ctx);
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'semantic action returns IR node');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'semantic action returns IR node');
     is($result->value(), 'TestId', 'semantic action preserves value');
 }
 

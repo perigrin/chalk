@@ -31,7 +31,7 @@ ok(defined $gen_grammar, 'grammar pipeline setup') or BAIL_OUT("Cannot continue:
 
 my @test_cases = (
     {
-        file        => 'lib/Chalk/Bootstrap/IR/Node/Start.pm',
+        file        => 'lib/Chalk/IR/Node/Start.pm',
         module      => 'Chalk::Bootstrap::Perl::XS::TierA::Start',
         label       => 'Start',
         skip_behavioral => 'inherits from IR::Node with required params - XS wrapper param forwarding not yet implemented',
@@ -40,7 +40,7 @@ my @test_cases = (
         ],
     },
     {
-        file        => 'lib/Chalk/Bootstrap/IR/Node/Return.pm',
+        file        => 'lib/Chalk/IR/Node/Return.pm',
         module      => 'Chalk::Bootstrap::Perl::XS::TierA::Return',
         label       => 'Return',
         skip_behavioral => 'inherits from IR::Node with required params - XS wrapper param forwarding not yet implemented',

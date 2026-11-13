@@ -171,7 +171,8 @@ my $typed   = Chalk::IR::NodeFactory->new;
         compat_class => 'HashRefExpr',
     );
 
-    is($arr1, $arr2, 'same class and inputs deduplicated');
+    # Two literals are two allocations, never one (d1e94ad8).
+    isnt($arr1, $arr2, 'same class and inputs: two allocations, not deduplicated');
     isnt($arr1, $hash, 'different class not deduplicated');
 }
 

@@ -62,7 +62,7 @@ my $factory = Chalk::IR::NodeFactory->new();
     my $extended = $ctx->extend($f);
     my $result = $extended->extract();
 
-    isa_ok($result, 'Chalk::Bootstrap::IR::Node::Constant', 'extended focus is Constant node');
+    isa_ok($result, 'Chalk::IR::Node::Constant', 'extended focus is Constant node');
     is($result->value(), 'transformed', 'extract(extend(f, w)) = f(w)');
 }
 
