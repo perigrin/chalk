@@ -504,7 +504,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             }
         }
 
-        if ($has_early_return) {
+        # A RETURN IS EMITTED as `goto xsreturn` wherever it stands, the last
+        # one too, so the label is needed whenever one is.
+        if ($has_early_return || grep { /\bgoto xsreturn\b/ } @helper) {
             push @helper, '    xsreturn:';
         }
         if ($has_return) {
@@ -724,7 +726,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 push @helper, "    $line";
             }
         }
-        if ($has_early_return) {
+        # A RETURN IS EMITTED as `goto xsreturn` wherever it stands, the last
+        # one too, so the label is needed whenever one is.
+        if ($has_early_return || grep { /\bgoto xsreturn\b/ } @helper) {
             push @helper, '    xsreturn:';
         }
         if ($has_return) {
