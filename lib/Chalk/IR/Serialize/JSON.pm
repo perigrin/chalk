@@ -779,6 +779,10 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'EnvRead') {
             $args{key} = $fields->{key};
         }
+        elsif ($op eq 'SubDefined') {
+            $args{$_} = $fields->{$_} for qw(name answer);
+            $args{unless} = [ @{ $fields->{unless} // [] } ];
+        }
         # B::SoN's ops the backend does not lower yet still LOAD, so it can say
         # by name what it lacks instead of the loader dying on the op.
         elsif ($op =~ /\A(?:Exists|Delete|ElemRestore|Chomp|ChompValue)\z/) {
@@ -1029,6 +1033,11 @@ sub _deserialize_graph ($method_data) {
 
 
 
+# THE GRAPHS THE PROGRAM MAY RUN (_reachable_methods), all the wire carried, the module subs B::SoN
+# refused, and those of them a graph that runs calls -- for the passes that ask
+# which code runs (Analysis::_answer_sub_defined).
+our ( %RUN, %ON_WIRE, %REFUSED, %REFUSED_CALLED );
+
 # _reachable_methods(\%methods) -> the names of the graphs the program may run.
 # from_json loads only these: what is never run is neither compiled nor read.
 # Dies when one runs a module sub B::SoN refused (`refused`), in its words.
@@ -1040,6 +1049,7 @@ sub _deserialize_graph ($method_data) {
 # shortcut: a call by a computed name (&{"POSIX::$f"}) does not reach a module
 # sub; such a call is refused elsewhere, and reaching would need its names.
 sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
+    %REFUSED_CALLED = ();
     # SURE: the program's own graphs, and what a sure graph calls by name, by a
     # named class's method, or lifts. A method call on an unknown invocant only
     # MAY reach a sub of its name: loaded, but never reason to refuse.
@@ -1086,6 +1096,7 @@ sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
             }
         }
         push @sure, grep { /\A\Q$g\E::__(?:ANON|SORTCMP|SUBSTREPL)__:/ } keys %$methods;
+        $REFUSED_CALLED{$_} = 1 for grep { $refused->{$_} } @sure, @maybe;
         for my $k (@sure, @maybe) {
             next unless $methods->{$k};
             my $up = $sure{$g} && !$sure{$k} && grep { $_ eq $k } @sure;
@@ -1280,6 +1291,10 @@ sub from_json ($json_string) {
     # A FOLLOWED MODULE'S SUB the program never reaches is not loaded.
     my %run = map { $_ => 1 } _reachable_methods( $data->{methods} // {}, $data->{classes} // {}, $data->{refused} // {} );
     my @gone = grep { !$run{$_} } keys %{ $data->{methods} // {} };
+    # (what runs, for the passes that ask: Analysis::_answer_sub_defined)
+    %RUN = %run;
+    %ON_WIRE = map { ( $_ => 1 ) } keys %{ $data->{methods} // {} };
+    %REFUSED = %{ $data->{refused} // {} };
     delete @{ $data->{methods} }{@gone};
     # ...and its class's record of it: a module's class keeps its shape, and
     # the name stays in its stash, unloaded (can() asks by name).

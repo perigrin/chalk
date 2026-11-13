@@ -403,6 +403,7 @@ sub infer ($class, $graphs) {
     # belief that the repr fixpoint below needed to precede it -- measured
     # wrong: _replay_classes seals the MOP ~30 lines BEFORE the direct-call
     # fixpoint, so the metaobject is available to it.
+    _answer_sub_defined(\%graphs);
     _rewrite_tied_scalars(\%graphs);
     _attach_call_targets(\%graphs, $mop);
     _class_of_self_chains(\%graphs, $mop);
@@ -895,6 +896,35 @@ our %TIED;
 # CLASS's FETCH on the tie's object, and a tied() of x the object. One read at
 # most -- each would run FETCH, and a method call is lowered once -- and
 # only after the tie. tied() of what nothing ties is undef.
+# _answer_sub_defined(\%graphs): B::SoN's `defined &NAME` asked where the program
+# runs (SubDefined: its answer as compiled, and the graphs whose run may change
+# it) IS that answer -- unless one of those graphs may run here (the loader's
+# reach), or is a module sub B::SoN refused and a graph that runs calls, or is
+# none the wire knows: then refused by name. (A program's own subs are all
+# loaded, so each counts as one that may run.)
+sub _answer_sub_defined ($graphs) {
+    my $factory = Chalk::IR::NodeFactory->new();
+    no warnings 'once';
+    my $run = \%Chalk::IR::Serialize::JSON::RUN;
+    my $refused = \%Chalk::IR::Serialize::JSON::REFUSED;
+    my $called = \%Chalk::IR::Serialize::JSON::REFUSED_CALLED;
+    my $wire = \%Chalk::IR::Serialize::JSON::ON_WIRE;
+    for my $g (values %$graphs) {
+        my @nodes = _all_graph_nodes($g);
+        for my $q (grep { $_->operation eq 'SubDefined' } @nodes) {
+            my ($by) = grep { $run->{$_} || $called->{$_} || !$wire->{$_} && !$refused->{$_} } $q->unless->@*;
+            die "GAP: `defined &" . $q->name . "` may change as the program runs ($by may run)\n" if defined $by;
+            my $k = $factory->make('Constant', const_type => 'boolean', value => ( $q->answer ? 1 : '' ));
+            $k->set_stamp('Boolean');
+            for my $c (grep { my $c = $_; grep { blessed($_) && refaddr($_) == refaddr($q) } $c->inputs->@* } @nodes) {
+                $_ = $k for grep { blessed($_) && refaddr($_) == refaddr($q) } $c->inputs->@*;
+                $k->add_consumer($c);
+            }
+        }
+    }
+    return;
+}
+
 sub _rewrite_tied_scalars ($graphs) {
     %TIED = ();
     my $factory = Chalk::IR::NodeFactory->new();
