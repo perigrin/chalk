@@ -9341,6 +9341,8 @@ sub _emit_unwind_terminator {
 # ends without dying.
 sub open_eval {
     my ($self, $region) = @_;
+    die "GAP: a block eval whose body returns (an eval Region of more than one way in) is not lowered\n"
+        if $region->inputs->@* > 1;
     die "GAP: a block eval whose body makes a value that may die (a division by what "
       . "may be zero, an element reference) is not lowered -- perl's message names the "
       . "file and line, and an unused one is not in the graph\n"

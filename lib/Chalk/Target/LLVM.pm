@@ -2015,6 +2015,8 @@ sub lower_with_elaboration {
     local %Chalk::Target::LLVM::Context::EVAL_BY_ENTRY;
     for my $r (grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed($_->eval_entry) }
                @Chalk::Target::LLVM::Context::PROGRAM) {
+        die "GAP: a block eval whose body returns (an eval Region of more than one way in) is not lowered\n"
+            if $r->inputs->@* > 1;
         push $Chalk::Target::LLVM::Context::EVAL_BY_ENTRY{ refaddr($r->eval_entry) }->@*, $r;
     }
     # Each anonymous sub's node, by name: a closure called directly finds
