@@ -43,6 +43,7 @@ sub make_forward_control_ref_graph {
     my $n10 = $f->make('Constant', value => '10', const_type => 'integer');
     my $val = $f->make('Call',
         dispatch_kind => 'method', name => 'val', inputs => [$n10]);
+    $val->set_stamp('Scalar');   # the producer stamps every call
     my $ret = $f->make_cfg('Return', inputs => [$val]);
 
     # The void statement-effect call ($c->inc;) is allocated AFTER Return and
@@ -50,6 +51,7 @@ sub make_forward_control_ref_graph {
     # control_in predecessor (Start -> inc -> Return).
     my $inc = $f->make('Call',
         dispatch_kind => 'method', name => 'inc', inputs => [$n10]);
+    $inc->set_stamp('Int');
     $inc->set_control_in($start);
     $ret->set_control_in($inc);
 

@@ -54,6 +54,7 @@ sub make_effectful_loop_graph {
     my $one  = $f->make('Constant', value => '1', const_type => 'integer');
     my $call = $f->make('Call', dispatch_kind => 'builtin', name => 'unused',
         inputs => [$print, $one]);
+    $call->set_stamp('Scalar');   # the producer stamps every call
 
     # --- loop header: entry control is the Call (last sequenced effect) ---
     my $loop = $f->make_cfg('Loop', inputs => [$call]);
@@ -109,6 +110,12 @@ sub make_effectful_loop_graph {
     my $read  = $f->make('Subscript', inputs => [$i_phi, $idx0, $mem_phi]);
 
     my $ret = $f->make_cfg('Return', inputs => [$region, $read]);
+
+    # Stamped as B::SoN stamps this loop: a memory Phi Unknown, an element
+    # Scalar, the induction variable Int.
+    $mem_phi->set_stamp('Unknown');
+    $_->set_stamp('Int') for $i_phi, $i_plus_1, $i_next;
+    $_->set_stamp('Scalar') for $lvalue, $read;
 
     my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
     return ($graph, {

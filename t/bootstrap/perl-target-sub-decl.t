@@ -52,7 +52,6 @@ my sub emit_via_program($stmt) {
 {
     my $return_node = $factory->make_cfg('Return',
         inputs => [
-            $factory->make('Start'),
             $factory->make('Constant', const_type => 'string', value => '42'),
         ],
     );

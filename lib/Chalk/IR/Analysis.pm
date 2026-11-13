@@ -142,6 +142,10 @@ my %_COMPUTED_REPR = (
 # to seed: the literal's repr is whatever its stamp says. The same conflation
 # cost 37 corpus spec blocks and one wrong fix of mine on the consumer side, and
 # it died loudly in the producer's own code the moment the two strings differed.
+my %_CONST_TYPE_REPR = (
+    integer => 'Int', int => 'Int', number => 'Num', float => 'Num',
+    string => 'Str', boolean => 'Boolean', bool => 'Boolean', undef => 'Undef',
+);
 my %_SEED_REPR = (
     RegexMatch => 'Boolean',
 );
@@ -2601,6 +2605,15 @@ sub _seed_and_propagate_reprs ($graphs) {
                 && $node->can('const_type')
                 && ($node->const_type // '') eq 'regex') {
                 $node->set_stamp('Regex');
+                next;
+            }
+            # A LITERAL NO STAMP CAME WITH (a graph built by hand, not off the
+            # wire) is typed by what it is: T1 stamps every node (94316971).
+            # Absent only: a wire's Unknown is an answer, kept as sent.
+            if ($node->operation eq 'Constant' && _stamp_is_absent($node)
+                && $node->can('const_type')
+                && defined( my $t = $_CONST_TYPE_REPR{ $node->const_type // '' } )) {
+                $node->set_stamp($t);
                 next;
             }
             my $seed = $_SEED_REPR{ $node->operation } // next;

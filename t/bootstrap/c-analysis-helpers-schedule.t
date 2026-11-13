@@ -31,7 +31,7 @@ sub schedule_of(@nodes) {
 {
     my $start = $factory->make('Start');
     my $val = $factory->make('Constant', const_type => 'string', value => 'x');
-    my $ret = $factory->make_cfg('Return', inputs => [$start, $val]);
+    my $ret = $factory->make_cfg('Return', inputs => [$val]);
 
     my $sched_with_return = schedule_of($ret);
     my $sched_no_return = schedule_of($val);
@@ -47,7 +47,7 @@ sub schedule_of(@nodes) {
 {
     my $start = $factory->make('Start');
     my $val = $factory->make('Constant', const_type => 'string', value => 'x');
-    my $ret_early = $factory->make_cfg('Return', inputs => [$start, $val]);
+    my $ret_early = $factory->make_cfg('Return', inputs => [$val]);
     my $val2 = $factory->make('Constant', const_type => 'string', value => 'y');
 
     my $sched_early = schedule_of($ret_early, $val2);
@@ -64,8 +64,8 @@ sub schedule_of(@nodes) {
 {
     my $start = $factory->make('Start');
     my $name = $factory->make('Constant', const_type => 'variable', value => '$foo');
-    # VarDecl is a data node: inputs => [control, name, init]
-    my $vd = $factory->make('VarDecl', inputs => [$start, $name, undef]);
+    # VarDecl: inputs => [name, init]; control via control_in
+    my $vd = $factory->make('VarDecl', inputs => [$name, undef]);
     my $sched = schedule_of($vd);
     my %declared;
     $target->_collect_var_decls($sched, \%declared);

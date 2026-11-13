@@ -91,6 +91,7 @@ sub make_simple_graph {
     my $arg   = $f->make('Constant', value => '1', const_type => 'integer');
     my $call  = $f->make('Call', dispatch_kind => 'builtin', name => 'push',
                           inputs => [$arg]);
+    $call->set_stamp('Int');   # the producer stamps every call
     my $ret   = $f->make_cfg('Return', inputs => [$start, $call]);
     my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
 
@@ -186,8 +187,10 @@ sub make_simple_graph {
     my $m     = $f->make(q{RegexMatch}, pattern => q{(a)}, flags => q{}, inputs => [$subj]);
     my $cap   = $f->make(q{RegexCapture}, n => 1, inputs => [$m]);
     my $env   = $f->make(q{EnvRead}, key => q{CHALK_TEST});
+    $_->set_stamp(q{Str}) for $cap, $env;   # as the producer stamps them
     my $call  = $f->make(q{Call}, dispatch_kind => q{method}, name => q{new},
         param_names => [q{left}, q{right}], inputs => [$cap, $env]);
+    $call->set_stamp(q{Object});   # the producer stamps every call
     my $ret   = $f->make_cfg(q{Return}, inputs => [$start, $call]);
     my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
 
@@ -310,6 +313,7 @@ JSON
     my $loop  = $f->make_cfg('Loop', inputs => [$start]);
     my $init  = $f->make('Constant', value => '0', const_type => 'integer');
     my $phi   = $f->make('Phi', inputs => [$init], region => $loop);
+    $phi->set_stamp('Int');   # as B::SoN stamps a loop counter
     my $one   = $f->make('Constant', value => '1', const_type => 'integer');
     my $add   = $f->make('Add', inputs => [$phi, $one]);
     $phi->set_backedge($add) if $phi->can('set_backedge');
@@ -414,6 +418,7 @@ subtest 'a loop Phi backedge is never treated as a topo predecessor to visit' =>
     my $loop  = $f->make_cfg('Loop', inputs => [$start]);
     my $init  = $f->make('Constant', value => '0', const_type => 'integer');
     my $phi   = $f->make('Phi', inputs => [$init], region => $loop);
+    $phi->set_stamp('Int');   # as B::SoN stamps a loop counter
     my $one   = $f->make('Constant', value => '1', const_type => 'integer');
     my $add   = $f->make('Add', inputs => [$phi, $one]);
     $phi->set_backedge($add);
