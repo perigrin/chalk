@@ -1933,7 +1933,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @elements, $val;
             }
         }
-        return $ctx->factory->make('ArrayRef',
+        return $ctx->factory->make('ArrayLiteral',
             inputs       => [\@elements],
         );
     }
@@ -1952,7 +1952,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @pairs, $val;
             }
         }
-        return $ctx->factory->make('HashRef',
+        return $ctx->factory->make('HashLiteral',
             inputs       => [\@pairs],
         );
     }
@@ -2409,7 +2409,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # The emitter will render it as (k, v, ...) for hash variable init.
                 my $init_value = $value;
                 if (ref($value) eq 'ARRAY') {
-                    $init_value = $ctx->factory->make('HashRef',
+                    $init_value = $ctx->factory->make('HashLiteral',
                         inputs       => [$value],
                     );
                 }

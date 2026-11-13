@@ -95,9 +95,9 @@ IR
 %ca2=Constant(2) :Int
 %ca3=Constant(3) :Int
 %ca4=Constant(4) :Int
-%ref0=ArrayRef(%ca1, %ca2) :ArrayRef
-%ref1=ArrayRef(%ca3, %ca4) :ArrayRef
-%outer_ref=ArrayRef(%ref0, %ref1) :ArrayRef
+%ref0=ArrayLiteral(%ca1, %ca2) :ArrayRef
+%ref1=ArrayLiteral(%ca3, %ca4) :ArrayRef
+%outer_ref=ArrayLiteral(%ref0, %ref1) :ArrayRef
 %outer_arr=PostfixDeref(%outer_ref, sigil: "@") :Array
 %idx1=Constant(1) :Int
 %inner_ref=Subscript(%outer_arr, %idx1) :ArrayRef
@@ -111,9 +111,9 @@ IR
 %ca2=Constant(2) :Int
 %ca3=Constant(3) :Int
 %ca4=Constant(4) :Int
-%ref0=ArrayRef(%ca1, %ca2) :ArrayRef
-%ref1=ArrayRef(%ca3, %ca4) :ArrayRef
-%outer_ref=ArrayRef(%ref0, %ref1) :ArrayRef
+%ref0=ArrayLiteral(%ca1, %ca2) :ArrayRef
+%ref1=ArrayLiteral(%ca3, %ca4) :ArrayRef
+%outer_ref=ArrayLiteral(%ref0, %ref1) :ArrayRef
 %idx0=Constant(0) :Int
 %inner_ref=Subscript(%outer_ref, %idx0) :ArrayRef
 %idx1=Constant(1) :Int
@@ -162,7 +162,7 @@ IR
     my $spec = <<'IR';
 %c1=Constant(1) :Int
 %c2=Constant(2) :Int
-%ref=ArrayRef(%c1, %c2) :ArrayRef
+%ref=ArrayLiteral(%c1, %c2) :ArrayRef
 %arr=PostfixDeref(%ref, sigil: "@") :Array
 %i0=Constant(0) :Int
 %r=Subscript(%arr, %i0) :Int
@@ -171,7 +171,7 @@ IR
     my $wrong = <<'IR';
 %c1=Constant(1) :Int
 %c2=Constant(2) :Int
-%ref=ArrayRef(%c1, %c2) :ArrayRef
+%ref=ArrayLiteral(%c1, %c2) :ArrayRef
 %arr=PostfixDeref(%ref, sigil: "%") :Array
 %i0=Constant(0) :Int
 %r=Subscript(%arr, %i0) :Int
@@ -278,7 +278,7 @@ IR
 %c1   = Constant(1) :Int
 %c2   = Constant(2) :Int
 %c3   = Constant(3) :Int
-%arr  = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr  = ArrayLiteral(%c1, %c2, %c3) :ArrayRef
 %idx  = Constant(0) :Int
 %lval = Subscript(%arr, %idx) :Int
 %nv   = Constant(42) :Int
@@ -289,7 +289,7 @@ IR
 %c1    = Constant(1) :Int
 %c2    = Constant(2) :Int
 %c3    = Constant(3) :Int
-%arr   = ArrayRef(%c1, %c2, %c3) :ArrayRef
+%arr   = ArrayLiteral(%c1, %c2, %c3) :ArrayRef
 %idx   = Constant(0) :Int
 %lval  = Subscript(%arr, %idx) :Int
 %nv    = Constant(42) :Int
