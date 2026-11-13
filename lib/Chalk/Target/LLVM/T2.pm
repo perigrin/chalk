@@ -3268,7 +3268,7 @@ sub type_of {
         if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'caller';
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'substr';
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:int|rand)\z/;
-    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:ftdir|chdir)\z/;
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:ftdir|chdir|reftype_of_ref)\z/;
     return 'i64' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'require';
     return 'i64'   if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'index';
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
@@ -3546,6 +3546,10 @@ sub _value {
             attr => { msg => $msg, id => $b->{strs}{$msg} });
         $b->after_call;   # (a zero modulus is a die: an eval's to catch)
         return $r;
+    }
+    # `ref \$x` (B::SoN's reftype_of_ref): what kind of thing $x holds.
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'reftype_of_ref') {
+        return $b->as( $b->emit(op => 'KindOfRef', type => '%Slot', inputs => [ $b->as( $b->value( $v->inputs->[0] ), '%Slot' ) ]), $ty );
     }
     # -x: perl's, on the value it has at run time (t2_slot_neg).
     if ($op eq 'Negate') {
@@ -3953,6 +3957,7 @@ sub _line {
     return "$nm = call %Slot \@t2_substr(" . $arg->(@in) . ')' if $op eq 'Substr';
     return "$nm = call %Slot \@t2_substr_rep(" . $arg->(@in) . ')' if $op eq 'SubstrRep';
     return "$nm = call %Slot \@t2_slot_neg(" . $arg->(@in) . ')' if $op eq 'SlotNeg';
+    return "$nm = call %Slot \@t2_kind_of_ref(" . $arg->(@in) . ')' if $op eq 'KindOfRef';
     return "$nm = call i1 \@t2_aexists(" . $arg->(@in) . ')' if $op eq 'AExists';
     return "call void \@t2_aset_len(" . $arg->(@in) . ')' if $op eq 'ASetLen';
     return "$nm = call i64 \@t2_index(" . $arg->(@in) . ')' if $op eq 'Index';
@@ -4893,6 +4898,21 @@ flip:
   ret %Slot %fb
 }
 @lit_minus = private unnamed_addr constant [2 x i8] c"-\00"
+; ref \$x: "REF" when $x holds a reference (tags 5..9), else "SCALAR". (T2
+; holds no glob, lvalue or vstring values, the other answers perl gives.)
+@lit_kind_ref = private unnamed_addr constant [4 x i8] c"REF\00"
+@lit_kind_scalar = private unnamed_addr constant [7 x i8] c"SCALAR\00"
+define internal %Slot @t2_kind_of_ref(%Slot %x) {
+  %t = extractvalue %Slot %x, 0
+  %lo = icmp uge i8 %t, 5
+  %hi = icmp ule i8 %t, 9
+  %isref = and i1 %lo, %hi
+  %rs = call %Str @t2_str(i8* getelementptr ([4 x i8], [4 x i8]* @lit_kind_ref, i64 0, i64 0), i64 3)
+  %ss = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_kind_scalar, i64 0, i64 0), i64 6)
+  %s = select i1 %isref, %Str %rs, %Str %ss
+  %b = call %Slot @t2_box_str(%Str %s)
+  ret %Slot %b
+}
 define internal %Slot @t2_slot_mul(%Slot %x, %Slot %y) {
 entry:
   %tx = extractvalue %Slot %x, 0

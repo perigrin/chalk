@@ -900,7 +900,9 @@ our %TIED;
 # runs (SubDefined: its answer as compiled, and the graphs whose run may change
 # it) IS that answer -- unless one of those graphs may run here (the loader's
 # reach), or is a module sub B::SoN refused and a graph that runs calls, or is
-# none the wire knows: then refused by name. (A program's own subs are all
+# none the wire knows that a running graph calls (by its name, or a method of
+# its short name -- a module B::SoN loads but does not follow, as Errno for %!):
+# then refused by name. (A program's own subs are all
 # loaded, so each counts as one that may run.)
 sub _answer_sub_defined ($graphs) {
     my $factory = Chalk::IR::NodeFactory->new();
@@ -909,10 +911,11 @@ sub _answer_sub_defined ($graphs) {
     my $refused = \%Chalk::IR::Serialize::JSON::REFUSED;
     my $called = \%Chalk::IR::Serialize::JSON::REFUSED_CALLED;
     my $wire = \%Chalk::IR::Serialize::JSON::ON_WIRE;
+    my $called_name = \%Chalk::IR::Serialize::JSON::CALLED;
     for my $g (values %$graphs) {
         my @nodes = _all_graph_nodes($g);
         for my $q (grep { $_->operation eq 'SubDefined' } @nodes) {
-            my ($by) = grep { $run->{$_} || $called->{$_} || !$wire->{$_} && !$refused->{$_} } $q->unless->@*;
+            my ($by) = grep { $run->{$_} || $called->{$_} || !$wire->{$_} && !$refused->{$_} && ( $called_name->{$_} || $called_name->{ s{\A.*::}{}r } ) } $q->unless->@*;
             die "GAP: `defined &" . $q->name . "` may change as the program runs ($by may run)\n" if defined $by;
             my $k = $factory->make('Constant', const_type => 'boolean', value => ( $q->answer ? 1 : '' ));
             $k->set_stamp('Boolean');

@@ -1036,7 +1036,7 @@ sub _deserialize_graph ($method_data) {
 # THE GRAPHS THE PROGRAM MAY RUN (_reachable_methods), all the wire carried, the module subs B::SoN
 # refused, and those of them a graph that runs calls -- for the passes that ask
 # which code runs (Analysis::_answer_sub_defined).
-our ( %RUN, %ON_WIRE, %REFUSED, %REFUSED_CALLED );
+our ( %RUN, %ON_WIRE, %REFUSED, %REFUSED_CALLED, %CALLED );   # %CALLED: names a running graph calls (full, or a method's short name)
 
 # _reachable_methods(\%methods) -> the names of the graphs the program may run.
 # from_json loads only these: what is never run is neither compiled nor read.
@@ -1050,6 +1050,7 @@ our ( %RUN, %ON_WIRE, %REFUSED, %REFUSED_CALLED );
 # sub; such a call is refused elsewhere, and reaching would need its names.
 sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
     %REFUSED_CALLED = ();
+    %CALLED = ();
     # SURE: the program's own graphs, and what a sure graph calls by name, by a
     # named class's method, or lifts. A method call on an unknown invocant only
     # MAY reach a sub of its name: loaded, but never reason to refuse.
@@ -1084,6 +1085,7 @@ sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
             # program cannot be compiled without it -- say why, in its words.
             die "GAP: $runs, which the program calls, is refused in its module: $refused->{$runs}\n"
                 if $sure{$g} && defined $runs && defined $refused->{$runs};
+            $CALLED{ $runs // $name } = 1;
             if ( defined $runs ) { push @sure, $runs }
             else { push @maybe, $name, @{ $by_sub{ $name =~ s/\A.*:://r } // [] } }
             # UNIVERSAL::can BY A NAME KNOWN HERE: the sub it names may be
