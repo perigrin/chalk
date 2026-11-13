@@ -3421,6 +3421,10 @@ sub _lower_negate {
     my $v = $self->_operand_as($x, $repr, '-');
     my $r = $self->_fresh;
     $self->_emit($repr eq 'Int' ? "  $r = sub i64 0, $v  ; -" : "  $r = fneg " . _repr_to_llvm_type('Num') . " $v  ; -");
+    # A SCALAR NEGATION (B::SoN types it so: -"abc" is "-abc"; the string
+    # case stopped above) is the number, in a cell.
+    $r = $self->_emit_box_into_slot($r, $repr, '-')
+        if ( $self->_repr_of($node) // '' ) =~ /\A(?:Scalar|Slot)\z/;
     return $self->{cache}{ $node->id } = $r;
 }
 

@@ -452,6 +452,9 @@ sub walk {
         elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'Hash') { $ctl = $s }
         # A chdir OR A require is made where it stands (the next -d reads its cwd).
         elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:chdir|require)\z/) { $b->value($s); $ctl = $s }
+        # A FOUR-ARGUMENT substr (an lvalue substr, an s/// into one): its part
+        # replaced in the `my` scalar where it stands.
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'substr') { $b->substr_write($s); $ctl = $s }
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands.
         elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || ( $s->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/ )) {
@@ -2501,6 +2504,28 @@ sub _in_place {
         && blessed($subj) && $subj->operation eq 'PadAccess';
 }
 
+# substr_write($Call): substr($s, o, l, R) where it stands -- $s a `my` scalar
+# kept here: its new string stored; the call's value the part it replaced.
+sub substr_write {
+    my ($b, $s) = @_;
+    my @a = grep { blessed($_) } $s->inputs->@*;
+    pop @a if $s->can('memory_input') && $s->memory_input;
+    out('a substr statement of other than four arguments') unless @a == 4;
+    my $pad = $a[0];
+    out('a four-argument substr of what is not a `my` scalar kept here')
+        unless $pad->operation eq 'PadAccess' && ( $pad->sigil // '' ) eq '$' && $pad->is_location;
+    my $old = $b->as( $b->value($pad), '%Str' );
+    my $off = $b->as( $b->value( $a[1] ), 'i64' );
+    my $len = $b->as( $b->value( $a[2] ), 'i64' );
+    my $rep = $b->as( $b->value( $a[3] ), '%Str' );
+    my $part = $b->emit(op => 'Substr', type => '%Slot', inputs => [ $old, $off, $len, $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }) ]);
+    my $new = $b->emit(op => 'SubstrRep', type => '%Slot', inputs => [ $old, $off, $len, $rep ]);
+    $b->reads_before( $pad->inputs->[0] );
+    $b->emit(op => 'Store', type => 'void', inputs => [ $new, $b->location($pad) ]);
+    $b->pos_reset($pad);
+    $b->{memo}{ refaddr($s) } = $part;
+}
+
 # regex_subst_stmt($RegexSubst): an s/// where it stands -- in place (not /r):
 # its new string stored into its subject, a `my` scalar kept here.
 sub regex_subst_stmt {
@@ -2988,6 +3013,18 @@ sub loop_breaks {
     # the head phis' back edges.
     my @lat = grep { !$_->{block}{dead} } @{ $lx->{latches} };
     out('a loop that never goes round') unless @lat;
+    # A WAY ROUND THROUGH A REGION THAT FEEDS THE LATCH (a `redo` in a nested
+    # arm): that Region merged first, its merge one way into the next.
+    while (1) {
+        my %by = map { ( refaddr($_->{region}) => $_->{region} ) } grep { $_->{region} } @lat;
+        my ($inner) = grep { my $r = $_; my @o = _region_outs($r); @o == 1 } values %by;
+        last unless $inner;
+        my ($outer) = _region_outs($inner);
+        my @in = grep { $_->{region} && refaddr($_->{region}) == refaddr($inner) } @lat;
+        my ( $blk, $memo ) = $b->merge_at( $inner, 'round', $head_memo, @in );
+        @lat = ( ( grep { !( $_->{region} && refaddr($_->{region}) == refaddr($inner) ) } @lat ),
+                 { block => $blk, memo => $memo, end => $inner, region => $outer } );
+    }
     my %lr = map { ( ( $_->{region} ? refaddr( $_->{region} ) : 0 ) => $_->{region} ) } @lat;
     out('a loop whose ways round do not meet at one latch') if keys %lr > 1;
     my ($latch) = values %lr;
@@ -3091,7 +3128,16 @@ sub loop_jump {
 # it, or a Region it is a way into (a latch has neither).
 sub _goes_on {
     my ($r) = @_;
-    return successors($r) || grep { blessed($_) && $_->operation eq 'Region' && grep { blessed($_) && refaddr($_) == refaddr($r) } $_->inputs->@* } ( $r->consumers // [] )->@*;
+    # (through a Region it feeds that goes on: one that feeds only the latch,
+    # a Region with no way on, does not)
+    return successors($r) || grep { blessed($_) && $_->operation eq 'Region' && ( grep { blessed($_) && refaddr($_) == refaddr($r) } $_->inputs->@* ) && _goes_on($_) } ( $r->consumers // [] )->@*;
+}
+
+# _region_outs($Region) -> the Regions it is a way into.
+sub _region_outs {
+    my ($r) = @_;
+    my %seen;
+    return grep { blessed($_) && $_->operation eq 'Region' && !$seen{ refaddr($_) }++ && grep { blessed($_) && refaddr($_) == refaddr($r) } $_->inputs->@* } ( $r->consumers // [] )->@*;
 }
 
 # loop_edge($lx, $end, $arm) -> true (and recorded) when control $end leaves
@@ -3498,6 +3544,10 @@ sub _value {
         $b->after_call;   # (a zero modulus is a die: an eval's to catch)
         return $r;
     }
+    # -x: perl's, on the value it has at run time (t2_slot_neg).
+    if ($op eq 'Negate') {
+        return $b->as( $b->emit(op => 'SlotNeg', type => '%Slot', inputs => [ $b->as( $b->value( $v->inputs->[0] ), '%Slot' ) ]), $ty );
+    }
     if (my $a = $ARITH{$op}) {
         if ($ty eq '%Slot') {
             return $b->emit(op => 'SlotArith', type => '%Slot', attr => { op => $a },
@@ -3583,6 +3633,7 @@ sub _value {
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:substr|index)\z/) {
         my @a = grep { blessed($_) } $v->inputs->@*;
         pop @a if $v->can('memory_input') && $v->memory_input;
+        return $b->{memo}{ refaddr($v) } // out('a four-argument substr read before it is made') if $v->name eq 'substr' && @a == 4;
         out('a ' . $v->name . ' of more than three arguments') if @a > 3;
         my $str = $b->as( $b->value( $a[0] ), '%Str' );
         if ($v->name eq 'substr') {
@@ -3897,6 +3948,8 @@ sub _line {
     return "$nm = call %Array* \@t2_caller(" . $arg->(@in) . ')' if $op eq 'Caller';
     return "$nm = call %Slot \@t2_caller_pkg(" . $arg->(@in) . ')' if $op eq 'CallerPkg';
     return "$nm = call %Slot \@t2_substr(" . $arg->(@in) . ')' if $op eq 'Substr';
+    return "$nm = call %Slot \@t2_substr_rep(" . $arg->(@in) . ')' if $op eq 'SubstrRep';
+    return "$nm = call %Slot \@t2_slot_neg(" . $arg->(@in) . ')' if $op eq 'SlotNeg';
     return "$nm = call i64 \@t2_index(" . $arg->(@in) . ')' if $op eq 'Index';
     return "$nm = call i1 \@t2_defined(" . $arg->(@in) . ')' if $op eq 'Defined';
     if ($op eq 'Truth') {
@@ -4086,6 +4139,52 @@ undef:
   call void @t2_run_ends()
   call void @exit(i32 255)
   unreachable
+}
+; substr(s, off, len, r): s with the part substr(s, off, len) names replaced by r
+; -- the offsets t2_substr takes (which stopped already were they outside).
+define internal %Slot @t2_substr_rep(%Str %s, i64 %off, i64 %len, %Str %r) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %rp = extractvalue %Str %r, 0
+  %rn = extractvalue %Str %r, 1
+  %oneg = icmp slt i64 %off, 0
+  %npos = icmp sgt i64 %n, 0
+  %adj = and i1 %oneg, %npos
+  %offn = add i64 %off, %n
+  %p1 = select i1 %adj, i64 %offn, i64 %off
+  %lneg = icmp slt i64 %len, 0
+  %fromend = add i64 %n, %len
+  %p1neg = icmp slt i64 %p1, 0
+  %p1len = add i64 %p1, %len
+  %room = sub i64 %n, %p1
+  %toolong = icmp sgt i64 %len, %room
+  %fwd = select i1 %toolong, i64 %n, i64 %p1len
+  %pos2 = select i1 %p1neg, i64 %p1len, i64 %fwd
+  %p2a = select i1 %lneg, i64 %fromend, i64 %pos2
+  %p2neg = icmp slt i64 %p2a, 0
+  %p2b = select i1 %p2neg, i64 0, i64 %p2a
+  %p1b = select i1 %p1neg, i64 0, i64 %p1
+  %under = icmp slt i64 %p2b, %p1b
+  %p2c = select i1 %under, i64 %p1b, i64 %p2b
+  %over = icmp sgt i64 %p2c, %n
+  %p2 = select i1 %over, i64 %n, i64 %p2c
+  %tail = sub i64 %n, %p2
+  %l0 = add i64 %p1b, %rn
+  %l = add i64 %l0, %tail
+  %l1 = add i64 %l, 1
+  %buf = call i8* @malloc(i64 %l1)
+  call i8* @memcpy(i8* %buf, i8* %p, i64 %p1b)
+  %mid = getelementptr i8, i8* %buf, i64 %p1b
+  call i8* @memcpy(i8* %mid, i8* %rp, i64 %rn)
+  %dst = getelementptr i8, i8* %buf, i64 %l0
+  %src = getelementptr i8, i8* %p, i64 %p2
+  call i8* @memcpy(i8* %dst, i8* %src, i64 %tail)
+  %end = getelementptr i8, i8* %buf, i64 %l
+  store i8 0, i8* %end
+  %str = call %Str @t2_str(i8* %buf, i64 %l)
+  %box = call %Slot @t2_box_str(%Str %str)
+  ret %Slot %box
 }
 ; index(s, t, pos): the first place at or after pos (clamped into the string) t is, or -1.
 define internal i64 @t2_index(%Str %s, %Str %t, i64 %pos0) {
@@ -4726,6 +4825,69 @@ nums:
   %sn = call %Slot @t2_box_num(double %d)
   ret %Slot %sn
 }
+; -x, perl's (pp_negate): a number 0 - x (so -0.0 is 0); a string that begins
+; with a letter or _ gets a "-", one with a "+" (or a lone "-") its sign turned;
+; "-" then a digit or "." is a number. "-" then anything else hangs on whether
+; perl reads it as a number ("-inf" does, "-abc" does not): stopped, not guessed.
+@lit_neg_stop = private unnamed_addr constant [50 x i8] c"unary minus of a \22-\22 string: stopped (chalk, T2)\0A\00"
+define internal %Slot @t2_slot_neg(%Slot %x) {
+entry:
+  %t = extractvalue %Slot %x, 0
+  %isstr = icmp eq i8 %t, 3
+  br i1 %isstr, label %str, label %num
+num:
+  %z = call %Slot @t2_box_i64(i64 0)
+  %r = call %Slot @t2_slot_sub(%Slot %z, %Slot %x)
+  ret %Slot %r
+str:
+  %s = call %Str @t2_slot_str(%Slot %x)
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %empty = icmp eq i64 %n, 0
+  br i1 %empty, label %num, label %first
+first:
+  %c = load i8, i8* %p
+  %let = call i1 @t2_is_letter(i8 %c)
+  %und = icmp eq i8 %c, 95
+  %id = or i1 %let, %und
+  br i1 %id, label %prefix, label %sign
+prefix:
+  %m = call %Str @t2_str(i8* getelementptr ([2 x i8], [2 x i8]* @lit_minus, i64 0, i64 0), i64 1)
+  %j = call %Str @t2_concat(%Str %m, %Str %s)
+  %jb = call %Slot @t2_box_str(%Str %j)
+  ret %Slot %jb
+sign:
+  %plus = icmp eq i8 %c, 43
+  br i1 %plus, label %flip, label %minus
+minus:
+  %ism = icmp eq i8 %c, 45
+  br i1 %ism, label %after, label %num
+after:
+  %lone = icmp eq i64 %n, 1
+  br i1 %lone, label %flip, label %next
+next:
+  %p1 = getelementptr i8, i8* %p, i64 1
+  %c1 = load i8, i8* %p1
+  %d0 = icmp uge i8 %c1, 48
+  %d1 = icmp ule i8 %c1, 57
+  %dig = and i1 %d0, %d1
+  %dot = icmp eq i8 %c1, 46
+  %numy = or i1 %dig, %dot
+  br i1 %numy, label %num, label %stop
+stop:
+  call void @t2_stop(i8* getelementptr ([50 x i8], [50 x i8]* @lit_neg_stop, i64 0, i64 0), i64 49)
+  unreachable
+flip:
+  %n1 = add i64 %n, 1
+  %buf = call i8* @malloc(i64 %n1)
+  call i8* @memcpy(i8* %buf, i8* %p, i64 %n1)
+  %to = select i1 %plus, i8 45, i8 43
+  store i8 %to, i8* %buf
+  %f = call %Str @t2_str(i8* %buf, i64 %n)
+  %fb = call %Slot @t2_box_str(%Str %f)
+  ret %Slot %fb
+}
+@lit_minus = private unnamed_addr constant [2 x i8] c"-\00"
 define internal %Slot @t2_slot_mul(%Slot %x, %Slot %y) {
 entry:
   %tx = extractvalue %Slot %x, 0

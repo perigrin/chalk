@@ -42,6 +42,8 @@ for my $c (
     [ q{my $a = -1.5; my $z = $a * 0; print "$z\n";} ],
     [ q{my $a = $ARGV[0] // 12; my $f = 2.5; my $i = 7; print -$a, " ", -$f, " ", -$i, " ", -(0.5 - 0.5), "\n";} ],
     [ q{my $x = 3; my $y = -$x * 2; print $y, " ", - -$x, "\n";} ],
+    # (with a ** T2 does not take: the fallback's, its value a cell -- pvm 038)
+    [ q{my $a = $ARGV[0] // 12; my $p = $a ** 2; print -$a, " $p\n";} ],
 ) {
     my ($src) = @$c;
     my $want = qx($^X -e '$src');
