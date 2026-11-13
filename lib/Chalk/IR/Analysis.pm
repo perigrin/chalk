@@ -658,6 +658,8 @@ sub infer ($class, $graphs) {
 
     _narrow_unknown_coercions(\%graphs);
     _type_calls_by_context(\%graphs);
+    # ...and what merges such a call (a per-context copy's return Phi) follows it.
+    _seed_and_propagate_reprs(\%graphs);
 
     # THE EXIT INVARIANT -- NOT YET ENFORCED. See
     # _assert_value_nodes_are_typed below for why it is off and what has to
