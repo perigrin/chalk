@@ -1227,6 +1227,10 @@ sub from_json ($json_string) {
     our @PHASE_BLOCKS = ();
     our @PHASE_GRAPHS = ();
     our %CODE_GRAPHS = ();
+    # THE MODULES AND FILES B::SoN FOLLOWED (a sub's `module`: Foo::Bar, or a
+    # required .pl by its path): compiled in, so a require of one is done.
+    our %FOLLOWED = map { ( $_->{module} => 1 ) } grep { ref $_ eq 'HASH' && defined $_->{module} }
+        values %{ $data->{methods} // {} };
     my $phase_n = 0;
     # Each sub's prototype, by its full name: prototype(\&f) reads it. A sub
     # the program defines with none is there, undef.

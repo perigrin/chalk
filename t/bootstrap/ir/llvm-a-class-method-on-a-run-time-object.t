@@ -54,11 +54,14 @@ for my $src (
     is($got, $want, "perl's answer: " . ( $src =~ s/\n/ /gr ));
 }
 
-# Two classes have the method: which one an object is, nothing here knows.
-{
-    my $src = $hdr . qq{class Cat { method id { 1 } }\nclass Dog { method id { 2 } }\nsub f (\$in) { return join(",", map { \$_->id } \$in->\@*) }\nprint f([Cat->new, Dog->new]), "\\n";\n};
-    my $got = eval { through_llvm_file(file_of($src)) } // "REFUSED $@";
-    like($got, qr/\AREFUSED lower: GAP: /, "refused by name: two classes have it");
+# Two classes have the method: T2 dispatches on the object's class at run
+# time (it was refused only while array `exists` was not T2's). Both orders.
+for my $objs ("Cat->new, Dog->new", "Dog->new, Cat->new, Dog->new") {
+    my $src = $hdr . qq{class Cat { method id { 1 } }\nclass Dog { method id { 2 } }\nsub f (\$in) { return join(",", map { \$_->id } \$in->\@*) }\nprint f([$objs]), "\\n";\n};
+    my $pl = file_of($src);
+    my $want = qx($^X $pl 2>/dev/null) . "exit " . ($? >> 8);
+    my $got = eval { through_llvm_file($pl) } // "REFUSED $@";
+    is($got, $want, "two classes have it: $objs");
 }
 
 done_testing;

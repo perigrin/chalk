@@ -91,8 +91,9 @@ sub lower_program {
         # element, `\(@a)`, `\$_[0]`): refused, not stopped at run time. T2
         # makes one to a `my` scalar kept in memory, an array's, a hash's.
         Chalk::Target::LLVM::T2::Builder::out('a scalar deref where a reference T2 does not make may reach it')
-            if grep( { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret) )
+            if grep( { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' && !Chalk::Target::LLVM::T2::Builder::_alias_elem($_) } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret) )
             && grep { $_->operation eq 'Ref' && !( ( $_->stamp // '' ) =~ /\A(?:ArrayRef|HashRef)\z/
+                          || Chalk::Target::LLVM::T2::Builder::_alias_ref($_)
                           || blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'PadAccess' && ( $_->inputs->[0]->sigil // '' ) eq '$' && $_->inputs->[0]->is_location ) }
                      Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
         $b->build($ret); 1 };
@@ -368,7 +369,8 @@ sub walk {
         elsif ($op eq 'PackageMark') { $ctl = $s }
         # A CHOICE PINNED WHERE IT RUNS (B::SoN pins one that reads memory, `$n
         # > 1 ? ... : ...` of a package scalar): its value made here, in order.
-        elsif ($op eq 'TernaryExpr') { $b->value($s); push @{ $b->{passed} }, $s; $ctl = $s }
+        # (A FOREACH ALIAS'S GUARDED REFERENCE is never made: its deref is the element.)
+        elsif ($op eq 'TernaryExpr') { $b->value($s) unless _alias_guard($s); push @{ $b->{passed} }, $s; $ctl = $s }
         # A READ OF $@ ON THE CHAIN is made where it stands: a caught die sets
         # $@ with no store in the graph, so only its place orders it.
         # (B::SoN gives two reads of $@ around a caught die one version, and
@@ -448,6 +450,8 @@ sub walk {
         # A `my %h = (...)` LIST PINNED where it runs: made by the assign that
         # stores it into its hash, in place.
         elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'Hash') { $ctl = $s }
+        # A chdir OR A require is made where it stands (the next -d reads its cwd).
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:chdir|require)\z/) { $b->value($s); $ctl = $s }
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands.
         elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || ( $s->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/ )) {
@@ -652,6 +656,8 @@ sub _guarded {
 sub _through_ref {
     my ($b, $n) = @_;
     my $op = $n->operation;
+    # (a foreach alias read is its element's read)
+    if ( $op eq 'PostfixDeref' && ( my $el = _alias_elem($n) ) ) { return $b->_through_ref($el) }
     if ($op =~ /\A(?:Subscript|Exists)\z/ && ( $n->can('kind') ? $n->kind // '' : '' ) eq 'hash') {
         return _named_hash($n->inputs->[0]) || $n->inputs->[0]->operation eq 'FieldAccess' ? 0 : 1;   # a `my %h`, a hash field: never a stop
     }
@@ -1079,6 +1085,16 @@ sub hash_value {
         return $b->emit(op => 'HGet', type => '%Slot', inputs => [ $h, $k ]) if $op eq 'Subscript';
         return $b->emit(op => 'HExists', type => 'i1', inputs => [ $h, $k ]) if $op eq 'Exists';
         return $b->emit(op => 'HDelete', type => '%Slot', inputs => [ $h, $k ]);
+    }
+    # AN ARRAY ELEMENT EXISTS where its index is in the array: T2's arrays have
+    # no holes (no array delete), so 0 <= i < len, or -len <= i for a negative one.
+    if ( $op eq 'Exists' && $kind eq 'array' ) {
+        my $len = $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of( $in[0] ) ]);
+        my $i   = $b->as( $b->value( $in[1] ), 'i64' );
+        my $neg = $b->emit(op => 'Arith', type => 'i64', inputs => [ $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }), $len ], attr => { op => 'sub' });
+        my $lo  = $b->emit(op => 'Cmp', type => 'i1', inputs => [ $i, $neg ], attr => { op => 'ge' });
+        my $hi  = $b->emit(op => 'Cmp', type => 'i1', inputs => [ $i, $len ], attr => { op => 'lt' });
+        return $b->emit(op => 'Select', type => 'i1', inputs => [ $lo, $hi, $b->emit(op => 'Const', type => 'i1', attr => { value => 0 }) ]);
     }
     # caller: the site of the call this sub is in, N frames up (the stack
     # each call pushes). A package in scalar context; (package, file, line).
@@ -2996,6 +3012,58 @@ sub loop_breaks {
     return $R;
 }
 
+# _alias_elem($deref) -> the element a FOREACH ALIAS READ reads -- B::SoN's
+# ${ \ $_[i] } (inside a guard of $_[i]'s existence, its other way undef) --
+# or undef. Not one written through (a store into the caller's variable).
+sub _alias_elem {
+    my ($d) = @_;
+    return undef unless blessed($d) && $d->operation eq 'PostfixDeref' && ( $d->sigil // '' ) eq '$';
+    return undef if grep { blessed($_) && $_->operation =~ /\A(?:Assign|Increment|Decrement)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($d) }
+        ( $d->consumers // [] )->@*;
+    # ONLY THE GUARDED FORM (a bare \$a[i] deref is a reference T2 does not make:
+    # one before the array's start dies), ONLY OVER @_, ONLY WHERE NOTHING
+    # RESHAPES @_ -- a foreach over an array its body shifts reads by index
+    # into the changing array, which this is not.
+    my $t = $d->inputs->[0];
+    return undef unless blessed($t) && $t->operation eq 'TernaryExpr' && blessed( $t->inputs->[2] )
+        && $t->inputs->[2]->operation eq 'Constant' && ( $t->inputs->[2]->const_type // '' ) eq 'undef';
+    my $r = $t->inputs->[1];
+    return undef unless blessed($r) && $r->operation eq 'Ref';
+    my $s = $r->inputs->[0];
+    return undef unless blessed($s) && $s->operation eq 'Subscript' && ( $s->can('kind') ? $s->kind // 'array' : 'array' ) eq 'array';
+    my $a = $s->inputs->[0];
+    return undef unless blessed($a) && $a->operation eq 'ArgsSource';
+    return undef if grep { blessed($_) && $_->operation eq 'Call' && ( $_->name // '' ) =~ /\A(?:shift|pop|push|unshift|splice)\z/
+                           && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($a) } ( $a->consumers // [] )->@*;
+    return $s;
+}
+# _alias_guard($TernaryExpr) -> true for a foreach alias's guard: c ? \$a[i] : undef,
+# its reference read only through derefs (_alias_ref).
+sub _alias_guard {
+    my ($t) = @_;
+    my ($r, $u) = @{ $t->inputs }[ 1, 2 ];
+    return blessed($r) && $r->operation eq 'Ref' && _alias_ref($r)
+        && blessed($u) && $u->operation eq 'Constant' && ( $u->const_type // '' ) eq 'undef';
+}
+# _alias_ref($Ref) -> true when every use of it is a foreach alias read (it
+# escapes nowhere: the deref of it is the element).
+sub _alias_ref {
+    my ($r) = @_;
+    my @c = grep { blessed($_) } ( $r->consumers // [] )->@*;
+    return 0 unless @c;
+    for my $c (@c) {
+        if ( $c->operation eq 'PostfixDeref' ) { return 0 unless _alias_elem($c); next }
+        if ( $c->operation eq 'TernaryExpr' && blessed( $c->inputs->[1] ) && refaddr( $c->inputs->[1] ) == refaddr($r) ) {
+            my $t = $c;
+            my @d = grep { my $u = $_; blessed($u) && grep { blessed($_) && refaddr($_) == refaddr($t) } $u->inputs->@* } ( $c->consumers // [] )->@*;   # (its values' users, not its control's)
+            return 0 unless @d && !grep { !( $_->operation eq 'PostfixDeref' && _alias_elem($_) ) } @d;
+            next;
+        }
+        return 0;
+    }
+    return 1;
+}
+
 # loop_exit($Loop) -> the Region the program goes on from after it: of the
 # Regions B::SoN heads with it (its exit, and the merge of its ways round,
 # which has no way on), the one with a way on.
@@ -3145,12 +3213,14 @@ sub type_of {
     # length of a scalar: undef for undef, so a %Slot; of a string, an i64.
     return ( ( $v->inputs->[0]->stamp // '' ) !~ /\A(?:Array|ArrayRef)\z/ && $b->type_of($v->inputs->[0]) eq '%Slot' ) ? '%Slot' : 'i64' if $op eq 'Length'; # static type
     my $hk = $v->can('kind') ? $v->kind // '' : '';
-    return 'i1' if $op eq 'Exists' && $hk eq 'hash';
+    return 'i1' if $op eq 'Exists' && $hk =~ /\A(?:hash|array)\z/;
     return '%Slot' if $op eq 'Delete' && $hk eq 'hash';
     return ( $v->stamp // '' ) eq 'Scalar' ? '%Slot' : '%Array*'   # static type
         if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'caller';
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'substr';
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:int|rand)\z/;
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:ftdir|chdir)\z/;
+    return 'i64' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'require';
     return 'i64'   if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'index';
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
         return $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar' ? 'i64' : '%Array*';
@@ -3290,6 +3360,12 @@ sub _value {
     }
     # $$r: what the variable r refers to holds; perl's die where r is no SCALAR
     # reference (a string under strict refs; undef too), its eval's to catch.
+    # A FOREACH ALIAS READ (B::SoN's ${ \ $_[i] }, a guard of its existence
+    # around it): the deref of a reference to an element is that element.
+    if ( $op eq 'PostfixDeref' && ( my $el = _alias_elem($v) ) ) {
+        my $arr = do { local $b->{elem_read} = 1; $b->array_of( $el->inputs->[0] ) };
+        return $b->as( $b->emit(op => 'AGet', type => '%Slot', inputs => [ $arr, $b->as( $b->value( $el->inputs->[1] ), 'i64' ) ]), $ty );
+    }
     if ($op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '$') {
         my $at = $b->deref_at($v);
         my $r = $b->emit(op => 'SDeref', type => '%Slot', inputs => [ $b->as($b->value($v->inputs->[0]), '%Slot') ],
@@ -3364,6 +3440,22 @@ sub _value {
         return $b->emit(op => 'Const', type => $ty, attr => { value => $c }) if $ty ne '%Str';
         $b->{strs}{$c} //= scalar keys %{ $b->{strs} };
         return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => $c, id => $b->{strs}{$c} });
+    }
+    # -d PATH: a directory (1), something else there (''), nothing (undef).
+    # chdir PATH: 1, or '' where it could not. A require of a file B::SoN
+    # followed is done -- its subs are compiled in (1); of any other, not T2's.
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:ftdir|chdir|require)\z/) {
+        my @a = grep { blessed($_) && !_is_version($_) } $v->inputs->@*;
+        out( 'a ' . $v->name . ' of no argument' ) unless @a;
+        if ( $v->name eq 'require' ) {
+            my $f = $a[0];
+            out('a require of a file named at run time') unless $f->operation eq 'Constant' && defined $f->value;
+            ( my $mod = $f->value ) =~ s{\.pm\z}{}; $mod =~ s{/}{::}g;
+            out( 'a require of ' . $f->value . ', not compiled in' )
+                unless $Chalk::IR::Serialize::JSON::FOLLOWED{ $f->value } || $Chalk::IR::Serialize::JSON::FOLLOWED{$mod};
+            return $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), $ty );
+        }
+        return $b->as( $b->emit(op => $v->name eq 'ftdir' ? 'FtDir' : 'Chdir', type => '%Slot', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty );
     }
     # int(X): X's number truncated toward zero. rand(X): a number in [0, X),
     # X 1 when absent or 0 (perl's), from libc's generator -- not perl's.
@@ -3698,6 +3790,8 @@ sub _line {
     return "$nm = load %Slot, %Slot* " . $in[0]->name if $op eq 'Load';
     return "$nm = call %Slot \@t2_slot_numify(" . $arg->(@in) . ')' if $op eq 'Numify';
     return "$nm = call %Slot \@t2_slot_int(" . $arg->(@in) . ')' if $op eq 'IntOf';
+    return "$nm = call %Slot \@t2_ftdir(" . $arg->(@in) . ')' if $op eq 'FtDir';
+    return "$nm = call %Slot \@t2_chdir(" . $arg->(@in) . ')' if $op eq 'Chdir';
     return "$nm = call %Slot \@t2_slot_rand(" . $arg->(@in) . ')' if $op eq 'Rand';
     return "store %Slot " . $in[0]->name . ", %Slot* " . $in[1]->name if $op eq 'Store';
     return "$nm = call %Slot \@t2_slot_$a{op}(" . $arg->(@in) . ')' if $op eq 'SlotStep';
@@ -4220,6 +4314,60 @@ define internal %Slot @t2_box_i64(i64 %v) {
   %s = call %Slot @t2_slot(i8 1, i64 %v)
   ret %Slot %s
 }
+; t2_cstr(s): s as a NUL-terminated C string (a copy).
+; t2_ftdir(path): perl's -d -- 1 a directory, '' something else, undef nothing.
+; t2_chdir(path): perl's chdir -- 1, or ''.
+declare i8* @opendir(i8*)
+declare i32 @closedir(i8*)
+declare i32 @access(i8*, i32)
+declare i32 @chdir(i8*)
+define internal i8* @t2_cstr(%Str %s) {
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %n1 = add i64 %n, 1
+  %c = call i8* @malloc(i64 %n1)
+  call i8* @memmove(i8* %c, i8* %p, i64 %n)
+  %e = getelementptr i8, i8* %c, i64 %n
+  store i8 0, i8* %e
+  ret i8* %c
+}
+define internal %Slot @t2_ftdir(%Str %s) {
+entry:
+  %c = call i8* @t2_cstr(%Str %s)
+  %d = call i8* @opendir(i8* %c)
+  %isdir = icmp ne i8* %d, null
+  br i1 %isdir, label %dir, label %other
+dir:
+  call i32 @closedir(i8* %d)
+  %one = call %Slot @t2_box_i64(i64 1)
+  ret %Slot %one
+other:
+  %a = call i32 @access(i8* %c, i32 0)
+  %there = icmp eq i32 %a, 0
+  br i1 %there, label %file, label %none
+file:
+  %no = call %Str @t2_str(i8* getelementptr ([1 x i8], [1 x i8]* @t2_empty, i64 0, i64 0), i64 0)
+  %nos = call %Slot @t2_box_str(%Str %no)
+  ret %Slot %nos
+none:
+  %u = call %Slot @t2_slot(i8 0, i64 0)
+  ret %Slot %u
+}
+define internal %Slot @t2_chdir(%Str %s) {
+entry:
+  %c = call i8* @t2_cstr(%Str %s)
+  %r = call i32 @chdir(i8* %c)
+  %ok = icmp eq i32 %r, 0
+  br i1 %ok, label %yes, label %no
+yes:
+  %one = call %Slot @t2_box_i64(i64 1)
+  ret %Slot %one
+no:
+  %e = call %Str @t2_str(i8* getelementptr ([1 x i8], [1 x i8]* @t2_empty, i64 0, i64 0), i64 0)
+  %es = call %Slot @t2_box_str(%Str %e)
+  ret %Slot %es
+}
+@t2_empty = private unnamed_addr constant [1 x i8] c"\00"
 ; t2_slot_int(x) / t2_slot_rand(x): perl's int and rand of a slot.
 declare double @llvm.trunc.f64(double)
 declare i32 @rand()
