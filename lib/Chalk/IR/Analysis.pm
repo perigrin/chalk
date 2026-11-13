@@ -656,6 +656,7 @@ sub infer ($class, $graphs) {
     }
 
     _narrow_unknown_coercions(\%graphs);
+    _type_calls_by_context(\%graphs);
 
     # THE EXIT INVARIANT -- NOT YET ENFORCED. See
     # _assert_value_nodes_are_typed below for why it is off and what has to
@@ -784,6 +785,26 @@ sub run ($class, $graphs, $classes = undef) {
 # Do NOT enable it by weakening it to "warn" -- a contract nothing enforces is
 # the state this function was written to end.
 # ============================================================================
+# _type_calls_by_context($graphs): A CALL INFERENCE LEFT UNTYPED is what its
+# context makes it. A sub's result in scalar context is a Scalar and in list
+# context a List, whatever the sub is: the widest type that is true, as `@_`
+# is an Array whatever its elements are. Inference leaves one when the callee
+# returns what its caller handed it and the caller's argument is untyped
+# (t/test.pl's `_ok($pass, ...)` called from `is` with its own parameter).
+# A call in any other context stays untyped, and the assertion names it.
+sub _type_calls_by_context ($graphs) {
+    for my $g (values %$graphs) {
+        next unless $g;
+        for my $n ( $g->nodes->@* ) {
+            next unless $n->operation eq 'Call' && _stamp_is_absent($n);
+            next unless ( $n->can('dispatch_kind') ? $n->dispatch_kind // '' : '' ) =~ /\A(?:direct|method|indirect)\z/;
+            my $want = $n->can('want') ? $n->want // '' : '';
+            $n->set_stamp( $want eq 'list' ? 'List' : 'Scalar' ) if $want =~ /\A(?:scalar|list)\z/;
+        }
+    }
+    return;
+}
+
 sub _assert_value_nodes_are_typed ($graphs) {
     my @untyped;
     for my $gname (sort keys %$graphs) {

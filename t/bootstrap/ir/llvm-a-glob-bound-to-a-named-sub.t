@@ -18,7 +18,9 @@ sub through_llvm ($src, $env) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src;
     close $fh;
-    my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null);
+    my ($efh, $ef) = tempfile(SUFFIX => '.err', UNLINK => 1);
+    my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>$ef);
+    my $perr = do { local $/; <$efh> } // '';   # (the producer's refusal, when it is the one)
     my $select = sub ($graphs, $mop) {
         my $g = $graphs->{'main::__PROGRAM__'} or return ();
         my $ret = $g->returns->[0] or return ();
@@ -27,6 +29,7 @@ sub through_llvm ($src, $env) {
     my ($units, undef, undef, $err) =
         Chalk::CodeGen::Pipeline->new->run_detail($json, $select, program_mode => 1);
     die "load: $err\n" if $err;
+    die "load: no program graph: $perr" unless @$units;
     die "lower: $units->[0]{err}\n" unless $units->[0]{ok};
     $LAST_LL = $units->[0]{ll};
     my ($lf, $ll) = tempfile(SUFFIX => '.ll', UNLINK => 1);
