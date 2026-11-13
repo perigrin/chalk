@@ -452,6 +452,14 @@ sub walk {
         elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'Hash') { $ctl = $s }
         # A chdir OR A require is made where it stands (the next -d reads its cwd).
         elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:chdir|require)\z/) { $b->value($s); $ctl = $s }
+        # `$#a = N` where it stands: the array resized (t2_aset_len).
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'set_arylen') {
+            my @a = grep { blessed($_) } $s->inputs->@*;
+            pop @a if $s->can('memory_input') && $s->memory_input;
+            $b->emit(op => 'ASetLen', type => 'void', inputs => [ $b->array_of( $a[0] ), $b->as( $b->value( $a[1] ), 'i64' ) ]);
+            $b->{memo}{ refaddr($s) } = $b->value( $a[1] );
+            $ctl = $s;
+        }
         # A FOUR-ARGUMENT substr (an lvalue substr, an s/// into one): its part
         # replaced in the `my` scalar where it stands.
         elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'substr') { $b->substr_write($s); $ctl = $s }
@@ -1089,15 +1097,10 @@ sub hash_value {
         return $b->emit(op => 'HExists', type => 'i1', inputs => [ $h, $k ]) if $op eq 'Exists';
         return $b->emit(op => 'HDelete', type => '%Slot', inputs => [ $h, $k ]);
     }
-    # AN ARRAY ELEMENT EXISTS where its index is in the array: T2's arrays have
-    # no holes (no array delete), so 0 <= i < len, or -len <= i for a negative one.
+    # AN ARRAY ELEMENT EXISTS where its index is in the array and perl made it:
+    # not a hole (t2_aexists).
     if ( $op eq 'Exists' && $kind eq 'array' ) {
-        my $len = $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of( $in[0] ) ]);
-        my $i   = $b->as( $b->value( $in[1] ), 'i64' );
-        my $neg = $b->emit(op => 'Arith', type => 'i64', inputs => [ $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }), $len ], attr => { op => 'sub' });
-        my $lo  = $b->emit(op => 'Cmp', type => 'i1', inputs => [ $i, $neg ], attr => { op => 'ge' });
-        my $hi  = $b->emit(op => 'Cmp', type => 'i1', inputs => [ $i, $len ], attr => { op => 'lt' });
-        return $b->emit(op => 'Select', type => 'i1', inputs => [ $lo, $hi, $b->emit(op => 'Const', type => 'i1', attr => { value => 0 }) ]);
+        return $b->emit(op => 'AExists', type => 'i1', inputs => [ $b->array_of( $in[0] ), $b->as( $b->value( $in[1] ), 'i64' ) ]);
     }
     # caller: the site of the call this sub is in, N frames up (the stack
     # each call pushes). A package in scalar context; (package, file, line).
@@ -1985,7 +1988,7 @@ sub make_mop {
     my %called = map { ( $_->name =~ s/\A.*:://r => 1 ) }
         grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($mop, $b->{ret});
     # A TIE'S METHODS are the runtime's to call, by these names.
-    $called{$_} = 1 for grep { my $t = $_; grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' } _all_nodes($mop, $b->{ret}) } qw(TIEARRAY TIEHASH FETCH STORE FETCHSIZE PUSH POP SHIFT UNSHIFT EXISTS DELETE CLEAR EXTEND FIRSTKEY NEXTKEY);
+    $called{$_} = 1 for grep { my $t = $_; grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' } _all_nodes($mop, $b->{ret}) } qw(TIEARRAY TIEHASH FETCH STORE FETCHSIZE PUSH POP SHIFT UNSHIFT EXISTS DELETE CLEAR EXTEND STORESIZE FIRSTKEY NEXTKEY);
     # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES, VERSION), else
     # perl's die ("Can't locate object method"), unless an AUTOLOAD answers.
     my %defined = map { ( $_->name => 1 ) } map { ( $_->subs, $_->methods ) } @classes;
@@ -3950,6 +3953,8 @@ sub _line {
     return "$nm = call %Slot \@t2_substr(" . $arg->(@in) . ')' if $op eq 'Substr';
     return "$nm = call %Slot \@t2_substr_rep(" . $arg->(@in) . ')' if $op eq 'SubstrRep';
     return "$nm = call %Slot \@t2_slot_neg(" . $arg->(@in) . ')' if $op eq 'SlotNeg';
+    return "$nm = call i1 \@t2_aexists(" . $arg->(@in) . ')' if $op eq 'AExists';
+    return "call void \@t2_aset_len(" . $arg->(@in) . ')' if $op eq 'ASetLen';
     return "$nm = call i64 \@t2_index(" . $arg->(@in) . ')' if $op eq 'Index';
     return "$nm = call i1 \@t2_defined(" . $arg->(@in) . ')' if $op eq 'Defined';
     if ($op eq 'Truth') {
@@ -5038,7 +5043,7 @@ loop:
   br i1 %more, label %body, label %done
 body:
   %p = getelementptr %Slot, %Slot* %els, i64 %i
-  store %Slot zeroinitializer, %Slot* %p
+  store %Slot { i8 0, i64 1 }, %Slot* %p   ; (absent: perl's hole)
   %i1 = add i64 %i, 1
   br label %loop
 done:
@@ -5054,7 +5059,10 @@ define internal void @t2_apush_d(%Array* %a, %Slot %v) {
   %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
   %els = load %Slot*, %Slot** %ep
   %p = getelementptr %Slot, %Slot* %els, i64 %n
-  store %Slot %v, %Slot* %p
+  %vt = extractvalue %Slot %v, 0
+  %vu = icmp eq i8 %vt, 0
+  %vn = select i1 %vu, %Slot zeroinitializer, %Slot %v
+  store %Slot %vn, %Slot* %p
   ret void
 }
 ; t2_aunshift(a, v): v in front, every element one further on.
@@ -5078,7 +5086,10 @@ body:
   store %Slot %e, %Slot* %to
   br label %loop
 done:
-  store %Slot %v, %Slot* %els
+  %vt = extractvalue %Slot %v, 0
+  %vu = icmp eq i8 %vt, 0
+  %vn = select i1 %vu, %Slot zeroinitializer, %Slot %v
+  store %Slot %vn, %Slot* %els
   ret void
 }
 define internal %Slot @t2_aget_d(%Array* %a, i64 %i) {
@@ -5096,11 +5107,110 @@ get:
   %els = load %Slot*, %Slot** %ep
   %p = getelementptr %Slot, %Slot* %els, i64 %j
   %v = load %Slot, %Slot* %p
-  ret %Slot %v
+  %vt = extractvalue %Slot %v, 0
+  %vu = icmp eq i8 %vt, 0
+  %vr = select i1 %vu, %Slot zeroinitializer, %Slot %v   ; (an absent one is undef)
+  ret %Slot %vr
 undef:
   ret %Slot zeroinitializer
 }
 @lit_aset = private unnamed_addr constant [64 x i8] c"Modification of non-creatable array value attempted, subscript \00"
+; HOLES: an element perl has not made (past a store beyond the end, or $#a
+; grown) is ABSENT -- tag undef, payload 1. Every reader takes it for undef;
+; aget and the stores make it a plain undef, so it never leaves its array.
+; exists $a[i] of a plain array: in it, and not absent.
+define internal i1 @t2_aexists_d(%Array* %a, i64 %i) {
+entry:
+  %n = call i64 @t2_alen_d(%Array* %a)
+  %neg = icmp slt i64 %i, 0
+  %fromend = add i64 %i, %n
+  %j = select i1 %neg, i64 %fromend, i64 %i
+  %lo = icmp slt i64 %j, 0
+  %hi = icmp sge i64 %j, %n
+  %out = or i1 %lo, %hi
+  br i1 %out, label %no, label %look
+look:
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  %p = getelementptr %Slot, %Slot* %els, i64 %j
+  %v = load %Slot, %Slot* %p
+  %t = extractvalue %Slot %v, 0
+  %w = extractvalue %Slot %v, 1
+  %ut = icmp eq i8 %t, 0
+  %uw = icmp eq i64 %w, 1
+  %absent = and i1 %ut, %uw
+  %there = xor i1 %absent, true
+  ret i1 %there
+no:
+  ret i1 false
+}
+; A TIED ARRAY'S are its class's EXISTS and STORESIZE (n + 1); a negative
+; index counts back from its FETCHSIZE, as perl's does. Both are reached through
+; the container's metaobject (slots 18 and 19).
+@lit_tm_storesize = private unnamed_addr constant [10 x i8] c"STORESIZE\00"
+define internal i1 @t2_tie_aexists(%Array* %a, i64 %i) {
+entry:
+  %neg = icmp slt i64 %i, 0
+  br i1 %neg, label %back, label %ask
+back:
+  %n = call i64 @t2_tie_alen(%Array* %a)
+  %fromend = add i64 %i, %n
+  br label %ask
+ask:
+  %j = phi i64 [ %i, %entry ], [ %fromend, %back ]
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %js = call %Slot @t2_box_i64(i64 %j)
+  %args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %args, %Slot %o)
+  call void @t2_apush(%Array* %args, %Slot %js)
+  %m = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_tm_exists, i64 0, i64 0), i64 6)
+  %r = call %Slot @t2_tie_call(%Array* %args, %Str %m)
+  %b = call i1 @t2_truth_slot(%Slot %r)
+  ret i1 %b
+}
+define internal void @t2_tie_aset_len(%Array* %a, i64 %n) {
+entry:
+  %n1 = add i64 %n, 1
+  %neg = icmp slt i64 %n1, 0
+  %nl = select i1 %neg, i64 0, i64 %n1
+  %o = call %Slot @t2_tie_obj(%Array* %a)
+  %ns = call %Slot @t2_box_i64(i64 %nl)
+  %args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %args, %Slot %o)
+  call void @t2_apush(%Array* %args, %Slot %ns)
+  %m = call %Str @t2_str(i8* getelementptr ([10 x i8], [10 x i8]* @lit_tm_storesize, i64 0, i64 0), i64 9)
+  %r = call %Slot @t2_tie_call(%Array* %args, %Str %m)
+  ret void
+}
+define internal i1 @t2_aexists(%Array* %a, i64 %i) {
+  %f = call i8* @t2_vt(%Array* %a, i64 18)
+  %fn = bitcast i8* %f to i1 (%Array*, i64)*
+  %r = call i1 %fn(%Array* %a, i64 %i)
+  ret i1 %r
+}
+define internal void @t2_aset_len(%Array* %a, i64 %n) {
+  %f = call i8* @t2_vt(%Array* %a, i64 19)
+  %fn = bitcast i8* %f to void (%Array*, i64)*
+  call void %fn(%Array* %a, i64 %n)
+  ret void
+}
+; $#a = n: n + 1 elements (none below -1); grown, the new ones are absent.
+define internal void @t2_aset_len_d(%Array* %a, i64 %n) {
+entry:
+  %n1 = add i64 %n, 1
+  %neg = icmp slt i64 %n1, 0
+  %nl = select i1 %neg, i64 0, i64 %n1
+  %len = call i64 @t2_alen_d(%Array* %a)
+  %shrink = icmp sle i64 %nl, %len
+  br i1 %shrink, label %cut, label %grow
+cut:
+  %lp = getelementptr %Array, %Array* %a, i32 0, i32 0
+  store i64 %nl, i64* %lp
+  ret void
+grow:
+  call void @t2_agrow(%Array* %a, i64 %nl)
+  ret void
+}
 define internal void @t2_aset_d(%Array* %a, i64 %i, %Slot %v, i8* %at, i64 %atn) {
 entry:
   %n = call i64 @t2_alen(%Array* %a)
@@ -5115,7 +5225,10 @@ set:
   %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
   %els = load %Slot*, %Slot** %ep
   %p = getelementptr %Slot, %Slot* %els, i64 %j
-  store %Slot %v, %Slot* %p
+  %vt = extractvalue %Slot %v, 0
+  %vu = icmp eq i8 %vt, 0
+  %vn = select i1 %vu, %Slot zeroinitializer, %Slot %v
+  store %Slot %vn, %Slot* %p
   ret void
 die:
   %m = getelementptr [64 x i8], [64 x i8]* @lit_aset, i64 0, i64 0
@@ -6507,7 +6620,7 @@ die:
 ; rest look the operation up there. A tie's entries call the object's
 ; methods; the other kind's entries stay the default's.
 %Meta = type { i8**, %Slot }
-@t2_vt_default = internal global [18 x i8*] [
+@t2_vt_default = internal global [20 x i8*] [
   i8* bitcast (%Slot (%Array*, i64)* @t2_aget_d to i8*),
   i8* bitcast (void (%Array*, i64, %Slot, i8*, i64)* @t2_aset_d to i8*),
   i8* bitcast (i64 (%Array*)* @t2_alen_d to i8*),
@@ -6525,9 +6638,11 @@ die:
   i8* bitcast (%Array* (%Slot)* @t2_hkeys_d to i8*),
   i8* bitcast (%Array* (%Slot)* @t2_hvalues_d to i8*),
   i8* bitcast (%Array* (%Slot)* @t2_hpairs_d to i8*),
-  i8* bitcast (void (%Slot, %Array*)* @t2_hfroma_d to i8*)
+  i8* bitcast (void (%Slot, %Array*)* @t2_hfroma_d to i8*),
+  i8* bitcast (i1 (%Array*, i64)* @t2_aexists_d to i8*),
+  i8* bitcast (void (%Array*, i64)* @t2_aset_len_d to i8*)
 ]
-@t2_vt_tiearray = internal global [18 x i8*] [
+@t2_vt_tiearray = internal global [20 x i8*] [
   i8* bitcast (%Slot (%Array*, i64)* @t2_tie_aget to i8*),
   i8* bitcast (void (%Array*, i64, %Slot, i8*, i64)* @t2_tie_aset to i8*),
   i8* bitcast (i64 (%Array*)* @t2_tie_alen to i8*),
@@ -6545,9 +6660,11 @@ die:
   i8* bitcast (%Array* (%Slot)* @t2_hkeys_d to i8*),
   i8* bitcast (%Array* (%Slot)* @t2_hvalues_d to i8*),
   i8* bitcast (%Array* (%Slot)* @t2_hpairs_d to i8*),
-  i8* bitcast (void (%Slot, %Array*)* @t2_hfroma_d to i8*)
+  i8* bitcast (void (%Slot, %Array*)* @t2_hfroma_d to i8*),
+  i8* bitcast (i1 (%Array*, i64)* @t2_tie_aexists to i8*),
+  i8* bitcast (void (%Array*, i64)* @t2_tie_aset_len to i8*)
 ]
-@t2_vt_tiehash = internal global [18 x i8*] [
+@t2_vt_tiehash = internal global [20 x i8*] [
   i8* bitcast (%Slot (%Array*, i64)* @t2_aget_d to i8*),
   i8* bitcast (void (%Array*, i64, %Slot, i8*, i64)* @t2_aset_d to i8*),
   i8* bitcast (i64 (%Array*)* @t2_alen_d to i8*),
@@ -6565,9 +6682,11 @@ die:
   i8* bitcast (%Array* (%Slot)* @t2_tie_hkeys to i8*),
   i8* bitcast (%Array* (%Slot)* @t2_tie_hvalues to i8*),
   i8* bitcast (%Array* (%Slot)* @t2_tie_hpairs to i8*),
-  i8* bitcast (void (%Slot, %Array*)* @t2_tie_hfroma to i8*)
+  i8* bitcast (void (%Slot, %Array*)* @t2_tie_hfroma to i8*),
+  i8* bitcast (i1 (%Array*, i64)* @t2_aexists_d to i8*),
+  i8* bitcast (void (%Array*, i64)* @t2_aset_len_d to i8*)
 ]
-@t2_meta_default = internal global %Meta { i8** getelementptr ([18 x i8*], [18 x i8*]* @t2_vt_default, i64 0, i64 0), %Slot zeroinitializer }
+@t2_meta_default = internal global %Meta { i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_default, i64 0, i64 0), %Slot zeroinitializer }
 ; t2_meta(a) -> the metaobject a container points at
 define internal %Meta* @t2_meta(%Array* %a) {
   %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
@@ -7041,13 +7160,13 @@ define internal %Slot @t2_tie(%Array* %a, i8** %vt, %Slot %cls, %Array* %rest, %
 }
 define internal %Slot @t2_tie_array(%Array* %a, %Slot %cls, %Array* %rest) {
   %c = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_tm_tiearray, i64 0, i64 0), i64 8)
-  %r = call %Slot @t2_tie(%Array* %a, i8** getelementptr ([18 x i8*], [18 x i8*]* @t2_vt_tiearray, i64 0, i64 0), %Slot %cls, %Array* %rest, %Str %c)
+  %r = call %Slot @t2_tie(%Array* %a, i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_tiearray, i64 0, i64 0), %Slot %cls, %Array* %rest, %Str %c)
   ret %Slot %r
 }
 define internal %Slot @t2_tie_hash(%Slot %h, %Slot %cls, %Array* %rest) {
   %a = call %Array* @t2_harr(%Slot %h)
   %c = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_tm_tiehash, i64 0, i64 0), i64 7)
-  %r = call %Slot @t2_tie(%Array* %a, i8** getelementptr ([18 x i8*], [18 x i8*]* @t2_vt_tiehash, i64 0, i64 0), %Slot %cls, %Array* %rest, %Str %c)
+  %r = call %Slot @t2_tie(%Array* %a, i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_tiehash, i64 0, i64 0), %Slot %cls, %Array* %rest, %Str %c)
   ret %Slot %r
 }
 ; t2_tied(a) -> the tie's object, or undef where a has the default metaobject
