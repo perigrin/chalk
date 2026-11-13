@@ -31,7 +31,7 @@ sub through_llvm ($src) {
     my ($lf, $ll) = tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $lf $units->[0]{ll};
     close $lf;
-    my $out = qx($LLI $ll 2>&1);
+    my $out = qx($LLI $ll 2>/dev/null);   # (stdout, as perl's is read)
     die "lli exited " . ($? >> 8) . ": $out" if $?;
     return $out;
 }
@@ -61,10 +61,17 @@ for my $src (
     is($got . $rc, $want, "perl's output and exit for $src") or diag $@;
 }
 
-# A BLOCK READING A MAIN-LINE LEXICAL read it unbound: refused.
-for my $src (q{my $x; BEGIN { $x = 5 } print defined $x ? $x : "u", "\n";}, q{my $c = 3; END { print "c=$c\n" } print "m\n";}) {
+# A BEGIN READING OR WRITING A MAIN-LINE LEXICAL ran before the main line's
+# `my`, which leaves it: run first, the `my` reset it. Refused.
+for my $src (q{my $x; BEGIN { $x = 5 } print defined $x ? $x : "u", "\n";}) {
     my $got = eval { through_llvm($src) };
     ok(!defined $got && $@ =~ /GAP/, "refused: $src") or diag $got // $@;
+}
+
+# AN END READING ONE shares it, as a named sub does (T2): perl's answer.
+{
+    my $src = q{my $c = 3; END { print "c=$c\n" } print "m\n";};
+    is( scalar eval { through_llvm($src) }, scalar qx($^X -e '$src'), "perl's answer for $src" ) or diag $@;
 }
 
 done_testing;

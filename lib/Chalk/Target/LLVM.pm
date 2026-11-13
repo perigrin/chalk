@@ -1963,13 +1963,12 @@ sub lower_with_elaboration {
 
     # T2 IS THE ARCHITECTURE (perigrin): a program its slices take is built as
     # a graph typed in LLVM's types and printed. Any other (undef) is lowered
-    # below, a fallback each slice shrinks. A phase block is not slice 1's.
-    if (!grep { blessed($_->[1]) } @Chalk::IR::Serialize::JSON::PHASE_GRAPHS) {
+    # below, a fallback each slice shrinks. (T2 takes BEGIN and END blocks.)
+    {
         require Chalk::Target::LLVM::T2;
         my $ir = Chalk::Target::LLVM::T2->lower_program($return_node, mop => $opts{mop});
         return $ir if defined $ir;
     }
-    else { $Chalk::Target::LLVM::T2::PATH = { path => 'fallback', why => 'a phase block' } }
 
     # Context sees a Maybe[T] as Scalar, as it did before Maybe[T] was a type.
     my $maybe_view = _context_sees_maybe_as_scalar($return_node, $opts{mop});

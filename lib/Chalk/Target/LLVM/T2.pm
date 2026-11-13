@@ -151,9 +151,33 @@ sub build {
     # (a tie calls its class's methods too)
     $b->make_mop if grep { $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) eq 'method' || ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' ) } _all_nodes($b->{mop}, $ret);
     $b->make_constant_arrays(_own_nodes($ret));
+    # PHASE BLOCKS, each a function as a sub is (its file lexicals shared as a
+    # sub's are): a BEGIN runs first, in order, at the program's start; an END
+    # is registered with atexit(3), which runs them last defined first at every
+    # way out -- the main line's end, an exit, a die. Another phase is not T2's.
+    for my $ph ( grep { blessed( $_->[1] ) } @Chalk::IR::Serialize::JSON::PHASE_GRAPHS ) {
+        my ( $kind, $g ) = @$ph;
+        out("a $kind block") unless $kind =~ /\A(?:BEGIN|END)\z/;
+        # A BEGIN TOUCHING A MAIN-LINE LEXICAL ran at compile time, before the
+        # main line's `my`, which then leaves it (`my $x; BEGIN { $x = 5 }` is 5):
+        # run first here, the `my` reset it. Refused.
+        out('a BEGIN block reading or writing a lexical of the main program')
+            if $kind eq 'BEGIN' && grep { $_->operation eq 'PadAccess' && ( $_->shared || !defined $_->inputs->[0] ) }
+                Chalk::Target::LLVM::Context::_program_nodes( $g->returns->[0] );
+        my $sub = Chalk::MOP::Sub->new( name => "main::$kind", class => undef, graph => $g, params => ['@_'], uses_args => 1 );
+        my $fn = $b->func( $sub, lc($kind) . '_' . ++$b->{nphase} );
+        out("a $kind block read as taking arguments") if $fn->{nargs} || $fn->{list} || $fn->{closure};
+        if ( $kind eq 'BEGIN' ) { $b->emit_call(op => 'Call', type => '%Slot', inputs => [], attr => { fn => $fn->{name} }) }
+        else {
+            out('more than 64 END blocks') if @{ $b->{atexit} // [] } >= 64;
+            push @{ $b->{atexit} }, $fn->{name};
+            $b->emit(op => 'AtExit', type => 'void', attr => { fn => '@x_' . scalar @{ $b->{atexit} } });
+        }
+    }
     $b->{jumps} = {};
     $b->walk($start);
     out('an early exit to a merge never reached') if %{ $b->{jumps} };
+    $b->emit(op => 'RunEnds', type => 'void') if $b->{atexit} && !$b->{cur}{dead};   # (the main line's end)
     $b->{cur}{term} = [ 'ret' ];
 }
 
@@ -2066,6 +2090,9 @@ sub _all_nodes {
     for my $sub ( $mop ? map { $_->subs } $mop->classes : () ) {
         push @n, Chalk::Target::LLVM::Context::_graph_component($sub->graph) if $sub->graph;
     }
+    # (A PHASE BLOCK'S too: its method calls, its derefs, are the program's.)
+    push @n, Chalk::Target::LLVM::Context::_program_nodes( $_->[1]->returns->[0] )
+        for grep { blessed( $_->[1] ) } @Chalk::IR::Serialize::JSON::PHASE_GRAPHS;
     return @n;
 }
 
@@ -3560,6 +3587,10 @@ sub print_module {
         push @L, 'define internal void @t2_symtab_init() {', @add, '  ret void', '}';
     }
     push @L, 'define i32 @main(i32 %argc, i8** %argv) {', _blocks($bld->{blocks}), '}', '';
+    # AN END BLOCK'S atexit(3) ENTRY: void(), its function called.
+    if ( my @x = @{ $bld->{atexit} // [] } ) {
+        push @L, "define internal void \@x_$_() {", "  %r = call %Slot $x[$_ - 1]()", '  ret void', '}', '' for 1 .. @x;
+    }
     # EACH SUB A FUNCTION: `%Slot (%Slot %a0, ...)`, its blocks printed alike.
     for my $fn (sort { $a->{name} cmp $b->{name} } values %{ $bld->{funcs} // {} }) {
         my $i = 0;
@@ -3765,6 +3796,8 @@ sub _line {
     return "$nm = call $aop{$op}(" . $arg->(@in) . ')' if $aop{$op};
     return "call void \@t2_" . ( ( $a{fd} // 1 ) == 2 ? 'eprint' : 'print' ) . '(' . $arg->(@in) . ')' if $op eq 'Print';
     return "call void \@t2_exit(" . $arg->(@in) . ')' if $op eq 'Exit';
+    return "call void \@t2_atexit(void ()* $a{fn})" if $op eq 'AtExit';
+    return 'call void @t2_run_ends()' if $op eq 'RunEnds';
     return "call void \@t2_frame_push(" . $arg->(@in) . ')' if $op eq 'FramePush';
     return 'call void @t2_frame_pop()' if $op eq 'FramePop';
     return "$nm = call %Array* \@t2_caller(" . $arg->(@in) . ')' if $op eq 'Caller';
@@ -3956,6 +3989,7 @@ clamp:
   ret %Slot %rs
 undef:
   call i64 @write(i32 2, i8* getelementptr ([47 x i8], [47 x i8]* @lit_substr_out, i64 0, i64 0), i64 46)
+  call void @t2_run_ends()
   call void @exit(i32 255)
   unreachable
 }
@@ -3989,8 +4023,40 @@ found:
 none:
   ret i64 -1
 }
+; END BLOCKS: the program's, in the order they run (t2_atexit adds one);
+; t2_run_ends runs them once, at every way out -- the main line's end, an
+; exit, a die (atexit(3) is not run by lli for an exit the program calls).
+@t2_ends = internal global [64 x void ()*] zeroinitializer
+@t2_nends = internal global i64 0
+define internal void @t2_atexit(void ()* %f) {
+  %n = load i64, i64* @t2_nends
+  %p = getelementptr [64 x void ()*], [64 x void ()*]* @t2_ends, i64 0, i64 %n
+  store void ()* %f, void ()** %p
+  %n1 = add i64 %n, 1
+  store i64 %n1, i64* @t2_nends
+  ret void
+}
+define internal void @t2_run_ends() {
+entry:
+  %n = load i64, i64* @t2_nends
+  store i64 0, i64* @t2_nends
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i1, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %p = getelementptr [64 x void ()*], [64 x void ()*]* @t2_ends, i64 0, i64 %i
+  %f = load void ()*, void ()** %p
+  call void %f()
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  ret void
+}
 define internal void @t2_exit(i64 %v) {
   %c = trunc i64 %v to i32
+  call void @t2_run_ends()
   call void @exit(i32 %c)
   unreachable
 }
@@ -4749,6 +4815,7 @@ die:
   %in = extractvalue %Str %is, 1
   call i64 @write(i32 2, i8* %ip, i64 %in)
   call i64 @write(i32 2, i8* %at, i64 %atn)
+  call void @t2_run_ends()
   call void @exit(i32 255)
   unreachable
 }
@@ -4876,6 +4943,7 @@ declare i32 @memcmp(i8*, i8*, i64)
 @msg_refstr = private unnamed_addr constant [62 x i8] c"chalk: refused at run time: a reference read as a str or num\0A\00"
 define internal void @t2_stop(i8* %m, i64 %n) {
   %w = call i64 @write(i32 2, i8* %m, i64 %n)
+  call void @t2_run_ends()
   call void @exit(i32 255)
   unreachable
 }
@@ -5445,6 +5513,7 @@ define internal void @t2_die(%Str %m) {
   %p = extractvalue %Str %m, 0
   %n = extractvalue %Str %m, 1
   call i64 @write(i32 2, i8* %p, i64 %n)
+  call void @t2_run_ends()
   call void @exit(i32 255)
   unreachable
 }
