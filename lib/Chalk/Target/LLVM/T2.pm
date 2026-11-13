@@ -233,7 +233,7 @@ sub walk {
             $ctl = $s;
         }
         elsif ($op eq 'Loop') { $ctl = $b->loop($s) }
-        elsif ($op eq 'If')   { $ctl = $b->if_stmt($s) }
+        elsif ($op eq 'If')   { $ctl = $b->if_stmt($s) // return undef }   # (undef: both arms left the loop)
         # A READ OF A TIED AGGREGATE PINNED where it runs (B::SoN): a FETCH,
         # FETCHSIZE or EXISTS call, made here, in order.
         elsif ($op eq 'RegexSubst' || $op eq 'Transliterate') { $b->regex_subst_stmt($s); push @{ $b->{passed} }, $s; $ctl = $s }
@@ -1741,6 +1741,25 @@ sub if_stmt {
         $vals{$i} = { block => $b->{cur}, ctl => $end{$i}, memo => $b->{memo} };
     }
     $from->{term} = [ 'condbr', $cond, $blk{0}, $blk{1} ];
+    # IN A LOOP THAT LEAVES OR GOES ROUND FROM ITS BODY (see loop_breaks): an
+    # arm that reaches the loop's exit or its latch is that loop's edge, made
+    # there; the if goes on from the other arm, or (both left) the body ends.
+    if ( my $lx = $b->{loopx} ) {
+        my $meet = defined $end{0} && defined $end{1} && do {
+            my ($r) = grep { $_->operation eq 'Region' } ( $end{0}->consumers // [] )->@*;
+            $r && refaddr($r) != refaddr( $lx->{exit} ) && grep { blessed($_) && refaddr($_) == refaddr($end{1}) } $r->inputs->@*;
+        };
+        unless ($meet) {
+            my %left = map { ( $_ => ( !defined $end{$_} || $b->loop_edge( $lx, $end{$_}, $vals{$_} ) || $b->loop_jump( $end{$_}, $vals{$_} ) ) ) } 0, 1;
+            if ( $left{0} && $left{1} ) { $b->{cur} = $b->new_block('left'); $b->{cur}{dead} = 1; $b->{cur}{term} = ['unreachable']; return undef }
+            if ( $left{0} || $left{1} ) {
+                my $go = $left{0} ? 1 : 0;
+                $b->{cur}  = $vals{$go}{block};
+                $b->{memo} = $vals{$go}{memo};
+                return $end{$go};
+            }
+        }
+    }
     my ($region) = grep { $_->operation eq 'Region' } ( $end{0}->consumers // [] )->@*;
     # ARMS THAT DO NOT MEET: one leaves early (`// return` in an arm) for a
     # merge further out. That arm waits there (jump); the if goes on from the
@@ -2816,7 +2835,9 @@ sub loop {
     my ($b, $L) = @_;
     my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } successors_by_input($L);
     my ($bodyp, $exitp) = @proj{0, 1};
+    return $b->loop_breaks($L) if !$bodyp && !$exitp && $b->loop_exit($L);
     out('a loop without a body and an exit') unless $bodyp && $exitp;
+    local $b->{loopx};   # (its body's ifs are its own: an outer loop's edges are not here)
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($L)
                       && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $L->consumers // [] )->@*;
     my %seen;
@@ -2874,6 +2895,158 @@ sub loop {
     # THE EXIT'S MEMORY is a version too: a read at it, before a store after.
     push @{ $b->{passed} }, _memory_phis($region) if $region;
     return $region // $exitp;
+}
+
+# loop_breaks($Loop) -> the control the program goes on from: A LOOP THAT
+# LEAVES OR GOES ROUND FROM ITS BODY (B::SoN's `while (1) { ... next if C;
+# ... last }`, a bare block's `redo`): no test at its head. Its body is walked
+# from the Loop; an arm reaching the Loop's exit Region leaves (a way into
+# the exit, merged after), one reaching its latch -- a control with no way on,
+# or a Region of such -- goes round (the latch merged, its values the head
+# phis' back edges).
+sub loop_breaks {
+    my ($b, $L) = @_;
+    my $R = $b->loop_exit($L);
+    my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($L)
+                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $L->consumers // [] )->@*;
+    my %seen;
+    @phis = grep { !$seen{ refaddr($_) }++ } @phis;
+    out('a loop phi with other than two ways in') if grep { scalar( @{ $_->inputs } ) != 2 } @phis;
+    $b->reads_before($_) for @{ $b->{passed} };
+    my @init = map {
+        my $i0 = $_->inputs->[0];
+        $b->loop_type($_) eq '%Array*' && blessed($i0) && $i0->operation eq 'ArrayLiteral' && !$i0->inputs->@*
+            ? $b->emit(op => 'NewArray', type => '%Array*')
+            : $b->as($b->value($i0), $b->loop_type($_))
+    } @phis;
+    my $pre_end = $b->{cur};
+    my $head = $b->new_block('loop');
+    $pre_end->{term} = [ 'br', $head ];
+    my @t2 = map {
+        my $p = $b->emit(op => 'Phi', type => $b->loop_type($phis[$_]), inputs => [ $init[$_] ], attr => { from => [$pre_end] });
+        $b->{memo}{ refaddr( $phis[$_] ) } = $p;
+    } 0 .. $#phis;
+    my @mphis = _memory_phis($L);
+    $b->reads_before($_) for @mphis;
+    push @{ $b->{passed} }, @mphis;
+    my $lx = { exit => $R, exits => [], latches => [] };
+    my $outer_memo = $b->{memo};
+    my $head_memo;
+    {
+        local $b->{memo}  = { %{ $b->{memo} } };
+        local $b->{depth} = ( $b->{depth} // 0 ) + 1;
+        local $b->{loopx} = $lx;
+        $head_memo = { %{ $b->{memo} } };
+        my $e = $b->walk($L);
+        $b->loop_edge( $lx, $e, { block => $b->{cur}, memo => $b->{memo} } )
+            || out('a loop body that ends neither going round nor leaving') if defined $e;
+    }
+    # THE LATCH: the ways round merged (one: that arm itself); its values are
+    # the head phis' back edges.
+    my @lat = grep { !$_->{block}{dead} } @{ $lx->{latches} };
+    out('a loop that never goes round') unless @lat;
+    my %lr = map { ( ( $_->{region} ? refaddr( $_->{region} ) : 0 ) => $_->{region} ) } @lat;
+    out('a loop whose ways round do not meet at one latch') if keys %lr > 1;
+    my ($latch) = values %lr;
+    my ( $lblk, $lmemo ) = blessed($latch) ? $b->merge_at( $latch, 'latch', $head_memo, @lat ) : ( $lat[0]{block}, $lat[0]{memo} );
+    my @back;
+    {
+        local $b->{cur}  = $lblk;
+        local $b->{memo} = $lmemo;
+        @back = map { $b->as($b->value($phis[$_]->inputs->[1]), $t2[$_]->type) } 0 .. $#phis;
+        $lblk = $b->{cur};
+    }
+    $lblk->{term} = [ 'br', $head ];
+    for my $i (0 .. $#t2) {
+        push @{ $t2[$i]->inputs }, $back[$i];
+        push @{ $t2[$i]->attr->{from} }, $lblk;
+    }
+    # THE EXIT: the ways out merged, with the exit Region's phis.
+    my @out = grep { !$_->{block}{dead} } @{ $lx->{exits} };
+    out('a loop that never leaves') unless @out;
+    ( $b->{cur}, $b->{memo} ) = $b->merge_at( $R, 'exit', $outer_memo, @out );
+    push @{ $b->{passed} }, _memory_phis($R);
+    return $R;
+}
+
+# loop_exit($Loop) -> the Region the program goes on from after it: of the
+# Regions B::SoN heads with it (its exit, and the merge of its ways round,
+# which has no way on), the one with a way on.
+sub loop_exit {
+    my ($b, $L) = @_;
+    my @r = grep { $_->operation eq 'Region' && blessed( $_->head ) && refaddr( $_->head ) == refaddr($L) && _goes_on($_) }
+        @{ $b->{own_nodes} // [] };
+    out('a loop with more than one exit') if @r > 1;
+    return $r[0];
+}
+
+# loop_jump($end, $arm) -> true (and recorded as a jump, see if_stmt) when an
+# arm in a loop body ends at a merge out past the loop (`return 0 unless ...`
+# reaching the sub's last merge): the walk after the loop joins it there.
+sub loop_jump {
+    my ($b, $e, $arm) = @_;
+    return 0 unless blessed($e) && !successors($e);
+    my @r = grep { $_->operation eq 'Region' } ( $e->consumers // [] )->@*;
+    return 0 unless @r == 1 && _goes_on( $r[0] );
+    push @{ $b->{jumps}{ refaddr( $r[0] ) } }, { %$arm, end => $e };
+    return 1;
+}
+
+# _goes_on($Region) -> true when control goes on from it: a statement after
+# it, or a Region it is a way into (a latch has neither).
+sub _goes_on {
+    my ($r) = @_;
+    return successors($r) || grep { blessed($_) && $_->operation eq 'Region' && grep { blessed($_) && refaddr($_) == refaddr($r) } $_->inputs->@* } ( $r->consumers // [] )->@*;
+}
+
+# loop_edge($lx, $end, $arm) -> true (and recorded) when control $end leaves
+# the loop $lx is walking (it feeds its exit Region) or goes round (it has no
+# way on, or feeds only a Region that has none: the latch).
+sub loop_edge {
+    my ($b, $lx, $e, $arm) = @_;
+    return 0 unless blessed($e);
+    my @r = grep { $_->operation eq 'Region' } ( $e->consumers // [] )->@*;
+    if ( @r == 1 && refaddr( $r[0] ) == refaddr( $lx->{exit} ) ) { push @{ $lx->{exits} }, { %$arm, end => $e }; return 1 }
+    return 0 if successors($e);
+    if ( !@r ) { push @{ $lx->{latches} }, { %$arm, end => $e }; return 1 }
+    if ( @r == 1 && !_goes_on( $r[0] ) ) { push @{ $lx->{latches} }, { %$arm, end => $e, region => $r[0] }; return 1 }
+    return 0;
+}
+
+# merge_at($Region, $name, $base, @arms) -> (block, memo): a block the arms (each
+# {block, memo, end}, end a way into the Region) go on to, the Region's phis
+# made there from each arm's value -- and the memo after it.
+sub merge_at {
+    my ($b, $r, $name, $base, @preds) = @_;   # $base: the memo where every arm began
+    my @ways = grep { blessed($_) } $r->inputs->@*;
+    my @pred_of = map { my $in = $_; ( grep { refaddr( $preds[$_]{end} ) == refaddr($in) } 0 .. $#preds )[0] } @ways;
+    my @live = grep { defined $pred_of[$_] } 0 .. $#ways;   # (a way from an arm that died is no way in)
+    my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
+                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $r->consumers // [] )->@*;
+    my %seen;
+    @phis = grep { !$seen{ refaddr($_) }++ } @phis;
+    my @made;
+    for my $p (@phis) {
+        my $ty = $b->phi_type($p);
+        my @in;
+        for my $k (@live) {
+            my $pr = $preds[ $pred_of[$k] ];
+            local $b->{cur}  = $pr->{block};
+            local $b->{memo} = $pr->{memo};
+            push @in, [ $ty eq '%Array*' ? $b->as_list( $p->inputs->[$k] ) : $b->as($b->value($p->inputs->[$k]), $ty), $pr ];
+            $pr->{block} = $b->{cur};
+        }
+        push @made, [ $p, $ty, \@in ];
+    }
+    my $join = $b->new_block($name);
+    $_->{block}{term} = [ 'br', $join ] for @preds;
+    local $b->{cur} = $join;
+    my %memo = %$base;
+    for my $m (@made) {
+        my ( $p, $ty, $in ) = @$m;
+        $memo{ refaddr($p) } = $b->emit(op => 'Phi', type => $ty, inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $_->[1]{block} } @$in ] });
+    }
+    return ( $join, \%memo );
 }
 
 # _memory_phis($merge) -> the memory phis a Region or Loop merges.
