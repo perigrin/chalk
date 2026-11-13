@@ -10,6 +10,8 @@ class Chalk::IR::Node::RegexSubst :isa(Chalk::IR::Node::Regex) {
     field $replacement :param :reader = '';
     # A replacement B::SoN makes per match (/ge): the graph that computes it.
     field $replacement_body :param :reader = undef;
+    # The pattern is input 1, made at run time (an interpolated one), not `pattern`.
+    field $pattern_is_input :param :reader = 0;
 
     method operation() { 'RegexSubst' }
     method staleness_kind() { 'opaque' }
@@ -19,7 +21,7 @@ class Chalk::IR::Node::RegexSubst :isa(Chalk::IR::Node::Regex) {
 
     method content_hash() {
         return join('|', 'RegexSubst', "pattern=" . $self->pattern,
-            "replacement=$replacement", "flags=" . $self->flags, "body=" . ( $replacement_body // '' ),
+            "replacement=$replacement", "flags=" . $self->flags, "body=" . ( $replacement_body // '' ), "pin=$pattern_is_input",
             $self->_serialize_inputs());
     }
 }

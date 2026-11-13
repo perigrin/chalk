@@ -84,7 +84,7 @@ sub matcher ( $pattern, $flags, $flavor = 'scalar', %o ) {
     $g->{awk}    = $o{awk} ? 1 : 0;
     $g->{nrlit}  = $o{rlits} // 0;    # literals known at run time: arguments after the others
     $g->{global} = ( $flags // '' ) =~ /g/ ? 1 : 0;
-    $g->{segs} = $o{computed} ? [ { kind => 'val' } ] : replacement( $o{replacement} // '', $p->{ngroups} ) if $flavor eq 'subst';
+    $g->{segs} = $o{percall} ? [ { kind => 'call' } ] : $o{computed} ? [ { kind => 'val' } ] : replacement( $o{replacement} // '', $p->{ngroups} ) if $flavor eq 'subst';
     $g->build($p);
     $g->prune;
     return { nodes => $g->{n}, start => 0, returns => [ $g->{ret} ], ngroups => $p->{ngroups} };
@@ -384,7 +384,7 @@ sub build ( $g, $p ) {
                       $g->{pnoempty} = $g->node( 'PadAccess', f => { sigil => '$', symbol => 'noempty' }, stamp => 'Scalar' );
     }
     push @params, $g->{rv} = $g->node( 'PadAccess', f => { sigil => '$', symbol => 'rv' }, stamp => 'Scalar' )
-        if $g->{segs} && grep { $_->{kind} eq 'val' } @{ $g->{segs} };
+        if $g->{segs} && grep { $_->{kind} =~ /\A(?:val|call)\z/ } @{ $g->{segs} };
     push @params, map { $g->{rlit}[$_] = $g->node( 'PadAccess', f => { sigil => '$', symbol => "lit$_" }, stamp => 'Str' ) } 0 .. $g->{nrlit} - 1;
     push @params, map { $g->{code}[$_] = $g->node( 'PadAccess', f => { sigil => '$', symbol => "code$_" }, stamp => 'Scalar' ) } 0 .. $g->{ncode} - 1;
     $g->node( 'Assign', in => [ @params, $g->node( 'ArgsSource', stamp => 'Array' ) ], f => { targets => scalar @params }, stamp => 'List' );
@@ -454,6 +454,23 @@ sub build_subst ($g) {
             for my $seg ( @{ $g->{segs} } ) {
                 if    ( $seg->{kind} eq 'lit' ) { $g->set( acc => $g->cat( $g->get('acc'), $g->str_( $seg->{text} ) ) ) }
                 elsif ( $seg->{kind} eq 'val' ) { $g->set( acc => $g->cat( $g->get('acc'), $g->{rv} ) ) }
+                elsif ( $seg->{kind} eq 'call' ) {
+                    # s///e: THIS MATCH'S $& AND $1.. are perl's globals of the
+                    # match, so they are stored where the body reads them
+                    # (@T2::SubstCaps) and the body called; what it gives goes in.
+                    my @caps;
+                    for my $k ( 0 .. $g->{ng} ) {
+                        $g->set( "cap$k" => $g->undef_, 'Maybe[Str]' );
+                        $g->if_( $g->op2( 'NumGe', $g->get( 'r' . 2 * $k ), $g->int_(0) ),
+                            sub { $g->set( "cap$k" => $g->text( $g->get( 'r' . 2 * $k ), $g->get( 'r' . ( 2 * $k + 1 ) ) ) ) } );
+                        push @caps, $g->get("cap$k");
+                    }
+                    my $lit = $g->node( 'ArrayLiteral', in => \@caps, stamp => 'Array' );
+                    $g->stmt( 'EntryWrite', in => [ $g->node( 'EntryDef', f => { package => 'T2', sigil => '@', symbol => 'SubstCaps' }, stamp => 'Array' ), $lit ] );
+                    my $v = $g->stmt( 'Call', in => [ $g->{rv} ], f => { dispatch_kind => 'indirect', name => '', param_names => [] }, stamp => 'Scalar' );
+                    $g->set( acc => $g->cat( $g->get('acc'), $v ) );
+                    delete $g->{var}{"cap$_"} for 0 .. $g->{ng};
+                }
                 else {    # $N: its text, "" where it took no part
                     my $k = $seg->{n};
                     $g->set( gv => $g->str_(''), 'Str' );

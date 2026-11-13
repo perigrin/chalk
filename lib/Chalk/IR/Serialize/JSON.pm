@@ -771,6 +771,7 @@ sub _deserialize_graph ($method_data) {
             $args{replacement} = $fields->{replacement} // '';
             $args{flags}       = $fields->{flags}       // '';
             $args{replacement_body} = $fields->{replacement_body} if defined $fields->{replacement_body};
+            $args{pattern_is_input} = $fields->{pattern_is_input} ? 1 : 0;
         }
         elsif ($op eq 'RegexCapture') {
             $args{n} = $fields->{n};

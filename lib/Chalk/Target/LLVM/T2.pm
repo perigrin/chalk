@@ -2320,19 +2320,80 @@ sub regex_subst {
     my $k = 'rxs' . refaddr($s);
     return $b->{memo}{$k} if $b->{memo}{$k};
     out('an s/// with code blocks') if $s->can('code_bodies') && $s->code_bodies && @{ $s->code_bodies };
-    out('an s/// whose replacement is computed per match (/ge)') if $s->can('replacement_body') && defined $s->replacement_body;
-    out('an s/// with an empty pattern (the last pattern that matched)') if ( $s->pattern // '' ) eq '';
-    # A COMPUTED REPLACEMENT is an input between the subject and the memory
-    # version: B::SoN makes it in the arm of a match of its own -- ONCE.
-    my @in = grep { blessed($_) } @{ $s->inputs }[ 1 .. $#{ $s->inputs } ];
+    out('an s/// with an empty pattern (the last pattern that matched)') if ( $s->pattern // '' ) eq '' && !$s->pattern_is_input;
+    # s///ge: ITS BODY CALLED PER MATCH by the subst graph (percall), which
+    # stores the match's $& $1.. where the body's captures read them.
+    if ( $s->can('replacement_body') && defined( my $body = $s->replacement_body ) ) {
+        my $g = $Chalk::IR::Serialize::JSON::CODE_GRAPHS{$body} // out('an s///e replacement whose body B::SoN did not give');
+        out('an s///e replacement holding an s///e (its matches would overwrite the captures it reads)')
+            if grep { $_->operation eq 'RegexSubst' && $_->can('replacement_body') && defined $_->replacement_body }
+               Chalk::Target::LLVM::Context::_graph_component($g);
+        my $sub = $b->{rxcode}{$body} //= Chalk::MOP::Sub->new( name => $body, class => undef, graph => $g, params => ['@_'], uses_args => 1 );
+        my $code = $b->emit(op => 'CodeOfFn', type => '%Slot', attr => { fn => $b->func( $sub, 'rxrepl_' . scalar keys %{ $b->{rxcode} } )->{name} });
+        ( my $flags = $s->flags // '' ) =~ s/[er]//g;
+        my $subj = $b->as( $b->value( $s->inputs->[0] ), '%Slot' );
+        $b->reads_before($_) for @{ $b->{passed} };   # (the body may read and store what reads here read)
+        return $b->{memo}{$k} = $b->subst_call( $s, $flags, { percall => 1 }, $subj, $code );
+    }
+    # A COMPUTED REPLACEMENT is an input between the subject (and a pattern
+    # input) and the memory version: B::SoN makes it in the arm of a match of
+    # its own -- ONCE.
+    my @in = grep { blessed($_) } @{ $s->inputs }[ ( $s->pattern_is_input ? 2 : 1 ) .. $#{ $s->inputs } ];
     my $repl = @in && !_is_version( $in[0] ) && !Chalk::Target::LLVM::Context::_is_memory_phi( $in[0] ) ? $in[0] : undef;
     my $flags = $s->flags // '';
     out('an s///g whose replacement is made per match (B::SoN computes it once)') if $repl && $flags =~ /g/;
     $flags =~ s/[er]//g;
-    my $fn = $b->regex_fn( $s->pattern, $flags, 'subst', $repl ? ( computed => 1 ) : ( replacement => $s->replacement // '' ) );
     my @args = ( $b->as( $b->value( $s->inputs->[0] ), '%Slot' ) );
     push @args, $b->as( $b->value($repl), '%Slot' ) if $repl;
-    return $b->{memo}{$k} = $b->emit_call(op => 'Call', type => '%Slot', inputs => \@args, attr => { fn => $fn->{name} });
+    return $b->{memo}{$k} = $b->subst_call( $s, $flags, $repl ? { computed => 1 } : { replacement => $s->replacement // '' }, @args );
+}
+
+# subst_call($RegexSubst, $flags, \%opts, @args) -> what its subst graph gives.
+# AN INTERPOLATED PATTERN (input 1) that is one of a few constant strings (a
+# choice of them, concatenated: File::Temp's `X(?=X*$end)`) has a matcher for
+# each, the one it is picked at run time; any other is not T2's.
+sub subst_call {
+    my ($b, $s, $flags, $ro, @args) = @_;
+    unless ( $s->pattern_is_input ) {
+        my $fn = $b->regex_fn( $s->pattern, $flags, 'subst', %$ro );
+        return $b->emit_call(op => 'Call', type => '%Slot', inputs => \@args, attr => { fn => $fn->{name} });
+    }
+    my $pn   = $s->inputs->[1];
+    my @pats = _const_choices($pn);
+    out('an s/// whose pattern is made at run time of what is not a few constants') unless @pats && @pats <= 8;
+    my @code = map { $b->emit(op => 'CodeOfFn', type => '%Slot', attr => { fn => $b->regex_fn( $_, $flags, 'subst', %$ro )->{name} }) } @pats;
+    my $p    = $b->as( $b->value($pn), '%Str' );
+    my $code = $code[-1];   # (the pattern is one of them: the choices are all it can be)
+    for my $i ( reverse 0 .. $#pats - 1 ) {
+        my $cmp = $b->emit(op => 'StrCmp', type => 'i64', inputs => [ $p, $b->as( $b->const_str( $pats[$i] ), '%Str' ) ]);
+        my $eq  = $b->emit(op => 'Cmp', type => 'i1', inputs => [ $cmp, $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }) ], attr => { op => 'eq' });
+        $code = $b->emit(op => 'Select', type => '%Slot', inputs => [ $eq, $code[$i], $code ]);
+    }
+    my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+    $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for @args;
+    return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $arr ]);
+}
+
+# _const_choices($node) -> the strings a pattern node can be: a constant, a
+# concatenation of such, a choice (?:) of such. () for anything else.
+sub _const_choices {
+    my ($n) = @_;
+    return () unless blessed($n);
+    my $op = $n->operation;
+    return ( $n->value // '' ) if $op eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:string|integer)\z/;
+    return _const_choices( $n->inputs->[0] ) if $op eq 'Coerce';
+    if ( $op eq 'Concat' ) {
+        my @a = _const_choices( $n->inputs->[0] ) or return ();
+        my @z = _const_choices( $n->inputs->[1] ) or return ();
+        return map { my $x = $_; map { "$x$_" } @z } @a;
+    }
+    if ( $op eq 'TernaryExpr' ) {
+        my @a = _const_choices( $n->inputs->[1] ) or return ();
+        my @z = _const_choices( $n->inputs->[2] ) or return ();
+        my %seen;
+        return grep { !$seen{$_}++ } @a, @z;
+    }
+    return ();
 }
 
 # translit($Transliterate) -> the %Slot tr's graph gives: [the new string,
@@ -2430,6 +2491,12 @@ sub regex_capture {
     my ($b, $c) = @_;
     my $m = $c->inputs->[0];
     out('a capture of no regex match') unless blessed($m) && $m->operation =~ /\A(?:RegexMatch|Match)\z/;
+    # IN AN s///e BODY (its match has no subject: the one that called it): the
+    # match's $& $1.. as the subst graph stored them, undef where none took part.
+    if ( $m->operation eq 'RegexMatch' && !grep { blessed($_) } $m->inputs->@* ) {
+        my $caps = $b->emit(op => 'GArray', type => '%Array*', attr => { global => $b->global_named('pkgarr::T2::SubstCaps') });
+        return $b->as( $b->emit(op => 'AGet', type => '%Slot', inputs => [ $caps, $b->emit(op => 'Const', type => 'i64', attr => { value => $c->n }) ]), $b->type_of($c) );
+    }
     out('a capture read where its match may have failed (perl reads the last match that succeeded)')
         unless ( $b->{rx_ok} // {} )->{ refaddr($m) };
     my $n = $c->n;
@@ -2883,6 +2950,7 @@ sub type_of {
     return ( $v->stamp // '' ) eq 'Scalar' ? '%Slot' : '%Array*'   # static type
         if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'caller';
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'substr';
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:int|rand)\z/;
     return 'i64'   if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'index';
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
         return $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar' ? 'i64' : '%Array*';
@@ -2947,6 +3015,10 @@ sub _value {
     out( 'the match variable ' . ( $v->sigil // '$' ) . $v->symbol . ' (B::SoN ties it to no match)' )
         if $v->operation eq 'EntryDef' && ( $v->symbol // '' ) =~ /\A(?:[&`'+-]|\d+)\z/;
     return $b->pkg_agg($v) if _pkg_agg($v);
+    # $] IS THE VERSION OF THE PERL T2 IS: the one compiling (whose semantics it
+    # keeps), read-only.
+    return $b->as( $b->const_str("$]"), $b->type_of($v) )   # (its text: "5.042000")
+        if blessed($v) && $v->operation eq 'EntryDef' && ( $v->sigil // '' ) eq '$' && ( $v->symbol // '' ) eq ']' && ( ( $v->can('package') ? $v->package : undef ) // 'main' ) eq 'main';
     # THE LITERAL A PACKAGE AGGREGATE WAS STORED FROM is how B::SoN gives a
     # later read of the name: read as the aggregate, which a push or another
     # sub may have changed since (a copy of the literal printed "1 2" for "1 2 3").
@@ -3092,6 +3164,14 @@ sub _value {
         return $b->emit(op => 'Const', type => $ty, attr => { value => $c }) if $ty ne '%Str';
         $b->{strs}{$c} //= scalar keys %{ $b->{strs} };
         return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => $c, id => $b->{strs}{$c} });
+    }
+    # int(X): X's number truncated toward zero. rand(X): a number in [0, X),
+    # X 1 when absent or 0 (perl's), from libc's generator -- not perl's.
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:int|rand)\z/) {
+        my @a = grep { blessed($_) && !_is_version($_) } $v->inputs->@*;
+        out('an int of no argument (of $_)') if $v->name eq 'int' && !@a;
+        my $x = @a ? $b->as( $b->value( $a[0] ), '%Slot' ) : $b->emit(op => 'Undef', type => '%Slot');
+        return $b->as( $b->emit(op => $v->name eq 'int' ? 'IntOf' : 'Rand', type => '%Slot', inputs => [$x]), $ty );
     }
     if ($op eq 'Coerce') {
         # TO Undef IS NOT A CONVERSION: undef has no value to convert into, and
@@ -3413,6 +3493,8 @@ sub _line {
     }
     return "$nm = load %Slot, %Slot* " . $in[0]->name if $op eq 'Load';
     return "$nm = call %Slot \@t2_slot_numify(" . $arg->(@in) . ')' if $op eq 'Numify';
+    return "$nm = call %Slot \@t2_slot_int(" . $arg->(@in) . ')' if $op eq 'IntOf';
+    return "$nm = call %Slot \@t2_slot_rand(" . $arg->(@in) . ')' if $op eq 'Rand';
     return "store %Slot " . $in[0]->name . ", %Slot* " . $in[1]->name if $op eq 'Store';
     return "$nm = call %Slot \@t2_slot_$a{op}(" . $arg->(@in) . ')' if $op eq 'SlotStep';
     return "$nm = call %Slot \@t2_slot_$a{op}(" . $arg->(@in) . ')' if $op eq 'SlotArith';
@@ -3898,6 +3980,26 @@ define internal %Slot @t2_slot(i8 %t, i64 %v) {
 define internal %Slot @t2_box_i64(i64 %v) {
   %s = call %Slot @t2_slot(i8 1, i64 %v)
   ret %Slot %s
+}
+; t2_slot_int(x) / t2_slot_rand(x): perl's int and rand of a slot.
+declare double @llvm.trunc.f64(double)
+declare i32 @rand()
+define internal %Slot @t2_slot_int(%Slot %s) {
+  %d = call double @t2_slot_num(%Slot %s)
+  %t = call double @llvm.trunc.f64(double %d)
+  %r = call %Slot @t2_box_num(double %t)
+  ret %Slot %r
+}
+define internal %Slot @t2_slot_rand(%Slot %s) {
+  %x = call double @t2_slot_num(%Slot %s)
+  %z = fcmp oeq double %x, 0.0
+  %m = select i1 %z, double 1.0, double %x
+  %r = call i32 @rand()
+  %rd = sitofp i32 %r to double
+  %u = fdiv double %rd, 2147483648.0
+  %v = fmul double %u, %m
+  %b = call %Slot @t2_box_num(double %v)
+  ret %Slot %b
 }
 define internal %Slot @t2_box_num(double %v) {
   %i = bitcast double %v to i64
