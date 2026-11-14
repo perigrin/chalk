@@ -257,6 +257,39 @@ sub array_value {
             && ( $v->stamp // '' ) eq 'ArrayRef';   # \(@a) is a reference to each element type
         return $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->array_of($t) ]);
     }
+    # A SLICE READ (`@a[1, 2]`, `@h{qw(a b)}`, `$r->@[...]`): a new list of
+    # the elements its indices name, in their order -- undef where there is
+    # none, as perl's. One perl would alias (passed to a sub, referenced) is
+    # not this copy.
+    if ($op eq 'Slice') {
+        $b->list_only($v, 'a slice');
+        out('a slice a sub or a reference would alias') if grep {
+            $_->operation eq 'Ref' || $_->operation eq 'Call' && $_->is_sub_call
+        } grep { my $u = $_; blessed($u) && grep { blessed($_) && refaddr($_) == refaddr($v) } $u->inputs->@* } ( $v->consumers // [] )->@*;
+        my @ix = grep { blessed($_) } @in;
+        my $src = pop @ix;
+        my $list = $b->emit(op => 'NewArray', type => '%Array*');
+        for my $e (@ix) {
+            if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $list, $b->array_of($e) ]) }
+            else { $b->emit(op => 'APush', type => 'void', inputs => [ $list, $b->as($b->value($e), '%Slot') ]) }
+        }
+        my $kind = $v->kind // '';
+        return $b->emit(op => 'HSlice', type => '%Array*', inputs => [ $b->hash_of($src), $list ]) if $kind eq 'hash';
+        out("a slice of kind $kind") unless $kind eq 'array';
+        my $arr = do { local $b->{elem_read} = 1; $b->array_of($src) };   # (as an element read: through undef, undef)
+        return $b->emit(op => 'ASlice', type => '%Array*', inputs => [ $arr, $list ]);
+    }
+    # A RANGE OF NUMBERS (`1 .. $n`: a bound is a number): a new list of the
+    # integers from one bound to the other. A range of strings (perl's magic
+    # increment, where neither bound is a number) is not T2's yet.
+    if ($op eq 'Range') {
+        $b->list_only($v, 'a range');
+        # (a bound as it is, not as B::SoN coerced it: it numifies both, the
+        # strings of `"az" .. "bb"` too)
+        my ($lo, $hi) = map { my $x = $_; $x = $x->inputs->[0] while blessed($x) && $x->operation eq 'Coerce'; $x } @in;
+        out('a range of strings') unless grep { $b->type_of($_) =~ /\A(?:i64|double)\z/ } $lo, $hi;
+        return $b->emit(op => 'ARange', type => '%Array*', inputs => [ map { $b->as($b->value($_), 'i64') } $lo, $hi ]);
+    }
     if ($op eq 'ListAppend') {
         # map's and grep's list, built a pass at a time: the value (a list,
         # flattened) appended -- by grep only where its condition held.
@@ -384,7 +417,7 @@ sub array_of {
     # A SLURPY ARRAY PARAMETER: its copy, made at the sub's entry (args_rest).
     return $b->{memo}{ refaddr($n) } if blessed($n) && $n->operation eq 'Parameter' && $b->{memo}{ refaddr($n) };
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
-    if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || $n->is_array_deref || $n->is_my_array || $n->is_argv
+    if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource|Slice|Range)\z/ || $n->is_array_deref || $n->is_my_array || $n->is_argv
                          || $n->is_package_aggregate && $n->sigil eq '@'
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
                          || $n->operation eq 'Repeat' && $b->type_of($n) eq '%Array*'

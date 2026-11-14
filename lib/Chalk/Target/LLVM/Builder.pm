@@ -230,6 +230,30 @@ sub _list_use {
     return $list ? 1 : 0;
 }
 
+# list_only($n, $what): a list value (a slice, a range) is a list only where
+# what takes it takes a list -- print's, a list's element, a builtin's list,
+# a list assign, map's and grep's walk (its count and elements). Taken as a
+# scalar (a slice's last element, a range's flip-flop) it is refused.
+sub list_only {
+    my ($b, $n, $what) = @_;
+    for my $u (grep { blessed($_) } ( $n->consumers // [] )->@*) {
+        my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
+        next unless @pos;
+        my $op = $u->operation;
+        my $at0 = grep { $_ == 0 } @pos;
+        next if $op eq 'Coerce' && !grep { blessed($_) && $_->operation ne 'Print' } ( $u->consumers // [] )->@*;
+        next if $op =~ /\A(?:ArrayLiteral|HashLiteral|Print)\z/;
+        next if $op eq 'Count' && $at0;
+        next if $op eq 'Subscript' && $at0 && @pos == 1 && ( $u->can('kind') ? $u->kind // 'array' : 'array' ) eq 'array';
+        next if $op eq 'Slice' && !grep { $_ == $u->inputs->$#* } @pos;   # its indices
+        next if $op eq 'ListAppend' && !$at0;
+        next if $op eq 'Assign' && $u->can('targets') && defined $u->targets;
+        next if $op eq 'Call' && ( $u->is_sub_call && !( $at0 && ( $u->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ )
+                                   || ( $u->takes_a_list || ( $u->name // '' ) =~ /\A(?:push|unshift|join)\z/ ) && !$at0 );
+        out("$what taken as a scalar ($op)");
+    }
+}
+
 # _value_read($n) -> some node takes $n's value as an input -- not only as its
 # memory version (a later read of the array) or its control.
 sub _value_read {

@@ -16,6 +16,7 @@ class Chalk::Target::LLVM::Node::HKeys :isa(Chalk::Target::LLVM::Node) { method 
 class Chalk::Target::LLVM::Node::HPairs :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_hpairs') } }
 class Chalk::Target::LLVM::Node::HValues :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_hvalues') } }
 class Chalk::Target::LLVM::Node::HDerefR :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_hderef_r') } }
+class Chalk::Target::LLVM::Node::HSlice :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_hslice') } }
 class Chalk::Target::LLVM::Node::HAssign :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_hassign') } }
 
 class Chalk::Target::LLVM::Node::Each :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_each') } }

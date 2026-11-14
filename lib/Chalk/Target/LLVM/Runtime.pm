@@ -4518,6 +4518,67 @@ body:
 done:
   ret %Array* %r
 }
+; t2_aslice(a, ix) -> a new list of a's elements at the indices ix holds, in
+; their order: from the end where negative, undef outside the array -- perl's
+; aslice read (it makes no element).
+define internal %Array* @t2_aslice(%Array* %a, %Array* %ix) {
+entry:
+  %n = call i64 @t2_alen(%Array* %ix)
+  %r = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %k = phi i64 [ 0, %entry ], [ %k2, %body ]
+  %more = icmp slt i64 %k, %n
+  br i1 %more, label %body, label %done
+body:
+  %is = call %Slot @t2_aget(%Array* %ix, i64 %k)
+  %i = call i64 @t2_slot_i64(%Slot %is)
+  %v = call %Slot @t2_aget(%Array* %a, i64 %i)
+  call void @t2_apush(%Array* %r, %Slot %v)
+  %k2 = add i64 %k, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
+; t2_range(lo, hi) -> a new list of the integers lo to hi (none when hi < lo):
+; perl's range of numbers.
+define internal %Array* @t2_range(i64 %lo, i64 %hi) {
+entry:
+  %r = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %i = phi i64 [ %lo, %entry ], [ %i2, %body ]
+  %more = icmp sle i64 %i, %hi
+  br i1 %more, label %body, label %done
+body:
+  %v = call %Slot @t2_box_i64(i64 %i)
+  call void @t2_apush(%Array* %r, %Slot %v)
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
+; t2_hslice(h, keys) -> a new list of h's values at the keys, in their order,
+; undef for a missing one -- perl's hslice read.
+define internal %Array* @t2_hslice(%Slot %h, %Array* %keys) {
+entry:
+  %n = call i64 @t2_alen(%Array* %keys)
+  %r = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %k = phi i64 [ 0, %entry ], [ %k2, %body ]
+  %more = icmp slt i64 %k, %n
+  br i1 %more, label %body, label %done
+body:
+  %ks = call %Slot @t2_aget(%Array* %keys, i64 %k)
+  %key = call %Str @t2_slot_str(%Slot %ks)
+  %v = call %Slot @t2_hget(%Slot %h, %Str %key)
+  call void @t2_apush(%Array* %r, %Slot %v)
+  %k2 = add i64 %k, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
 define internal %Array* @t2_hpairs_d(%Slot %h) {
 entry:
   %a = call %Array* @t2_harr(%Slot %h)

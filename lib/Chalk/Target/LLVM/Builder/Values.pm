@@ -61,6 +61,7 @@ sub type_of {
     return '%Slot' if $op eq 'Ref';
     return '%Slot' if $op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '$';
     return '%Array*' if $op eq 'ArrayLiteral' || $v->is_array_deref || $v->is_my_array || $op eq 'ArgsSource' || $op eq 'ListAppend';
+    return '%Array*' if $op eq 'Slice' || $op eq 'Range';   # a list of its own, made where it is
     return 'i64' if $op eq 'Count';
     return '%Slot' if $op eq 'Subscript';
     # A HASH REFERENCE is a %Slot (tag 5) over a %Hash: it is a scalar.

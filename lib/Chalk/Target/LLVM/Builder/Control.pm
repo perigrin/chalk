@@ -602,6 +602,11 @@ sub loop {
     # put back at the exit.
     my $save = $b->alias_saves($L);
     local $b->{alias_restore} = $save ? 1 : $b->{alias_restore};
+    # A LIST THE LOOP WALKS (map's and grep's over a slice or a range: its
+    # count each pass, its elements by index) is made once, before it, as
+    # perl makes the list before it walks it.
+    $b->value($_) for grep { blessed($_) && $_->operation =~ /\A(?:Slice|Range)\z/ }
+        map { $_->inputs->[0] } grep { blessed($_) && $_->operation eq 'Count' } $cond[0]->inputs->@*;
     my $pre = $b->{cur};
     # A LIST THE LOOP BUILDS starts empty each time the loop is entered: a
     # fresh array here (the empty literal, made once at entry, was every
