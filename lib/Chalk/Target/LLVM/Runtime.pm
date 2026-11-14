@@ -4563,6 +4563,276 @@ put:
   store %Slot %v, %Slot* %p
   ret void
 }
+; ---- builtins of one value: chr, ord, time, reverse of a string, x, -e, sprintf ----
+@msg_chr = private unnamed_addr constant [56 x i8] c"chr of other than a byte (0..255): stopped (chalk, T2)\0A\00"
+; chr(n): the string of one byte n. Past a byte perl's is a character: stopped.
+define internal %Str @t2_chr(%Slot %v) {
+entry:
+  %n = call i64 @t2_slot_i64(%Slot %v)
+  %lo = icmp slt i64 %n, 0
+  %hi = icmp sgt i64 %n, 255
+  %bad = or i1 %lo, %hi
+  br i1 %bad, label %stop, label %ok
+stop:
+  call void @t2_stop(i8* getelementptr ([56 x i8], [56 x i8]* @msg_chr, i64 0, i64 0), i64 55)
+  unreachable
+ok:
+  %buf = call i8* @malloc(i64 2)
+  %c = trunc i64 %n to i8
+  store i8 %c, i8* %buf
+  %e = getelementptr i8, i8* %buf, i64 1
+  store i8 0, i8* %e
+  %r = call %Str @t2_str(i8* %buf, i64 1)
+  ret %Str %r
+}
+; ord(s): its first byte, 0 for "".
+define internal i64 @t2_ord(%Str %s) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %z = icmp eq i64 %n, 0
+  br i1 %z, label %none, label %some
+none:
+  ret i64 0
+some:
+  %c = load i8, i8* %p
+  %r = zext i8 %c to i64
+  ret i64 %r
+}
+declare i64 @time(i64*)
+define internal i64 @t2_time() {
+  %t = call i64 @time(i64* null)
+  ret i64 %t
+}
+; reverse in scalar context: the string's bytes, last first.
+define internal %Str @t2_strrev(%Str %s) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %n1 = add i64 %n, 1
+  %buf = call i8* @malloc(i64 %n1)
+  %e = getelementptr i8, i8* %buf, i64 %n
+  store i8 0, i8* %e
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %src = getelementptr i8, i8* %p, i64 %i
+  %c = load i8, i8* %src
+  %j0 = sub i64 %n, %i
+  %j = sub i64 %j0, 1
+  %dst = getelementptr i8, i8* %buf, i64 %j
+  store i8 %c, i8* %dst
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  %r = call %Str @t2_str(i8* %buf, i64 %n)
+  ret %Str %r
+}
+; s x n: n copies of s ("" for n < 1).
+define internal %Str @t2_repeat(%Str %s, i64 %k) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %neg = icmp slt i64 %k, 0
+  %k1 = select i1 %neg, i64 0, i64 %k
+  %tot = mul i64 %n, %k1
+  %t1 = add i64 %tot, 1
+  %buf = call i8* @malloc(i64 %t1)
+  %e = getelementptr i8, i8* %buf, i64 %tot
+  store i8 0, i8* %e
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %k1
+  br i1 %more, label %body, label %done
+body:
+  %off = mul i64 %i, %n
+  %dst = getelementptr i8, i8* %buf, i64 %off
+  call i8* @memcpy(i8* %dst, i8* %p, i64 %n)
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  %r = call %Str @t2_str(i8* %buf, i64 %tot)
+  ret %Str %r
+}
+; (LIST) x n: a new list of n copies of the list's elements.
+define internal %Array* @t2_arepeat(%Array* %a, i64 %k) {
+entry:
+  %r = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %k
+  br i1 %more, label %body, label %done
+body:
+  call void @t2_aappend(%Array* %r, %Array* %a)
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
+; -e PATH: 1 where something is there, else undef.
+define internal %Slot @t2_ftis(%Str %s) {
+entry:
+  %c = call i8* @t2_cstr(%Str %s)
+  %a = call i32 @access(i8* %c, i32 0)
+  %there = icmp eq i32 %a, 0
+  br i1 %there, label %yes, label %no
+yes:
+  %one = call %Slot @t2_box_i64(i64 1)
+  ret %Slot %one
+no:
+  %u = call %Slot @t2_slot(i8 0, i64 0)
+  ret %Slot %u
+}
+; t2_fmt(spec, kind, width, precision, v): one conversion of sprintf, by C's
+; snprintf: spec is "%<flags>*.*<conv>" (kind 0 an integer, 1 a number, 2 a
+; string) or "%<flags>*c" (kind 3, a character).
+define internal %Str @t2_fmt(%Str %spec, i64 %kind, i64 %w, i64 %p, %Slot %v) {
+entry:
+  %sp = call i8* @t2_cstr(%Str %spec)
+  %w32 = trunc i64 %w to i32
+  %p32 = trunc i64 %p to i32
+  switch i64 %kind, label %int [ i64 1, label %num
+                                  i64 2, label %str
+                                  i64 3, label %chr ]
+int:
+  %i = call i64 @t2_slot_i64(%Slot %v)
+  %ni = call i32 (i8*, i64, i8*, ...) @snprintf(i8* null, i64 0, i8* %sp, i32 %w32, i32 %p32, i64 %i)
+  %ni64 = sext i32 %ni to i64
+  %ni1 = add i64 %ni64, 1
+  %bi = call i8* @malloc(i64 %ni1)
+  %xi = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %bi, i64 %ni1, i8* %sp, i32 %w32, i32 %p32, i64 %i)
+  %ri = call %Str @t2_str(i8* %bi, i64 %ni64)
+  ret %Str %ri
+num:
+  %d = call double @t2_slot_num(%Slot %v)
+  %nd = call i32 (i8*, i64, i8*, ...) @snprintf(i8* null, i64 0, i8* %sp, i32 %w32, i32 %p32, double %d)
+  %nd64 = sext i32 %nd to i64
+  %nd1 = add i64 %nd64, 1
+  %bd = call i8* @malloc(i64 %nd1)
+  %xd = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %bd, i64 %nd1, i8* %sp, i32 %w32, i32 %p32, double %d)
+  %rd = call %Str @t2_str(i8* %bd, i64 %nd64)
+  ret %Str %rd
+str:
+  %s = call %Str @t2_slot_str(%Slot %v)
+  %cs = call i8* @t2_cstr(%Str %s)
+  %ns = call i32 (i8*, i64, i8*, ...) @snprintf(i8* null, i64 0, i8* %sp, i32 %w32, i32 %p32, i8* %cs)
+  %ns64 = sext i32 %ns to i64
+  %ns1 = add i64 %ns64, 1
+  %bs = call i8* @malloc(i64 %ns1)
+  %xs = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %bs, i64 %ns1, i8* %sp, i32 %w32, i32 %p32, i8* %cs)
+  %rs = call %Str @t2_str(i8* %bs, i64 %ns64)
+  ret %Str %rs
+chr:
+  %ci = call i64 @t2_slot_i64(%Slot %v)
+  %c32 = trunc i64 %ci to i32
+  %nc = call i32 (i8*, i64, i8*, ...) @snprintf(i8* null, i64 0, i8* %sp, i32 %w32, i32 %c32)
+  %nc64 = sext i32 %nc to i64
+  %nc1 = add i64 %nc64, 1
+  %bc = call i8* @malloc(i64 %nc1)
+  %xc = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %bc, i64 %nc1, i8* %sp, i32 %w32, i32 %c32)
+  %rc = call %Str @t2_str(i8* %bc, i64 %nc64)
+  ret %Str %rc
+}
+; t2_pow(l, r): perl's ** (pp_pow). An integer to a power not below 0:
+; a base a power of 2 is a number, as pow() gives; one whose result surely
+; fits 64 bits (its bits times the power at most 64) an integer by
+; multiplying -- past what an i64 holds, a UV T2 has not: stopped. Anything
+; else pow()'s number.
+declare double @llvm.pow.f64(double, double)
+declare double @llvm.fabs.f64(double)
+declare i64 @llvm.ctlz.i64(i64, i1)
+@msg_pow_uv = private unnamed_addr constant [51 x i8] c"an ** past what an i64 holds: stopped (chalk, T2)\0A\00"
+define internal i1 @t2_is_int_num(%Slot %v) {
+entry:
+  %t = extractvalue %Slot %v, 0
+  %isint = icmp eq i8 %t, 1
+  br i1 %isint, label %yes, label %other
+yes:
+  ret i1 1
+other:
+  %undef = icmp eq i8 %t, 0
+  br i1 %undef, label %no, label %num
+num:
+  %d = call double @t2_slot_num(%Slot %v)
+  %tr = call double @llvm.trunc.f64(double %d)
+  %whole = fcmp oeq double %d, %tr
+  %a = call double @llvm.fabs.f64(double %d)
+  %small = fcmp olt double %a, 9007199254740992.0
+  %r = and i1 %whole, %small
+  ret i1 %r
+no:
+  ret i1 0
+}
+define internal %Slot @t2_pow(%Slot %l, %Slot %r) {
+entry:
+  %li = call i1 @t2_is_int_num(%Slot %l)
+  %ri = call i1 @t2_is_int_num(%Slot %r)
+  %both = and i1 %li, %ri
+  br i1 %both, label %ints, label %float
+ints:
+  %p = call i64 @t2_slot_i64(%Slot %r)
+  %b = call i64 @t2_slot_i64(%Slot %l)
+  %pneg = icmp slt i64 %p, 0
+  %bneg = icmp slt i64 %b, 0
+  %bn = sub i64 0, %b
+  %bu = select i1 %bneg, i64 %bn, i64 %b
+  %bm1 = sub i64 %bu, 1
+  %band = and i64 %bu, %bm1
+  %pow2 = icmp eq i64 %band, 0
+  %lz = call i64 @llvm.ctlz.i64(i64 %bu, i1 false)
+  %hb = sub i64 64, %lz
+  %pbig = icmp ugt i64 %p, 64
+  %prod = mul i64 %p, %hb
+  %pfit = icmp ule i64 %prod, 64
+  %fit0 = xor i1 %pbig, 1
+  %fit1 = and i1 %fit0, %pfit
+  %np = xor i1 %pneg, 1
+  %np2 = xor i1 %pow2, 1
+  %fit2 = and i1 %fit1, %np
+  %fit = and i1 %fit2, %np2
+  br i1 %fit, label %loop, label %float
+loop:
+  %i = phi i64 [ 0, %ints ], [ %i2, %step ]
+  %acc = phi i64 [ 1, %ints ], [ %acc2, %step ]
+  %more = icmp slt i64 %i, %p
+  br i1 %more, label %step, label %done
+step:
+  %acc2 = mul i64 %acc, %bu
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  %odd = and i64 %p, 1
+  %isodd = icmp eq i64 %odd, 1
+  %negres = and i1 %bneg, %isodd
+  br i1 %negres, label %neg, label %pos
+pos:
+  %big = icmp slt i64 %acc, 0
+  br i1 %big, label %stop, label %posok
+posok:
+  %ps = call %Slot @t2_box_i64(i64 %acc)
+  ret %Slot %ps
+neg:
+  %na = sub i64 0, %acc
+  %nbig = icmp sgt i64 %na, 0
+  br i1 %nbig, label %stop, label %negok
+negok:
+  %ns = call %Slot @t2_box_i64(i64 %na)
+  ret %Slot %ns
+stop:
+  call void @t2_stop(i8* getelementptr ([51 x i8], [51 x i8]* @msg_pow_uv, i64 0, i64 0), i64 50)
+  unreachable
+float:
+  %ld = call double @t2_slot_num(%Slot %l)
+  %rd = call double @t2_slot_num(%Slot %r)
+  %f = call double @llvm.pow.f64(double %ld, double %rd)
+  %fs = call %Slot @t2_box_num(double %f)
+  ret %Slot %fs
+}
 LL
 
 1;

@@ -13,6 +13,8 @@ class Chalk::Target::LLVM::Node::Env :isa(Chalk::Target::LLVM::Node) {
     }
 }
 class Chalk::Target::LLVM::Node::FtDir :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_ftdir') } }
+class Chalk::Target::LLVM::Node::FtIs :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_ftis') } }
+class Chalk::Target::LLVM::Node::Time :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->name . ' = call i64 @t2_time()' } }
 class Chalk::Target::LLVM::Node::Chdir :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_chdir') } }
 class Chalk::Target::LLVM::Node::Print :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { $self->_void( '@t2_' . ( ( $self->attr->{fd} // 1 ) == 2 ? 'eprint' : 'print' ) ) }

@@ -374,6 +374,7 @@ sub array_of {
     if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || $n->is_array_deref || $n->is_my_array || $n->is_argv
                          || $n->is_package_aggregate && $n->sigil eq '@'
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
+                         || $n->operation eq 'Repeat' && $b->type_of($n) eq '%Array*'
                          || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:keys|values|sort|reverse|caller)\z/ )) {
         my $a = $b->value($n);
         return $a if $a->type eq '%Array*';

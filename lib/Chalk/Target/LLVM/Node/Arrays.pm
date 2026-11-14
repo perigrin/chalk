@@ -52,4 +52,6 @@ class Chalk::Target::LLVM::Node::APop :isa(Chalk::Target::LLVM::Node) { method t
 class Chalk::Target::LLVM::Node::AExists :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_aexists') } }
 class Chalk::Target::LLVM::Node::ASetLen :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_aset_len') } }
 
+class Chalk::Target::LLVM::Node::ARepeat :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_arepeat') } }
+
 1;

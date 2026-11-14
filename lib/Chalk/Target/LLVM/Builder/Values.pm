@@ -112,6 +112,12 @@ sub type_of {
     return '%Slot' if $op eq 'Coerce' && ( $v->stamp // '' ) eq 'Num' # static type
         && $b->type_of($v->inputs->[0]) =~ /\A%(?:Slot|Str)\z/;
     return $b->phi_type($v) if $op eq 'Phi';
+    # ** IS AN INTEGER where perl's is (an integer to a power, small enough),
+    # else a number: which, at run time.
+    return '%Slot' if $op eq 'Power';
+    # (LIST) x N: a list.
+    return '%Array*' if $op eq 'Repeat' && ( $v->stamp // '' ) eq 'List';   # static type
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'ftis';
     return '%Slot' if ( $v->stamp // '' ) =~ /\A(?:Unknown|None)\z/; # static type
     if ($op eq 'And' || $op eq 'Or') {
         my %t = map { ( $b->type_of($_) => 1 ) } $v->inputs->@[0, 1];
@@ -468,6 +474,26 @@ sub _value {
         my $pos = @a > 2 ? $b->as( $b->value( $a[2] ), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
         return $b->emit(op => 'Index', type => 'i64', inputs => [ $str, $b->as( $b->value( $a[1] ), '%Str' ), $pos ]);
     }
+    if ($op eq 'Power') {
+        return $b->as( $b->emit(op => 'Pow', type => '%Slot', inputs => [ map { $b->as( $b->value($_), '%Slot' ) } $v->inputs->@[0, 1] ]), $ty );
+    }
+    if ($op eq 'Repeat') {
+        my ($l, $n) = $v->inputs->@[0, 1];
+        my $k = $b->as( $b->value($n), 'i64' );
+        # (B::SoN coerces the list to a Str there: the list repeated is the list)
+        $l = $l->inputs->[0] while $ty eq '%Array*' && blessed($l) && $l->operation eq 'Coerce' && blessed( $l->inputs->[0] ) && _is_list( $l->inputs->[0] );
+        return $b->emit(op => 'ARepeat', type => '%Array*', inputs => [ $b->array_of($l), $k ]) if $ty eq '%Array*';
+        out('a Repeat of a list in scalar context') if _is_list($l);
+        return $b->as( $b->emit(op => 'Repeat', type => '%Str', inputs => [ $b->as( $b->value($l), '%Str' ), $k ]), $ty );
+    }
+    # `A xor B`: their truths differ.
+    if ($op eq 'Xor') {
+        my ($x, $y) = map { $b->truth( $b->value($_) ) } $v->inputs->@[0, 1];
+        return $b->as( $b->emit(op => 'Cmp', type => 'i1', inputs => [ $x, $y ], attr => { op => 'ne' }), $ty );
+    }
+    if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:chr|ord|time|ftis|reverse|sprintf|lock)\z/) {
+        return $b->builtin_value($v, $ty);
+    }
     # A REGEX MATCH OF A CONSTANT PATTERN is a call of its own graph
     # (Chalk::Regex::Graph): [start, end, groups...] or undef; it is true when
     # that is defined. A capture reads the offsets of the match it names.
@@ -486,6 +512,82 @@ sub _value {
     # A REGEX MATCH, literal or a qr value: no engine in T2 yet (the fallback has one).
     out('a regex match: T2 has no regex engine yet') if $op =~ /\A(?:RegexMatch|Match|RegexSubst|Subst|QrConst|Split)\z/;
     out($op . ( $op eq 'Call' ? ' ' . ( $v->dispatch_kind // '' ) . ' ' . ( $v->name // '' ) : '' ));
+}
+
+# builtin_value($Call, $ty) -> a builtin of one value: chr, ord, time, -e,
+# reverse in scalar context, sprintf, lock.
+sub builtin_value {
+    my ($b, $v, $ty) = @_;
+    my $name = $v->name;
+    my @a = grep { blessed($_) } $v->inputs->@*;
+    pop @a if $v->can('memory_input') && $v->memory_input;
+    return $b->as( $b->emit(op => 'Time', type => 'i64'), $ty ) if $name eq 'time';
+    if ($name eq 'reverse') {
+        # IN SCALAR CONTEXT (a list's is an array): its list joined, its bytes last first.
+        out('a reverse of $_') unless @a;
+        out('a reverse past ASCII') if $b->past_ascii;
+        my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+        for my $e (@a) {
+            if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($e) ]) }
+            else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as( $b->value($e), '%Slot' ) ]) }
+        }
+        my $s = $b->emit(op => 'Join', type => '%Str', inputs => [ $b->const_str(''), $arr ]);
+        return $b->as( $b->emit(op => 'StrRev', type => '%Str', inputs => [$s]), $ty );
+    }
+    return $b->sprintf_value($v, $ty, @a) if $name eq 'sprintf';
+    out("a $name of other than one argument (of \$_)") unless @a == 1;
+    out("a $name of a list") if _is_list( $a[0] );
+    # lock: perl's without threads is a no-op, its value its argument.
+    return $b->as( $b->value( $a[0] ), $ty ) if $name eq 'lock';
+    return $b->as( $b->emit(op => 'FtIs', type => '%Slot', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty ) if $name eq 'ftis';
+    # chr, ord: of a byte -- perl's are of a character, the same while no string goes past ASCII.
+    out("a $name where a string goes past ASCII") if $b->past_ascii;
+    return $b->as( $b->emit(op => 'Chr', type => '%Str', inputs => [ $b->as( $b->value( $a[0] ), '%Slot' ) ]), $ty ) if $name eq 'chr';
+    return $b->as( $b->emit(op => 'Ord', type => 'i64', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty );
+}
+
+# past_ascii -> a string constant of the program goes past ASCII (T2's
+# strings are bytes; perl's past ASCII are characters).
+sub past_ascii {
+    my ($b) = @_;
+    return $b->{past_ascii} //= scalar grep { $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'string' && ( $_->value // '' ) =~ /[^\x00-\x7f]/ }
+        _all_nodes($b->{mop}, $b->{ret});
+}
+
+# sprintf_value($Call, $ty, $format, @args) -> sprintf of a constant format:
+# its literal text kept, each conversion one snprintf (t2_fmt) of its
+# argument -- a * width or precision the next argument, as perl's.
+sub sprintf_value {
+    my ($b, $v, $ty, $f, @args) = @_;
+    out('a sprintf of no format') unless blessed($f);
+    out('a sprintf of a format made at run time') unless $f->operation eq 'Constant' && defined $f->value;
+    out('a sprintf of a list') if grep { _is_list($_) } @args;
+    my $fmt = $f->value;
+    my @parts;
+    my $next = sub { @args ? $b->as( $b->value( shift @args ), '%Slot' ) : $b->emit(op => 'Undef', type => '%Slot') };
+    pos($fmt) = 0;
+    while (pos($fmt) < length $fmt) {
+        if ($fmt =~ /\G([^%]+)/gc) { push @parts, $b->const_str($1); next }
+        if ($fmt =~ /\G%%/gc) { push @parts, $b->const_str('%'); next }
+        $fmt =~ /\G%([-+ 0#]*)(\*|\d*)(?:\.(\*|\d*))?([a-zA-Z])/gc
+            or out('a sprintf conversion T2 does not read (' . substr($fmt, pos($fmt), 6) . ')');
+        my ($flags, $w, $p, $c) = ($1, $2, $3, $4);
+        my %kind = (d => 0, i => 0, u => 0, x => 0, X => 0, o => 0, e => 1, E => 1, f => 1, F => 1, g => 1, G => 1, s => 2, c => 3);
+        out("a sprintf %$c") unless exists $kind{$c};
+        my $wn = $w eq '*' ? $b->as( $next->(), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => length $w ? $w : 0 });
+        my $pn = !defined $p ? $b->emit(op => 'Const', type => 'i64', attr => { value => -1 })
+               : $p eq '*'   ? $b->as( $next->(), 'i64' )
+               :               $b->emit(op => 'Const', type => 'i64', attr => { value => length $p ? $p : 0 });
+        out('a sprintf %c of a precision') if $c eq 'c' && defined $p;
+        # (perl's integers are 64 bits: C's with `l`; %i is %d)
+        my $conv = $kind{$c} == 0 ? 'l' . ( $c eq 'i' ? 'd' : $c ) : $c;
+        my $spec = '%' . $flags . '*' . ( $c eq 'c' ? '' : '.*' ) . $conv;
+        push @parts, $b->emit(op => 'Fmt', type => '%Str', inputs => [ $b->const_str($spec),
+            $b->emit(op => 'Const', type => 'i64', attr => { value => $kind{$c} }), $wn, $pn, $next->() ]);
+    }
+    my $r = @parts ? shift @parts : $b->const_str('');
+    $r = $b->emit(op => 'Concat', type => '%Str', inputs => [ $r, $_ ]) for @parts;
+    return $b->as( $r, $ty );
 }
 
 # truth($node) -> an i1: perl's truth of a value of any slice type.

@@ -267,6 +267,8 @@ sub walk {
         elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'Hash') { $ctl = $s }
         # A chdir OR A require is made where it stands (the next -d reads its cwd).
         elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:chdir|require)\z/) { $b->value($s); $ctl = $s }
+        # A lock is a no-op without threads (its operand the variable, not a value).
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'lock') { $ctl = $s }
         # `$#a = N` where it stands: the array resized (t2_aset_len).
         elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'set_arylen') {
             my @a = grep { blessed($_) } $s->inputs->@*;
