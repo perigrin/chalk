@@ -458,7 +458,10 @@ sub array_of {
         my $t = $n->target;
         my $fn = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
         out('a list from a call of no sub T2 made') unless $fn;
-        return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$r]) if $fn->{listret};
+        # (IN SCALAR CONTEXT -- `r()->@*`, `@{ r() }`, `r()->[1]`: what it
+        # returns is a reference, the array its value refers to; a list of
+        # that one value printed "ARRAY(0x...)" for "1 2")
+        return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$r]) if $fn->{listret} || !_list_use($n);
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
         $b->emit(op => 'APush', type => 'void', inputs => [ $a, $r ]);
         return $a;
