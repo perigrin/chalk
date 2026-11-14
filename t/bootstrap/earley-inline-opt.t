@@ -220,7 +220,10 @@ sub opt_reference($value) {
     is($sym->quantifier(), '?', "quantifier is still '?'");
 }
 
-# Test 8: SemanticAction produces correct Context tree with placeholder for absent optional
+# Test 8: SemanticAction Context tree for an absent optional.
+# Since e72a4929 (#713) an absent B? is multiply(value, one()): it leaves no
+# placeholder Context (the old B_opt placeholder came from on_skip_optional,
+# which was removed). The tree holds exactly the two scans, in order.
 {
     my $grammar = [
         Chalk::Grammar::Rule->new(
@@ -243,10 +246,7 @@ sub opt_reference($value) {
     my $value = $parser->parse_value('ac');
     ok(defined $value, "SemanticAction parse_value returns defined for 'ac'");
 
-    # The context should have children for: 'a', placeholder, 'c'
-    # The placeholder represents the absent B?
-    my @children = $value->children()->@*;
-    # Flatten the multiply tree to count significant leaves (non-one() singletons)
+    # Flatten the multiply tree to its leaves
     my @leaves;
     my $collect;
     $collect = sub($ctx) {
@@ -259,17 +259,16 @@ sub opt_reference($value) {
         }
     };
     $collect->($value);
-    # Filter out the one() singleton: it has undef focus, no rule, no children
+    # Filter out the one() singletons: undef focus, no rule, no children
     my @significant = grep {
         defined $_->extract() || defined $_->rule()
     } @leaves;
-    # We expect 3 significant leaves: 'a' scan, placeholder (B_opt rule), 'c' scan
-    is(scalar @significant, 3,
-        "absent optional produces 3 significant leaf contexts (a, placeholder, c)");
+    is(scalar @significant, 2,
+        "absent optional produces 2 significant leaf contexts (a, c), no placeholder");
     is($significant[0]->extract(), 'a', "first leaf is 'a'");
-    ok(!defined $significant[1]->extract(), "second leaf (placeholder) has undef focus");
-    is($significant[1]->rule(), 'B_opt', "placeholder has B_opt rule name");
-    is($significant[2]->extract(), 'c', "third leaf is 'c'");
+    is($significant[1]->extract(), 'c', "second leaf is 'c'");
+    ok(!(grep { defined $_->rule() && $_->rule() =~ /^B/ } @leaves),
+        "no leaf is named for the absent B");
 
     # Optional present: 'abc'
     my $value2 = $parser->parse_value('abc');
