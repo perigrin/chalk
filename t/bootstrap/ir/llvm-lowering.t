@@ -511,10 +511,12 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $rs = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]);
     $rs->set_stamp('Int');
 
-    # Existing chain: vn -> vs -> loop; the Print goes after the loop.
+    # Existing chain: vn -> vs -> loop; the Print goes after the loop -- off
+    # its exit Region, as B::SoN hangs the statement after a loop. Off the Loop
+    # itself it would stand beside the loop's test: a fork, refused.
     $vs->set_control_in($vn);
     $loop->set_control_in($vs);
-    my $ret = print_and_return($f, $s_phi, $loop);
+    my $ret = print_and_return($f, $s_phi, $exit_region);
 
     my $ll;
     eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
@@ -909,10 +911,12 @@ ok(Chalk::Target::LLVM->can('lower'),
     $n_new->set_control_in($body_proj);
     $s_new->set_control_in($body_proj);
 
-    # Existing chain: vn -> vs -> loop; the Print goes after the loop.
+    # Existing chain: vn -> vs -> loop; the Print goes after the loop -- off
+    # its exit Region, as B::SoN hangs the statement after a loop. Off the Loop
+    # itself it would stand beside the loop's test: a fork, refused.
     $vs->set_control_in($vn);
     $loop->set_control_in($vs);
-    my $ret = print_and_return($f, $s_phi, $loop);
+    my $ret = print_and_return($f, $s_phi, $exit_region);
 
     my $ll;
     eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };

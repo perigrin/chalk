@@ -46,6 +46,9 @@ sub print_returned_value {
     $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    # The Return this replaces leaves the chain: left hung on $ctrl beside the
+    # first Print, it reads as a fork the backend refuses rather than drop one.
+    $ret_node->set_control_in(undef);
     # A Return hung directly off a Loop is ambiguous between the loop BODY and
     # the code after it. Post-loop statements belong on the loop's exit Region,
     # which is where a Return-off-a-Region graph already puts them.

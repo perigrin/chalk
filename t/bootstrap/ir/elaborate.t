@@ -35,6 +35,10 @@ sub print_returned_value {
     }
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    # The Return this replaces leaves the chain: left hung on $ctrl beside the
+    # first Print, it reads as a control node two statements follow -- a fork
+    # the backend refuses rather than drop one of them.
+    $ret_node->set_control_in(undef);
     for my $part ('[', $str, "]\n") {
         my $val = ref $part ? $part : do {
             my $k = $f->make('Constant', value => $part, const_type => 'string');
@@ -814,10 +818,12 @@ ok(Chalk::IR::Schedule::Elaborate->can('from_return_node'),
     $vs->set_control_in($vn);
     $loop->set_control_in($vs);
 
-    # Return $s
+    # Return $s -- after the loop, so off its exit Region, as B::SoN hangs the
+    # statement after a loop. Hung off the Loop itself it would stand beside
+    # the loop's test, two statements following one control node.
     my $rx  = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 's', inputs => [$vs]); $rx->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$rx]);
-    $ret->set_control_in($loop);
+    $ret->set_control_in($exit_reg);
 
     SKIP: {
         skip 'E9: lli not found', 6 unless -x $LLI;

@@ -42,6 +42,9 @@ sub print_returned_value {
     $close->set_stamp('Str');
 
     my $ctrl = $ret_node->control_in // $f->make_cfg('Start');
+    # The Return this replaces leaves the chain: left hung on $ctrl beside the
+    # first Print, it reads as a fork the backend refuses rather than drop one.
+    $ret_node->set_control_in(undef);
     for my $part ($open, $s, $close) {
         my $p = $f->make('Print', inputs => [$part]);
         $p->set_control_in($ctrl);
