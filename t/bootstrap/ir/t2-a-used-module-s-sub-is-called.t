@@ -26,7 +26,7 @@ for my $case (
     my ( $fh, $pl ) = tempfile( SUFFIX => '.pl', UNLINK => 1 );
     print $fh $src; close $fh;
     my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null);
-    local $Chalk::Target::LLVM::T2::PATH;
+    local $Chalk::Target::LLVM::Lower::PATH;
     my ($units, undef, undef, $err) = Chalk::CodeGen::Pipeline->new->run_detail( $json,
         sub ($g, $m) { my $x = $g->{'main::__PROGRAM__'} or return (); ([ 'main::__PROGRAM__', $x->returns->[0] ]) },
         program_mode => 1 );

@@ -8,14 +8,14 @@ use lib 'lib', 't/lib';
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";
 require Chalk::CodeGen::Pipeline;
-require Chalk::Target::LLVM::T2;
+require Chalk::Target::LLVM::Lower;
 
 # T2's own reason, read where lower_program gives up.
 my $why;
 {
     no warnings 'redefine';
-    my $orig = \&Chalk::Target::LLVM::T2::lower_program;
-    *Chalk::Target::LLVM::T2::lower_program = sub { my $r = $orig->(@_); $why = $r ? 'taken' : ( $@ =~ s/\n.*//sr ); $r };
+    my $orig = \&Chalk::Target::LLVM::Lower::lower_program;
+    *Chalk::Target::LLVM::Lower::lower_program = sub { my $r = $orig->(@_); $why = $r ? 'taken' : ( $@ =~ s/\n.*//sr ); $r };
 }
 
 my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);

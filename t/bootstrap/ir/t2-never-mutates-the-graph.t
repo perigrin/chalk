@@ -11,7 +11,7 @@ plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$S
 
 require Chalk::CodeGen::Pipeline;
 require Chalk::Target::LLVM;
-require Chalk::Target::LLVM::T2;
+require Chalk::Target::LLVM::Lower;
 
 sub snapshot (@nodes) {
     return join "\n", map { refaddr($_) . ':' . join(',', map { blessed($_) ? refaddr($_) : 'u' } $_->inputs->@*) } @nodes;
@@ -32,7 +32,7 @@ for my $src (
         my $ret = $g->returns->[0];
         my @nodes = map { $_->component } values %$graphs;
         $before = snapshot(@nodes);
-        Chalk::Target::LLVM::T2->lower_program($ret, mop => $mop);
+        Chalk::Target::LLVM::Lower->lower_program($ret, mop => $mop);
         $after = snapshot(@nodes);
         return ();
     }, program_mode => 1);

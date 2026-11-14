@@ -3,7 +3,7 @@
 use 5.42.0;
 use Test::More;
 
-open my $fh, '<', 'lib/Chalk/Target/LLVM/T2.pm' or die "T2.pm: $!";
+open my $fh, '<', 'lib/Chalk/Target/LLVM/Runtime.pm' or die "Runtime.pm: $!";
 my $src = do { local $/; <$fh> };
 my $n = 0;
 while ($src =~ /(\@\w+) = private unnamed_addr constant \[(\d+) x i8\] c"((?:[^"\\]|\\.)*)"/g) {

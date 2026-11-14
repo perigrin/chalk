@@ -1914,8 +1914,8 @@ sub _process_control_chain {
 # Context (perigrin, 2026-11-09).
 sub _context_sees_maybe_as_scalar {
     my ($ret, $mop) = @_;
-    require Chalk::Target::LLVM::T2;
-    my @nodes = Chalk::Target::LLVM::T2::Builder::_all_nodes($mop, $ret);
+    require Chalk::Target::LLVM::Builder;
+    my @nodes = Chalk::Target::LLVM::Builder::_all_nodes($mop, $ret);
     for my $m ( $mop ? map { $_->can('methods') ? $_->methods : () } $mop->classes : () ) {
         push @nodes, $m->graph->component if $m->can('graph') && $m->graph;
     }
@@ -1966,8 +1966,8 @@ sub lower_with_elaboration {
     # a graph typed in LLVM's types and printed. Any other (undef) is lowered
     # below, a fallback each slice shrinks. (T2 takes BEGIN and END blocks.)
     {
-        require Chalk::Target::LLVM::T2;
-        my $ir = Chalk::Target::LLVM::T2->lower_program($return_node, mop => $opts{mop});
+        require Chalk::Target::LLVM::Lower;
+        my $ir = Chalk::Target::LLVM::Lower->lower_program($return_node, mop => $opts{mop});
         return $ir if defined $ir;
     }
 
