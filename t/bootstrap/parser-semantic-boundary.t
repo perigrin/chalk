@@ -76,27 +76,25 @@ my $parser = Chalk::Bootstrap::Earley->new(
     ok(!$result, 'parse() returns false for invalid input');
 }
 
-# Test 2: parse_value() returns raw semiring value
+# Test 2: parse_value() returns the composite's value: one Context.
+# Since #706 (c0a02b8b) FilterComposite's value is a single Context with
+# per-semiring annotation slots, not an N-tuple [bool, context].
 {
     my $result = $parser->parse_value('ABC');
 
-    is(ref($result), 'ARRAY', 'parse_value() returns arrayref (composite semiring value)');
-    is(scalar($result->@*), 2, 'composite value is 2-tuple [bool, context]');
-
-    my ($bool_val, $context_val) = $result->@*;
-    ok($bool_val, 'boolean component is true for valid input');
-    isa_ok($context_val, 'Chalk::Bootstrap::Context', 'semantic component is Context');
+    isa_ok($result, 'Chalk::Bootstrap::Context',
+        'parse_value() returns a Context (unified composite value)');
+    ok(!$result->is_zero(), 'Context is non-zero for valid input');
+    ok(!$comp_sr->is_zero($result), 'composite agrees the value is non-zero');
 }
 
 # Test 3: Extracting semantic value from composite result
 {
-    my $result = $parser->parse_value('ABC');
-    my ($bool_val, $context) = $result->@*;
+    my $context = $parser->parse_value('ABC');
 
     # The context should contain the parse tree structure
-    isa_ok($context, 'Chalk::Bootstrap::Context', 'can extract Context from parse result');
-
     is($context->rule(), 'Start', 'context has correct rule name');
+    is($context->scanned_text(), 'ABC', 'context covers the scanned input');
 }
 
 # Test 4: parse_value() returns undef for parse failure
