@@ -318,6 +318,15 @@ class Chalk::IR::Node {
     method is_args_list_assign()  { return 0 }       # Assign
     method stored_whole_into()    { return undef }   # ArrayLiteral, HashLiteral
 
+    # const_choices -> the strings this value can be where it is made of
+    # constants: a constant, a concatenation of such, a choice (?:) of such.
+    # () for anything else.
+    method const_choices() { return () }
+
+    # const_pattern -> the one string this value is where it is folded to
+    # constants (a string, or strings joined), else undef.
+    method const_pattern() { return undef }
+
     # successors -> the nodes whose control is this one, each once.
     method successors() {
         my %seen;

@@ -2281,7 +2281,7 @@ sub subst_call {
         return $b->emit_call(op => 'Call', type => '%Slot', inputs => \@args, attr => { fn => $fn->{name} });
     }
     my $pn   = $s->inputs->[1];
-    my @pats = _const_choices($pn);
+    my @pats = $pn isa Chalk::IR::Node ? $pn->const_choices : ();
     out('an s/// whose pattern is made at run time of what is not a few constants') unless @pats && @pats <= 8;
     my @code = map { $b->emit(op => 'CodeOfFn', type => '%Slot', attr => { fn => $b->regex_fn( $_, $flags, 'subst', %$ro )->{name} }) } @pats;
     my $p    = $b->as( $b->value($pn), '%Str' );
@@ -2294,28 +2294,6 @@ sub subst_call {
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
     $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for @args;
     return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $arr ]);
-}
-
-# _const_choices($node) -> the strings a pattern node can be: a constant, a
-# concatenation of such, a choice (?:) of such. () for anything else.
-sub _const_choices {
-    my ($n) = @_;
-    return () unless blessed($n);
-    my $op = $n->operation;
-    return ( $n->value // '' ) if $op eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:string|integer)\z/;
-    return _const_choices( $n->inputs->[0] ) if $op eq 'Coerce';
-    if ( $op eq 'Concat' ) {
-        my @a = _const_choices( $n->inputs->[0] ) or return ();
-        my @z = _const_choices( $n->inputs->[1] ) or return ();
-        return map { my $x = $_; map { "$x$_" } @z } @a;
-    }
-    if ( $op eq 'TernaryExpr' ) {
-        my @a = _const_choices( $n->inputs->[1] ) or return ();
-        my @z = _const_choices( $n->inputs->[2] ) or return ();
-        my %seen;
-        return grep { !$seen{$_}++ } @a, @z;
-    }
-    return ();
 }
 
 # translit($Transliterate) -> the %Slot tr's graph gives: [the new string,
@@ -2351,16 +2329,6 @@ sub regex_subst_count {
     return $b->emit(op => 'Select', type => '%Slot', inputs => [ $none, $b->as( $b->const_str(''), '%Slot' ), $n ]);
 }
 
-# _in_place($node) -> an s/// or tr that writes its subject: pinned, not /r,
-# of a variable (B::SoN gives a copy's -- `(my $t = $s) =~ s///` -- as the
-# value it was given: the node's value is then the new string).
-sub _in_place {
-    my ($s) = @_;
-    my $subj = $s->inputs->[0];
-    return ( $s->flags // '' ) !~ /r/ && $s->can('control_in') && blessed( $s->control_in )
-        && blessed($subj) && $subj->operation eq 'PadAccess';
-}
-
 # substr_write($Call): substr($s, o, l, R) where it stands -- $s a `my` scalar
 # kept here: its new string stored; the call's value the part it replaced.
 sub substr_write {
@@ -2389,7 +2357,7 @@ sub regex_subst_stmt {
     my ($b, $s) = @_;
     my $subj = $s->inputs->[0];
     my $new = $b->regex_subst_part( $s, 0 );
-    return unless _in_place($s);   # (its value is the new string: what reads it reads)
+    return unless $s->is_in_place;   # (its value is the new string: what reads it reads)
     out('an s/// or tr in place of what is not a `my` scalar kept here')
         unless $subj->operation eq 'PadAccess' && ( $subj->sigil // '' ) eq '$' && $subj->is_location;
     my $ptr = $b->location($subj);
@@ -2474,7 +2442,7 @@ sub _pattern_parts {
         }
         if ( $op eq 'Call' && ( $x->dispatch_kind // '' ) eq 'builtin' && ( $x->name // '' ) eq 'quotemeta' ) {
             my ($arg) = grep { blessed($_) } $x->inputs->@*;
-            my $c = _const_pattern($arg);
+            my $c = $arg isa Chalk::IR::Node ? $arg->const_pattern : undef;
             return quotemeta $c if defined $c;    # (known here: quoted here)
             return undef if @lits >= 32;
             push @lits, $arg;
@@ -2497,22 +2465,6 @@ sub _made_a_string {
     return 1 if $op eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:join|sprintf|lc|uc|lcfirst|ucfirst|substr|quotemeta|sprintf)\z/;
     return _made_a_string( $n->inputs->[0] ) && _made_a_string( $n->inputs->[1] ) if $op eq 'DefinedOr';
     return 0;
-}
-
-# _const_pattern($node) -> the string an interpolated pattern is where B::SoN
-# folded it to constants (a string, or strings joined), else undef.
-sub _const_pattern {
-    my ($n) = @_;
-    return undef unless blessed($n);
-    my $op = $n->operation;
-    return $n->value // '' if $op eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:string|integer)\z/;
-    return _const_pattern( $n->inputs->[0] ) if $op eq 'Coerce';
-    if ( $op eq 'Concat' ) {
-        my @p = map { _const_pattern($_) } grep { blessed($_) } $n->inputs->@*;
-        return undef if grep { !defined } @p;
-        return join '', @p;
-    }
-    return undef;
 }
 
 # _rx_arm(\%ok, $cond, $arm) -> the matches known to have succeeded in arm
@@ -3415,7 +3367,7 @@ sub _value {
     if ($op eq 'RegexSubst' || $op eq 'Transliterate') {
         # IN PLACE (pinned, of a `my` scalar): how many it replaced. Else --
         # /r, floating, or of a value B::SoN folded a copy into -- the new string.
-        return $b->as( _in_place($v) ? $b->regex_subst_count($v) : $b->regex_subst_part( $v, 0 ), $ty );
+        return $b->as( $v->is_in_place ? $b->regex_subst_count($v) : $b->regex_subst_part( $v, 0 ), $ty );
     }
     return $b->as( $b->regex_subst_count( $v->inputs->[0] ), $ty ) if $op eq 'RegexSubstCount' || $op eq 'TransliterateCount';
     # pos($s): its cell (undef where no m//g left it)

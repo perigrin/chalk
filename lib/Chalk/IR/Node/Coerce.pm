@@ -37,4 +37,8 @@ class Chalk::IR::Node::Coerce :isa(Chalk::IR::Value) {
             "to=$to_repr",
             $self->_serialize_inputs());
     }
+
+    # A conversion of constants is what it converts.
+    method const_choices() { my $in = $self->inputs->[0]; return $in isa Chalk::IR::Node ? $in->const_choices : () }
+    method const_pattern() { my $in = $self->inputs->[0]; return $in isa Chalk::IR::Node ? $in->const_pattern : undef }
 }

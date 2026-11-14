@@ -12,6 +12,16 @@ class Chalk::IR::Node::TernaryExpr :isa(Chalk::IR::Value) {
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
 
+    # const_choices -> what either arm can be (each once), where both are
+    # made of constants.
+    method const_choices() {
+        my ( $t, $e ) = $self->inputs->@[ 1, 2 ];
+        my @a = ( $t isa Chalk::IR::Node ? $t->const_choices : () ) or return ();
+        my @z = ( $e isa Chalk::IR::Node ? $e->const_choices : () ) or return ();
+        my %seen;
+        return grep { !$seen{$_}++ } @a, @z;
+    }
+
     # is_alias_guard -> true for a FOREACH ALIAS'S GUARD: c ? \$a[i] : undef,
     # its reference read only through derefs (Ref's is_alias_ref).
     method is_alias_guard() {

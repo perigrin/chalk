@@ -15,6 +15,15 @@ class Chalk::IR::Node::RegexSubst :isa(Chalk::IR::Node::Regex) {
 
     method operation() { 'RegexSubst' }
 
+    # is_in_place -> true for one that WRITES ITS SUBJECT: pinned, not /r, of a
+    # variable (B::SoN gives a copy's -- `(my $t = $s) =~ s///` -- as the value
+    # it was given: the node's value is then the new string).
+    method is_in_place() {
+        my $subj = $self->inputs->[0];
+        return ( $self->flags // '' ) !~ /r/ && $self->is_pinned
+            && blessed($subj) && $subj->operation eq 'PadAccess';
+    }
+
     # A MEMORY VERSION where pinned: it stores its subject's new string (in place).
     method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'opaque' }
