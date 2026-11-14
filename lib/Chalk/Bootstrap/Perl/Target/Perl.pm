@@ -153,6 +153,14 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             $parent = $cls->parent_name;
         }
 
+        # A class-scope lexical (`my %h = (...)` in the class block) is not
+        # emitted here, and the class's subs would read an undeclared name.
+        # Refused by name; the functor replacing this target spells it
+        # (docs/plans/2026-11-14-the-perl-target-replaces-deparse.md).
+        die "GAP: a class-scope lexical (`my` in a class block) is not emitted"
+          . " by the old Perl target\n"
+            if $cls->can('class_scope_vars') && $cls->class_scope_vars;
+
         my $decl = "class $name";
         $decl .= " :isa($parent)" if defined $parent;
         $decl .= " {";
@@ -236,6 +244,13 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # field-scope attribute and is preserved for symmetry with the
     # legacy _emit_sub_decl signature.
     method _emit_mop_sub($sub, $scope_kind = 'class') {
+        # A pragma in the body (`no strict 'refs'`) is kept by the parser
+        # but dropped by the EagerPinning schedule, so the sub would run under
+        # the wrong pragmas. Refused by name; the functor replacing this target
+        # spells it (docs/plans/2026-11-14-the-perl-target-replaces-deparse.md).
+        die "GAP: a pragma (use/no) inside a sub body is not emitted by the old"
+          . " Perl target\n"
+            if grep { blessed($_) && $_ isa Chalk::IR::UseInfo } ( $sub->can('body') ? $sub->body : [] )->@*;
         my $name   = $sub->name;
         my $params = $sub->params;
         my $sig    = '(' . join(', ', $params->@*) . ')';

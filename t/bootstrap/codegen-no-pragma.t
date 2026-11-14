@@ -71,13 +71,10 @@ PERL
     print $fh $source;
     close $fh;
 
-    my $code = parse_and_generate($gen_grammar, $tmpfile);
-    ok(defined $code, 'no strict: generates code');
-
-    SKIP: {
-        skip 'no generated code', 1 unless defined $code;
-        like($code, qr/no\s+strict/m, 'no strict: emits "no strict"');
-    }
+    # The old Perl target drops a pragma inside a sub body; it refuses by
+    # name rather than emit the sub without it.
+    my $code = eval { parse_and_generate($gen_grammar, $tmpfile) };
+    like($@, qr/GAP: a pragma \(use\/no\) inside a sub body/, 'no strict: refused by name, not dropped');
 
     unlink $tmpfile;
 }

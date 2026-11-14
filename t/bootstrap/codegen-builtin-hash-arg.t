@@ -21,8 +21,7 @@ ok(defined $gen_grammar, 'grammar setup');
 use 5.42.0;
 use utf8;
 class KeysTest {
-    my %h = ('a', 1, 'b', 2);
-    sub get_keys() { return keys %h; }
+    sub get_keys() { my %h = ('a', 1, 'b', 2); return keys %h; }
 }
 PERL
 
@@ -53,8 +52,7 @@ PERL
 use 5.42.0;
 use utf8;
 class ValuesTest {
-    my %h = ('a', 1);
-    sub get_values() { return values %h; }
+    sub get_values() { my %h = ('a', 1); return values %h; }
 }
 PERL
 

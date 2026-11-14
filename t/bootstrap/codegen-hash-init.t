@@ -32,17 +32,10 @@ PERL
     print $fh $source;
     close $fh;
 
-    my $code = parse_and_generate($gen_grammar, $tmpfile);
-    ok(defined $code, 'hash init: generates code');
-
-    SKIP: {
-        skip 'no generated code', 2 unless defined $code;
-
-        # The generated code should contain the initializer, not just 'my %lookup;'
-        unlike($code, qr/my \%lookup;\s*$/m,
-            'hash init: not an empty declaration');
-        like($code, qr/my \%lookup\s*=/, 'hash init: has = initializer');
-    }
+    # The old Perl target does not emit a class-scope lexical; it refuses by
+    # name rather than drop the initializer (the regression this file pinned).
+    my $code = eval { parse_and_generate($gen_grammar, $tmpfile) };
+    like($@, qr/GAP: a class-scope lexical/, 'hash init: refused by name, not dropped');
 
     unlink $tmpfile;
 }
@@ -66,13 +59,8 @@ PERL
     print $fh $source;
     close $fh;
 
-    my $code = parse_and_generate($gen_grammar, $tmpfile);
-    ok(defined $code, 'qw hash init: generates code');
-
-    SKIP: {
-        skip 'no generated code', 1 unless defined $code;
-        like($code, qr/my \%rules\s*=/, 'qw hash init: has = initializer');
-    }
+    my $code = eval { parse_and_generate($gen_grammar, $tmpfile) };
+    like($@, qr/GAP: a class-scope lexical/, 'qw hash init: refused by name, not dropped');
 
     unlink $tmpfile;
 }
