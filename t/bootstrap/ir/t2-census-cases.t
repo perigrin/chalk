@@ -51,7 +51,7 @@ my @CASES = qw(
     hashes:3 hashes:4 heredocs:1 heredocs:2 heredocs:3
     list-operators-in-context:2 list-operators-in-context:4
     list-operators-in-context:5 loading:1 loading:6 loops:1 loops:2 loops:3
-    loops:4 loops:5 loops:6 loops:7 loops:9 named-operators:1
+    loops:4 loops:5 loops:6 loops:7 loops:9 loops:10 named-operators:1
     named-operators:2 named-operators:4 named-operators:6 named-operators:7
     named-operators:8 named-operators:9 names:1 names:3 names:4 names:5
     numeric-point:1 numeric-point:2 numeric-point:3 numeric-point:4

@@ -399,6 +399,13 @@ sub _value {
         $b->{strs}{$k} //= scalar keys $b->{strs}->%*;
         return $b->emit(op => 'Env', type => '%Slot', attr => { key => $k, id => $b->{strs}{$k} });
     }
+    # A // WHOSE LEFT SIDE IS NOT A %Slot: a number, a string, a truth is never
+    # undef in T2 (undef is a %Slot's tag), so it is the left side, and the
+    # right side is never evaluated.
+    if ($op eq 'DefinedOr') {
+        my $lhs = $b->value($v->inputs->[0]);
+        return $b->as($lhs, $ty) unless $lhs->type eq '%Slot';
+    }
     if ($op eq 'DefinedOr' || $op eq 'TernaryExpr' || $op eq 'And' || $op eq 'Or') {
         # A MERGE: its condition, an arm built in each block, a phi at the join.
         my ($cond, $then, $else);
@@ -418,7 +425,6 @@ sub _value {
         }
         else {
             my $lhs = $b->value($v->inputs->[0]);
-            out('a // whose left side is not a Slot') unless $lhs->type eq '%Slot';
             $cond = $b->emit(op => 'Defined', type => 'i1', inputs => [$lhs]);
             ($then, $else) = ($lhs, $v->inputs->[1]);
         }
