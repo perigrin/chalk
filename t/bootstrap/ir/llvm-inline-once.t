@@ -40,7 +40,10 @@ subtest 'an inlined effectful callee used as both a statement and a value lowers
     my $f = Chalk::IR::NodeFactory->new;
 
     # Callee: sub f { print "x\n"; 2 }
-    my $callee_start = $f->make('Start');
+    # Each graph its own Start (make_cfg): `make('Start')` hash-conses to ONE
+    # node, which hung the caller's Call and the callee's Print off the same
+    # control -- a fork the backend refuses rather than drop one of them.
+    my $callee_start = $f->make_cfg('Start');
     my $msg = $f->make('Constant', value => "x\n", const_type => 'string');
     $msg->set_stamp('Str');
     my $print = $f->make('Print', inputs => [$msg]);
@@ -55,7 +58,7 @@ subtest 'an inlined effectful callee used as both a statement and a value lowers
     );
 
     # Caller: my $r = f(); $r;
-    my $start = $f->make('Start');
+    my $start = $f->make_cfg('Start');
     my $call = $f->make('Call',
         dispatch_kind  => 'direct',
         name           => 'main::f',
@@ -81,12 +84,13 @@ subtest 'an inlined effectful callee used as both a statement and a value lowers
     ok(!$@, 'the graph lowers without a GAP') or diag $@;
     ok(defined $ll && length $ll, 'lowering produced IR') or return;
 
-    # Exactly ONE printf: the callee's inlined `print "x\n"`. The bug doubles
+    # Exactly ONE write: the callee's inlined `print "x\n"`. The bug doubles
     # it (the Call is reached both as a statement and as the Return's value),
     # producing two. program_mode emits no result-print epilogue, so this
-    # count is the callee's print alone.
-    my $printf_calls = () = $ll =~ /call i32 \(i8\*, \.\.\.\) \@printf/g;
-    is($printf_calls, 1, 'exactly one printf call: the callee print is inlined once')
+    # count is the callee's print alone. (A print is an fwrite of the string's
+    # every byte since 5e0c9341; it was a printf.)
+    my $writes = () = $ll =~ /call i64 \@fwrite\(/g;
+    is($writes, 1, 'exactly one fwrite call: the callee print is inlined once')
         or diag $ll;
 
     # Count in the IR is static; RUN it to prove the effect fires once.
