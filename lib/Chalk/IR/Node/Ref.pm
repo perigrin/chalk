@@ -27,7 +27,8 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
     # escapes nowhere: the deref of it is the element, PostfixDeref's
     # alias_element), directly or through its guard's ?:.
     method is_alias_ref() {
-        my @c = grep { blessed($_) } $self->consumers->@*;
+        # (its values' users: one pinned on the chain is the next statement's control)
+        my @c = grep { my $u = $_; blessed($u) && grep { blessed($_) && refaddr($_) == refaddr($self) } $u->inputs->@* } $self->consumers->@*;
         return 0 unless @c;
         for my $c (@c) {
             if ( $c->operation eq 'PostfixDeref' ) { return 0 unless $c->alias_element; next }

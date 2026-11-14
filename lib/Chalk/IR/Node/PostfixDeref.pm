@@ -26,29 +26,50 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
     method is_array_deref() { return ( $sigil // '@' ) eq '@' }
 
     # alias_element -> the element a FOREACH ALIAS READ reads -- B::SoN's
-    # ${ \ $_[i] } (inside a guard of $_[i]'s existence, its other way undef)
-    # -- or undef. Not one written through (a store into the caller's
-    # variable).
+    # ${ \ $a[i] } -- or undef. Not one written through (a store into the
+    # aliased variable). Two forms:
+    #  - GUARDED, over an array (`@_`, `my @a`, `@$r`): c ? \$a[i] : undef,
+    #    c the element's existence. The loop reads the array's count each
+    #    pass, so the element is read by index into the live array, as perl's
+    #    iterator does. Over @_, only where nothing reshapes @_ (a sub's
+    #    arguments are not one array a shift and an index both see).
+    #  - BARE, over a list of the foreach's own (an ArrayLiteral naming no
+    #    variable: `for (1, 2)`, `for (sort ...)`), its index the loop's
+    #    counter: no one else holds the list, and the counter stays in it. A
+    #    bare \$a[i] of another array is a reference to an element of no known
+    #    place (one before the array's start dies; past its end, made).
     method alias_element() {
         return undef unless ( $sigil // '' ) eq '$';
         return undef if grep { blessed($_) && $_->operation =~ /\A(?:Assign|Increment|Decrement)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($self) }
             $self->consumers->@*;
-        # ONLY THE GUARDED FORM (a bare \$a[i] deref is a reference to an element
-        # of no known place: one before the array's start dies), ONLY OVER @_,
-        # ONLY WHERE NOTHING RESHAPES @_ -- a foreach over an array its body
-        # shifts reads by index into the changing array, which this is not.
         my $t = $self->inputs->[0];
-        return undef unless blessed($t) && $t->operation eq 'TernaryExpr' && blessed( $t->inputs->[2] )
+        my $guarded = blessed($t) && $t->operation eq 'TernaryExpr' && blessed( $t->inputs->[2] )
             && $t->inputs->[2]->operation eq 'Constant' && ( $t->inputs->[2]->const_type // '' ) eq 'undef';
-        my $r = $t->inputs->[1];
-        return undef unless blessed($r) && $r->operation eq 'Ref';
+        my $r = $guarded ? $t->inputs->[1] : $t;
+        return undef unless blessed($r) && $r->operation eq 'Ref' && !$r->each;
         my $s = $r->inputs->[0];
         return undef unless blessed($s) && $s->operation eq 'Subscript' && ( $s->can('kind') ? $s->kind // 'array' : 'array' ) eq 'array';
-        my $args = $s->inputs->[0];
-        return undef unless blessed($args) && $args->operation eq 'ArgsSource';
-        return undef if grep { blessed($_) && $_->operation eq 'Call' && $_->mutates_array
-                               && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($args) } $args->consumers->@*;
-        return $s;
+        my $arr = $s->inputs->[0];
+        return undef unless blessed($arr);
+        unless ($guarded) {
+            my $i = $s->inputs->[1];
+            return undef unless $arr->operation eq 'ArrayLiteral' && !defined $arr->symbol && !$arr->is_my_array
+                && blessed($i) && $i->operation eq 'Phi';
+            return $s;
+        }
+        # (the guard is the element's existence)
+        my $c = $t->inputs->[0];
+        return undef unless blessed($c) && $c->operation eq 'Exists' && refaddr( $c->inputs->[0] ) == refaddr($arr)
+            && refaddr( $c->inputs->[1] ) == refaddr( $s->inputs->[1] );
+        if ( $arr->operation eq 'ArgsSource' ) {
+            return undef if grep { blessed($_) && $_->operation eq 'Call' && $_->mutates_array
+                                   && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($arr) } $arr->consumers->@*;
+            return $s;
+        }
+        return $s if $arr->is_my_array || $arr->is_array_deref || $arr->is_argv
+            || $arr->is_package_aggregate && ( $arr->sigil // '' ) eq '@'
+            || $arr->operation eq 'ArrayLiteral' && ( $arr->stamp // '' ) eq 'Array';   # static type
+        return undef;
     }
 
     # memory_operand -> it reads at its second input (the first is what it reads).

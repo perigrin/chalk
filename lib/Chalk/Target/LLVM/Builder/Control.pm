@@ -223,6 +223,8 @@ sub walk {
         # > 1 ? ... : ...` of a package scalar): its value made here, in order.
         # (A FOREACH ALIAS'S GUARDED REFERENCE is never made: its deref is the element.)
         elsif ($op eq 'TernaryExpr') { $b->value($s) unless $s->is_alias_guard; push $b->{passed}->@*, $s; $ctl = $s }
+        # (and its bare one, over the foreach's own list: likewise)
+        elsif ($op eq 'Ref' && $s->is_alias_ref) { push $b->{passed}->@*, $s; $ctl = $s }
         # A READ OF $@ ON THE CHAIN is made where it stands: a caught die sets
         # $@ with no store in the graph, so only its place orders it.
         # (B::SoN gives two reads of $@ around a caught die one version, and
