@@ -125,13 +125,31 @@ sub args_assign {
     }
 }
 
+# plain_anon($Call) -> true for a direct call of an anonymous sub that
+# CAPTURES NOTHING, its code value folded away (B::SoN keeps no AnonSub for
+# `my $f = sub { $_[0] * 3 }; $f->(14)`): a sub as a named one is, called
+# directly. (A variable it captures: a CellParam, or an outer `my` aggregate
+# it reads -- shared, or of no version of its own.)
+sub plain_anon {
+    my ($b, $c) = @_;
+    return 0 unless ( $c->name // '' ) =~ /__ANON__/;
+    my $t = $c->can('target') ? $c->target : undef;
+    return 0 unless blessed($t) && $t->can('graph') && $t->graph;
+    return 0 if grep { $_->operation eq 'CellParam'
+        || $_->operation eq 'PadAccess' && ( $_->shared || !defined $_->inputs->[0] ) } $t->graph->component;
+    return 0 if grep { $_->operation eq 'AnonSub' && ( $_->name // '' ) eq $c->name } +($b->{own_nodes} // [])->@*;
+    out('a closure called directly and as a code value') if ( $b->{funcs}{ refaddr($t) } // {} )->{closure};
+    return 1;
+}
+
 # call($Call) -> the %Slot a direct call of a sub returns: its function, made
 # once, called with each argument boxed (one not passed is undef).
 sub call {
     my ($b, $c) = @_;
     # A DIRECT CALL OF A CLOSURE (`$f->()` B::SoN resolved): through the code
     # value its AnonSub makes in this function -- its cells are there.
-    if (( $c->name // '' ) =~ /__ANON__/) {
+    my $plain = $b->plain_anon($c);
+    if (( $c->name // '' ) =~ /__ANON__/ && !$plain) {
         my @anon = grep { $_->operation eq 'AnonSub' && ( $_->name // '' ) eq $c->name } +($b->{own_nodes} // [])->@*;
         out('a direct call of a closure made elsewhere') unless @anon == 1;
         my @args = $c->inputs->@*;
@@ -397,7 +415,7 @@ sub scalar_arg {
     my ($b, $n) = @_;
     return $b->as($b->value($n), '%Slot') unless _is_list($n);
     out('a call passing a list') unless $n->operation eq 'Call';
-    if (( $n->dispatch_kind // '' ) eq 'direct' && ( $n->name // '' ) !~ /__ANON__/) {
+    if (( $n->dispatch_kind // '' ) eq 'direct' && ( ( $n->name // '' ) !~ /__ANON__/ || $b->plain_anon($n) )) {
         my $r = $b->value($n);
         my $t = $n->target;
         my $fn = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
@@ -447,6 +465,7 @@ sub code_value {
         +($b->{own_nodes} // [])->@*;
     my $sub = $a->sub // ( $called ? $called->target : undef );
     out('a closure of no sub') unless blessed($sub) && $sub->can('graph') && $sub->graph;
+    out('a closure called directly and as a code value') if $b->{funcs}{ refaddr($sub) } && !$b->{funcs}{ refaddr($sub) }{closure};
     my $fn = $b->func($sub, $a->name // 'anon', closure => 1);
     my @cells = map { $b->value($_) } grep { blessed($_) } $a->inputs->@*;
     out('a closure capturing what is not a cell') if grep { $_->type ne '%Slot*' } @cells;

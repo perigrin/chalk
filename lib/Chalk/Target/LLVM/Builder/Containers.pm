@@ -484,7 +484,7 @@ sub array_of {
     }
     # A CALL IN LIST CONTEXT: a sub returning a list gives a reference to it; a
     # sub returning one value is a list of it. A method's sub is not known here.
-    if (blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct' && ( $n->name // '' ) !~ /__ANON__/) {
+    if (blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct' && ( ( $n->name // '' ) !~ /__ANON__/ || $b->plain_anon($n) )) {
         my $r = $b->value($n);
         my $t = $n->target;
         my $fn = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
@@ -500,7 +500,7 @@ sub array_of {
     # A CALL OF A CODE VALUE IN LIST CONTEXT: its wrapper hands back a list's
     # reference, as a method's does.
     return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ])
-        if blessed($n) && $n->operation eq 'Call' && ( ( $n->dispatch_kind // '' ) eq 'indirect' || ( $n->name // '' ) =~ /__ANON__/ );   # (a closure called directly too)
+        if blessed($n) && $n->operation eq 'Call' && ( ( $n->dispatch_kind // '' ) eq 'indirect' || ( $n->name // '' ) =~ /__ANON__/ && !$b->plain_anon($n) );   # (a closure called directly too)
     # A METHOD IN LIST CONTEXT: its wrapper hands back a reference to a list
     # always (the sub's list, or one of its value) -- but a class's `new`,
     # made here, is its object.

@@ -41,15 +41,16 @@ my @CASES = qw(
     chalk-found-gaps:24 chalk-found-gaps:28 chalk-found-gaps:29
     chalk-found-gaps:30 chalk-found-gaps:31 chalk-found-gaps:32
     chalk-found-gaps:33 chalk-found-gaps:34 chalk-found-gaps:35
-    chalk-found-gaps:36 chalk-found-gaps:39 chalk-found-gaps:40
-    chalk-found-gaps:41 chalk-found-gaps:42 chalk-found-gaps:44
-    chalk-found-gaps:45 chalk-found-gaps:46 chalk-found-gaps:48
-    chalk-found-gaps:49 chalk-found-gaps:5 chalk-found-gaps:50
-    chalk-found-gaps:51 chalk-found-gaps:52 chalk-found-gaps:53
-    chalk-found-gaps:55 chalk-found-gaps:56 chalk-found-gaps:57
-    chalk-found-gaps:6 chalk-found-gaps:60 chalk-found-gaps:62
-    chalk-found-gaps:69 chalk-found-gaps:7 chalk-found-gaps:72
-    chalk-found-gaps:79 chalk-found-gaps:8 chalk-found-gaps:82
+    chalk-found-gaps:36 chalk-found-gaps:38 chalk-found-gaps:39
+    chalk-found-gaps:40 chalk-found-gaps:41 chalk-found-gaps:42
+    chalk-found-gaps:44 chalk-found-gaps:45 chalk-found-gaps:46
+    chalk-found-gaps:47 chalk-found-gaps:48 chalk-found-gaps:49
+    chalk-found-gaps:5 chalk-found-gaps:50 chalk-found-gaps:51
+    chalk-found-gaps:52 chalk-found-gaps:53 chalk-found-gaps:55
+    chalk-found-gaps:56 chalk-found-gaps:57 chalk-found-gaps:6
+    chalk-found-gaps:60 chalk-found-gaps:62 chalk-found-gaps:69
+    chalk-found-gaps:7 chalk-found-gaps:72 chalk-found-gaps:79
+    chalk-found-gaps:8 chalk-found-gaps:82 chalk-found-gaps:85
     chalk-found-gaps:87 chalk-found-gaps:89 chalk-found-gaps:9
     chalk-found-gaps:90 chalk-found-gaps:91 chalk-found-gaps:92
     chalk-found-gaps:95 chalk-found-gaps:96 chalk-found-gaps:97
@@ -86,11 +87,11 @@ my @CASES = qw(
     regex-matching:3 regex-matching:4 regex-matching:5 regex-matching:7
     regex-pattern-positions:1 regex-pattern-positions:2 regex-quote-likes:1
     regex-quote-likes:2 strings:1 strings:2 strings:3 subroutines:1
-    subroutines:10 subroutines:11 subroutines:3 subroutines:6 subroutines:7
-    subroutines:8 subroutines:9 symbol-table:4 taking-references:1
-    taking-references:3 taking-references:4 unary:1 unary:2 unary:3 unary:4
-    unary:5 ungated:1 ungated:2 ungated:3 ungated:4 vstrings:1 vstrings:2
-    writing:1 writing:2 writing:3 writing:4
+    subroutines:10 subroutines:11 subroutines:2 subroutines:3 subroutines:4
+    subroutines:6 subroutines:7 subroutines:8 subroutines:9 symbol-table:4
+    taking-references:1 taking-references:3 taking-references:4 unary:1
+    unary:2 unary:3 unary:4 unary:5 ungated:1 ungated:2 ungated:3 ungated:4
+    vstrings:1 vstrings:2 writing:1 writing:2 writing:3 writing:4
 );
 
 my %case = map { ( $_->{id} => $_ ) } Chalk::CodeGen::Harness::T2Case::cases();
