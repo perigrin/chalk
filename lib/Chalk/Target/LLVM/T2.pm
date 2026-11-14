@@ -2112,6 +2112,12 @@ sub _all_nodes {
     for my $sub ( $mop ? map { $_->subs } $mop->classes : () ) {
         push @n, Chalk::Target::LLVM::Context::_graph_component($sub->graph) if $sub->graph;
     }
+    # (AN ADJUST BLOCK'S too: `new` runs it, so a method only it calls --
+    # `ADJUST { $self->mark("d") }` -- must be in its stash, or the lookup
+    # dies where perl finds it.)
+    for my $adj ( $mop ? map { $_->adjust_blocks } $mop->classes : () ) {
+        push @n, Chalk::Target::LLVM::Context::_graph_component($adj->graph) if $adj->can('graph') && $adj->graph;
+    }
     # (A PHASE BLOCK'S too: its method calls, its derefs, are the program's.)
     push @n, Chalk::Target::LLVM::Context::_program_nodes( $_->[1]->returns->[0] )
         for grep { blessed( $_->[1] ) } @Chalk::IR::Serialize::JSON::PHASE_GRAPHS;
