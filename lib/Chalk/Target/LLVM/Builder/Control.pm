@@ -32,7 +32,7 @@ sub walk {
         my $op = $s->operation;
         # (WHERE EACH STATEMENT STANDS: its turn and its block -- hash_reads_settled
         # makes a waiting read at the store right after the read's own version)
-        $b->{at}{ refaddr($s) } = [ ++$b->{seq}, refaddr( $b->{cur} // 0 ) ];
+        $b->{at}{ refaddr($s) } = [ ++$b->{seq}, refaddr( $b->{cur} // 0 ), $b->{depth} // 0 ];
         # A STATEMENT A READ TAKES AS ITS MEMORY must be a version T2 orders
         # reads by (is_memory_version): a new store kind missing there let reads after
         # it be made after the next store (three wrong answers, slices 14-15).

@@ -151,6 +151,10 @@ sub call {
     my $plain = $b->plain_anon($c);
     if (( $c->name // '' ) =~ /__ANON__/ && !$plain) {
         my @anon = grep { $_->operation eq 'AnonSub' && ( $_->name // '' ) eq $c->name } +($b->{own_nodes} // [])->@*;
+        # (ITS CODE VALUE FOLDED AWAY -- `my $c = sub {...}; $c->(1)` -- the
+        # AnonSub hangs off the cells it captures, after its statement)
+        @anon = grep { $_->operation eq 'AnonSub' && ( $_->name // '' ) eq $c->name } Chalk::IR::Graph::own_nodes( $b->{ret} )
+            unless @anon;
         out('a direct call of a closure made elsewhere') unless @anon == 1;
         my @args = $c->inputs->@*;
         pop @args if $c->can('memory_input') && $c->memory_input;
@@ -471,7 +475,9 @@ sub code_value {
     my $sub = $a->sub // ( $called ? $called->target : undef );
     out('a closure of no sub') unless blessed($sub) && $sub->can('graph') && $sub->graph;
     out('a closure called directly and as a code value') if $b->{funcs}{ refaddr($sub) } && !$b->{funcs}{ refaddr($sub) }{closure};
-    my $fn = $b->func($sub, $a->name // 'anon', closure => 1);
+    # (its cells by the name of what each captures, for a `my` aggregate's)
+    my %cells = map { my $c = ( $a->inputs->@* )[$_]; blessed($c) && $c->can('cell_name') && defined $c->cell_name ? ( $c->cell_name => $_ ) : () } 0 .. $a->inputs->$#*;
+    my $fn = $b->func($sub, $a->name // 'anon', closure => 1, cells => \%cells);
     my @cells = map { $b->value($_) } grep { blessed($_) } $a->inputs->@*;
     out('a closure capturing what is not a cell') if grep { $_->type ne '%Slot*' } @cells;
     my $n = $b->emit(op => 'Const', type => 'i64', attr => { value => scalar @cells });
@@ -679,6 +685,7 @@ sub func {
     local $b->{args} = $is_method ? { map { ( $_ => $argn[ $margs{$_} ] ) } grep { $_ ne 'np' } keys %margs }
                                   : { ( map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads ), ( map { ( refaddr( $_->[0] ) => $argn[ $_->[1] ] ) } @also ) };
     local $b->{self} = $is_method ? $argn[0] : undef;   # a field's object
+    local $b->{cells} = $closure ? $o{cells} : undef;
     local $b->{env} = $closure ? do { my $e = Chalk::Target::LLVM::Node::_n(op => 'Arg', type => '%Slot**', attr => { index => 1 }); $e->set_name('%env'); $e } : undef;
     local $b->{own_nodes} = [ $g->component ];
     local $b->{eval_at} = { map { ( refaddr( $_->eval_entry ) => $_ ) } grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed( $_->eval_entry ) } $b->{own_nodes}->@* };

@@ -111,6 +111,16 @@ sub emit_entry {
     return $n;
 }
 
+# emit_entry_end(%n): a node made at the function's entry, after what is there
+# (here, when the walk is still in it).
+sub emit_entry_end {
+    my ($b, %a) = @_;
+    return $b->emit(%a) if refaddr( $b->{cur} // 0 ) == refaddr( $b->{blocks}[0] );
+    my $n = Chalk::Target::LLVM::Node::_n(%a);
+    push $b->{blocks}[0]{nodes}->@*, $n;
+    return $n;
+}
+
 # _is_list($n): a value that is a list in perl's list context -- its stamp
 # says so, or it is an array or hash variable (stamped Unknown).
 sub _is_list {

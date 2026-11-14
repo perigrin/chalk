@@ -165,6 +165,11 @@ sub index_readers {
         next if $n->can('control_in') && blessed($n->control_in);
         next if $n->operation =~ /\A(?:Phi|Region|Proj|Start|Return|MemStart)\z/;
         my $m = $n->memory_operand;
+        # (A READ AT A CELL MADE -- a closure's capture -- is a read at the
+        # version the cell was made at: making a cell writes nothing. Not
+        # indexed, `my @k = sort @h` was made after a call of the closure
+        # pushing to @h.)
+        $m = $m->inputs->[1] while $m isa Chalk::IR::Node && $m->operation eq 'MakeCell';
         push $r{ refaddr($m) }->@*, $n if $m isa Chalk::IR::Node && $m->is_memory_version;
     }
     # A PACKAGE SCALAR READ WITH NO VERSION: B::SoN reads a write's target

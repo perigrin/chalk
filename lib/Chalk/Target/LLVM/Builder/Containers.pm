@@ -209,6 +209,8 @@ sub hash_var {
     # at its first use from any function.
     return $b->{locs}{ '%file#' . $pad->symbol } //= $b->emit_entry(op => 'GHash', type => '%Slot', attr => { global => $b->global_named( 'my::%' . $pad->symbol ) })
         if $pad->can('file') && $pad->file;
+    return $b->{locs}{ '%cell#' . $pad->name } //= $b->captured($pad)
+        if $b->{env} && defined( ( $b->{cells} // {} )->{ $pad->name } );
     out('a hash a closure shares') if $pad->can('shared') && $pad->shared && !$b->_own_shared($pad);
     my $key = '%' . $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
     return $b->{locs}{$key} //= do {
@@ -441,6 +443,15 @@ sub array_value {
     return undef;
 }
 
+# captured($pad) -> IN A CLOSURE, the reference its maker's `my` array or hash
+# put in the cell it captured (the code value's environment, by its place).
+sub captured {
+    my ($b, $pad) = @_;
+    my $ix = $b->emit_entry_end(op => 'Const', type => 'i64', attr => { value => $b->{cells}{ $pad->name } });
+    my $cell = $b->emit_entry_end(op => 'EnvGet', type => '%Slot*', inputs => [ $b->{env}, $ix ]);
+    return $b->emit_entry_end(op => 'Load', type => '%Slot', inputs => [$cell]);
+}
+
 # array_var($pad): a `my @a` named, not made here (is_my_array): one %Array
 # per variable, made at its function's entry -- fresh each call. A closure's
 # (shared) is not T2's.
@@ -450,6 +461,8 @@ sub array_var {
     # A FILE'S ARRAY: likewise, the global holding its reference.
     return $b->{locs}{ '@file#' . $pad->symbol } //= $b->emit_entry(op => 'GArray', type => '%Array*', attr => { global => $b->global_named( 'my::@' . $pad->symbol ) })
         if $pad->can('file') && $pad->file;
+    return $b->{locs}{ '@cell#' . $pad->name } //= $b->emit_entry_end(op => 'ADeref', type => '%Array*', inputs => [ $b->captured($pad) ])
+        if $b->{env} && defined( ( $b->{cells} // {} )->{ $pad->name } );
     out('an array a closure shares') if $pad->can('shared') && $pad->shared && !$b->_own_shared($pad);
     my $key = '@' . $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
     return $b->{locs}{$key} //= do {

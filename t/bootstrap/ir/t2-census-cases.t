@@ -29,67 +29,69 @@ my @CASES = qw(
     chalk-found-gaps:100 chalk-found-gaps:102 chalk-found-gaps:103
     chalk-found-gaps:105 chalk-found-gaps:11 chalk-found-gaps:111
     chalk-found-gaps:112 chalk-found-gaps:113 chalk-found-gaps:114
-    chalk-found-gaps:115 chalk-found-gaps:117 chalk-found-gaps:119
-    chalk-found-gaps:12 chalk-found-gaps:122 chalk-found-gaps:125
-    chalk-found-gaps:126 chalk-found-gaps:13 chalk-found-gaps:131
-    chalk-found-gaps:133 chalk-found-gaps:135 chalk-found-gaps:136
-    chalk-found-gaps:139 chalk-found-gaps:14 chalk-found-gaps:140
-    chalk-found-gaps:142 chalk-found-gaps:143 chalk-found-gaps:148
-    chalk-found-gaps:149 chalk-found-gaps:15 chalk-found-gaps:151
-    chalk-found-gaps:155 chalk-found-gaps:157 chalk-found-gaps:158
-    chalk-found-gaps:16 chalk-found-gaps:161 chalk-found-gaps:162
-    chalk-found-gaps:165 chalk-found-gaps:169 chalk-found-gaps:17
-    chalk-found-gaps:170 chalk-found-gaps:171 chalk-found-gaps:172
-    chalk-found-gaps:18 chalk-found-gaps:19 chalk-found-gaps:2
-    chalk-found-gaps:21 chalk-found-gaps:23 chalk-found-gaps:24
-    chalk-found-gaps:25 chalk-found-gaps:28 chalk-found-gaps:29
-    chalk-found-gaps:30 chalk-found-gaps:31 chalk-found-gaps:32
-    chalk-found-gaps:33 chalk-found-gaps:34 chalk-found-gaps:35
-    chalk-found-gaps:36 chalk-found-gaps:38 chalk-found-gaps:39
-    chalk-found-gaps:40 chalk-found-gaps:41 chalk-found-gaps:42
-    chalk-found-gaps:44 chalk-found-gaps:45 chalk-found-gaps:46
-    chalk-found-gaps:47 chalk-found-gaps:48 chalk-found-gaps:49
-    chalk-found-gaps:5 chalk-found-gaps:50 chalk-found-gaps:51
-    chalk-found-gaps:52 chalk-found-gaps:53 chalk-found-gaps:55
-    chalk-found-gaps:56 chalk-found-gaps:57 chalk-found-gaps:6
-    chalk-found-gaps:60 chalk-found-gaps:62 chalk-found-gaps:69
+    chalk-found-gaps:115 chalk-found-gaps:117 chalk-found-gaps:118
+    chalk-found-gaps:119 chalk-found-gaps:12 chalk-found-gaps:122
+    chalk-found-gaps:125 chalk-found-gaps:126 chalk-found-gaps:13
+    chalk-found-gaps:131 chalk-found-gaps:133 chalk-found-gaps:135
+    chalk-found-gaps:136 chalk-found-gaps:139 chalk-found-gaps:14
+    chalk-found-gaps:140 chalk-found-gaps:142 chalk-found-gaps:143
+    chalk-found-gaps:148 chalk-found-gaps:149 chalk-found-gaps:15
+    chalk-found-gaps:151 chalk-found-gaps:155 chalk-found-gaps:157
+    chalk-found-gaps:158 chalk-found-gaps:16 chalk-found-gaps:161
+    chalk-found-gaps:162 chalk-found-gaps:165 chalk-found-gaps:169
+    chalk-found-gaps:17 chalk-found-gaps:170 chalk-found-gaps:171
+    chalk-found-gaps:172 chalk-found-gaps:18 chalk-found-gaps:19
+    chalk-found-gaps:2 chalk-found-gaps:21 chalk-found-gaps:23
+    chalk-found-gaps:24 chalk-found-gaps:25 chalk-found-gaps:28
+    chalk-found-gaps:29 chalk-found-gaps:30 chalk-found-gaps:31
+    chalk-found-gaps:32 chalk-found-gaps:33 chalk-found-gaps:34
+    chalk-found-gaps:35 chalk-found-gaps:36 chalk-found-gaps:38
+    chalk-found-gaps:39 chalk-found-gaps:40 chalk-found-gaps:41
+    chalk-found-gaps:42 chalk-found-gaps:44 chalk-found-gaps:45
+    chalk-found-gaps:46 chalk-found-gaps:47 chalk-found-gaps:48
+    chalk-found-gaps:49 chalk-found-gaps:5 chalk-found-gaps:50
+    chalk-found-gaps:51 chalk-found-gaps:52 chalk-found-gaps:53
+    chalk-found-gaps:55 chalk-found-gaps:56 chalk-found-gaps:57
+    chalk-found-gaps:6 chalk-found-gaps:60 chalk-found-gaps:62
+    chalk-found-gaps:65 chalk-found-gaps:66 chalk-found-gaps:69
     chalk-found-gaps:7 chalk-found-gaps:72 chalk-found-gaps:74
     chalk-found-gaps:77 chalk-found-gaps:79 chalk-found-gaps:8
-    chalk-found-gaps:82 chalk-found-gaps:85 chalk-found-gaps:87
-    chalk-found-gaps:89 chalk-found-gaps:9 chalk-found-gaps:90
-    chalk-found-gaps:91 chalk-found-gaps:92 chalk-found-gaps:95
-    chalk-found-gaps:96 chalk-found-gaps:97 chalk-found-gaps:99
-    class-feature:1 class-feature:10 class-feature:11 class-feature:12
-    class-feature:2 class-feature:3 class-feature:4 class-feature:5
-    class-feature:6 class-feature:7 class-feature:8 class-feature:9
-    code-references:1 code-references:2 comparison:1 comparison:2
-    comparison:3 comparison:4 comparison:5 comparison:6 compile-phase:1
-    compile-phase:2 compile-phase:3 compile-phase:4 compound-assignment:1
-    compound-assignment:2 compound-assignment:3 compound-assignment:4
-    compound-assignment:5 conditionals:1 conditionals:2 conditionals:3
-    conditionals:4 context-from-inside:1 context-from-inside:2
-    declarations:1 declarations:2 declarations:3 dereferencing:1
-    dereferencing:2 dereferencing:3 dereferencing:4 dereferencing:5
-    dereferencing:6 dereferencing:7 dereferencing:8 dynamic-scope:1
-    dynamic-scope:2 embedded-code:1 embedded-code:2 embedded-code:3
-    eval-replacement:1 formats:1 formats:2 handles:1 handles:2 handles:3
-    handles:4 hashes:1 hashes:2 hashes:3 hashes:4 hashes:5 heredocs:1
-    heredocs:2 heredocs:3 jumps:1 jumps:3 list-operators-in-context:1
-    list-operators-in-context:2 list-operators-in-context:3
-    list-operators-in-context:4 list-operators-in-context:5 loading:1
-    loading:6 loops:1 loops:10 loops:11 loops:2 loops:3 loops:4 loops:5
-    loops:6 loops:7 loops:8 loops:9 named-operators:1 named-operators:2
-    named-operators:3 named-operators:4 named-operators:5 named-operators:6
-    named-operators:7 named-operators:8 named-operators:9 names:1 names:3
-    names:4 names:5 numeric-point:1 numeric-point:2 numeric-point:3
-    numeric-point:4 numeric-point:5 numeric-radix:1 numeric-radix:2
-    numeric-radix:3 numeric-radix:4 numeric-radix:5 numeric-radix:6
-    packages:1 packages:2 packages:3 pod-and-data:1 pod-and-data:2
-    pod-and-data:3 pod-and-data:4 quote-like-terms:2 quote-like-terms:3
-    quote-like-terms:4 quote-like-terms:5 quote-like-terms:6 range:1 range:3
-    read-position:1 read-position:2 read-position:3 regex-delimiters:1
-    regex-delimiters:2 regex-delimiters:3 regex-matching:1 regex-matching:2
-    regex-matching:3 regex-matching:4 regex-matching:5 regex-matching:7
+    chalk-found-gaps:82 chalk-found-gaps:83 chalk-found-gaps:85
+    chalk-found-gaps:87 chalk-found-gaps:89 chalk-found-gaps:9
+    chalk-found-gaps:90 chalk-found-gaps:91 chalk-found-gaps:92
+    chalk-found-gaps:95 chalk-found-gaps:96 chalk-found-gaps:97
+    chalk-found-gaps:99 class-feature:1 class-feature:10 class-feature:11
+    class-feature:12 class-feature:2 class-feature:3 class-feature:4
+    class-feature:5 class-feature:6 class-feature:7 class-feature:8
+    class-feature:9 code-references:1 code-references:2 comparison:1
+    comparison:2 comparison:3 comparison:4 comparison:5 comparison:6
+    compile-phase:1 compile-phase:2 compile-phase:3 compile-phase:4
+    compound-assignment:1 compound-assignment:2 compound-assignment:3
+    compound-assignment:4 compound-assignment:5 conditionals:1
+    conditionals:2 conditionals:3 conditionals:4 context-from-inside:1
+    context-from-inside:2 declarations:1 declarations:2 declarations:3
+    dereferencing:1 dereferencing:2 dereferencing:3 dereferencing:4
+    dereferencing:5 dereferencing:6 dereferencing:7 dereferencing:8
+    dynamic-scope:1 dynamic-scope:2 embedded-code:1 embedded-code:2
+    embedded-code:3 eval-replacement:1 formats:1 formats:2 handles:1
+    handles:2 handles:3 handles:4 hashes:1 hashes:2 hashes:3 hashes:4
+    hashes:5 heredocs:1 heredocs:2 heredocs:3 jumps:1 jumps:3
+    list-operators-in-context:1 list-operators-in-context:2
+    list-operators-in-context:3 list-operators-in-context:4
+    list-operators-in-context:5 loading:1 loading:6 loops:1 loops:10
+    loops:11 loops:2 loops:3 loops:4 loops:5 loops:6 loops:7 loops:8 loops:9
+    named-operators:1 named-operators:2 named-operators:3 named-operators:4
+    named-operators:5 named-operators:6 named-operators:7 named-operators:8
+    named-operators:9 names:1 names:3 names:4 names:5 numeric-point:1
+    numeric-point:2 numeric-point:3 numeric-point:4 numeric-point:5
+    numeric-radix:1 numeric-radix:2 numeric-radix:3 numeric-radix:4
+    numeric-radix:5 numeric-radix:6 packages:1 packages:2 packages:3
+    pod-and-data:1 pod-and-data:2 pod-and-data:3 pod-and-data:4
+    quote-like-terms:2 quote-like-terms:3 quote-like-terms:4
+    quote-like-terms:5 quote-like-terms:6 range:1 range:3 read-position:1
+    read-position:2 read-position:3 regex-delimiters:1 regex-delimiters:2
+    regex-delimiters:3 regex-matching:1 regex-matching:2 regex-matching:3
+    regex-matching:4 regex-matching:5 regex-matching:7
     regex-pattern-positions:1 regex-pattern-positions:2 regex-quote-likes:1
     regex-quote-likes:2 strings:1 strings:2 strings:3 subroutines:1
     subroutines:10 subroutines:11 subroutines:2 subroutines:3 subroutines:4

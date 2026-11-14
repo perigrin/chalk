@@ -247,6 +247,25 @@ sub _value {
         pop @args if $v->can('memory_input') && $v->memory_input;
         return $b->code_call($v, $b->as($b->value($code), '%Slot'), @args);
     }
+    if ($op eq 'MakeCell' && blessed( $v->inputs->[0] ) && $v->inputs->[0]->operation eq 'PadAccess'
+        && ( $v->inputs->[0]->sigil // '' ) =~ /\A[\@%]\z/) {
+        # A `my` ARRAY OR HASH A CLOSURE CAPTURES: its cell holds a reference
+        # to the variable's one storage (made at the function's entry), which
+        # the closure reaches through it (array_var, hash_var). Made where the
+        # variable is: one a loop or an arm renews is a new one each time.
+        my ($pad, $ver) = $v->inputs->@*;
+        my $at = blessed($ver) ? $b->{at}{ refaddr($ver) } : undef;
+        my $depth = $at ? $at->[2] : blessed($ver) && $ver->operation eq 'MemStart' ? 0 : $b->{depth};
+        out('an aggregate captured in a loop body or an arm') if $depth;
+        my $key = 'cell' . $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
+        return $b->{locs}{$key} //= do {
+            my $agg = $pad->sigil eq '@' ? $b->array_var($pad) : $b->hash_var($pad);
+            my $c = $b->emit_entry_end(op => 'HeapCell', type => '%Slot*', attr => { name => $pad->name });
+            my $r = $pad->sigil eq '@' ? $b->emit_entry_end(op => 'ARef', type => '%Slot', inputs => [$agg]) : $agg;
+            $b->emit_entry_end(op => 'Store', type => 'void', inputs => [ $r, $c ]);
+            $c;
+        };
+    }
     if ($op eq 'MakeCell') {
         # THE CELL IS THE VARIABLE'S OWN STORAGE (the maker reads and writes it
         # as the closure does). A variable a loop renews, captured in it, is a
