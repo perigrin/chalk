@@ -43,12 +43,13 @@ my @CASES = qw(
     chalk-found-gaps:41 chalk-found-gaps:42 chalk-found-gaps:44
     chalk-found-gaps:45 chalk-found-gaps:46 chalk-found-gaps:48
     chalk-found-gaps:5 chalk-found-gaps:51 chalk-found-gaps:52
-    chalk-found-gaps:55 chalk-found-gaps:56 chalk-found-gaps:57
-    chalk-found-gaps:6 chalk-found-gaps:60 chalk-found-gaps:62
-    chalk-found-gaps:69 chalk-found-gaps:7 chalk-found-gaps:72
-    chalk-found-gaps:8 chalk-found-gaps:82 chalk-found-gaps:87
-    chalk-found-gaps:89 chalk-found-gaps:9 chalk-found-gaps:91
-    chalk-found-gaps:92 chalk-found-gaps:95 chalk-found-gaps:97
+    chalk-found-gaps:53 chalk-found-gaps:55 chalk-found-gaps:56
+    chalk-found-gaps:57 chalk-found-gaps:6 chalk-found-gaps:60
+    chalk-found-gaps:62 chalk-found-gaps:69 chalk-found-gaps:7
+    chalk-found-gaps:72 chalk-found-gaps:8 chalk-found-gaps:82
+    chalk-found-gaps:87 chalk-found-gaps:89 chalk-found-gaps:9
+    chalk-found-gaps:91 chalk-found-gaps:92 chalk-found-gaps:95
+    chalk-found-gaps:96 chalk-found-gaps:97 chalk-found-gaps:99
     class-feature:1 class-feature:11 class-feature:12 class-feature:2
     class-feature:3 class-feature:4 class-feature:5 class-feature:6
     class-feature:7 class-feature:8 class-feature:9 code-references:1

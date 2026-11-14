@@ -269,25 +269,29 @@ sub construct {
         my @byix;   # in field order (no sort block: its $b is the builder here)
         $byix[ $_->fieldix ] = $_ for $cls->fields;
         for my $f (grep { defined } @byix) {
+            # (one B::SoN gives no graph of: made undef, perl's was its value)
+            out('a field default the producer does not model') if $f->default_unmodeled;
             my $key = $b->const_str( $cls->name . '::' . $f->name );
             if ($f->sigil eq '@') {
-                out('an array field with a default') if $f->has_default;
-                $b->emit(op => 'HSet', type => 'void', inputs => [ $obj, $key, $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->emit(op => 'NewArray', type => '%Array*') ]) ]);
+                my $a = $b->emit(op => 'NewArray', type => '%Array*');
+                $b->field_default_into($a, $f->default_value) if $f->has_default;
+                $b->emit(op => 'HSet', type => 'void', inputs => [ $obj, $key, $b->emit(op => 'ARef', type => '%Slot', inputs => [$a]) ]);
                 next;
             }
             if ($f->sigil eq '%') {
-                out('a hash field with a default') if $f->has_default;
-                $b->emit(op => 'HSet', type => 'void', inputs => [ $obj, $key, $b->emit(op => 'HNew', type => '%Slot') ]);
+                my $h = $b->emit(op => 'HNew', type => '%Slot');
+                if ($f->has_default) {
+                    my $l = $b->emit(op => 'NewArray', type => '%Array*');
+                    $b->field_default_into($l, $f->default_value);
+                    $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $l ]);
+                }
+                $b->emit(op => 'HSet', type => 'void', inputs => [ $obj, $key, $h ]);
                 next;
             }
             out('a ' . $f->sigil . ' field') unless $f->sigil eq '$';
             my $v;
             if (defined $f->param_name && exists $arg{ $f->param_name }) { $v = $b->as($b->value( $arg{ $f->param_name } ), '%Slot') }
-            elsif ($f->has_default) {
-                my $d = $f->default_value;
-                out('a field default that is not a constant') unless blessed($d) && $d->operation eq 'Constant';
-                $v = $b->as($b->value($d), '%Slot');
-            }
+            elsif ($f->has_default) { $v = $b->field_default( $f->default_value ) }
             elsif (defined $f->param_name) { out('a new missing a required parameter (perl dies)') }
             else { $v = $b->emit(op => 'Undef', type => '%Slot') }
             $b->emit(op => 'HSet', type => 'void', inputs => [ $obj, $key, $v ]);
@@ -301,6 +305,43 @@ sub construct {
         }
     }
     return $obj;
+}
+
+# field_default($node) -> a scalar field's default, made anew for this object
+# (perl evaluates it at each construction: `field $r = [...]` is a new array
+# each time, `field $b = Box->new` a new call): built with a memo of its own,
+# so nothing made for one object is another's. Only a default made of
+# itself -- constants, [...] and (...) of them, a method call on a class by
+# name -- is T2's: one reading a variable or an earlier field is not.
+# field_default_into($array, $node): an aggregate field's default, its list
+# pushed onto $array (a new one per object).
+sub _self_made {
+    my ($n, $seen) = @_;
+    return 0 unless blessed($n);
+    return 1 if $seen->{ refaddr($n) }++;
+    my $op = $n->operation;
+    return 0 unless $op eq 'Constant' || $op eq 'ArrayLiteral' && ( $n->stamp // '' ) =~ /\A(?:Array|ArrayRef)\z/   # static type
+        || $op eq 'HashLiteral' && ( $n->stamp // '' ) eq 'Hash'
+        || $op eq 'Call' && ( $n->dispatch_kind // '' ) eq 'method' && blessed( $n->inputs->[0] ) && $n->inputs->[0]->operation eq 'Constant';
+    return !grep { !_self_made($_, $seen) } grep { blessed($_) } $n->inputs->@*;
+}
+sub field_default {
+    my ($b, $d) = @_;
+    out('a field default that is not made of itself') unless _self_made($d, {});
+    local $b->{memo} = {};
+    local $b->{depth} = 0;   # (made here, for this object: an arm's or a body's is its own)
+    return $b->as($b->value($d), '%Slot');
+}
+sub field_default_into {
+    my ($b, $arr, $d) = @_;
+    out('a field default that is not made of itself') unless _self_made($d, {});
+    local $b->{memo} = {};
+    local $b->{depth} = 0;
+    for my $e ( $d->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( $d->stamp // '' ) =~ /\A(?:Array|Hash)\z/ ? $d->inputs->@* : $d ) {   # static type
+        next unless blessed($e);
+        if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($e) ]) }
+        else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($e), '%Slot') ]) }
+    }
 }
 
 # method_call($Call) -> a method call: @_ built (the invocant first), the

@@ -12,6 +12,10 @@ class Chalk::MOP::Field {
     field $param_name    :param :reader = undef;
     field $has_default   :param :reader = false;
     field $default_value :param :reader = undef;
+    # A DEFAULT THE PRODUCER DID NOT MODEL (B::SoN's `default_unmodeled`: an
+    # initializer reading a variable or an earlier field, `field $y = $x + 1`):
+    # the field has one, but no graph of it -- has_default is false.
+    field $default_unmodeled :param :reader = false;
     field $type          :param :reader = undef;
     # Does this field carry the `:reader` attribute?
     #

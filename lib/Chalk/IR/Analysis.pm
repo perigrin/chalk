@@ -2401,6 +2401,7 @@ sub _replay_classes ($classes, $graphs) {
                 ($has_default
                     ? (default_value => $default_node, has_default => true)
                     : ()),
+                ($f->{default_unmodeled} ? (default_unmodeled => true) : ()),
             );
         }
 
