@@ -65,14 +65,14 @@ my @CASES = qw(
     compile-phase:4 compound-assignment:1 compound-assignment:2
     compound-assignment:3 compound-assignment:4 compound-assignment:5
     conditionals:1 conditionals:2 conditionals:3 conditionals:4
-    context-from-inside:2 declarations:1 declarations:2 declarations:3
-    dereferencing:1 dereferencing:2 dereferencing:3 dereferencing:4
-    dereferencing:5 dereferencing:6 dereferencing:7 dereferencing:8
-    dynamic-scope:1 dynamic-scope:2 embedded-code:1 embedded-code:2
-    embedded-code:3 eval-replacement:1 formats:1 formats:2 handles:1
-    handles:2 handles:3 handles:4 hashes:1 hashes:2 hashes:3 hashes:4
-    hashes:5 heredocs:1 heredocs:2 heredocs:3 jumps:1 jumps:3
-    list-operators-in-context:1 list-operators-in-context:2
+    context-from-inside:1 context-from-inside:2 declarations:1
+    declarations:2 declarations:3 dereferencing:1 dereferencing:2
+    dereferencing:3 dereferencing:4 dereferencing:5 dereferencing:6
+    dereferencing:7 dereferencing:8 dynamic-scope:1 dynamic-scope:2
+    embedded-code:1 embedded-code:2 embedded-code:3 eval-replacement:1
+    formats:1 formats:2 handles:1 handles:2 handles:3 handles:4 hashes:1
+    hashes:2 hashes:3 hashes:4 hashes:5 heredocs:1 heredocs:2 heredocs:3
+    jumps:1 jumps:3 list-operators-in-context:1 list-operators-in-context:2
     list-operators-in-context:3 list-operators-in-context:4
     list-operators-in-context:5 loading:1 loading:6 loops:1 loops:10
     loops:11 loops:2 loops:3 loops:4 loops:5 loops:6 loops:7 loops:8 loops:9

@@ -93,7 +93,7 @@ sub loop_type { my ($b, $phi) = @_; return $b->phi_type($phi) }
 sub type_of {
     my ($b, $v) = @_;
     my $op = $v->operation;
-    return '%Slot' if $op eq 'EnvRead' || $op eq 'DefinedOr' || $op eq 'RegexCapture';   # may be undef (a capture: its group took no part)
+    return '%Slot' if $op eq 'EnvRead' || $op eq 'DefinedOr' || $op eq 'RegexCapture' || $op eq 'Wantarray';   # may be undef (a capture: its group took no part)
     return '%Slot' if ( $v->stamp // '' ) eq 'Regex';   # a qr value: an object of class Regexp
     return '%Array*' if $op =~ /\A(?:RegexMatch|Match)\z/ && _is_list($v);   # a match in list context: its list
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'split') {
@@ -264,6 +264,12 @@ sub _value {
         return $b->emit(op => 'Load', type => '%Slot', inputs => [ $b->value( $v->inputs->[0] ) ]);
     }
     if ($op eq 'AnonSub') { return $b->code_value($v) }
+    # wantarray: the main program's is undef (no caller). A sub's is its
+    # caller's context, which may be void (undef): T2 holds list or scalar only.
+    if ($op eq 'Wantarray') {
+        out('wantarray in a sub (T2 has no void context)') if $b->{in_func};
+        return $b->emit(op => 'Undef', type => '%Slot');
+    }
     # A push B::SoN left off the chain, a body's last statement (an ADJUST's):
     # made where its value is wanted -- its Return, the only use allowed.
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'push' && !$v->is_pinned) {
