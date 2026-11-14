@@ -140,6 +140,8 @@ sub _match_in_list {
         pop @args if $c->can('memory_input') && $c->memory_input;
         next unless grep { blessed($_) && refaddr($_) == refaddr($n) } @args;
         my $is_in = sub ($x) { grep { blessed($_) && refaddr($_) == refaddr($x) } @args };
+        # (returned: the sub gives its list or its truth by its caller's context -- func)
+        next if $op eq 'Return' && $c->inputs->@* == 1;
         Chalk::Target::LLVM::Builder::out('a match returned (its context is its caller\'s)') if $op eq 'Return';
         if ( $op eq 'Coerce' && grep { blessed($_) && $_->operation eq 'Print' } ( $c->consumers // [] )->@* ) { $list = 1; next }
         $list = 1 if $op =~ /\A(?:Print|ArrayLiteral|ListAppend)\z/ && $is_in->($n);

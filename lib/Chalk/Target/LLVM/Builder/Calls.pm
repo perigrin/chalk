@@ -453,7 +453,11 @@ sub func {
     my $arrret = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && !$hkv
         && ( $ret->inputs->[0]->is_my_array || $ret->inputs->[0]->operation eq 'ArrayLiteral' && ( $ret->inputs->[0]->stamp // '' ) eq 'Array' )   # static type
         ? $ret->inputs->[0] : undef;
-    my $listret = $ret->inputs->@* == 2 || $valueless || $hkv || $arrret;
+    # `return /x/` (a match its last statement): its groups in a list, its
+    # truth in a scalar.
+    my $mret = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation =~ /\A(?:RegexMatch|Match)\z/
+        ? $ret->inputs->[0] : undef;
+    my $listret = $ret->inputs->@* == 2 || $valueless || $hkv || $arrret || $mret;
     out("sub $name returns more than one reading") if $ret->inputs->@* > 2;
     # A METHOD OF THE CLASS FEATURE: $self is its first argument, its signature's
     # parameter i the i+1th (B::SoN's Parameter nodes). One reading @_, or with
@@ -618,9 +622,11 @@ sub func {
         # A FRESH ARRAY of it: a constant one is made once, at entry, and the
         # caller may write the list it is handed (`for (f()) { $_ = 0 }`).
         my $copy = $b->emit(op => 'NewArray', type => '%Array*');
-        $b->emit(op => 'AAppend', type => 'void', inputs => [ $copy, $b->as_list($v) ]);
+        out("sub $name returns a /g match") if $mret && ( $mret->flags // '' ) =~ /g/;
+        $b->emit(op => 'AAppend', type => 'void', inputs => [ $copy, $mret ? $b->array_of($mret) : $b->as_list($v) ]);
         my $l = $b->emit(op => 'ARef', type => '%Slot', inputs => [$copy]);
-        my $sv = $arrret ? $b->as( $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($arrret) ]), '%Slot' )
+        my $sv = $mret ? $b->as( $b->value($mret), '%Slot' )
+               : $arrret ? $b->as( $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($arrret) ]), '%Slot' )
                : blessed( $ret->inputs->[1] ) ? $b->as($b->value( $ret->inputs->[1] ), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
         $r = $b->emit(op => 'Select', type => '%Slot', inputs => [ $want, $l, $sv ]);
     }

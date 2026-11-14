@@ -192,10 +192,20 @@ sub walk {
         }
         # map's `$_` FOR A CALLEE: its body reads the element itself; only code
         # reading the global $_ needs it -- none in the program, a no-op.
+        # WHERE THE PROGRAM READS $_ (a sub called in the body), the global $_
+        # is the element: a copy, stored here each pass -- sound only where
+        # nothing writes $_ (perl's alias would write the element) -- and what
+        # it held before put back when the loop ends (alias_saves).
         elsif ($op eq 'LocalAlias' && ( $s->can('name') ? $s->name // '' : '' ) eq '_') {
-            out('a $_ aliased where the program reads $_')
-                if grep { $_->is_package_scalar && $_->symbol eq '_' && grep { blessed($_) && $_->operation ne 'EntryWrite' } ( $_->consumers // [] )->@* }
-                   _all_nodes($b->{mop}, $b->{ret});
+            if ($b->reads_topic) {
+                out('a $_ aliased where the program reads $_, outside a loop T2 restores it after') unless $b->{alias_restore};
+                my $src = $s->inputs->[0];
+                # (B::SoN's guarded reference to the element: the element)
+                # (B::SoN's reference to the element, guarded or not: the element)
+                $src = $src->inputs->[1] if blessed($src) && $src->operation eq 'TernaryExpr' && blessed( $src->inputs->[1] ) && $src->inputs->[1]->operation eq 'Ref';
+                $src = $src->inputs->[0] if blessed($src) && $src->operation eq 'Ref';
+                $b->emit(op => 'GStore', type => 'void', inputs => [ $b->as( $b->value($src), '%Slot' ) ], attr => { global => $b->global_named('main::_') });
+            }
             $ctl = $s;
         }
         # `package X;` names the package code after it is in: nothing T2 reads.
@@ -568,6 +578,10 @@ sub loop {
     out('a loop phi with other than two ways in') if grep { scalar( $_->inputs->@* ) != 2 } @phis;
 
     $b->reads_before($_) for $b->{passed}->@*;   # see if_stmt
+    # A FOREACH ALIASING $_ where the program reads it: what $_ held saved here,
+    # put back at the exit.
+    my $save = $b->alias_saves($L);
+    local $b->{alias_restore} = $save ? 1 : $b->{alias_restore};
     my $pre = $b->{cur};
     # A LIST THE LOOP BUILDS starts empty each time the loop is entered: a
     # fresh array here (the empty literal, made once at entry, was every
@@ -612,10 +626,49 @@ sub loop {
     }
     my $exit = $b->new_block('exit');
     $head_end->{term} = [ 'condbr', $cond, $body, $exit ];
+    $b->emit(op => 'GStore', type => 'void', inputs => [$save], attr => { global => $b->global_named('main::_') }) if $save;
     my ($region) = grep { $_->operation eq 'Region' } ( $exitp->consumers // [] )->@*;
     # THE EXIT'S MEMORY is a version too: a read at it, before a store after.
     push $b->{passed}->@*, $region->memory_phis if $region;
     return $region // $exitp;
+}
+
+# reads_topic -> the program reads the global $_ (a sub reading it, called
+# in a foreach's body). Refused where anything writes it: perl's $_ is the
+# element itself, and a write through it changes the list.
+sub reads_topic {
+    my ($b) = @_;
+    return $b->{reads_topic} //= do {
+        my @all = _all_nodes($b->{mop}, $b->{ret});
+        my @top = grep { $_->is_package_scalar && ( $_->symbol // '' ) eq '_' } @all;
+        my $reads = grep { my $t = $_; grep { blessed($_) && $_->operation ne 'EntryWrite' } ( $t->consumers // [] )->@* } @top;
+        out('a $_ aliased where the program writes $_ (perl writes the element)')
+            if $reads && ( grep { $_->operation eq 'EntryWrite' && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->symbol // '' ) eq '_' && $_->inputs->[0]->is_package_scalar } @all
+                           or grep { $_->operation =~ /\A(?:RegexSubst|Transliterate|Chomp)\z/ && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->can('symbol') ? $_->inputs->[0]->symbol // '' : '' ) eq '_' } @all );
+        out('a $_ aliased where the program reads $_, in a program with an eval') if $reads && $b->{has_eval};
+        $reads ? 1 : 0;
+    };
+}
+
+# alias_saves($Loop) -> what $_ held before the loop (a GLoad), where the
+# loop's body aliases $_ and the program reads it; else undef.
+sub alias_saves {
+    my ($b, $L) = @_;
+    my $mine = sub ($a) {
+        my @todo = ( $a->inputs->@* );
+        for (1 .. 8) {
+            my @next;
+            for my $x (grep { blessed($_) } @todo) {
+                return 1 if $x->operation eq 'Phi' && blessed( $x->region ) && refaddr( $x->region ) == refaddr($L);
+                push @next, $x->inputs->@* unless $x->operation eq 'Phi';
+            }
+            @todo = @next;
+        }
+        return 0;
+    };
+    return undef unless grep { $_->operation eq 'LocalAlias' && ( $_->name // '' ) eq '_' && $mine->($_) } +($b->{own_nodes} // [])->@*;
+    return undef unless $b->reads_topic;
+    return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_named('main::_') });
 }
 
 # loop_breaks($Loop) -> the control the program goes on from: A LOOP THAT
