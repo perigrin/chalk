@@ -13,6 +13,7 @@ class Chalk::IR::Node::EnvRead :isa(Chalk::IR::Value) {
     field $key :param :reader;
 
     method operation() { 'EnvRead' }
+    method makes_the_same() { return 1 }
     method staleness_kind() { 'opaque' }
     sub identity_kind { 'hash_consed' }
 

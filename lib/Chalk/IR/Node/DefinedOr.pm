@@ -8,6 +8,7 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::DefinedOr :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'DefinedOr' }
+    method makes_the_same() { return 1 }
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
     method op_str()    { '//' }

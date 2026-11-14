@@ -201,8 +201,9 @@ sub type_of {
 # value($t1) -> the T2 node for a T1 value, built once.
 sub value {
     my ($b, $v) = @_;
+    # (one made the same anywhere is made again here: a constant, `$ENV{X} // "a"`)
     out('a value an eval made, read past its end')
-        if delete $b->{past_eval}{ refaddr($v) } and $v->operation ne 'Constant';
+        if delete $b->{past_eval}{ refaddr($v) } and !$v->all_made_the_same;
     return $b->{memo}{ refaddr($v) } //= $b->_value($v);
 }
 

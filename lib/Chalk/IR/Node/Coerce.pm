@@ -28,6 +28,7 @@ class Chalk::IR::Node::Coerce :isa(Chalk::IR::Value) {
     method set_reprs($f, $t) { ($from_repr, $to_repr) = ($f, $t); return }
 
     method operation() { 'Coerce' }
+    method makes_the_same() { return 1 }
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
 

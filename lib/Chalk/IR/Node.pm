@@ -304,6 +304,16 @@ class Chalk::IR::Node {
     # each read says where its memory input is.
     method memory_operand() { return undef }
 
+    # makes_the_same -> true where making this value again, anywhere its
+    # inputs are, gives the same value: it reads no memory, writes nothing and
+    # cannot die (a constant, an %ENV read, a // or a . of such). The classes
+    # that answer yes say so; all_made_the_same asks it of every input too.
+    method makes_the_same() { return 0 }
+    method all_made_the_same($seen = {}) {
+        return 1 if $seen->{ refaddr($self) }++;
+        return $self->makes_the_same && !grep { blessed($_) && !$_->all_made_the_same($seen) } $self->inputs->@*;
+    }
+
     # Questions of one kind of node, answered no by every other, so a caller
     # holding any node may ask. The classes that answer yes say what each is.
     method is_package_scalar()    { return 0 }       # EntryDef

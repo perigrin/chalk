@@ -13,6 +13,7 @@ class Chalk::IR::Node::Constant :isa(Chalk::IR::Value) {
     field $flags      :param :reader = undef;
 
     method operation() { 'Constant' }
+    method makes_the_same() { return 1 }
     method staleness_kind() { 'opaque' }
     sub identity_kind { 'hash_consed' }
 
