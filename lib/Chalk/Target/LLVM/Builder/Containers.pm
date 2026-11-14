@@ -484,7 +484,7 @@ sub array_of {
     }
     # A CHOICE IN LIST CONTEXT (`$c ? @$x : ()`, `$c ? @a : 7`): the list of
     # the arm taken, merged at the join.
-    return $b->list_choice($n) if blessed($n) && $n->operation eq 'TernaryExpr' && ( _is_list($n) || $b->type_of($n) eq '%Array*' );
+    return $b->list_choice($n) if blessed($n) && $n->operation =~ /\A(?:TernaryExpr|And|Or)\z/ && ( _is_list($n) || $b->type_of($n) eq '%Array*' );
     # A LIST A LOOP BUILDS (a phi of one, map's ListAppend) is its array.
     return $b->value($n) if blessed($n) && $n->operation =~ /\A(?:Phi|ListAppend)\z/ && $b->type_of($n) eq '%Array*';
     # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`).
@@ -525,15 +525,28 @@ sub array_of {
 # own block as a list (a list as it is, a scalar a list of one -- B::SoN folds
 # `(7)` to 7), the arm taken's list at the join. Taken as a scalar it is
 # refused (list_only). Made once.
+# L && R, L || R read as a list: L in scalar context (an array its count)
+# decides; where it does, the list is that one value, else R's list.
 sub list_choice {
     my ($b, $v) = @_;
     my $key = 'list:' . refaddr($v);
     return $b->{memo}{$key} if $b->{memo}{$key};
     $b->list_only($v, 'a choice of lists');
     my ($cond, $then, $else) = $v->inputs->@*;
-    my $c = $b->truth($b->value($cond));
+    my $c;
+    if ( $v->operation =~ /\A(?:And|Or)\z/ ) {
+        my $l = $b->as($b->value($cond), '%Slot');
+        $c = $b->truth($l);
+        ( $then, $else ) = $v->operation eq 'And' ? ( $then, $l ) : ( $l, $then );
+    }
+    else { $c = $b->truth($b->value($cond)) }
     my $arm = sub {
         my ($x) = @_;
+        if ( $x isa Chalk::Target::LLVM::Node ) {   # (the left side's value, made)
+            my $a = $b->emit(op => 'NewArray', type => '%Array*');
+            $b->emit(op => 'APush', type => 'void', inputs => [ $a, $x ]);
+            return $a;
+        }
         return $b->array_of($x) if _is_list($x) || $b->type_of($x) eq '%Array*';
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
         $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($x), '%Slot') ]);
