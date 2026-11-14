@@ -506,7 +506,7 @@ sub _value {
     if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:open|close|eof|readline|select|sselect)\z/) {
         return $b->as( $b->io_value($v), $ty );
     }
-    if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:chr|ord|time|ftis|reverse|sprintf|lock)\z/) {
+    if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:chr|ord|time|ftis|reverse|sprintf|lock|formline)\z/) {
         return $b->builtin_value($v, $ty);
     }
     # A REGEX MATCH OF A CONSTANT PATTERN is a call of its own graph
@@ -550,6 +550,7 @@ sub builtin_value {
         return $b->as( $b->emit(op => 'StrRev', type => '%Str', inputs => [$s]), $ty );
     }
     return $b->sprintf_value($v, $ty, @a) if $name eq 'sprintf';
+    return $b->format_write($v, $ty, @a) if $name eq 'formline';
     out("a $name of other than one argument (of \$_)") unless @a == 1;
     out("a $name of a list") if _is_list( $a[0] );
     # lock: perl's without threads is a no-op, its value its argument.
@@ -643,6 +644,40 @@ sub _bit_readers {
         return -1;
     }
     return $k;
+}
+
+# format_write($Call, $ty, $picture, @values) -> a format's formline, in the
+# sub `write` calls (B::SoN's __FORMAT__:main::STDOUT): its lines made and
+# printed -- what write does with what formline accumulates. Each line its
+# text and its @<<< / @>>> fields (one value each), its trailing spaces
+# chopped, as formline's are. Another field kind, another handle, or a
+# formline elsewhere is not T2's.
+sub format_write {
+    my ($b, $v, $ty, $pic, @vals) = @_;
+    out('a formline outside a format of STDOUT') unless ( $b->{format_of} // '' ) =~ /\A(?:main::)?STDOUT\z/;
+    out('a format written in a program that selects a handle') if $b->selects;
+    out('a formline of a picture made at run time') unless blessed($pic) && $pic->operation eq 'Constant' && defined $pic->value;
+    out('a formline of a list') if grep { _is_list($_) } @vals;
+    my @out;
+    for my $line ( split /(?<=\n)/, $pic->value ) {
+        my $nl = $line =~ s/\n\z// ? "\n" : '';
+        my @parts;
+        pos($line) = 0;
+        while ( pos($line) < length $line ) {
+            if ( $line =~ /\G([^\@^~]+)/gc ) { push @parts, $b->const_str($1); next }
+            $line =~ /\G\@(<*|>*)(?![<>|#*])/gc or out('a format field T2 does not have (' . substr( $line, pos($line), 6 ) . ')');
+            my $f = $1;
+            out('a format with more fields than values') unless @vals;
+            push @parts, $b->emit(op => 'FormField', type => '%Str', inputs => [ $b->as( $b->value( shift @vals ), '%Slot' ),
+                $b->emit(op => 'Const', type => 'i64', attr => { value => 1 + length $f }) ], attr => { right => ( $f =~ /\A>/ ? 1 : 0 ) });
+        }
+        my $l = @parts ? shift @parts : $b->const_str('');
+        $l = $b->emit(op => 'Concat', type => '%Str', inputs => [ $l, $_ ]) for @parts;
+        $l = $b->emit(op => 'RTrim', type => '%Str', inputs => [$l]) if $nl;
+        push @out, $l, ( length $nl ? $b->const_str($nl) : () );
+    }
+    $b->emit(op => 'Print', type => 'void', inputs => [$_], attr => { fd => 1 }) for @out;
+    return $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), $ty );
 }
 
 # past_ascii -> a string constant of the program goes past ASCII (T2's

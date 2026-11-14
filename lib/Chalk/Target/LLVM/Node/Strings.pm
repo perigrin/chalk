@@ -23,4 +23,9 @@ class Chalk::Target::LLVM::Node::StrRev :isa(Chalk::Target::LLVM::Node) { method
 class Chalk::Target::LLVM::Node::Repeat :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_repeat') } }
 class Chalk::Target::LLVM::Node::Fmt :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_fmt') } }
 
+class Chalk::Target::LLVM::Node::FormField :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = call %Str @t2_form_field(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{right} ? 1 : 0 ) . ')' }
+}
+class Chalk::Target::LLVM::Node::RTrim :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_rtrim') } }
+
 1;

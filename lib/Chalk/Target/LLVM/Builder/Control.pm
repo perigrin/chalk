@@ -96,8 +96,8 @@ sub walk {
             push $b->{passed}->@*, $s;
             $ctl = $s;
         }
-        # A HANDLE'S open, close, readline, eof, select where it stands.
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:open|close|eof|readline|select|sselect)\z/) {
+        # A HANDLE'S open, close, readline, eof, select, a format's formline, where it stands.
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:open|close|eof|readline|select|sselect|formline)\z/) {
             $b->value($s);
             push $b->{passed}->@*, $s;
             $ctl = $s;

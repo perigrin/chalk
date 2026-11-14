@@ -5203,6 +5203,57 @@ stop:
   call void @t2_stop(i8* getelementptr ([62 x i8], [62 x i8]* @msg_select, i64 0, i64 0), i64 61)
   unreachable
 }
+; ---- formats (formline) ----
+declare i8* @memset(i8*, i32, i64)
+; t2_form_field(v, w, right): a format's @<<< (or @>>>) field: v up to its
+; first newline, cut to w, padded with spaces to w (on the left if right).
+define internal %Str @t2_form_field(%Slot %v, i64 %w, i1 %right) {
+entry:
+  %s = call %Str @t2_slot_str(%Slot %v)
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %nl = call i8* @memchr(i8* %p, i32 10, i64 %n)
+  %has = icmp ne i8* %nl, null
+  %nli = ptrtoint i8* %nl to i64
+  %pi = ptrtoint i8* %p to i64
+  %upto = sub i64 %nli, %pi
+  %l0 = select i1 %has, i64 %upto, i64 %n
+  %long = icmp sgt i64 %l0, %w
+  %l = select i1 %long, i64 %w, i64 %l0
+  %w1 = add i64 %w, 1
+  %buf = call i8* @malloc(i64 %w1)
+  call i8* @memset(i8* %buf, i32 32, i64 %w)
+  %pad = sub i64 %w, %l
+  %at = select i1 %right, i64 %pad, i64 0
+  %dst = getelementptr i8, i8* %buf, i64 %at
+  call i8* @memcpy(i8* %dst, i8* %p, i64 %l)
+  %e = getelementptr i8, i8* %buf, i64 %w
+  store i8 0, i8* %e
+  %r = call %Str @t2_str(i8* %buf, i64 %w)
+  ret %Str %r
+}
+; t2_rtrim(s): s without its trailing spaces (a format line's, as formline chops them).
+define internal %Str @t2_rtrim(%Str %s) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  br label %loop
+loop:
+  %k = phi i64 [ %n, %entry ], [ %k1, %back ]
+  %any = icmp sgt i64 %k, 0
+  br i1 %any, label %chk, label %done
+chk:
+  %k1 = sub i64 %k, 1
+  %cp = getelementptr i8, i8* %p, i64 %k1
+  %c = load i8, i8* %cp
+  %sp = icmp eq i8 %c, 32
+  br i1 %sp, label %back, label %done
+back:
+  br label %loop
+done:
+  %r = call %Str @t2_str(i8* %p, i64 %k)
+  ret %Str %r
+}
 LL
 
 1;

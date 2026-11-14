@@ -561,6 +561,8 @@ sub func {
     local $b->{evals} = [];
     local $b->{eval_opened} = {};
     local $b->{in_func} = 1;
+    # A FORMAT's sub (B::SoN's __FORMAT__:<handle>), which `write` calls.
+    local $b->{format_of} = $name =~ /__FORMAT__:(.+)\z/ ? $1 : undef;
     local $b->{ret} = $ret;
     local $b->{passed} = [ grep { $_->operation eq 'MemStart' } $g->component ];
     local $b->{readers};
