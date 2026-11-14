@@ -47,7 +47,7 @@ my @VALUE = qw(
     Add Subtract Multiply Divide Concat NumLt StrEq DefinedOr
     Not Length Negate Defined
     Subscript PadAccess FieldAccess
-    ArrayRef HashRef Slice
+    ArrayLiteral HashLiteral Slice
     RegexMatch
 );
 

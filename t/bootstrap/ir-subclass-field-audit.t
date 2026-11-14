@@ -82,7 +82,7 @@ my @UNARYOP_FAMILY = qw(
 # leaves a name behind that dies at `make`; audited 2026-08-20 and Stringify was
 # the only such name.
 my @STRUCTURAL_ONLY = qw(
-    ArrayRef HashRef Slice Interpolate
+    Slice Interpolate
     Print TryCatch BacktickExpr
     StructRef StructFieldAccess TernaryExpr ExpressionList
     Start MemStart Unwind Subscript
@@ -252,7 +252,9 @@ $SPEC{VarDecl} = sub ($f) {
 # _deserialize_graph (mirrors the existing per-op field dispatch pattern),
 # so this is now a normal (non-gap) round-trip assertion.
 $SPEC{Coerce} = sub ($f) {
-    my $operand = _const($f, '1');
+    # A parameter, not a constant: analysis may fold a coercion of a literal.
+    my $operand = $f->make('Parameter', index => 0, name => '$s', sigil => '$', inputs => []);
+    $operand->set_stamp('Str');
     my $node = $f->make('Coerce',
         from_repr => 'Str', to_repr => 'Num', inputs => [$operand]);
     return ($node, { from_repr => 'Str', to_repr => 'Num' });
@@ -287,7 +289,51 @@ $SPEC{AnonSub} = sub ($f) {
 # can't be wired as an ordinary value feeding a Return the way every other
 # op above is). Each gets its own tiny bespoke graph and is round-tripped
 # directly rather than through the shared harness.
+# -----------------------------------------------------------------------
+# Ops added after the audit was written (audited 2026-11-14). Structural
+# ones carry only their inputs; the rest name the fields they carry.
+# -----------------------------------------------------------------------
+for my $op (qw(ArrayLiteral HashLiteral Count Increment RegexSubstCount
+               TransliterateCount Wantarray CellRead CellWrite)) {
+    $SPEC{$op} = sub ($f) {
+        my $node = $f->make($op, inputs => [_const($f, '7')]);
+        return ($node, {});
+    };
+}
+for my $op (qw(Chomp ChompValue Delete ElemRestore Exists)) {
+    $SPEC{$op} = sub ($f) {
+        my $node = $f->make($op, kind => 'hash', inputs => [_const($f, '7')]);
+        return ($node, { kind => 'hash' });
+    };
+}
+$SPEC{CellParam} = sub ($f) {
+    return ($f->make('CellParam', index => 2, name => '$x'), { index => 2, name => '$x' });
+};
+$SPEC{EntryWrite} = sub ($f) {
+    return ($f->make('EntryWrite', binds => 1, inputs => [_const($f, '7')]), { binds => 1 });
+};
+$SPEC{ListAppend} = sub ($f) {
+    return ($f->make('ListAppend', inputs => [_const($f, '7')]), {});
+};
+$SPEC{LocalAlias} = sub ($f) {
+    return ($f->make('LocalAlias', name => '$x', inputs => [_const($f, '7')]), { name => '$x' });
+};
+$SPEC{MakeCell} = sub ($f) {
+    return ($f->make('MakeCell', cell_name => '$c', captured_written => 1, inputs => [_const($f, '7')]),
+            { cell_name => '$c', captured_written => 1 });
+};
+$SPEC{PackageMark} = sub ($f) {
+    return ($f->make('PackageMark', package => 'Foo'), { package => 'Foo' });
+};$SPEC{Transliterate} = sub ($f) {
+    return ($f->make('Transliterate', from => 'a-z', to => 'A-Z', flags => 'r', inputs => [_const($f, 'x', 'string')]),
+            { from => 'a-z', to => 'A-Z', flags => 'r' });
+};
+
 my %CFG_SPECIAL = map { $_ => 1 } qw(Start If Loop Region);
+# ANSWERED AT LOAD: from_json runs Analysis, whose _answer_sub_defined
+# replaces every SubDefined by its answer, so none survives a load to be
+# found. Its fields are exercised by t/bootstrap/ir/t2-defined-sub-asked-where-it-runs.t.
+my %ANSWERED_AT_LOAD = map { $_ => 1 } qw(SubDefined);
 
 # -----------------------------------------------------------------------
 # Coverage check: every *.pm under lib/Chalk/IR/Node/ is either in %SPEC,
@@ -302,6 +348,7 @@ for my $path (@all_files) {
     next if exists $SPEC{$op};
     next if exists $CFG_SPECIAL{$op};
     next if exists $ABSTRACT_BASE{$op};
+    next if exists $ANSWERED_AT_LOAD{$op};
     push @uncovered, $op;
 }
 is_deeply(\@uncovered, [],
@@ -322,6 +369,10 @@ for my $op (sort keys %SPEC) {
     subtest "round-trip: $op" => sub {
         my $f = Chalk::IR::NodeFactory->new();
         my ($node, $expect) = $SPEC{$op}->($f);
+        # The wire always sends a stamp; a hand-built node has none, and the
+        # loader's exit assertion refuses an untyped value. Unknown is the
+        # wire's own "no answer" (94316971).
+        $node->set_stamp('Unknown') if $node isa Chalk::IR::Value && !defined $node->stamp;
 
         my $graph;
         if ($op eq 'Return') {
@@ -465,6 +516,7 @@ subtest 'KNOWN GAP: Call.target does not survive round-trip (documented decorati
     my $node = $f->make('Call',
         dispatch_kind => 'method', name => 'foo', inputs => []);
     $node->set_target('sentinel-mop-method-handle');
+    $node->set_stamp('Unknown');   # the wire always sends one
     my $graph  = _base_graph($f, $node);
     my $loaded = from_json(to_json({ tgt => $graph }));
     my ($found) = grep { blessed($_) && $_->operation eq 'Call' } $loaded->{tgt}->nodes->@*;
@@ -506,6 +558,7 @@ subtest 'KNOWN GAP: AnonSub.graph does not survive round-trip' => sub {
     my $inner_ret   = $inner_f->make_cfg('Return', inputs => [$inner_start, $inner_val]);
     my $inner_graph = Chalk::IR::Graph->new(start => $inner_start, returns => [$inner_ret]);
     my $node        = $f->make('AnonSub', graph => $inner_graph, inputs => []);
+    $node->set_stamp('Unknown');   # the wire always sends one
     my $graph       = _base_graph($f, $node);
     my $loaded      = from_json(to_json({ an => $graph }));
     my ($found) = grep { blessed($_) && $_->operation eq 'AnonSub' } $loaded->{an}->nodes->@*;

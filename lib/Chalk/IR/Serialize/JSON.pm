@@ -229,6 +229,27 @@ sub _extract_fields ($node, $id_remap) {
             to_repr   => $node->to_repr,
         };
     }
+    # The fields the loader reads for these ops (_deserialize_graph), written
+    # under the same keys so a graph round-trips whole.
+    if ($op =~ /\A(?:Exists|Delete|ElemRestore|Chomp|ChompValue)\z/) {
+        return { ( defined $node->kind ? ( kind => $node->kind ) : () ) };
+    }
+    if ($op eq 'CellParam') {
+        return { index => $node->index, ( defined $node->name ? ( name => $node->name ) : () ) };
+    }
+    if ($op eq 'MakeCell') {
+        return { ( defined $node->cell_name ? ( cell_name => $node->cell_name ) : () ),
+                 captured_written => $node->captured_written ? 1 : 0 };
+    }
+    if ($op eq 'EntryWrite')    { return { binds => $node->binds ? 1 : 0 } }
+    if ($op eq 'LocalAlias')    { return { ( defined $node->name ? ( name => $node->name ) : () ) } }
+    if ($op eq 'PackageMark')   { return { package => $node->package } }
+    if ($op eq 'SubDefined') {
+        return { name => $node->name, answer => $node->answer, unless => [ ( $node->unless // [] )->@* ] };
+    }
+    if ($op eq 'Transliterate') {
+        return { from => $node->from, to => $node->to, flags => $node->flags };
+    }
     return undef;
 }
 
