@@ -16,6 +16,10 @@ class Chalk::MOP::Class {
     field $superclass  :param :reader = undef;
     field $parent_name :param :reader = undef;
     field $mop         :param :reader;
+    # A class of the class feature (`class Name { }`), told from a plain
+    # package: one with no fields and no methods of its own (an empty
+    # `class Child :isa(Base) { }`) is still a class whose `new` constructs.
+    field $is_class    :param :reader = false;
     field @fields;
     field @methods;
     field @subs;

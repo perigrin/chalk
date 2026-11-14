@@ -740,6 +740,7 @@ class Chalk::Bootstrap::Perl::Actions {
             my $mop_class = $mop->declare_class($name_str,
                 (defined $superclass_obj ? (superclass => $superclass_obj) : ()),
                 (defined $parent_str ? (parent_name => $parent_str) : ()),
+                is_class => true,
             );
 
             for my $item (@body) {

@@ -2330,6 +2330,7 @@ sub _replay_classes ($classes, $graphs) {
         my $cls = $mop->declare_class($name,
             (defined $super  ? (superclass  => $super)  : ()),
             (defined $parent ? (parent_name => $parent) : ()),
+            is_class => ( $cd->{is_class} ? true : false ),
         );
         # Recorded so a post-seal pass can tell a DECLARED class from the
         # `main` Chalk::MOP seeds unconditionally.
