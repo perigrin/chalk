@@ -51,6 +51,15 @@ sub walk {
                 my $fh = shift @args;
                 my $name = blessed($fh) && $fh->operation eq 'Constant' && ( $fh->stamp // '' ) eq 'Glob' ? $fh->value // '' : '';
                 if ( blessed($fh) && $fh->operation eq 'PadAccess' ) { $b->reads_before($_) for $b->{passed}->@*; $to = $b->fh_handle($fh) }
+                # A HANDLE THE PROGRAM OPENS NOWHERE (`print __CLASS__;` is a
+                # print to one): perl prints nothing to it. Its value (false) unread.
+                elsif ( length $name && $name !~ /\A(?:main)?::(?:STDOUT|STDERR)\z|\A(?:STDOUT|STDERR|STDIN|DATA)\z/
+                        && !grep { $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'glob' && ( $_->value // '' ) eq $name
+                                   && grep { blessed($_) && $_->operation ne 'Print' } ( $_->consumers // [] )->@* } _all_nodes($b->{mop}, $b->{ret}) ) {
+                    out('a print to a handle opened nowhere, its value read') if $b->_value_read($s);
+                    $ctl = $s;
+                    next;
+                }
                 else {
                     $fd = { STDOUT => 1, STDERR => 2 }->{ $name =~ s/\A(?:main)?:://r }
                         // out('a print to a filehandle other than STDOUT or STDERR');

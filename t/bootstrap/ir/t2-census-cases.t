@@ -77,8 +77,8 @@ my @CASES = qw(
     subroutines:3 subroutines:6 subroutines:7 subroutines:8 subroutines:9
     subroutines:10 subroutines:11 symbol-table:4 taking-references:1
     taking-references:3 taking-references:4 unary:1 unary:2 unary:3 unary:4
-    unary:5 ungated:1 ungated:2 ungated:4 vstrings:1 vstrings:2 writing:1
-    writing:2 writing:3 writing:4
+    unary:5 ungated:1 ungated:2 ungated:3 ungated:4 vstrings:1 vstrings:2
+    writing:1 writing:2 writing:3 writing:4
 );
 
 my %case = map { ( $_->{id} => $_ ) } Chalk::CodeGen::Harness::T2Case::cases();
