@@ -5293,6 +5293,63 @@ stop:
   call void @t2_stop(i8* getelementptr ([76 x i8], [76 x i8]* @msg_dyn, i64 0, i64 0), i64 75)
   unreachable
 }
+; ---- chomp and chop of a value ----
+; t2_chomp_n(s, chop) -> how many chars chomp ("\n" at the end: 1) or chop (any: 1) takes off.
+define internal i64 @t2_chomp_n(%Str %s, i1 %chop) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %empty = icmp eq i64 %n, 0
+  br i1 %empty, label %none, label %last
+last:
+  br i1 %chop, label %one, label %nl
+nl:
+  %k = sub i64 %n, 1
+  %lp = getelementptr i8, i8* %p, i64 %k
+  %c = load i8, i8* %lp
+  %is = icmp eq i8 %c, 10
+  br i1 %is, label %one, label %none
+one:
+  ret i64 1
+none:
+  ret i64 0
+}
+define internal %Str @t2_chomp(%Str %s, i1 %chop) {
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %k = call i64 @t2_chomp_n(%Str %s, i1 %chop)
+  %m = sub i64 %n, %k
+  %r = call %Str @t2_str(i8* %p, i64 %m)
+  ret %Str %r
+}
+; ---- each: a hash's iterator, by its address ----
+@t2_iters = internal global %Slot zeroinitializer
+define internal %Array* @t2_each(%Slot %h) {
+entry:
+  %tb = call %Slot @t2_ghash(%Slot* @t2_iters)
+  %k = call %Str @t2_addr_key(%Slot %h)
+  %ps = call %Slot @t2_hget(%Slot %tb, %Str %k)
+  %pos = call i64 @t2_slot_i64(%Slot %ps)
+  %n = call i64 @t2_hcount(%Slot %h)
+  %r = call %Array* @t2_new_array()
+  %end = icmp sge i64 %pos, %n
+  br i1 %end, label %done, label %next
+done:
+  %z = call %Slot @t2_box_i64(i64 0)
+  call void @t2_hset(%Slot %tb, %Str %k, %Slot %z)
+  ret %Array* %r
+next:
+  %ks = call %Array* @t2_hkeys(%Slot %h)
+  %vs = call %Array* @t2_hvalues(%Slot %h)
+  %kv = call %Slot @t2_aget(%Array* %ks, i64 %pos)
+  %vv = call %Slot @t2_aget(%Array* %vs, i64 %pos)
+  call void @t2_apush(%Array* %r, %Slot %kv)
+  call void @t2_apush(%Array* %r, %Slot %vv)
+  %p1 = add i64 %pos, 1
+  %ns = call %Slot @t2_box_i64(i64 %p1)
+  call void @t2_hset(%Slot %tb, %Str %k, %Slot %ns)
+  ret %Array* %r
+}
 LL
 
 1;

@@ -210,6 +210,13 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # there is in list context.
     method takes_a_list() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'list_args' ) ? 1 : 0 }
 
+    # gives_a_list -> a builtin called in list context (B::SoN's want) whose
+    # value there is a list (each's key and value).
+    method gives_a_list() {
+        return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'list_in_list' )
+            && ( $self->can('want') ? $self->want // '' : '' ) eq 'list' ? 1 : 0;
+    }
+
     # makes_a_string -> a builtin that returns a string makes one.
     method makes_a_string() { return $self->returns_string }
 }

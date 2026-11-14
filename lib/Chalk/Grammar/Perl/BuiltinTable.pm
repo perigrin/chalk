@@ -43,6 +43,12 @@ class Chalk::Grammar::Perl::BuiltinTable {
         printf  => { list_args => 1 },
         die     => { list_args => 1 },
         warn    => { list_args => 1 },
+
+        # A LIST IN LIST CONTEXT (perlfunc's `each HASH`: "in list context
+        # returns a 2-element list consisting of the key and value"), where
+        # B::SoN's stamp does not say so. Not every list-returning builtin is
+        # listed -- the ones a backend asks about are.
+        each    => { list_in_list => 1 },
     );
 
     # fact($builtin, $column) -> the builtin's fact in that column, or undef.

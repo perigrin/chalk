@@ -91,7 +91,7 @@ sub walk {
         # FETCHSIZE or EXISTS call, made here, in order.
         elsif ($op eq 'RegexSubst' || $op eq 'Transliterate') { $b->regex_subst_stmt($s); push $b->{passed}->@*, $s; $ctl = $s }
         elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref|FieldAccess|RegexMatch|Match|BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/
-               || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join|sort|caller|pos)\z/) {
+               || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join|sort|caller|pos|each)\z/) {
             $b->value($s);
             push $b->{passed}->@*, $s;
             $ctl = $s;
@@ -396,7 +396,16 @@ sub close_eval {
         $c->{term} = [ 'br', $join ];
         push @from, $c;
     }
-    out('an eval of no way to its end') unless @from;
+    # NO WAY TO ITS END (its body exits, and nothing in it can die): what
+    # follows never runs -- a block of its own, no way into it.
+    unless (@from) {
+        $join->{dead} = 1;
+        $b->{cur} = $join;
+        $b->{memo}{ refaddr( $_->[0] ) } = $b->emit(op => 'Undef', type => '%Slot') for grep { $_->[1] eq '%Slot' } @in;
+        out('an eval of no way to its end whose value is read') if grep { $_->[1] ne '%Slot' } @in;
+        push $b->{passed}->@*, $r, $r->memory_phis;
+        return $r;
+    }
     # A VALUE THE BODY MADE past its first block need not dominate the join
     # (a die skips it): a constant is made again where it is next read;
     # anything else is refused (the 1 one try made was the next try's: "does

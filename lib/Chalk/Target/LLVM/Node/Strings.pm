@@ -28,4 +28,11 @@ class Chalk::Target::LLVM::Node::FormField :isa(Chalk::Target::LLVM::Node) {
 }
 class Chalk::Target::LLVM::Node::RTrim :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_rtrim') } }
 
+class Chalk::Target::LLVM::Node::Chomp :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = call %Str @t2_chomp(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{chop} ? 1 : 0 ) . ')' }
+}
+class Chalk::Target::LLVM::Node::ChompN :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = call i64 @t2_chomp_n(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{chop} ? 1 : 0 ) . ')' }
+}
+
 1;

@@ -115,6 +115,7 @@ sub type_of {
     # ** IS AN INTEGER where perl's is (an integer to a power, small enough),
     # else a number: which, at run time.
     return '%Slot' if $op eq 'Power';
+    return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'each';
     # readline IN A LIST: every line left.
     return ( $v->stamp // '' ) =~ /\A(?:List|Array)\z/ ? '%Array*' : '%Slot'   # static type
         if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'readline';
@@ -498,6 +499,19 @@ sub _value {
         return $b->as( $b->emit(op => 'Repeat', type => '%Str', inputs => [ $b->as( $b->value($l), '%Str' ), $k ]), $ty );
     }
     return $b->bitwise($v) if $op =~ /\A(?:BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/;
+    # chomp's (or chop's) string of a value, and how many it took off. chomp
+    # takes $/ off: "\n", unless the program writes $/ (not T2's). Of a
+    # string past ASCII, chop's last character is not its last byte.
+    if ($op eq 'Chomp' || $op eq 'ChompValue') {
+        my $kind = $v->can('kind') ? $v->kind // 'chomp' : 'chomp';
+        out("a $kind of a list") if _is_list( $v->inputs->[0] );
+        out('a chomp in a program that writes $/') if $kind eq 'chomp' && grep { $_->operation =~ /\A(?:EntryWrite|LocalAlias)\z/
+            && grep { blessed($_) && $_->can('symbol') && ( $_->symbol // '' ) eq '/' } ( $_, $_->inputs->@* ) } _all_nodes($b->{mop}, $b->{ret});
+        out('a chop where a string goes past ASCII') if $kind eq 'chop' && $b->past_ascii;
+        out("a $kind T2 does not have") unless $kind =~ /\A(?:chomp|chop)\z/;
+        my $s = $b->as( $b->value( $v->inputs->[0] ), '%Str' );
+        return $b->as( $b->emit(op => $op eq 'Chomp' ? 'Chomp' : 'ChompN', type => $op eq 'Chomp' ? '%Str' : 'i64', inputs => [$s], attr => { chop => $kind eq 'chop' }), $ty );
+    }
     # `$o isa C`: through the run-time MOP's @ISA.
     if ($op eq 'IsaOp') {
         my ($o, $c) = $v->inputs->@[0, 1];

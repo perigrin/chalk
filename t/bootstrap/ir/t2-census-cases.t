@@ -15,48 +15,49 @@ my @CASES = qw(
     adjacency-01_literals:1 adjacency-05_scoping:1 adjacency-06_control:2
     adjacency-09_regex:1 aggregate-operators:1 aggregate-operators:2
     aggregate-operators:3 aggregate-operators:4 aggregate-operators:5
-    aggregates-in-context:1 aggregates-in-context:2 aggregates-in-context:3
-    argument-extent:1 argument-extent:2 argument-extent:4 arguments:1
-    arguments:4 arguments:5 arguments:6 arguments:7 arguments:9 arithmetic:1
-    arithmetic:2 arithmetic:3 arithmetic:4 arrays:1 arrays:2 arrays:3
-    bitwise:1 bitwise:3 bitwise:4 bitwise:5 bitwise:6 bless-dispatch:1
-    bless-dispatch:2 bless-dispatch:3 bless-dispatch:4 bless-dispatch:5
-    bless-dispatch:6 bless-dispatch:7 bless-dispatch:8
-    blocks-and-terminations:1 blocks-and-terminations:2
-    blocks-and-terminations:5 chalk-found-gaps:1 chalk-found-gaps:5
-    chalk-found-gaps:6 chalk-found-gaps:7 chalk-found-gaps:9
-    chalk-found-gaps:14 chalk-found-gaps:16 chalk-found-gaps:17
-    chalk-found-gaps:18 chalk-found-gaps:19 chalk-found-gaps:21
-    chalk-found-gaps:28 chalk-found-gaps:30 chalk-found-gaps:32
-    chalk-found-gaps:33 chalk-found-gaps:34 chalk-found-gaps:39
-    chalk-found-gaps:40 chalk-found-gaps:41 chalk-found-gaps:42
-    chalk-found-gaps:44 chalk-found-gaps:45 chalk-found-gaps:46
-    chalk-found-gaps:48 chalk-found-gaps:51 chalk-found-gaps:52
-    chalk-found-gaps:55 chalk-found-gaps:56 chalk-found-gaps:57
-    chalk-found-gaps:60 chalk-found-gaps:62 chalk-found-gaps:69
-    chalk-found-gaps:87 chalk-found-gaps:89 chalk-found-gaps:91
-    chalk-found-gaps:92 chalk-found-gaps:97 chalk-found-gaps:100
-    chalk-found-gaps:102 chalk-found-gaps:103 chalk-found-gaps:105
-    chalk-found-gaps:114 chalk-found-gaps:117 chalk-found-gaps:131
-    chalk-found-gaps:133 chalk-found-gaps:135 chalk-found-gaps:136
-    chalk-found-gaps:140 chalk-found-gaps:142 chalk-found-gaps:143
-    chalk-found-gaps:149 chalk-found-gaps:157 chalk-found-gaps:161
-    chalk-found-gaps:162 chalk-found-gaps:165 chalk-found-gaps:169
-    chalk-found-gaps:171 class-feature:1 class-feature:2 class-feature:3
-    class-feature:4 class-feature:5 class-feature:6 class-feature:7
-    class-feature:8 class-feature:9 class-feature:11 class-feature:12
-    code-references:2 comparison:1 comparison:2 comparison:3 comparison:4
-    comparison:5 comparison:6 compile-phase:1 compile-phase:2
-    compile-phase:3 compile-phase:4 compound-assignment:1
-    compound-assignment:2 compound-assignment:3 compound-assignment:4
-    compound-assignment:5 conditionals:1 conditionals:2 conditionals:3
-    conditionals:4 context-from-inside:2 declarations:1 declarations:2
-    declarations:3 dereferencing:1 dereferencing:2 dereferencing:3
-    dereferencing:4 dereferencing:5 dereferencing:6 dereferencing:7
-    dereferencing:8 dynamic-scope:1 dynamic-scope:2 embedded-code:1
-    embedded-code:2 embedded-code:3 eval-replacement:1 formats:1 formats:2
-    handles:1 handles:2 handles:3 handles:4 hashes:1 hashes:2 hashes:3
-    hashes:4 heredocs:1 heredocs:2 heredocs:3 list-operators-in-context:1
+    aggregate-operators:6 aggregates-in-context:1 aggregates-in-context:2
+    aggregates-in-context:3 argument-extent:1 argument-extent:2
+    argument-extent:4 arguments:1 arguments:4 arguments:5 arguments:6
+    arguments:7 arguments:9 arithmetic:1 arithmetic:2 arithmetic:3
+    arithmetic:4 arrays:1 arrays:2 arrays:3 bitwise:1 bitwise:3 bitwise:4
+    bitwise:5 bitwise:6 bless-dispatch:1 bless-dispatch:2 bless-dispatch:3
+    bless-dispatch:4 bless-dispatch:5 bless-dispatch:6 bless-dispatch:7
+    bless-dispatch:8 blocks-and-terminations:1 blocks-and-terminations:2
+    blocks-and-terminations:4 blocks-and-terminations:5 chalk-found-gaps:1
+    chalk-found-gaps:5 chalk-found-gaps:6 chalk-found-gaps:7
+    chalk-found-gaps:9 chalk-found-gaps:14 chalk-found-gaps:16
+    chalk-found-gaps:17 chalk-found-gaps:18 chalk-found-gaps:19
+    chalk-found-gaps:21 chalk-found-gaps:28 chalk-found-gaps:30
+    chalk-found-gaps:32 chalk-found-gaps:33 chalk-found-gaps:34
+    chalk-found-gaps:39 chalk-found-gaps:40 chalk-found-gaps:41
+    chalk-found-gaps:42 chalk-found-gaps:44 chalk-found-gaps:45
+    chalk-found-gaps:46 chalk-found-gaps:48 chalk-found-gaps:51
+    chalk-found-gaps:52 chalk-found-gaps:55 chalk-found-gaps:56
+    chalk-found-gaps:57 chalk-found-gaps:60 chalk-found-gaps:62
+    chalk-found-gaps:69 chalk-found-gaps:72 chalk-found-gaps:87
+    chalk-found-gaps:89 chalk-found-gaps:91 chalk-found-gaps:92
+    chalk-found-gaps:97 chalk-found-gaps:100 chalk-found-gaps:102
+    chalk-found-gaps:103 chalk-found-gaps:105 chalk-found-gaps:114
+    chalk-found-gaps:117 chalk-found-gaps:131 chalk-found-gaps:133
+    chalk-found-gaps:135 chalk-found-gaps:136 chalk-found-gaps:140
+    chalk-found-gaps:142 chalk-found-gaps:143 chalk-found-gaps:149
+    chalk-found-gaps:157 chalk-found-gaps:161 chalk-found-gaps:162
+    chalk-found-gaps:165 chalk-found-gaps:169 chalk-found-gaps:171
+    class-feature:1 class-feature:2 class-feature:3 class-feature:4
+    class-feature:5 class-feature:6 class-feature:7 class-feature:8
+    class-feature:9 class-feature:11 class-feature:12 code-references:2
+    comparison:1 comparison:2 comparison:3 comparison:4 comparison:5
+    comparison:6 compile-phase:1 compile-phase:2 compile-phase:3
+    compile-phase:4 compound-assignment:1 compound-assignment:2
+    compound-assignment:3 compound-assignment:4 compound-assignment:5
+    conditionals:1 conditionals:2 conditionals:3 conditionals:4
+    context-from-inside:2 declarations:1 declarations:2 declarations:3
+    dereferencing:1 dereferencing:2 dereferencing:3 dereferencing:4
+    dereferencing:5 dereferencing:6 dereferencing:7 dereferencing:8
+    dynamic-scope:1 dynamic-scope:2 embedded-code:1 embedded-code:2
+    embedded-code:3 eval-replacement:1 formats:1 formats:2 handles:1
+    handles:2 handles:3 handles:4 hashes:1 hashes:2 hashes:3 hashes:4
+    heredocs:1 heredocs:2 heredocs:3 list-operators-in-context:1
     list-operators-in-context:2 list-operators-in-context:4
     list-operators-in-context:5 loading:1 loading:6 loops:1 loops:2 loops:3
     loops:4 loops:5 loops:6 loops:7 loops:9 loops:10 loops:11

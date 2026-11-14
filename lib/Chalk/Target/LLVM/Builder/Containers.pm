@@ -91,6 +91,18 @@ sub hash_value {
         return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]) if $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar';
         return $b->emit(op => $v->name eq 'keys' ? 'HKeys' : 'HValues', type => '%Array*', inputs => [$h]);
     }
+    # each %h IN A LIST: its next key and value, or none (and it starts over).
+    # In scalar context (the key alone) not T2's.
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'each') {
+        out('an each in scalar context') unless ( $v->can('want') ? $v->want // '' : '' ) eq 'list';
+        out('an each of what is not a hash') unless $in[0] isa Chalk::IR::Node && $in[0]->is_named_hash;
+        # keys AND values START A HASH'S each OVER, but B::SoN places neither
+        # (a value made where it is used, or never): where they run against an
+        # each is not known. Refused where the program has one.
+        out('an each in a program with a keys or values (which reset it, B::SoN places them nowhere)')
+            if grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) =~ /\A(?:keys|values)\z/ } _all_nodes($b->{mop}, $b->{ret});
+        return $b->emit(op => 'Each', type => '%Array*', inputs => [ $b->hash_of($in[0]) ]);
+    }
     # sort (by string or by number, either way) and reverse, of a list: a new
     # list. A sort with its own comparator is not T2's yet.
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:sort|reverse)\z/
@@ -376,7 +388,7 @@ sub array_of {
                          || $n->is_package_aggregate && $n->sigil eq '@'
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
                          || $n->operation eq 'Repeat' && $b->type_of($n) eq '%Array*'
-                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // q{} ) =~ /\A(?:keys|values|sort|reverse|caller|readline)\z/ )) {
+                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // q{} ) =~ /\A(?:keys|values|sort|reverse|caller|readline|each)\z/ )) {
         my $a = $b->value($n);
         return $a if $a->type eq '%Array*';
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]

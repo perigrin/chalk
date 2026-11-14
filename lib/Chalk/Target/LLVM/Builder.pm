@@ -119,6 +119,7 @@ sub _is_list {
     # use decides, not its stamp (a call stamped List is a scalar's in `my $n =`).
     return _list_use($n) if $n->operation eq 'Call' && $n->is_sub_call;
     return 1 if ( $n->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
+    return 1 if $n->operation eq 'Call' && $n->gives_a_list;
     # A MATCH IN LIST CONTEXT (B::SoN stamps it Boolean): by what takes it.
     return _match_in_list($n) if $n->operation =~ /\A(?:RegexMatch|Match)\z/;
     return 1 if $n->operation eq 'PadAccess' && ( $n->sigil // '' ) =~ /\A[@%]\z/;
