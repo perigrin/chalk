@@ -91,7 +91,7 @@ sub type_of {
     }
     return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:sort|reverse)\z/
         && ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/;   # static type
-    return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'unpack';   # (in a list: array_value)
+    return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:unpack|glob)\z/;   # (in a list: array_value)
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
     return '%Str' if $op eq 'Call' && $v->changes_case;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
@@ -249,6 +249,21 @@ sub _value {
             attr => { strict => ( $v->can('strict') && $v->strict ? 1 : 0 ), %$at });
         $b->after_call;
         return $b->as($r, $ty);
+    }
+    # qx`CMD` / readpipe IN SCALAR CONTEXT: all the command printed (t2_qx).
+    # In a list (its lines) it is not T2's; nor a program reading $? (its
+    # exit status is not kept). Printed, the lines are the whole text.
+    if ($op eq 'BacktickExpr') {
+        out('a qx in list context') if _is_list($v) || grep {
+            my $u = $_;
+            $u->operation =~ /\A(?:ArrayLiteral|ListAppend|Return)\z/
+                || $u->operation eq 'Call' && ( $u->is_sub_call || $u->takes_a_list || ( $u->name // '' ) =~ /\A(?:push|unshift|join)\z/ )
+                || $u->operation eq 'Assign' && $u->can('targets') && defined $u->targets
+        } grep { blessed($_) } ( $v->consumers // [] )->@*;
+        out('a qx where the program reads $?') if grep { $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq '?' } _all_nodes($b->{mop}, $b->{ret});
+        my ($cmd) = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
+        out('a qx of no command') unless $cmd;
+        return $b->as($b->emit(op => 'Qx', type => '%Str', inputs => [ $b->as($b->value($cmd), '%Str') ]), $ty);
     }
     if ($op eq 'RefType') {
         return $b->emit(op => 'RefType', type => '%Str', inputs => [ $b->as($b->value($v->inputs->[0]), '%Slot') ]);
@@ -796,7 +811,7 @@ sub as {
     # arm's own. Refused (a node's consumers need not list every use, so
     # list_only cannot be all of the guard).
     out('a list taken as a scalar (' . $n->op . ')')
-        if $n->type eq '%Array*' && ( $n->op =~ /\A(?:ASlice|HSlice|ARange|UnpackC)\z/ || $n->op eq 'Phi' && $n->attr->{list_choice} );
+        if $n->type eq '%Array*' && ( $n->op =~ /\A(?:ASlice|HSlice|ARange|UnpackC|Glob)\z/ || $n->op eq 'Phi' && $n->attr->{list_choice} );
     $n = $b->emit(op => 'ALen', type => 'i64', inputs => [$n]) if $n->type eq '%Array*';
     return $n if $n->type eq $ty;
     out("a conversion " . $n->type . " -> $ty") unless exists $Chalk::Target::LLVM::Printer::CONVERT{ $n->type . '>' . $ty };

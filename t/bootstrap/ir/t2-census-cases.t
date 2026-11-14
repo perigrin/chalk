@@ -76,10 +76,11 @@ my @CASES = qw(
     numeric-radix:1 numeric-radix:2 numeric-radix:3 numeric-radix:4
     numeric-radix:5 numeric-radix:6 packages:1 packages:2 packages:3
     pod-and-data:1 pod-and-data:2 pod-and-data:3 pod-and-data:4
-    quote-like-terms:3 quote-like-terms:4 quote-like-terms:5 range:1 range:3
-    read-position:1 read-position:2 read-position:3 regex-delimiters:1
-    regex-delimiters:2 regex-delimiters:3 regex-matching:1 regex-matching:2
-    regex-matching:3 regex-matching:4 regex-matching:5 regex-matching:7
+    quote-like-terms:2 quote-like-terms:3 quote-like-terms:4
+    quote-like-terms:5 quote-like-terms:6 range:1 range:3 read-position:1
+    read-position:2 read-position:3 regex-delimiters:1 regex-delimiters:2
+    regex-delimiters:3 regex-matching:1 regex-matching:2 regex-matching:3
+    regex-matching:4 regex-matching:5 regex-matching:7
     regex-pattern-positions:1 regex-pattern-positions:2 regex-quote-likes:1
     regex-quote-likes:2 strings:1 strings:2 strings:3 subroutines:1
     subroutines:10 subroutines:11 subroutines:3 subroutines:6 subroutines:7

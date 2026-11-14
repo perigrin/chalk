@@ -397,6 +397,18 @@ sub array_value {
             $n = !defined $n ? 1 : $n eq '*' ? -1 : $n;
             return $b->emit(op => 'UnpackC', type => '%Array*', inputs => [ $b->as($b->value($a[1]), '%Str') ], attr => { n => $n });
         }
+        # glob PATTERN (`<*.x>`), in a list: the files it matches (t2_glob). In
+        # scalar context glob is an iterator: not T2's; nor several patterns.
+        if ($name eq 'glob') {
+            $b->list_only($v, 'a glob');
+            my @a = grep { blessed($_) && !$_->is_memory_version } @in;
+            out('a glob of other than one pattern') unless @a == 1;
+            my $lit = $a[0];
+            $lit = $lit->inputs->[0] while $lit->operation eq 'Coerce';
+            out('a glob pattern with whitespace (several patterns to perl)') if $lit->operation eq 'Constant' && ( $lit->value // '' ) =~ /\s/;
+            out('a glob pattern with a brace (perl keeps its alternatives in order)') if $lit->operation eq 'Constant' && ( $lit->value // '' ) =~ /\{/;
+            return $b->emit(op => 'Glob', type => '%Array*', inputs => [ $b->as($b->value($a[0]), '%Str') ]);
+        }
         if ($name eq 'shift' || $name eq 'pop') {
             return $b->emit(op => $name eq 'shift' ? 'AShift' : 'APop', type => '%Slot', inputs => [ $b->array_of($in[0]) ]);
         }
@@ -464,7 +476,7 @@ sub array_of {
                          || $n->is_package_aggregate && $n->sigil eq '@'
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
                          || $n->operation eq 'Repeat' && $b->type_of($n) eq '%Array*'
-                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // q{} ) =~ /\A(?:keys|values|sort|reverse|caller|readline|each|unpack)\z/ )) {
+                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // q{} ) =~ /\A(?:keys|values|sort|reverse|caller|readline|each|unpack|glob)\z/ )) {
         my $a = $b->value($n);
         return $a if $a->type eq '%Array*';
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]

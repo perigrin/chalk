@@ -4567,6 +4567,144 @@ body:
 done:
   ret %Array* %r
 }
+; t2_glob(pat) -> glob PAT in a list: the files it matches, through libc
+; glob(3) with File::Glob's flags (NOSORT 4 | BRACE 1024 | NOMAGIC 2048 |
+; TILDE 4096: the pattern itself where it has no metacharacters), sorted as
+; perl sorts them (case aside, then bytes). A brace's alternatives perl
+; keeps in their order, each sorted: not this sort -- a stop. glob_t's gl_pathc at 0, gl_pathv
+; at 8 (x86-64), its 72 bytes allocated as 128. A pattern with whitespace is
+; several patterns to perl: a stop too.
+declare i32 @glob(i8*, i32, i8*, i8*)
+declare i8* @calloc(i64, i64)
+declare void @qsort(i8*, i64, i64, i32 (i8*, i8*)*)
+declare i32 @strcasecmp(i8*, i8*)
+declare i32 @strcmp(i8*, i8*)
+@msg_globws = private unnamed_addr constant [76 x i8] c"chalk: refused at run time: a glob pattern with whitespace or a brace (T2)\0A\00"
+define internal i32 @t2_glob_cmp(i8* %a, i8* %b) {
+entry:
+  %pa = bitcast i8* %a to i8**
+  %sa = load i8*, i8** %pa
+  %pb = bitcast i8* %b to i8**
+  %sb = load i8*, i8** %pb
+  %c = call i32 @strcasecmp(i8* %sa, i8* %sb)
+  %z = icmp eq i32 %c, 0
+  br i1 %z, label %tie, label %out
+tie:
+  %d = call i32 @strcmp(i8* %sa, i8* %sb)
+  ret i32 %d
+out:
+  ret i32 %c
+}
+define internal %Array* @t2_glob(%Str %pat) {
+entry:
+  %p = extractvalue %Str %pat, 0
+  %l = extractvalue %Str %pat, 1
+  br label %scan
+scan:
+  %j = phi i64 [ 0, %entry ], [ %j2, %next ]
+  %more = icmp slt i64 %j, %l
+  br i1 %more, label %look, label %go
+look:
+  %cp = getelementptr i8, i8* %p, i64 %j
+  %ch = load i8, i8* %cp
+  %sp = icmp eq i8 %ch, 32
+  %tb = icmp eq i8 %ch, 9
+  %nl = icmp eq i8 %ch, 10
+  %br = icmp eq i8 %ch, 123
+  %w1 = or i1 %sp, %tb
+  %w2 = or i1 %w1, %nl
+  %w = or i1 %w2, %br
+  br i1 %w, label %ws, label %next
+next:
+  %j2 = add i64 %j, 1
+  br label %scan
+ws:
+  call void @t2_stop(i8* getelementptr ([76 x i8], [76 x i8]* @msg_globws, i64 0, i64 0), i64 75)
+  unreachable
+go:
+  %sz = add i64 %l, 1
+  %z = call i8* @malloc(i64 %sz)
+  call i8* @memcpy(i8* %z, i8* %p, i64 %l)
+  %end = getelementptr i8, i8* %z, i64 %l
+  store i8 0, i8* %end
+  %r = call %Array* @t2_new_array()
+  %g = call i8* @calloc(i64 1, i64 128)
+  %rc = call i32 @glob(i8* %z, i32 7172, i8* null, i8* %g)
+  %ok = icmp eq i32 %rc, 0
+  br i1 %ok, label %got, label %done
+got:
+  %pcp = bitcast i8* %g to i64*
+  %n = load i64, i64* %pcp
+  %pvp0 = getelementptr i8, i8* %g, i64 8
+  %pvp = bitcast i8* %pvp0 to i8***
+  %pv = load i8**, i8*** %pvp
+  %pv8 = bitcast i8** %pv to i8*
+  call void @qsort(i8* %pv8, i64 %n, i64 8, i32 (i8*, i8*)* @t2_glob_cmp)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %got ], [ %i1, %push ]
+  %again = icmp slt i64 %i, %n
+  br i1 %again, label %push, label %done
+push:
+  %ps = getelementptr i8*, i8** %pv, i64 %i
+  %s = load i8*, i8** %ps
+  %len = call i64 @strlen(i8* %s)
+  %str = call %Str @t2_str(i8* %s, i64 %len)
+  %v = call %Slot @t2_box_str(%Str %str)
+  call void @t2_apush(%Array* %r, %Slot %v)
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
+; t2_qx(cmd) -> qx`CMD` / readpipe in scalar context: the command run by
+; libc popen, all it printed read back. T2's prints are write(2)s, never
+; buffered, so nothing waits to be flushed before the fork. Its exit status
+; ($?) is not kept.
+declare i8* @popen(i8*, i8*)
+declare i32 @pclose(i8*)
+declare i64 @fread(i8*, i64, i64, i8*)
+@lit_popen_r = private unnamed_addr constant [2 x i8] c"r\00"
+define internal %Str @t2_qx(%Str %cmd) {
+entry:
+  %p = extractvalue %Str %cmd, 0
+  %l = extractvalue %Str %cmd, 1
+  %sz = add i64 %l, 1
+  %z = call i8* @malloc(i64 %sz)
+  call i8* @memcpy(i8* %z, i8* %p, i64 %l)
+  %end = getelementptr i8, i8* %z, i64 %l
+  store i8 0, i8* %end
+  %f = call i8* @popen(i8* %z, i8* getelementptr ([2 x i8], [2 x i8]* @lit_popen_r, i64 0, i64 0))
+  %none = icmp eq i8* %f, null
+  %b0 = call i8* @malloc(i64 4096)
+  br i1 %none, label %out, label %read
+read:
+  %buf = phi i8* [ %b0, %entry ], [ %buf2, %grown ]
+  %len = phi i64 [ 0, %entry ], [ %len2, %grown ]
+  %cap = phi i64 [ 4096, %entry ], [ %cap2, %grown ]
+  %at = getelementptr i8, i8* %buf, i64 %len
+  %room = sub i64 %cap, %len
+  %n = call i64 @fread(i8* %at, i64 1, i64 %room, i8* %f)
+  %len2 = add i64 %len, %n
+  %eof = icmp eq i64 %n, 0
+  br i1 %eof, label %close, label %grow
+grow:
+  %full = icmp eq i64 %len2, %cap
+  %capd = mul i64 %cap, 2
+  %cap2 = select i1 %full, i64 %capd, i64 %cap
+  %buf2 = call i8* @realloc(i8* %buf, i64 %cap2)
+  br label %grown
+grown:
+  br label %read
+close:
+  %rc = call i32 @pclose(i8* %f)
+  br label %out
+out:
+  %ob = phi i8* [ %b0, %entry ], [ %buf, %close ]
+  %ol = phi i64 [ 0, %entry ], [ %len2, %close ]
+  %s = call %Str @t2_str(i8* %ob, i64 %ol)
+  ret %Str %s
+}
 ; t2_range(lo, hi) -> a new list of the integers lo to hi (none when hi < lo):
 ; perl's range of numbers.
 define internal %Array* @t2_range(i64 %lo, i64 %hi) {

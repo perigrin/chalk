@@ -47,4 +47,8 @@ class Chalk::Target::LLVM::Node::SelectName :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { $self->name . ' = call %Slot @t2_select_name(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{used} ? 1 : 0 ) . ')' }
 }
 
+class Chalk::Target::LLVM::Node::Glob :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_glob') } }
+
+class Chalk::Target::LLVM::Node::Qx :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_qx') } }
+
 1;
