@@ -3309,6 +3309,18 @@ bad:
 fine:
   ret void
 }
+; t2_args_max(a, n): a signature's arity -- at most n arguments, else a stop.
+define internal void @t2_args_max(%Array* %a, i64 %n) {
+entry:
+  %got = call i64 @t2_alen(%Array* %a)
+  %ok = icmp sle i64 %got, %n
+  br i1 %ok, label %fine, label %bad
+bad:
+  call void @t2_stop(i8* getelementptr ([68 x i8], [68 x i8]* @msg_arity, i64 0, i64 0), i64 67)
+  unreachable
+fine:
+  ret void
+}
 ; t2_cmp(x, y, num) -> perl's cmp (by string) or <=> (by number): -1, 0, 1.
 define internal i64 @t2_cmp(%Slot %x, %Slot %y, i1 %num) {
 entry:

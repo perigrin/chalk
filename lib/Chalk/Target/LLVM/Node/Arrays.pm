@@ -12,6 +12,9 @@ class Chalk::Target::LLVM::Node::ArgsFrom :isa(Chalk::Target::LLVM::Node) { meth
 class Chalk::Target::LLVM::Node::ArgsMin :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { 'call void @t2_args_min(%Array* ' . $self->inputs->[0]->name . ', i64 ' . $self->attr->{n} . ')' }
 }
+class Chalk::Target::LLVM::Node::ArgsMax :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { 'call void @t2_args_max(%Array* ' . $self->inputs->[0]->name . ', i64 ' . $self->attr->{n} . ')' }
+}
 class Chalk::Target::LLVM::Node::ArgsPairs :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { 'call void @t2_args_pairs(%Array* ' . $self->inputs->[0]->name . ', i64 ' . $self->attr->{n} . ')' }
 }

@@ -621,6 +621,32 @@ sub func {
         $padded = ( $decl->{mandatory} // 0 ) > @reads || grep { !defined } @reads;
         @reads = map { $reads[$_] // bless( {}, 'Chalk::Target::LLVM::Builder::Unread' ) } 0 .. $decl->{mandatory} - 1;
     }
+    # A CLOSURE'S SIGNATURE (`sub ($n) {...}`, `sub ($id, @rest)`): its
+    # parameters from @_, the one array its code value is called with; its
+    # arity checked at its entry, at least and at most -- a run-time stop
+    # where perl dies (a call through a code value has no count known here).
+    my $sigclosure = $closure && !$@ && $an->{_args_signature} && !$an->{_args_written} && !$an->{_args_read_as_a_list};
+    my ($cmin, $cmax);
+    if ($sigclosure) {
+        $slurpy = $an->{_args_slurpy};
+        if (( $decl->{optional} // 0 ) > 0 || @defaulted) {
+            out("closure $name has an optional parameter of no default") if $slurpy || defined $decl->{optional} && @defaulted != $decl->{optional};
+            out("closure $name has a default that is not made the same anywhere") if grep { !$_->inputs->[0]->all_made_the_same } @defaulted;
+        }
+        @positional = grep { defined } @reads;
+        # (an anon sub's signature record may be missing: its parameters
+        # then, by place -- a trailing one never read is not there, and a
+        # call passing it stops, loudly)
+        my $all = $decl->{mandatory};
+        unless (defined $all) {
+            $all = 0;   # (not sort: a sort block's $b is the builder here)
+            $all < $_->index + 1 and $all = $_->index + 1 for grep { $_->operation eq 'Parameter' && ( $_->sigil // '$' ) eq '$' } $g->component;
+        }
+        my $opt = defined $decl->{mandatory} ? $decl->{optional} // 0 : scalar @defaulted;
+        $cmin = $slurpy ? scalar @positional - $opt : $all - $opt;
+        $cmax = $slurpy ? undef : $all;
+        $list = 1;
+    }
     out("closure $name reads \@_ other than T2 takes it") if $closure && !$list;
     # A CAPTURE USED BUT BY A CELL READ OR WRITE: B::SoN spells `$t += 1` on
     # one as Coerce(CellParam) + 1, with no write -- lowered, $t never changed
@@ -654,7 +680,7 @@ sub func {
     # T2's yet (dropped, `($a, $b = 3)` gave $b undef). Its arity is checked
     # at each call (perl dies on another).
     my $sig = $is_method ? $margs{np} > 0 : $an->{_args_signature};
-    if ($sig && !$is_method && !$optional) {
+    if ($sig && !$is_method && !$optional && !$sigclosure) {
         out("sub $name has an optional signature parameter")
             if $decl->{optional} || ( $decl->{mandatory} // scalar @reads ) != ( $slurpy ? @positional : @reads );
     }
@@ -709,10 +735,11 @@ sub func {
     $b->new_block('entry');
     # THE CALLER'S CONTEXT, read first (a call in the body sets it).
     my $want = $b->emit(op => 'GetWant', type => 'i1');
-    if ($slurpy || $optional) {
+    if ($slurpy || $optional || $sigclosure) {
         # A SIGNATURE'S ARITY: at least its positional parameters (perl dies
         # with fewer -- a run-time stop here, as a signature's wrapper's is).
-        $b->emit(op => 'ArgsMin', type => 'void', inputs => [ $argsarr ], attr => { n => $fn->{minargs} // scalar @positional }) if $sig;
+        $b->emit(op => 'ArgsMin', type => 'void', inputs => [ $argsarr ], attr => { n => $cmin // $fn->{minargs} // scalar @positional }) if $sig;
+        $b->emit(op => 'ArgsMax', type => 'void', inputs => [ $argsarr ], attr => { n => $cmax }) if $sig && defined $cmax;
         $b->emit(op => 'ArgsPairs', type => 'void', inputs => [ $argsarr ], attr => { n => scalar @positional })
             if $sig && $slurpy && ( $slurpy->can('sigil') ? $slurpy->sigil // '' : '' ) eq '%';
         # ITS PARAMETERS, made here: each its argument, the slurpy one the rest.
