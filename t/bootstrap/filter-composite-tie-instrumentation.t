@@ -86,6 +86,7 @@ package TieSemiring {
 # ============================================================
 {
     local $ENV{CHALK_COUNT_FILTER_TIES} = '1';
+    local $ENV{CHALK_TIE_CONTEXT} = '1';
 
     my $tie_sr = TieSemiring->new(slot_name_val => 'tie_slot');
     my $sa_sr  = TieSemiring->new(slot_name_val => '__sa__');
@@ -117,7 +118,12 @@ package TieSemiring {
     my $entry = $log->[0];
     ok(defined($entry->{semiring}), 'Tie entry has semiring field');
     ok(defined($entry->{slot}),     'Tie entry has slot field');
-    is($entry->{slot}, 'tie_slot',  'Tie entry records the tying slot name');
+    # Since b6756ada (product semantics) every annotation semiring is consulted,
+    # so a tie belongs to no single slot: the entry is 'all'/'unresolved', and
+    # CHALK_TIE_CONTEXT adds the per-slot verdicts that name who abstained.
+    is($entry->{slot}, 'unresolved', 'Tie entry is an unresolved product tie');
+    is_deeply($entry->{per_component}, [{ slot => 'tie_slot', verdict => 'abstain' }],
+        'Tie entry records the tying slot name and its abstention');
 }
 
 # ============================================================
