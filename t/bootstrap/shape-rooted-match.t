@@ -300,17 +300,19 @@ IR
     is verdict($spec, $real), 'PASS', 'R6-style element store read-back PASSes';
 }
 
-# Concat-assign: spec pad(s) .= "b", real Concat("a","b").
+# Concat-assign: spec pad($s) .= "b", real Concat("a","b").
+# A PadAccess spelling carries its sigil: build_graph_from_ir refuses a bare
+# "s" since b9d90061 split a variable into sigil + symbol.
 {
     my $spec = <<'IR';
-%sn   = Constant("s") :Str
+%sn   = Constant("$s") :Str
 %init = Constant("a") :Str
 %vs   = VarDecl(%sn, %init) :Str
-%ps   = PadAccess(%vs, "s") :Str
+%ps   = PadAccess(%vs, "$s") :Str
 %b    = Constant("b") :Str
 %cat  = Concat(%ps, %b) :Str
 %as   = Assign(%ps, %cat) :Str
-%rs   = PadAccess(%vs, "s") :Str
+%rs   = PadAccess(%vs, "$s") :Str
 return %rs
 control: %vs -> %as
 IR
