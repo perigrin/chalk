@@ -28,31 +28,32 @@ my @CASES = qw(
     blocks-and-terminations:5 chalk-found-gaps:1 chalk-found-gaps:10
     chalk-found-gaps:100 chalk-found-gaps:102 chalk-found-gaps:103
     chalk-found-gaps:105 chalk-found-gaps:11 chalk-found-gaps:111
-    chalk-found-gaps:112 chalk-found-gaps:114 chalk-found-gaps:117
-    chalk-found-gaps:119 chalk-found-gaps:12 chalk-found-gaps:122
-    chalk-found-gaps:125 chalk-found-gaps:126 chalk-found-gaps:13
-    chalk-found-gaps:131 chalk-found-gaps:133 chalk-found-gaps:135
-    chalk-found-gaps:136 chalk-found-gaps:14 chalk-found-gaps:140
-    chalk-found-gaps:142 chalk-found-gaps:143 chalk-found-gaps:148
-    chalk-found-gaps:149 chalk-found-gaps:15 chalk-found-gaps:151
-    chalk-found-gaps:155 chalk-found-gaps:157 chalk-found-gaps:158
-    chalk-found-gaps:16 chalk-found-gaps:161 chalk-found-gaps:162
-    chalk-found-gaps:165 chalk-found-gaps:169 chalk-found-gaps:17
-    chalk-found-gaps:170 chalk-found-gaps:171 chalk-found-gaps:172
-    chalk-found-gaps:18 chalk-found-gaps:19 chalk-found-gaps:2
-    chalk-found-gaps:21 chalk-found-gaps:23 chalk-found-gaps:24
-    chalk-found-gaps:25 chalk-found-gaps:28 chalk-found-gaps:29
-    chalk-found-gaps:30 chalk-found-gaps:31 chalk-found-gaps:32
-    chalk-found-gaps:33 chalk-found-gaps:34 chalk-found-gaps:35
-    chalk-found-gaps:36 chalk-found-gaps:38 chalk-found-gaps:39
-    chalk-found-gaps:40 chalk-found-gaps:41 chalk-found-gaps:42
-    chalk-found-gaps:44 chalk-found-gaps:45 chalk-found-gaps:46
-    chalk-found-gaps:47 chalk-found-gaps:48 chalk-found-gaps:49
-    chalk-found-gaps:5 chalk-found-gaps:50 chalk-found-gaps:51
-    chalk-found-gaps:52 chalk-found-gaps:53 chalk-found-gaps:55
-    chalk-found-gaps:56 chalk-found-gaps:57 chalk-found-gaps:6
-    chalk-found-gaps:60 chalk-found-gaps:62 chalk-found-gaps:69
-    chalk-found-gaps:7 chalk-found-gaps:72 chalk-found-gaps:77
+    chalk-found-gaps:112 chalk-found-gaps:114 chalk-found-gaps:115
+    chalk-found-gaps:117 chalk-found-gaps:119 chalk-found-gaps:12
+    chalk-found-gaps:122 chalk-found-gaps:125 chalk-found-gaps:126
+    chalk-found-gaps:13 chalk-found-gaps:131 chalk-found-gaps:133
+    chalk-found-gaps:135 chalk-found-gaps:136 chalk-found-gaps:139
+    chalk-found-gaps:14 chalk-found-gaps:140 chalk-found-gaps:142
+    chalk-found-gaps:143 chalk-found-gaps:148 chalk-found-gaps:149
+    chalk-found-gaps:15 chalk-found-gaps:151 chalk-found-gaps:155
+    chalk-found-gaps:157 chalk-found-gaps:158 chalk-found-gaps:16
+    chalk-found-gaps:161 chalk-found-gaps:162 chalk-found-gaps:165
+    chalk-found-gaps:169 chalk-found-gaps:17 chalk-found-gaps:170
+    chalk-found-gaps:171 chalk-found-gaps:172 chalk-found-gaps:18
+    chalk-found-gaps:19 chalk-found-gaps:2 chalk-found-gaps:21
+    chalk-found-gaps:23 chalk-found-gaps:24 chalk-found-gaps:25
+    chalk-found-gaps:28 chalk-found-gaps:29 chalk-found-gaps:30
+    chalk-found-gaps:31 chalk-found-gaps:32 chalk-found-gaps:33
+    chalk-found-gaps:34 chalk-found-gaps:35 chalk-found-gaps:36
+    chalk-found-gaps:38 chalk-found-gaps:39 chalk-found-gaps:40
+    chalk-found-gaps:41 chalk-found-gaps:42 chalk-found-gaps:44
+    chalk-found-gaps:45 chalk-found-gaps:46 chalk-found-gaps:47
+    chalk-found-gaps:48 chalk-found-gaps:49 chalk-found-gaps:5
+    chalk-found-gaps:50 chalk-found-gaps:51 chalk-found-gaps:52
+    chalk-found-gaps:53 chalk-found-gaps:55 chalk-found-gaps:56
+    chalk-found-gaps:57 chalk-found-gaps:6 chalk-found-gaps:60
+    chalk-found-gaps:62 chalk-found-gaps:69 chalk-found-gaps:7
+    chalk-found-gaps:72 chalk-found-gaps:74 chalk-found-gaps:77
     chalk-found-gaps:79 chalk-found-gaps:8 chalk-found-gaps:82
     chalk-found-gaps:85 chalk-found-gaps:87 chalk-found-gaps:89
     chalk-found-gaps:9 chalk-found-gaps:90 chalk-found-gaps:91

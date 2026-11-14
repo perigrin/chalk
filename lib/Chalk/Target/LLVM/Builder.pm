@@ -220,7 +220,7 @@ sub _use_counts {
         # (a LIST assign's last input is its list, not its memory: `my ($x, $y) = f()`)
         @pos = grep { $_ != $u->inputs->$#* } @pos if $u->operation =~ /\A(?:Assign|EntryWrite|Delete|Exists)\z/
             && !( $u->operation eq 'Assign' && $u->can('targets') && defined $u->targets );
-        @pos = () if $u->operation eq 'EntryDef';   # its input is its memory ($" read after the call)
+        @pos = () if $u->operation =~ /\A(?:EntryDef|PadAccess)\z/;   # its input is its memory ($" read after the call)
         # (a control node's first input is its control: a call on the chain
         # before a loop is the Loop's way in, not a use of its value)
         @pos = () if $op =~ /\A(?:Loop|Region|Proj)\z/;
@@ -236,6 +236,7 @@ sub _use_counts {
             || $op eq 'Return' && $u->inputs->@* == 2 && $at0
             || $op eq 'Assign' && $u->can('targets') && defined $u->targets) { $list++ }   # `my ($x, $y) = f()`
         elsif ($op eq 'Coerce' && $PRINTED{ refaddr($c) }) { }   # print's (counted above)
+        elsif ($op eq 'Phi' && $u->is_memory) { }   # (the call as a memory version: no value)
         elsif ($op eq 'Phi' && !$u->is_memory && blessed( $u->region ) && $u->region->operation eq 'Region'
                && ( $u->stamp // '' ) =~ /\A(?:List|Array)\z/) {   # static type
             # a merge of lists: its own use decides (`my @c = $p ? two() : ()`)
@@ -245,7 +246,7 @@ sub _use_counts {
             $list += $l; $scalar += $s;
         }
         elsif ($op =~ /\A(?:Phi|Return)\z/) { }   # a loop's merge or a tail call: its own use decides
-        elsif ($op eq 'Region') { }   # (the call as a way into a merge: control, no value)
+        elsif ($op =~ /\A(?:Region|Loop)\z/) { }   # (the call as a way into a merge, a loop's entry: control, no value)
         else { $scalar++ }
     }
     return ($list, $scalar);
