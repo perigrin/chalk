@@ -60,6 +60,19 @@ class Chalk::Target::LLVM::Node::Select :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { my @in = $self->inputs->@*; $self->name . ' = select i1 ' . $in[0]->name . ', ' . $self->_args( @in[ 1, 2 ] ) }
 }
 class Chalk::Target::LLVM::Node::Pow :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_pow') } }
+class Chalk::Target::LLVM::Node::BitOp :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my ($nm, @in) = ($self->name, $self->inputs->@*);
+        my %a = $self->attr->%*;
+        return "$nm = call %Slot \@t2_bitop(" . $self->_args(@in) . ", i64 $a{op}, i64 $a{mode}, i1 " . ( $a{inner} ? 1 : 0 ) . ')';
+    }
+}
+class Chalk::Target::LLVM::Node::Shift :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call %Slot @t2_shift(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $a{left} ? 1 : 0 ) . ', i1 ' . ( $a{inner} ? 1 : 0 ) . ')';
+    }
+}
 class Chalk::Target::LLVM::Node::SlotNeg :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_slot_neg') } }
 class Chalk::Target::LLVM::Node::Defined :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_defined') } }
 class Chalk::Target::LLVM::Node::Truth :isa(Chalk::Target::LLVM::Node) {

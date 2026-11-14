@@ -4833,6 +4833,155 @@ float:
   %fs = call %Slot @t2_box_num(double %f)
   ret %Slot %fs
 }
+; ---- perl's bitwise operators (pp_bit_and & co.) ----
+; t2_bit_uv(v): a value's bits as perl's UV reads them: an integer's own, a
+; number's (or a string's number) truncated -- past what an i64 holds, stopped.
+@msg_bit_big = private unnamed_addr constant [73 x i8] c"a bitwise operand or result past what an i64 holds: stopped (chalk, T2)\0A\00"
+define internal i64 @t2_bit_uv(%Slot %v) {
+entry:
+  %t = extractvalue %Slot %v, 0
+  %isint = icmp eq i8 %t, 1
+  br i1 %isint, label %int, label %num
+int:
+  %i = extractvalue %Slot %v, 1
+  ret i64 %i
+num:
+  %d = call double @t2_slot_num(%Slot %v)
+  %hi = fcmp oge double %d, 9223372036854775807.0
+  %lo = fcmp olt double %d, -9223372036854775807.0
+  %nan = fcmp uno double %d, %d
+  %b1 = or i1 %hi, %lo
+  %bad = or i1 %b1, %nan
+  br i1 %bad, label %stop, label %ok
+stop:
+  call void @t2_stop(i8* getelementptr ([73 x i8], [73 x i8]* @msg_bit_big, i64 0, i64 0), i64 72)
+  unreachable
+ok:
+  %r = fptosi double %d to i64
+  ret i64 %r
+}
+; t2_bit_num(r, inner) -> r as an Int; past IV_MAX (a UV perl prints whole)
+; stopped, unless only another bitwise op reads it (inner).
+define internal %Slot @t2_bit_num(i64 %r, i1 %inner) {
+entry:
+  %neg = icmp slt i64 %r, 0
+  %out = xor i1 %inner, 1
+  %bad = and i1 %neg, %out
+  br i1 %bad, label %stop, label %ok
+stop:
+  call void @t2_stop(i8* getelementptr ([73 x i8], [73 x i8]* @msg_bit_big, i64 0, i64 0), i64 72)
+  unreachable
+ok:
+  %s = call %Slot @t2_box_i64(i64 %r)
+  ret %Slot %s
+}
+; t2_bitop(a, b, op, mode, inner): op 0 &, 1 |, 2 ^, 3 ~ (b unused). Mode
+; 1 on numbers, 2 on strings' bytes, 0 perl's choice: bytes where every
+; operand is a string (tag 3), numbers otherwise.
+define internal %Slot @t2_bitop(%Slot %a, %Slot %b, i64 %op, i64 %mode, i1 %inner) {
+entry:
+  %ta = extractvalue %Slot %a, 0
+  %tb = extractvalue %Slot %b, 0
+  %sa = icmp eq i8 %ta, 3
+  %sb0 = icmp eq i8 %tb, 3
+  %isnot = icmp eq i64 %op, 3
+  %sb = or i1 %sb0, %isnot
+  %both = and i1 %sa, %sb
+  %m0 = icmp eq i64 %mode, 0
+  %m2 = icmp eq i64 %mode, 2
+  %by0 = and i1 %m0, %both
+  %bytes = or i1 %by0, %m2
+  br i1 %bytes, label %str, label %num
+num:
+  %x = call i64 @t2_bit_uv(%Slot %a)
+  br i1 %isnot, label %nnot, label %nbin
+nnot:
+  %rn = xor i64 %x, -1
+  %sn = call %Slot @t2_bit_num(i64 %rn, i1 %inner)
+  ret %Slot %sn
+nbin:
+  %y = call i64 @t2_bit_uv(%Slot %b)
+  %r0 = and i64 %x, %y
+  %r1 = or i64 %x, %y
+  %r2 = xor i64 %x, %y
+  %is1 = icmp eq i64 %op, 1
+  %is2 = icmp eq i64 %op, 2
+  %r01 = select i1 %is1, i64 %r1, i64 %r0
+  %r = select i1 %is2, i64 %r2, i64 %r01
+  %sr = call %Slot @t2_bit_num(i64 %r, i1 %inner)
+  ret %Slot %sr
+str:
+  %as = call %Str @t2_slot_str(%Slot %a)
+  %bs = call %Str @t2_slot_str(%Slot %b)
+  %ap = extractvalue %Str %as, 0
+  %an = extractvalue %Str %as, 1
+  %bp = extractvalue %Str %bs, 0
+  %bn0 = extractvalue %Str %bs, 1
+  %bn = select i1 %isnot, i64 0, i64 %bn0
+  %alt = icmp slt i64 %an, %bn
+  %mn = select i1 %alt, i64 %an, i64 %bn
+  %mx = select i1 %alt, i64 %bn, i64 %an
+  %isand = icmp eq i64 %op, 0
+  %is1s = icmp eq i64 %op, 1
+  %is2s = icmp eq i64 %op, 2
+  %n0 = select i1 %isand, i64 %mn, i64 %mx
+  %n = select i1 %isnot, i64 %an, i64 %n0
+  %n1 = add i64 %n, 1
+  %buf = call i8* @malloc(i64 %n1)
+  %e = getelementptr i8, i8* %buf, i64 %n
+  store i8 0, i8* %e
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %str ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %ina = icmp slt i64 %i, %an
+  %inb = icmp slt i64 %i, %bn
+  %pa = getelementptr i8, i8* %ap, i64 %i
+  %pb = getelementptr i8, i8* %bp, i64 %i
+  %z = getelementptr [1 x i8], [1 x i8]* @t2_empty, i64 0, i64 0
+  %qa = select i1 %ina, i8* %pa, i8* %z
+  %qb = select i1 %inb, i8* %pb, i8* %z
+  %ca0 = load i8, i8* %qa
+  %cb0 = load i8, i8* %qb
+  %ca = select i1 %ina, i8 %ca0, i8 0
+  %cb = select i1 %inb, i8 %cb0, i8 0
+  %c0 = and i8 %ca, %cb
+  %c1 = or i8 %ca, %cb
+  %c2 = xor i8 %ca, %cb
+  %c3 = xor i8 %ca, -1
+  %c01 = select i1 %is1s, i8 %c1, i8 %c0
+  %c012 = select i1 %is2s, i8 %c2, i8 %c01
+  %c = select i1 %isnot, i8 %c3, i8 %c012
+  %dst = getelementptr i8, i8* %buf, i64 %i
+  store i8 %c, i8* %dst
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  %rs = call %Str @t2_str(i8* %buf, i64 %n)
+  %rb = call %Slot @t2_box_str(%Str %rs)
+  ret %Slot %rb
+}
+; t2_shift(a, n, left, inner): perl's << and >> on a UV: a negative count
+; shifts the other way, one of 64 or more gives 0.
+define internal %Slot @t2_shift(%Slot %a, %Slot %b, i1 %left, i1 %inner) {
+entry:
+  %x = call i64 @t2_bit_uv(%Slot %a)
+  %n0 = call i64 @t2_bit_uv(%Slot %b)
+  %nneg = icmp slt i64 %n0, 0
+  %nn = sub i64 0, %n0
+  %n = select i1 %nneg, i64 %nn, i64 %n0
+  %l0 = xor i1 %left, %nneg
+  %big = icmp uge i64 %n, 64
+  %ns = select i1 %big, i64 0, i64 %n
+  %rl = shl i64 %x, %ns
+  %rr = lshr i64 %x, %ns
+  %r0 = select i1 %l0, i64 %rl, i64 %rr
+  %r = select i1 %big, i64 0, i64 %r0
+  %s = call %Slot @t2_bit_num(i64 %r, i1 %inner)
+  ret %Slot %s
+}
 LL
 
 1;

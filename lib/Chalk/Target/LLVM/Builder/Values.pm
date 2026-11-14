@@ -115,6 +115,8 @@ sub type_of {
     # ** IS AN INTEGER where perl's is (an integer to a power, small enough),
     # else a number: which, at run time.
     return '%Slot' if $op eq 'Power';
+    # A BITWISE OP's result is a number, or (perl's choice, on two strings) bytes.
+    return '%Slot' if $op =~ /\A(?:BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/;
     # (LIST) x N: a list.
     return '%Array*' if $op eq 'Repeat' && ( $v->stamp // '' ) eq 'List';   # static type
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'ftis';
@@ -299,6 +301,12 @@ sub _value {
     if ($op eq 'Constant') {
         my $c = $v->value;
         return $b->emit(op => 'Undef', type => '%Slot') if $ty eq '%Slot';
+        # AN INTEGER PAST WHAT AN i64 HOLDS (a UV perl folded, `~5`): printed as
+        # an i64 it wrapped (-6 for 18446744073709551610).
+        if ($ty eq 'i64' && defined $c && $c =~ /\A\+?(\d+)\z/) {
+            ( my $d = $1 ) =~ s/\A0+(?=\d)//;
+            out('an integer constant past what an i64 holds') if length $d > 19 || length $d == 19 && $d gt '9223372036854775807';
+        }
         return $b->emit(op => 'Const', type => $ty, attr => { value => $c }) if $ty ne '%Str';
         $b->{strs}{$c} //= scalar keys $b->{strs}->%*;
         return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => $c, id => $b->{strs}{$c} });
@@ -486,6 +494,7 @@ sub _value {
         out('a Repeat of a list in scalar context') if _is_list($l);
         return $b->as( $b->emit(op => 'Repeat', type => '%Str', inputs => [ $b->as( $b->value($l), '%Str' ), $k ]), $ty );
     }
+    return $b->bitwise($v) if $op =~ /\A(?:BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/;
     # `A xor B`: their truths differ.
     if ($op eq 'Xor') {
         my ($x, $y) = map { $b->truth( $b->value($_) ) } $v->inputs->@[0, 1];
@@ -544,6 +553,90 @@ sub builtin_value {
     out("a $name where a string goes past ASCII") if $b->past_ascii;
     return $b->as( $b->emit(op => 'Chr', type => '%Str', inputs => [ $b->as( $b->value( $a[0] ), '%Slot' ) ]), $ty ) if $name eq 'chr';
     return $b->as( $b->emit(op => 'Ord', type => 'i64', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty );
+}
+
+# BITWISE OPS (pp_bit_and & co.). bitwise($op) -> its %Slot. Perl does & | ^
+# ~ on two strings' bytes where no operand holds a number, on numbers
+# otherwise (and under feature "bitwise" as the op says: its flavor). An
+# operand T2 holds as a number decides it here; else at run time, by what
+# the operands hold -- sound only where nothing else could have made one a
+# number first (a numeric read of a string leaves it one): each such
+# operand read by this op alone, outside a loop or an arm. A result past
+# what an i64 holds (a UV) stops, unless only another bitwise op reads it.
+my %BITOP = (BitAnd => 0, BitOr => 1, BitXor => 2, Complement => 3);
+sub bitwise {
+    my ($b, $v) = @_;
+    my $op = $v->operation;
+    my @in = $op eq 'Complement' ? ( $v->inputs->[0] ) : $v->inputs->@[0, 1];
+    # (B::SoN's numeric reading of an operand is not perl's: the value is)
+    my @leaf = map { _bit_leaf($_) } @in;
+    my $inner = _bit_inner($v);
+    my @x = map { $b->as( $b->value($_), '%Slot' ) } @leaf;
+    if ($op =~ /Shift\z/) {
+        return $b->emit(op => 'Shift', type => '%Slot', inputs => \@x, attr => { left => $op eq 'LeftShift', inner => $inner });
+    }
+    my $flavor = $v->can('flavor') ? $v->flavor // '' : '';
+    my $mode = $flavor eq 'numeric' ? 1 : $flavor eq 'string' ? 2
+             : ( grep { $b->type_of($_) !~ /\A%(?:Slot|Str)\z/ } @leaf ) ? 1 : 0;
+    if ($mode == 0) {
+        out('a bitwise op on what may be strings, in a loop or an arm') if $b->{depth};
+        out('a bitwise op on what may be a string read elsewhere (perl reads it as a number after a numeric read)')
+            if grep { _bit_readers($_) != 1 } @leaf;
+    }
+    push @x, $b->emit(op => 'Undef', type => '%Slot') if @x == 1;
+    return $b->emit(op => 'BitOp', type => '%Slot', inputs => \@x, attr => { op => $BITOP{$op}, mode => $mode, inner => $inner });
+}
+
+my $BIT = qr/\A(?:BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/;
+
+# _value_users($n) -> the nodes that take $n's value (not as their memory).
+sub _value_users {
+    my ($n) = @_;
+    my %seen;
+    return grep {
+        my $u = $_;
+        my @in = $u->inputs->@*;
+        my $m = $u->can('memory_operand') ? $u->memory_operand : undef;
+        my $uses = grep { blessed($_) && refaddr($_) == refaddr($n) } @in;
+        $uses-- if blessed($m) && refaddr($m) == refaddr($n);
+        $uses > 0
+    } grep { blessed($_) && !$seen{ refaddr($_) }++ } ( $n->consumers // [] )->@*;
+}
+
+# _bit_leaf($n) -> $n under B::SoN's numeric Coerces of a bitwise operand.
+sub _bit_leaf {
+    my ($n) = @_;
+    $n = $n->inputs->[0] while blessed($n) && $n->operation eq 'Coerce' && ( $n->stamp // '' ) =~ /\A(?:Int|Num)\z/ && blessed( $n->inputs->[0] );   # static type
+    return $n;
+}
+
+# _bit_inner($op) -> only other bitwise ops read its value.
+sub _bit_inner {
+    my ($n) = @_;
+    my @u = _value_users($n);
+    my @other = grep { $_->operation !~ $BIT && !( $_->operation eq 'Coerce' && ( $_->stamp // '' ) =~ /\A(?:Int|Num)\z/ && _bit_inner($_) ) } @u;   # static type
+    return @u && !@other ? 1 : 0;
+}
+
+# _bit_readers($leaf) -> how many bitwise ops read it; -1 where something
+# else reads it but as a string (print, a join, a concatenation).
+sub _bit_readers {
+    my ($n) = @_;
+    my $k = 0;
+    for my $u (_value_users($n)) {
+        my $o = $u->operation;
+        if ($o =~ $BIT) { $k++; next }
+        if ($o eq 'Coerce' && ( $u->stamp // '' ) =~ /\A(?:Int|Num)\z/) {   # static type
+            my $r = _bit_readers($u);
+            return -1 if $r < 0;
+            $k += $r;
+            next;
+        }
+        next if $o eq 'Coerce' && ( $u->stamp // '' ) eq 'Str' && !grep { $_->operation !~ /\A(?:Print|Concat)\z/ } _value_users($u);   # static type
+        next if $o =~ /\A(?:Print|Concat)\z/;
+        return -1;
+    }
+    return $k;
 }
 
 # past_ascii -> a string constant of the program goes past ASCII (T2's

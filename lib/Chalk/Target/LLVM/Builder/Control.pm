@@ -78,7 +78,7 @@ sub walk {
         # A READ OF A TIED AGGREGATE PINNED where it runs (B::SoN): a FETCH,
         # FETCHSIZE or EXISTS call, made here, in order.
         elsif ($op eq 'RegexSubst' || $op eq 'Transliterate') { $b->regex_subst_stmt($s); push $b->{passed}->@*, $s; $ctl = $s }
-        elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref|RegexMatch|Match)\z/
+        elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref|RegexMatch|Match|BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/
                || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join|sort|caller|pos)\z/) {
             $b->value($s);
             push $b->{passed}->@*, $s;
