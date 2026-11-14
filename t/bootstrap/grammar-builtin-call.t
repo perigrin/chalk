@@ -114,4 +114,18 @@ my $gen_grammar = Chalk::Grammar::Perl::BuiltinCallTest::grammar();
     }
 }
 
+# Test 9: statement keywords are never sub names.
+# if/unless/while/until/for/foreach always introduce a statement or a
+# statement modifier, so a CallExpression headed by one of them is not a
+# parse. (They stay legal as bareword hash keys and method names.)
+{
+    my $parser = build_perl_ir_parser($gen_grammar, start => 'CallExpression');
+    for my $kw (qw(if unless while until for foreach)) {
+        my $result = $parser->parse_value("$kw \$x");
+        ok(!defined $result || $result->is_zero(), "$kw \$x is not a CallExpression");
+        $result = $parser->parse_value("$kw(\$x)");
+        ok(!defined $result || $result->is_zero(), "$kw(\$x) is not a CallExpression");
+    }
+}
+
 done_testing();

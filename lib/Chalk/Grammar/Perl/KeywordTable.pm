@@ -51,6 +51,22 @@ class Chalk::Grammar::Perl::KeywordTable {
         else elsif
     );
 
+    # Statement keywords: each always introduces a statement (if/unless/
+    # while/until/for/foreach BLOCK) or a statement modifier (EXPR if COND),
+    # so none of them is ever a sub name. Unlike the hard keywords above they
+    # are not rejected as every QualifiedIdentifier, because a bareword hash
+    # key ($h{if}, if => 1) and a method name ($obj->for) are still legal.
+    # TypeInference rejects them at the head of a CallExpression.
+    my %STATEMENT_KEYWORDS = map { $_ => true } qw(
+        if unless while until for foreach
+    );
+
+    # Returns true if the word is a statement keyword, which is never a sub
+    # name.
+    sub is_statement_keyword($word) {
+        return $STATEMENT_KEYWORDS{$word} // false;
+    }
+
     # Returns true if the word is a hard keyword that must always be rejected
     # as QualifiedIdentifier.
     sub is_hard_keyword($word) {

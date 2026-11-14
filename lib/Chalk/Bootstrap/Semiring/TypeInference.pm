@@ -135,6 +135,20 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         }, false, $is_completed_sub_expr);
     }
 
+    # Leftmost ident_text in the shared tree: for a CallExpression, the
+    # name of the called sub. The head QualifiedIdentifier is the leftmost
+    # child and its completion tag does not carry ident_text, so this walks
+    # without the sub-expression prune down to the head's scan leaf; being
+    # leftmost, that leaf is reached before anything in the argument list.
+    method _get_head_ident($ctx) {
+        return unless defined $ctx;
+        return _walk_annotations($ctx, sub ($n) {
+            my $type = $n->annotations()->{type};
+            return undef unless defined $type && ref($type) eq 'HASH';
+            return $type->{ident_text};
+        }, false);
+    }
+
     # Search the shared tree nodes for one with item_types in annotations->{type}.
     # Returns the item_types arrayref or undef.
     # Uses $is_completed_sub_expr as prune callback to stop at inner call boundaries.
@@ -374,6 +388,13 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # builtin_lookup and type_satisfies for per-position validation.
         # $value is the shared Context; tree-walkers read annotations->{type}.
         if ($rule_name eq 'CallExpression') {
+            # A statement keyword is never a sub name: `EXPR until COND` is a
+            # statement modifier, never EXPR + until(COND).
+            my $head = $self->_get_head_ident($value);
+            if (defined $head
+                    && Chalk::Grammar::Perl::KeywordTable::is_statement_keyword($head)) {
+                return undef;
+            }
             my $return_type;
             my $call_sym = $self->_get_call_symbol($value);
             if ($call_sym) {
