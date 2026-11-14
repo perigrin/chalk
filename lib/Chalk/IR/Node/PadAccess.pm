@@ -62,4 +62,29 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
         return join('|', 'PadAccess', 'name=' . $self->name(),
             ($shared ? 'shared' : ()), $self->_serialize_inputs());
     }
+
+    # is_my_hash -> true for A `my %h` NAMED, NOT MADE HERE (`my %e;`): one hash
+    # per variable, made at its function's entry. A shared one is read at a
+    # memory version, and is still the one hash.
+    method is_my_hash() { return ( $sigil // '' ) eq '%' && ( !$self->inputs->@* || $shared ) }
+
+    # is_my_array -> true for A `my @a` NAMED, NOT MADE HERE: an array declared
+    # once in its sub (one declared in a loop body or an arm is an ArrayLiteral
+    # pinned there, made each time).
+    method is_my_array() { return ( $sigil // '' ) eq '@' && ( !$self->inputs->@* || $shared ) }
+
+    # is_named_hash -> a `my %h` is a named hash.
+    method is_named_hash() { return $self->is_my_hash }
+
+    # is_assign_target -> true where this `my` is named as an assign's target
+    # -- a list assign's, or a scalar one's (B::SoN versions it by the memory
+    # before that assign): a write, not a read.
+    method is_assign_target() {
+        return scalar grep {
+            my $asg = $_;
+            blessed($asg) && $asg->operation eq 'Assign'
+                && grep { blessed($_) && refaddr($_) == refaddr($self) }
+                        $asg->inputs->@[ 0 .. ( $asg->can('targets') && defined $asg->targets ? $asg->targets - 1 : 0 ) ]
+        } $self->consumers->@*;
+    }
 }

@@ -17,6 +17,12 @@ class Chalk::IR::Node::Subscript :isa(Chalk::IR::Node::Access) {
     method is_memory_version() { return $self->is_pinned }
     sub identity_kind { q(hash_consed) }
 
+    # is_arg_element -> true for $_[N]: an element of @_ by a constant index.
+    method is_arg_element() {
+        return blessed( $self->inputs->[0] ) && $self->inputs->[0]->operation eq 'ArgsSource'
+            && blessed( $self->inputs->[1] ) && $self->inputs->[1]->operation eq 'Constant' && ( $self->inputs->[1]->value // '' ) =~ /\A\d+\z/;
+    }
+
     # 'array' or 'hash' (B::SoN's kind): which aggregate the read indexes,
     # said even where the container's own type does not (a value read by
     # its tag that holds the reference).

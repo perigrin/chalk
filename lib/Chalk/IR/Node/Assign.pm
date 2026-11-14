@@ -27,4 +27,10 @@ class Chalk::IR::Node::Assign :isa(Chalk::IR::Node::BinOp) {
         return join('|', 'Assign', (defined $targets ? "targets=$targets" : ()), ($local ? 'local' : ()),
             $self->_serialize_inputs());
     }
+
+    # is_args_list_assign -> true for `my (...) = @_`: a list assign from the
+    # arguments.
+    method is_args_list_assign() {
+        return defined $targets && blessed( $self->inputs->[-1] ) && $self->inputs->[-1]->operation eq 'ArgsSource';
+    }
 }

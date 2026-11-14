@@ -21,6 +21,10 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
 
     method operation() { 'PostfixDeref' }
 
+    # is_array_deref -> true for `@$r`, `@{...}`, `$r->@*`: an array deref (a
+    # `${...}` is a scalar's: not this).
+    method is_array_deref() { return ( $sigil // '@' ) eq '@' }
+
     # memory_operand -> it reads at its second input (the first is what it reads).
     method memory_operand() { return $self->inputs->[1] }
     method staleness_kind() { 'transparent' }

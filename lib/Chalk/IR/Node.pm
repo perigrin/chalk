@@ -304,8 +304,19 @@ class Chalk::IR::Node {
     # each read says where its memory input is.
     method memory_operand() { return undef }
 
-    # is_package_scalar -> true for a package scalar (EntryDef says which).
-    method is_package_scalar() { return 0 }
+    # Questions of one kind of node, answered no by every other, so a caller
+    # holding any node may ask. The classes that answer yes say what each is.
+    method is_package_scalar()    { return 0 }       # EntryDef
+    method is_package_aggregate() { return 0 }       # EntryDef
+    method is_argv()              { return 0 }       # EntryDef
+    method is_isa_array()         { return 0 }       # EntryDef
+    method is_my_hash()           { return 0 }       # PadAccess
+    method is_my_array()          { return 0 }       # PadAccess
+    method is_named_hash()        { return 0 }       # PadAccess, HashLiteral
+    method is_array_deref()       { return 0 }       # PostfixDeref
+    method is_arg_element()       { return 0 }       # Subscript
+    method is_args_list_assign()  { return 0 }       # Assign
+    method stored_whole_into()    { return undef }   # ArrayLiteral, HashLiteral
 
     # successors -> the nodes whose control is this one, each once.
     method successors() {

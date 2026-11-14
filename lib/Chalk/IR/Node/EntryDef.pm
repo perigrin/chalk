@@ -72,4 +72,26 @@ class Chalk::IR::Node::EntryDef :isa(Chalk::IR::Node::Access) {
         return ( $sigil // '' ) eq '$'
             && ( ( $symbol // '' ) =~ /\A[A-Za-z_]\w*\z/ && !$self->is_perls_own || ( $symbol // '' ) eq '@' );
     }
+
+    # is_package_aggregate -> true for A PACKAGE ARRAY OR HASH read by name
+    # (`our @a`, `%P::h`) -- not perl's own (@ISA, @ARGV, %ENV, @INC, %SIG,
+    # @_, a stash `%main::`, a punctuation name): each of those has its own
+    # meaning.
+    method is_package_aggregate() {
+        return ( $sigil // '' ) =~ /\A[\@%]\z/
+            && ( $symbol // '' ) =~ /\A[A-Za-z_]\w*\z/
+            && !$self->is_perls_own;
+    }
+
+    # is_argv -> true for @ARGV: the program's arguments.
+    method is_argv() {
+        return ( $sigil // '' ) eq '@' && ( $symbol // '' ) eq 'ARGV' && ( $package // 'main' ) eq 'main';
+    }
+
+    # is_isa_array -> true for a package's @ISA: its parents (whose, package says).
+    method is_isa_array() { return ( $sigil // '' ) eq '@' && ( $symbol // '' ) eq 'ISA' }
+
+    # qualified_name -> the variable's name with its package, no sigil
+    # ("main::x"): a package of none is main's.
+    method qualified_name() { return ( $package // 'main' ) . '::' . $symbol }
 }

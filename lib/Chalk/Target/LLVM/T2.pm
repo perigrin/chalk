@@ -291,8 +291,7 @@ sub walk {
         }
         # `my (...) = @_` PINNED (a call follows it): its reads are the
         # arguments already (args), nothing to store.
-        elsif ($op eq 'Assign' && $b->{args} && $s->can('targets') && defined $s->targets
-               && blessed($s->inputs->[-1]) && $s->inputs->[-1]->operation eq 'ArgsSource') {
+        elsif ($b->{args} && $s->is_args_list_assign) {
             $b->{argsarr} ? $b->list_args_assign($s) : $b->args_assign($s);
             $ctl = $s;
         }
@@ -406,17 +405,17 @@ sub walk {
         # aggregate in the global, the old one's reference saved first for
         # THE RESTORE, which puts that back. A reference taken to the old one
         # keeps its contents; a sub called inside the scope sees the new one.
-        elsif ($op eq 'EntryWrite' && $s->binds && _pkg_agg($s->inputs->[0])) {
+        elsif ($op eq 'EntryWrite' && $s->binds && ( $s->inputs->[0] isa Chalk::IR::Node && $s->inputs->[0]->is_package_aggregate )) {
             my ($t, $v, $mem) = $s->inputs->@*;
             my $h = $t->sigil eq '%';
             $b->hash_reads_settled('a local');
             $b->reads_before($_) for $b->{passed}->@*;
             my $slot;
-            if (blessed($v) && $v->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && !$v->inputs->@* && !_pkg_literal_of($v)) {
+            if (blessed($v) && $v->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && !$v->inputs->@* && !$v->stored_whole_into) {
                 # the save: a Ref over a read of this name at this store's memory version
                 for my $r ( grep { blessed($_) && $_->operation eq 'Ref' } _all_nodes( $b->{mop}, $b->{ret} ) ) {
                     my $in = $r->inputs->[0];
-                    next unless _pkg_agg($in) && _pkg_agg_name($in) eq _pkg_agg_name($t)
+                    next unless ( $in isa Chalk::IR::Node && $in->is_package_aggregate ) && _pkg_agg_name($in) eq _pkg_agg_name($t)
                         && blessed( $in->inputs->[-1] ) && refaddr( $in->inputs->[-1] ) == refaddr($mem);
                     my $old = $b->pkg_agg($in);
                     $b->{agg_save}{ refaddr($r) } = $h ? $old : $b->emit(op => 'ARef', type => '%Slot', inputs => [$old]);
@@ -434,7 +433,7 @@ sub walk {
         }
         # A PACKAGE ARRAY OR HASH STORED WHOLE (`@a = LIST`): its one aggregate
         # refilled in place -- a reference taken to it sees the new contents.
-        elsif ($op eq 'EntryWrite' && _pkg_agg($s->inputs->[0]) && blessed($s->inputs->[1])
+        elsif ($op eq 'EntryWrite' && ( $s->inputs->[0] isa Chalk::IR::Node && $s->inputs->[0]->is_package_aggregate ) && blessed($s->inputs->[1])
                && $s->inputs->[1]->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/) {
             out('a local') if $s->can('local') && $s->local;
             my ($t, $v) = $s->inputs->@*;
@@ -666,24 +665,15 @@ sub _through_ref {
     # (a foreach alias read is its element's read)
     if ( $op eq 'PostfixDeref' && ( my $el = _alias_elem($n) ) ) { return $b->_through_ref($el) }
     if ($op =~ /\A(?:Subscript|Exists)\z/ && ( $n->can('kind') ? $n->kind // '' : '' ) eq 'hash') {
-        return _named_hash($n->inputs->[0]) || $n->inputs->[0]->operation eq 'FieldAccess' ? 0 : 1;   # a `my %h`, a hash field: never a stop
+        return $n->inputs->[0]->is_named_hash || $n->inputs->[0]->operation eq 'FieldAccess' ? 0 : 1;   # a `my %h`, a hash field: never a stop
     }
     return 0 unless $op =~ /\A(?:Subscript|Count|PostfixDeref)\z/;
     my $c = $n->inputs->[0];
-    $c = $c->inputs->[0] while _aderef($c);
+    $c = $c->inputs->[0] while $c isa Chalk::IR::Node && $c->is_array_deref;
     return 0 unless blessed($c);
     # (a \@a, a [...], @_, a `my @a`, @ARGV: an array it has, never a stop)
-    return 0 if $c->operation =~ /\A(?:Ref|ArrayLiteral|ArgsSource)\z/ || _array_var($c) || _argv($c);
+    return 0 if $c->operation =~ /\A(?:Ref|ArrayLiteral|ArgsSource)\z/ || $c->is_my_array || $c->is_argv;
     return 1;
-}
-
-# _isa_var($n) -> the package whose @ISA $n is, or undef.
-sub _isa_var {
-    my ($n) = @_;
-    return undef unless blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) eq '@' && ( $n->symbol // '' ) eq 'ISA';
-    my $pkg = $n->can('package') ? $n->package : undef;
-    out('an @ISA of no known package') unless defined $pkg && length $pkg;
-    return $pkg;
 }
 
 # isa_write($EntryWrite) -> true when it is `our @ISA = (LIST)` (any
@@ -691,8 +681,8 @@ sub _isa_var {
 sub isa_write {
     my ($b, $s) = @_;
     my ($to, $from) = $s->inputs->@*;
-    return 0 unless blessed($to) && $to->operation eq 'EntryDef' && ( $to->sigil // '' ) eq '@' && ( $to->symbol // '' ) eq 'ISA';
-    my $pkg = $to->can('package') ? $to->package : undef;
+    return 0 unless $to isa Chalk::IR::Node && $to->is_isa_array;
+    my $pkg = $to->package;
     out('an @ISA of no known package') unless defined $pkg && length $pkg;
     out('an @ISA written from what is not a list of names') unless blessed($from) && $from->operation eq 'ArrayLiteral';
     out('an @ISA of a list') if grep { _is_list($_) } $from->inputs->@*; # static type
@@ -700,12 +690,6 @@ sub isa_write {
     $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($_), '%Slot') ]) for $from->inputs->@*;
     $b->emit(op => 'MopIsaSet', type => 'void', inputs => [ $b->const_str($pkg), $arr ]);
     return 1;
-}
-
-sub _args_list_assign {
-    my ($s) = @_;
-    return $s->operation eq 'Assign' && $s->can('targets') && defined $s->targets
-        && blessed($s->inputs->[-1]) && $s->inputs->[-1]->operation eq 'ArgsSource';
 }
 
 # args_elem($Assign, $read) -> @_'s element a `my (...) = @_` target is.
@@ -767,7 +751,7 @@ sub args_assign {
     }
     for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' } ( $s->consumers // [] )->@*) {
         next if $b->{args}{ refaddr($r) };
-        next if _is_list_target($r);   # the next list assign's target, versioned by this one
+        next if $r->is_assign_target;   # the next list assign's target, versioned by this one
         out('a read after `my (...) = @_` of no target') unless grep { blessed($_) && refaddr($_) == refaddr($s) } $r->inputs->@*;
         $b->{args}{ refaddr($r) } = $arg_of{ $r->symbol } // out('a read after `my (...) = @_` of no target');
     }
@@ -975,7 +959,7 @@ sub list_assign {
     # (`my ($t) = @_; my ($f) = caller; ... $t`: $t's version is this Assign).
     for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' } ( $s->consumers // [] )->@*) {
         next if $b->{memo}{ refaddr($r) } || $b->{args}{ refaddr($r) };
-        next if _is_list_target($r);
+        next if $r->is_assign_target;
         next unless grep { blessed($_) && refaddr($_) == refaddr($s) } $r->inputs->@*;
         if ( exists $val{ $r->symbol } ) { $b->{memo}{ refaddr($r) } = $val{ $r->symbol }; next }
         my $last = $b->{lvals}{ $r->symbol } // out('a read after a list assignment of no target (' . $r->symbol . ')');
@@ -985,19 +969,6 @@ sub list_assign {
     push $b->{passed}->@*, $s;
 }
 
-# _is_list_target($pad) -> true for a `my` named as an assign's target -- a
-# list assign's, or a scalar one's (B::SoN versions it by the memory before
-# that assign): a write, not a read.
-sub _is_list_target {
-    my ($r) = @_;
-    return scalar grep {
-        my $a = $_;
-        blessed($a) && $a->operation eq 'Assign'
-            && grep { blessed($_) && refaddr($_) == refaddr($r) }
-                    $a->inputs->@[ 0 .. ( $a->can('targets') && defined $a->targets ? $a->targets - 1 : 0 ) ]
-    } ( $r->consumers // [] )->@*;
-}
-
 # make_constant_arrays(@nodes): an array whose literal holds only constants
 # (`my @a = (1, 2)`, `my @a`) is made in the entry block -- first made where it
 # was first used, in a loop body it was made again each pass.
@@ -1005,12 +976,12 @@ sub make_constant_arrays {
     my ($b, @nodes) = @_;
     for my $lit (grep { $_->operation eq 'ArrayLiteral' } @nodes) {
         next if $lit->is_pinned;   # a `my @a` pinned where it runs: made there
-        next if _pkg_literal_of($lit);   # a package array, read where it is read
+        next if $lit->stored_whole_into;   # a package array, read where it is read
         next if grep { !( blessed($_) && $_->operation eq 'Constant' ) } $lit->inputs->@*;
         $b->value($lit);
     }
     # A `my %h = (...)` of constants, or of @_, is made at entry too.
-    for my $lit (grep { $_->operation eq 'HashLiteral' && ( $_->stamp // '' ) eq 'Hash' && !$_->is_pinned && !_pkg_literal_of($_) } @nodes) { # static type
+    for my $lit (grep { $_->operation eq 'HashLiteral' && ( $_->stamp // '' ) eq 'Hash' && !$_->is_pinned && !$_->stored_whole_into } @nodes) { # static type
         next if grep { !( blessed($_) && ( $_->operation =~ /\A(?:Constant|ArgsSource)\z/ || $b->{args}{ refaddr($_) } ) ) } $lit->inputs->@*;
         $b->value($lit);
     }
@@ -1046,7 +1017,7 @@ sub hash_value {
         }
         return $h;
     }
-    return $b->hash_var($v) if _hash_var($v);
+    return $b->hash_var($v) if $v->is_my_hash;
     my $kind = $v->can('kind') ? $v->kind // '' : '';
     if ($op =~ /\A(?:Subscript|Exists|Delete)\z/ && $kind eq 'hash') {
         my $h = $b->hash_of($in[0]);
@@ -1139,33 +1110,6 @@ sub hash_value {
     return undef;
 }
 
-# A `my %h` NAMED, NOT MADE HERE (`my %e;`): one hash per variable, made at
-# its function's entry -- as a `my @a` is.
-sub _hash_var {
-    my ($n) = @_;
-    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '%' && ( !$n->inputs->@* || $n->can('shared') && $n->shared );   # (a shared one, read at a memory version: the one hash; hash_var says whose)
-}
-# _pkg_agg($n): a package array or hash read by name (`our @a`, `%P::h`) --
-# not perl's own (@ISA, @ARGV, %ENV, @INC, %SIG, @_, a stash `%main::`, a
-# punctuation name): each has its own meaning, read elsewhere or refused.
-sub _pkg_agg {
-    my ($n) = @_;
-    return blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) =~ /\A[\@%]\z/
-        && ( $n->symbol // '' ) =~ /\A[A-Za-z_]\w*\z/
-        && $n->symbol !~ /\A(?:ISA|ARGV|ARGVOUT|ENV|INC|SIG|STDIN|STDOUT|STDERR|_)\z/;
-}
-# _pkg_literal_of($n): the package aggregate a named Array/HashLiteral is
-# stored into whole (B::SoN's `@a = LIST`), or undef.
-sub _pkg_literal_of {
-    my ($n) = @_;
-    return undef unless blessed($n) && $n->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/;
-    for my $w ( ( $n->consumers // [] )->@* ) {
-        next unless blessed($w) && $w->operation eq 'EntryWrite' && !$w->binds   # (a `local`'s fresh one is not stored, bound)
-            && blessed( $w->inputs->[1] ) && refaddr( $w->inputs->[1] ) == refaddr($n);
-        return $w->inputs->[0] if _pkg_agg( $w->inputs->[0] );
-    }
-    return undef;
-}
 # pkg_agg($n): THE ONE AGGREGATE a global holds, made at its first use from
 # any function. A whole store refills it in place, so its pointer stands.
 sub pkg_agg {
@@ -1178,19 +1122,17 @@ sub pkg_agg {
     return $b->emit(%op) if $b->swapped->{$name};
     return $b->{locs}{$name} //= $b->emit_entry(%op);
 }
+# _pkg_agg_name($n): the name of the global a package aggregate is held in
+# (T2's: a hash's apart from an array's of one name).
 sub _pkg_agg_name {
     my ($n) = @_;
-    return ( $n->sigil eq '%' ? 'pkghash::' : 'pkgarr::' ) . ( ( $n->can('package') ? $n->package : undef ) // 'main' ) . '::' . $n->symbol;
+    return ( $n->sigil eq '%' ? 'pkghash::' : 'pkgarr::' ) . $n->qualified_name;
 }
 # swapped -> { name => 1 } of the package aggregates a `local` swaps anywhere.
 sub swapped {
     my ($b) = @_;
     return $b->{swapped} //= { map { ( _pkg_agg_name( $_->inputs->[0] ) => 1 ) }
-        grep { $_->operation eq 'EntryWrite' && $_->binds && _pkg_agg( $_->inputs->[0] ) } _all_nodes( $b->{mop}, $b->{ret} ) };
-}
-sub _named_hash {
-    my ($n) = @_;
-    return _hash_var($n) || blessed($n) && $n->operation eq 'HashLiteral' && ( $n->stamp // '' ) eq 'Hash'; # static type
+        grep { $_->operation eq 'EntryWrite' && $_->binds && ( $_->inputs->[0] isa Chalk::IR::Node && $_->inputs->[0]->is_package_aggregate ) } _all_nodes( $b->{mop}, $b->{ret} ) };
 }
 # emit_entry(%n): a node made at the function's entry (first block's start),
 # where each `my` aggregate of the function is made.
@@ -1223,7 +1165,7 @@ sub hash_of {
     my ($b, $n) = @_;
     # A SLURPY HASH PARAMETER: its hash, made at the sub's entry (args_rest).
     return $b->{memo}{ refaddr($n) } if blessed($n) && $n->operation eq 'Parameter' && $b->{memo}{ refaddr($n) };
-    return $b->value($n) if _named_hash($n) || _pkg_agg($n) && $n->sigil eq '%';
+    return $b->value($n) if $n isa Chalk::IR::Node && ( $n->is_named_hash || $n->is_package_aggregate && $n->sigil eq '%' );
     if ($n->operation eq 'FieldAccess') {   # a hash field: its hash
         my (undef, $sg) = $b->field_of($n);
         return $b->value($n) if $sg eq '%';
@@ -1263,10 +1205,10 @@ sub array_value {
         return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->location($t) ])
             if blessed($t) && $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$' && $t->is_location;
         # \%h: a named hash IS its reference here (a %Slot of tag 5), one hash, two names.
-        return $b->value($t) if blessed($t) && ( _named_hash($t) || _pkg_agg($t) && $t->sigil eq '%' ) && ( $v->stamp // '' ) eq 'HashRef';   # static type
+        return $b->value($t) if blessed($t) && ( $t->is_named_hash || $t->is_package_aggregate && $t->sigil eq '%' ) && ( $v->stamp // '' ) eq 'HashRef';   # static type
         out('a reference to what is not an array') unless blessed($t)
-            && ( $t->operation eq 'ArrayLiteral' && ( $t->stamp // '' ) eq 'Array' || _aderef($t) || _array_var($t) || _argv($t)
-                 || _pkg_agg($t) && $t->sigil eq '@' ) # static
+            && ( $t->operation eq 'ArrayLiteral' && ( $t->stamp // '' ) eq 'Array' || $t->is_array_deref || $t->is_my_array || $t->is_argv
+                 || $t->is_package_aggregate && $t->sigil eq '@' ) # static
             && ( $v->stamp // '' ) eq 'ArrayRef';   # \(@a) is a reference to each element type
         return $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->array_of($t) ]);
     }
@@ -1286,7 +1228,7 @@ sub array_value {
         else { out("a list collector $c") }
         return $arr;
     }
-    if (_aderef($v)) {
+    if ($v->is_array_deref) {
         # `my @p = @$r` IS A COPY (B::SoN's copy): its own array, of the
         # elements as they are here.
         return $b->array_of($in[0]) unless $v->can('copy') && $v->copy;
@@ -1294,11 +1236,11 @@ sub array_value {
         $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->array_of($in[0]) ]);
         return $a;
     }
-    return $b->array_var($v) if _array_var($v);
-    return $b->emit(op => 'Argv', type => '%Array*') if _argv($v);
+    return $b->array_var($v) if $v->is_my_array;
+    return $b->emit(op => 'Argv', type => '%Array*') if $v->is_argv;
     return $b->{argsarr} // out('@_ outside a sub taking it as a list') if $op eq 'ArgsSource';
     # A HASH COUNTED is its keys (perl 5.26+), not its pairs flattened (4 for 2).
-    if ($op eq 'Count' && blessed($in[0]) && ( _named_hash($in[0]) || $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%' || $in[0]->operation eq 'FieldAccess' && ( $b->field_of($in[0]) )[1] eq '%' )) {
+    if ($op eq 'Count' && blessed($in[0]) && ( $in[0]->is_named_hash || $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%' || $in[0]->operation eq 'FieldAccess' && ( $b->field_of($in[0]) )[1] eq '%' )) {
         my $h = $in[0]->operation eq 'PostfixDeref' ? $b->hash_of($in[0]->inputs->[0]) : $b->hash_of($in[0]);
         return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]);
     }
@@ -1407,18 +1349,10 @@ sub _match_in_list {
     return $list;
 }
 
-# _aderef($n): `@$r`, `@{...}`, `$r->@*` -- an array deref (a `${...}` is a
-# scalar's: not this).
-sub _aderef {
-    my ($n) = @_;
-    return blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '@' ) eq '@';
-}
-
 sub global_of {
     my ($b, $n) = @_;
     return '@t2_err' if $n->symbol eq '@';
-    my $name = ( ( $n->can('package') ? $n->package : undef ) // 'main' ) . '::' . $n->symbol;
-    return $b->global_named($name);
+    return $b->global_named( $n->qualified_name );
 }
 sub global_named {
     my ($b, $name) = @_;
@@ -1442,13 +1376,6 @@ sub field_of {
     my ($f) = grep { $_->fieldix + $off == ( $n->field_index // -1 ) } $cls->fields;
     out('a field of no known index') unless $f;
     return ( "$stash\::" . $f->name, $f->sigil );
-}
-
-# @ARGV: the program's arguments, one array (made from argv on first use).
-sub _argv {
-    my ($n) = @_;
-    return blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) eq '@' && ( $n->symbol // '' ) eq 'ARGV'
-        && ( ( $n->can('package') ? $n->package : undef ) // 'main' ) eq 'main';
 }
 
 # _list_use($call) -> true when what uses the call's value uses it as a list:
@@ -1496,15 +1423,9 @@ sub _list_use {
     return $list ? 1 : 0;
 }
 
-# A `my @a` NAMED, NOT MADE HERE: B::SoN's PadAccess of an array declared
-# once in its sub (one declared in a loop body or an arm is an ArrayLiteral
-# pinned there, made each time). One %Array per variable, made at its
-# function's entry: fresh each call. A closure's (shared) is not T2's.
-sub _array_var {
-    my ($n) = @_;
-    return blessed($n) && $n->operation eq 'PadAccess' && ( $n->sigil // '' ) eq '@' && ( !$n->inputs->@* || $n->can('shared') && $n->shared );
-}
-
+# array_var($pad): a `my @a` named, not made here (is_my_array): one %Array
+# per variable, made at its function's entry -- fresh each call. A closure's
+# (shared) is not T2's.
 sub array_var {
     my ($b, $pad) = @_;
     if (blessed($pad) && defined( my $i = ( $b->{cmp_env} // {} )->{ refaddr($pad) } )) { return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->emit(op => 'CmpEnv', type => '%Slot', attr => { index => $i }) ]) }
@@ -1533,8 +1454,8 @@ sub array_of {
     # A SLURPY ARRAY PARAMETER: its copy, made at the sub's entry (args_rest).
     return $b->{memo}{ refaddr($n) } if blessed($n) && $n->operation eq 'Parameter' && $b->{memo}{ refaddr($n) };
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
-    if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || _aderef($n) || _array_var($n) || _argv($n)
-                         || _pkg_agg($n) && $n->sigil eq '@'
+    if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource)\z/ || $n->is_array_deref || $n->is_my_array || $n->is_argv
+                         || $n->is_package_aggregate && $n->sigil eq '@'
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
                          || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:keys|values|sort|reverse|caller)\z/ )) {
         my $a = $b->value($n);
@@ -1572,7 +1493,7 @@ sub array_of {
     # A LIST A LOOP BUILDS (a phi of one, map's ListAppend) is its array.
     return $b->value($n) if blessed($n) && $n->operation =~ /\A(?:Phi|ListAppend)\z/ && $b->type_of($n) eq '%Array*';
     # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`).
-    return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if _named_hash($n)
+    return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if ( $n isa Chalk::IR::Node && $n->is_named_hash )
         || blessed($n) && $n->operation eq 'FieldAccess' && ( $b->field_of($n) )[1] eq '%';
     return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n->inputs->[0]) ])
         if blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%';
@@ -1591,7 +1512,9 @@ sub array_of {
     # @Pkg::ISA IS THE RUN-TIME MOP'S OWN PARENT LIST: the array method lookup
     # walks, fetched where it is used, so push, shift and the rest change the
     # class's parents (perigrin: @ISA as the class's container; a view needs nothing kept in step).
-    if (my $pkg = _isa_var($n)) {
+    if ($n isa Chalk::IR::Node && $n->is_isa_array) {
+        my $pkg = $n->package;
+        out('an @ISA of no known package') unless defined $pkg && length $pkg;
         return $b->emit(op => 'MopIsaArr', type => '%Array*', inputs => [ $b->const_str($pkg) ]);
     }
     # A SCALAR HOLDING AN ARRAY REFERENCE (a variable, an argument): its
@@ -2031,13 +1954,6 @@ sub const_str {
 }
 
 # _all_nodes($mop, $ret) -> the program's nodes and every package sub's.
-# _arg_subscript($n) -> $n is $_[N]: a Subscript of @_ by a constant index.
-sub _arg_subscript {
-    my ($n) = @_;
-    return blessed($n) && $n->operation eq 'Subscript' && blessed( $n->inputs->[0] ) && $n->inputs->[0]->operation eq 'ArgsSource'
-        && blessed( $n->inputs->[1] ) && $n->inputs->[1]->operation eq 'Constant' && ( $n->inputs->[1]->value // '' ) =~ /\A\d+\z/;
-}
-
 sub _all_nodes {
     my ($mop, $ret) = @_;
     my @n = Chalk::IR::Graph::program_nodes($ret);
@@ -2683,9 +2599,9 @@ sub func {
     my @also;
     if (!$is_method && !$list && !$@ && @reads && !$an->{_args_written} && !$an->{_args_read_as_a_list}
             && !$an->{_args_slurpy} && !$an->{_args_signature}
-            && !grep { blessed($_) && !_arg_subscript($_) } @reads) {
+            && !grep { blessed($_) && !$_->is_arg_element } @reads) {
         my %by;
-        push $by{ $_->inputs->[1]->value }->@*, $_ for grep { _arg_subscript($_) } $g->component;
+        push $by{ $_->inputs->[1]->value }->@*, $_ for grep { $_->is_arg_element } $g->component;
         my $max = -1;   # (not sort: a sort block's $b is the builder here)
         $max < $_ and $max = $_ for keys %by;
         @reads = map { $by{$_} ? $by{$_}[0] : bless( {}, 'Chalk::Target::LLVM::T2::Unread' ) } 0 .. $max;
@@ -3139,16 +3055,16 @@ sub type_of {
     # AN ARRAY is an %Array of %Slot, by pointer; a count of it an i64, an
     # element a %Slot (it holds what was stored, by its tag).
     # AN ARRAY REFERENCE is a %Slot (tag 6) over an %Array: a scalar.
-    return $v->sigil eq '@' ? '%Array*' : '%Slot' if _pkg_agg($v);   # a hash is its %Slot
+    return $v->sigil eq '@' ? '%Array*' : '%Slot' if $v->is_package_aggregate;   # a hash is its %Slot
     return '%Slot' if $op eq 'ArrayLiteral' && ( $v->stamp // '' ) eq 'ArrayRef'; # static type
     return '%Slot' if $op eq 'Ref';
     return '%Slot' if $op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '$';
-    return '%Array*' if $op eq 'ArrayLiteral' || _aderef($v) || _array_var($v) || $op eq 'ArgsSource' || $op eq 'ListAppend';
+    return '%Array*' if $op eq 'ArrayLiteral' || $v->is_array_deref || $v->is_my_array || $op eq 'ArgsSource' || $op eq 'ListAppend';
     return 'i64' if $op eq 'Count';
     return '%Slot' if $op eq 'Subscript';
     # A HASH REFERENCE is a %Slot (tag 5) over a %Hash: it is a scalar.
     return '%Slot' if $op eq 'HashLiteral' && ( $v->stamp // '' ) =~ /\A(?:HashRef|Hash)\z/; # static type
-    return '%Slot' if _hash_var($v);
+    return '%Slot' if $v->is_my_hash;
     # length of a scalar: undef for undef, so a %Slot; of a string, an i64.
     return ( ( $v->inputs->[0]->stamp // '' ) !~ /\A(?:Array|ArrayRef)\z/ && $b->type_of($v->inputs->[0]) eq '%Slot' ) ? '%Slot' : 'i64' if $op eq 'Length'; # static type
     my $hk = $v->can('kind') ? $v->kind // '' : '';
@@ -3169,7 +3085,7 @@ sub type_of {
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
     return '%Str' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
-    return '%Array*' if _argv($v);
+    return '%Array*' if $v->is_argv;
     return '%Slot' if $v->is_package_scalar;   # what it holds is what was stored last, anywhere
     return '%Slot*' if $op eq 'MakeCell' || $op eq 'CellParam';   # a captured variable's storage
     return '%Slot' if $op eq 'CellRead' || $op eq 'AnonSub';
@@ -3223,7 +3139,7 @@ sub _value {
     # them as package variables, of no match: never read as one.
     out( 'the match variable ' . ( $v->sigil // '$' ) . $v->symbol . ' (B::SoN ties it to no match)' )
         if $v->operation eq 'EntryDef' && ( $v->symbol // '' ) =~ /\A(?:[&`'+-]|\d+)\z/;
-    return $b->pkg_agg($v) if _pkg_agg($v);
+    return $b->pkg_agg($v) if $v->is_package_aggregate;
     # $] IS THE VERSION OF THE PERL T2 IS: the one compiling (whose semantics it
     # keeps), read-only.
     return $b->as( $b->const_str("$]"), $b->type_of($v) )   # (its text: "5.042000")
@@ -3231,7 +3147,7 @@ sub _value {
     # THE LITERAL A PACKAGE AGGREGATE WAS STORED FROM is how B::SoN gives a
     # later read of the name: read as the aggregate, which a push or another
     # sub may have changed since (a copy of the literal printed "1 2" for "1 2 3").
-    if (my $t = _pkg_literal_of($v)) { return $b->pkg_agg($t) }
+    if (my $t = $v->stored_whole_into) { return $b->pkg_agg($t) }
     # A qr// VALUE (a regex constant read as a value): an object of class Regexp.
     return $b->qr_value($v) if $v->operation eq 'Constant' && ( $v->const_type // '' ) eq 'regex';
     # A PRINT THAT RAN AS A STATEMENT (in an arm of && or ||) read as a value
@@ -3243,8 +3159,8 @@ sub _value {
     if (my $arg = $b->{args}{ refaddr($v) }) { return $arg }
     # (a read after the Assign takes it as input; a target read is its input)
     if ($b->{argsarr} && $v->operation eq 'PadAccess'
-        && ( my ($as) = ( ( grep { blessed($_) && _args_list_assign($_) } $v->inputs->@* ),
-                          ( grep { blessed($_) && _args_list_assign($_) && grep { blessed($_) && refaddr($_) == refaddr($v) } $_->inputs->@[ 0 .. $_->inputs->$#* - 1 ] } ( $v->consumers // [] )->@* ) ) )) {
+        && ( my ($as) = ( ( grep { blessed($_) && $_->is_args_list_assign } $v->inputs->@* ),
+                          ( grep { blessed($_) && $_->is_args_list_assign && grep { blessed($_) && refaddr($_) == refaddr($v) } $_->inputs->@[ 0 .. $_->inputs->$#* - 1 ] } ( $v->consumers // [] )->@* ) ) )) {
         out('a read of `my (...) = @_` in a sub that shifts @_') if $b->{args_mutated};
         return $b->args_elem($as, $v);
     }
