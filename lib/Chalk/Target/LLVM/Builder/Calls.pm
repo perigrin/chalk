@@ -173,6 +173,10 @@ sub call {
     # A SIGNATURE WITH A SLURPY TAIL dies with too few arguments, or an odd
     # count into a slurpy hash (perl's "Too few arguments", "Odd name/value"):
     # refused by name where the call's count is known, as it was before.
+    if (defined $fn->{maxargs}) {
+        out('a call of a sub with optional parameters passing a list (its count unknown)') if grep { _is_list($_) } @args;
+        out('a call of a signature with too many arguments (perl dies)') if @args > $fn->{maxargs};
+    }
     if (defined $fn->{minargs} && !grep { _is_list($_) } @args) {
         out('a call of a signature with too few arguments (perl dies)') if @args < $fn->{minargs};
         out('an odd count into a signature\'s slurpy hash (perl dies)') if ( $fn->{slurpy_sigil} // '' ) eq '%' && ( @args - $fn->{minargs} ) % 2;
@@ -235,6 +239,7 @@ sub make_mop {
         my %sub = map { ( $_->name => $_ ) } grep { ( $called{can} || $dynamic || $called{ $_->name } ) && $_->graph } ( $cls->subs, $cls->methods );
         for my $sub (@sub{ sort keys %sub }) {
             my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
+            out('a sub of a signature T2 checks at its calls, called other than directly') if $fn->{direct_only};
             $b->emit(op => 'MopDef', type => 'void', inputs => [ $cs, $b->const_str($sub->name) ], attr => { fn => $fn->{name} });
         }
         # AN UNLOADED SUB (a module's, never reached) is in its stash by name,
@@ -585,6 +590,31 @@ sub func {
     my $slurpy = !$is_method && !$@ && !$closure && !$an->{_args_written} && !$an->{_args_read_as_a_list} ? $an->{_args_slurpy} : undef;
     my @positional = $slurpy ? @reads : ();
     $list = 1 if $slurpy;
+    # A SIGNATURE'S OPTIONAL PARAMETERS (`($a, $b = 3)`): @_ as one array,
+    # each such parameter its argument where one was passed, else its default
+    # -- one made the same anywhere (a constant), made at entry. Perl dies
+    # with too many arguments: the count is checked at each call, so such a
+    # sub is called directly only.
+    # (B::SoN's `mandatory` counts every positional parameter, optional ones too)
+    my $decl = !$is_method && $sub->can('signature') ? $sub->signature // {} : {};
+    my @defaulted = grep { $_->operation eq 'Parameter' && blessed( $_->inputs->[0] ) } $g->component;
+    my $optional = !$is_method && !$closure && !$@ && $an->{_args_signature} && ( $decl->{optional} // 0 ) > 0
+        && !$an->{_args_written} && !$an->{_args_read_as_a_list};
+    if ($optional) {
+        out("sub $name has an optional parameter of no default") if @defaulted != $decl->{optional};
+        out("sub $name has a default that is not made the same anywhere") if grep { !$_->inputs->[0]->all_made_the_same } @defaulted;
+        @positional = grep { defined } @reads unless $slurpy;
+        $list = 1;
+    }
+    # A SIGNATURE PARAMETER THE BODY NEVER READS (`sub g ($k, $x)` reading
+    # only $k) has its place all the same: its argument passed, unused. (Its
+    # arity is checked at each call: called directly only, as above.)
+    my $padded;
+    if (!$optional && !$is_method && !$closure && !$slurpy && !$@ && $an->{_args_signature} && !( $decl->{optional} // 0 )
+           && !$an->{_args_written} && !$an->{_args_read_as_a_list} && ( $decl->{mandatory} // 0 ) >= @reads) {
+        $padded = ( $decl->{mandatory} // 0 ) > @reads || grep { !defined } @reads;
+        @reads = map { $reads[$_] // bless( {}, 'Chalk::Target::LLVM::Builder::Unread' ) } 0 .. $decl->{mandatory} - 1;
+    }
     out("closure $name reads \@_ other than T2 takes it") if $closure && !$list;
     # A CAPTURE USED BUT BY A CELL READ OR WRITE: B::SoN spells `$t += 1` on
     # one as Coerce(CellParam) + 1, with no write -- lowered, $t never changed
@@ -618,8 +648,7 @@ sub func {
     # T2's yet (dropped, `($a, $b = 3)` gave $b undef). Its arity is checked
     # at each call (perl dies on another).
     my $sig = $is_method ? $margs{np} > 0 : $an->{_args_signature};
-    if ($sig && !$is_method) {
-        my $decl = $sub->can('signature') ? $sub->signature // {} : {};
+    if ($sig && !$is_method && !$optional) {
         out("sub $name has an optional signature parameter")
             if $decl->{optional} || ( $decl->{mandatory} // scalar @reads ) != ( $slurpy ? @positional : @reads );
     }
@@ -628,7 +657,9 @@ sub func {
     $id .= '_' . scalar keys $b->{funcs}->%* if grep { $_->{name} eq "\@f_$id" } values +($b->{funcs} // {})->%*;
     my $nargs = $is_method ? 1 + $margs{np} : $list ? 1 : scalar @reads;
     my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $nargs,
-        signature => $sig, list => $list, listret => $listret, closure => $closure, blocks => [] , minargs => ( $slurpy && $sig ? scalar @positional : undef ),
+        signature => $sig, list => $list, listret => $listret, closure => $closure, blocks => [] , minargs => ( $optional ? ( $decl->{mandatory} // 0 ) - $decl->{optional} : $slurpy && $sig ? scalar @positional : undef ),
+        maxargs => ( $optional && !$slurpy ? $decl->{mandatory} // 0 : undef ),
+        direct_only => ( $optional || $padded ? 1 : 0 ),
         slurpy_sigil => ( $slurpy && $sig ? ( $slurpy->can('sigil') ? $slurpy->sigil // '@' : '@' ) : undef ) };
     my @argn = map { Chalk::Target::LLVM::Node::_n(op => 'Arg', type => '%Slot', attr => { index => $_ }) } 0 .. ( $is_method ? $nargs : scalar @reads ) - 1;
     $argn[$_]->set_name("%a$_") for 0 .. $#argn;
@@ -671,18 +702,24 @@ sub func {
     $b->new_block('entry');
     # THE CALLER'S CONTEXT, read first (a call in the body sets it).
     my $want = $b->emit(op => 'GetWant', type => 'i1');
-    if ($slurpy) {
+    if ($slurpy || $optional) {
         # A SIGNATURE'S ARITY: at least its positional parameters (perl dies
         # with fewer -- a run-time stop here, as a signature's wrapper's is).
-        $b->emit(op => 'ArgsMin', type => 'void', inputs => [ $argsarr ], attr => { n => scalar @positional }) if $sig;
+        $b->emit(op => 'ArgsMin', type => 'void', inputs => [ $argsarr ], attr => { n => $fn->{minargs} // scalar @positional }) if $sig;
         $b->emit(op => 'ArgsPairs', type => 'void', inputs => [ $argsarr ], attr => { n => scalar @positional })
-            if $sig && ( $slurpy->can('sigil') ? $slurpy->sigil // '' : '' ) eq '%';
+            if $sig && $slurpy && ( $slurpy->can('sigil') ? $slurpy->sigil // '' : '' ) eq '%';
         # ITS PARAMETERS, made here: each its argument, the slurpy one the rest.
         for my $p (grep { $_->operation eq 'Parameter' } $g->component) {
             my $sg = $p->can('sigil') ? $p->sigil // '$' : '$';
-            $b->{memo}{ refaddr($p) } = $sg eq '$'
-                ? $b->emit(op => 'AGet', type => '%Slot', inputs => [ $argsarr, $b->emit(op => 'Const', type => 'i64', attr => { value => $p->index }) ])
+            my $ix = $b->emit(op => 'Const', type => 'i64', attr => { value => $p->index });
+            my $v = $sg eq '$'
+                ? $b->emit(op => 'AGet', type => '%Slot', inputs => [ $argsarr, $ix ])
                 : $b->args_rest($argsarr, $p->index, $sg);
+            # (an optional one: its argument if passed, else its default)
+            $v = $b->emit(op => 'Select', type => '%Slot', inputs => [
+                $b->emit(op => 'Cmp', type => 'i1', inputs => [ $b->emit(op => 'ALen', type => 'i64', inputs => [$argsarr]), $ix ], attr => { op => 'gt' }),
+                $v, $b->as( $b->value( $p->inputs->[0] ), '%Slot' ) ]) if $sg eq '$' && blessed( $p->inputs->[0] );
+            $b->{memo}{ refaddr($p) } = $v;
         }
     }
     # `return g()` IS CALLED IN THE CALLER'S CONTEXT: it is handed on.
