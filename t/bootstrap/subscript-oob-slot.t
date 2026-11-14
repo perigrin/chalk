@@ -1,5 +1,5 @@
 # ABOUTME: Guards the static out-of-bounds / missing-key Subscript repr inference (019f2e25).
-# ABOUTME: An OOB array read / absent hash key loads as :Slot (yields undef), not :Int (yields 0).
+# ABOUTME: An OOB array read / absent hash key is typed :Undef (yields undef), not :Int (yields 0).
 
 use 5.42.0;
 use utf8;
@@ -27,23 +27,24 @@ sub subscript_repr ($body) {
     return $sub ? ($sub->stamp // '<undef>') : '<no Subscript>';
 }
 
-subtest 'an out-of-bounds array read loads as :Slot (R9)' => sub {
+subtest 'an out-of-bounds array read is typed :Undef (R9)' => sub {
     # $a[9] on a 3-element array is statically OOB -> perl undef. The Subscript
-    # must load as Slot (the tagged {defined=false} path), not Int (which the
-    # backend prints as 0 -- a silent miscompile).
-    is(subscript_repr('my @a = (1, 2, 3); $a[9]'), 'Slot',
-        'OOB index 9 over a 3-element literal array -> Slot');
+    # is typed Undef, not Int (which the backend prints as 0 -- a silent
+    # miscompile). Undef is the TYPE; Slot, which this once asserted, is only
+    # its encoding and not a lattice member (3396682a).
+    is(subscript_repr('my @a = (1, 2, 3); $a[9]'), 'Undef',
+        'OOB index 9 over a 3-element literal array -> Undef');
 };
 
-subtest 'a missing-key hash lookup loads as :Slot (R10)' => sub {
-    is(subscript_repr('my %h = (a => 1, b => 2); $h{z}'), 'Slot',
-        'absent key "z" over {a,b} -> Slot');
+subtest 'a missing-key hash lookup is typed :Undef (R10)' => sub {
+    is(subscript_repr('my %h = (a => 1, b => 2); $h{z}'), 'Undef',
+        'absent key "z" over {a,b} -> Undef');
 };
 
 subtest 'an in-bounds array read stays :Int (teeth)' => sub {
     # The static-miss rule must NOT fire on a valid access: $a[1] is in bounds,
     # so it keeps the element repr. Bilateral coverage: a wrong static-miss
-    # check that stamped everything Slot would break every valid read.
+    # check that stamped everything Undef would break every valid read.
     is(subscript_repr('my @a = (1, 2, 3); $a[1]'), 'Int',
         'in-bounds index 1 keeps the element repr Int');
 };
@@ -57,35 +58,35 @@ subtest 'a negative in-range index is a HIT, stays :Int (teeth)' => sub {
     # $a[-1] on a 3-element array is perl's last element (a HIT), NOT a miss.
     # The static-miss rule must only fire for idx < -len, so a negative in-range
     # index keeps the element repr -- else a valid from-the-end read would
-    # wrongly load as Slot (undef). NOTE: the negative-index VALUE lowering
+    # wrongly be typed Undef. NOTE: the negative-index VALUE lowering
     # (from-the-end adjustment) is a separate backend gap (filed) -- this asserts
     # only the repr DECISION, which is correctly Int (a HIT, not a miss).
     is(subscript_repr('my @a = (1, 2, 3); $a[-1]'), 'Int',
         'negative in-range index -1 keeps the element repr Int (a HIT)');
 };
 
-subtest 'a negative out-of-range index is a MISS, loads :Slot (teeth)' => sub {
+subtest 'a negative out-of-range index is a MISS, typed :Undef (teeth)' => sub {
     # $a[-5] on a 3-element array is past the start -> perl undef.
-    is(subscript_repr('my @a = (1, 2, 3); $a[-5]'), 'Slot',
-        'negative out-of-range index -5 -> Slot');
+    is(subscript_repr('my @a = (1, 2, 3); $a[-5]'), 'Undef',
+        'negative out-of-range index -5 -> Undef');
 };
 
 subtest 'a flattened array container is NOT statically decided a MISS (teeth)' => sub {
     # (@x, 99) is list-flattening: B::SoN represents @x as a nested ArrayRef in
     # ONE input slot, so a static length over the outer inputs is WRONG. $a[3]
-    # here is a HIT (99), not a miss. The static-miss rule must NOT stamp Slot,
+    # here is a HIT (99), not a miss. The static-miss rule must NOT stamp Undef,
     # or a valid read miscompiles to undef. (The container's element repr is not
     # inferable through the flattening either, so it stays untyped -- an honest
-    # GAP, exactly as before the R9/R10 change; the point is it is NOT Slot.)
-    isnt(subscript_repr('my @x = (10,20,30); my @a = (@x, 99); $a[3]'), 'Slot',
-        'flattened (@x, 99)[3] is a HIT, NOT statically a miss -> not Slot');
+    # GAP, exactly as before the R9/R10 change; the point is it is NOT Undef.)
+    isnt(subscript_repr('my @x = (10,20,30); my @a = (@x, 99); $a[3]'), 'Undef',
+        'flattened (@x, 99)[3] is a HIT, NOT statically a miss -> not Undef');
 };
 
 subtest 'a flattened hash container is NOT statically decided a MISS (teeth)' => sub {
     # (%base, b => 2) flattens %base into one input slot, corrupting the
     # even/odd key parity -- a static key scan would falsely miss present keys.
-    isnt(subscript_repr('my %base = (a => 1); my %h = (%base, b => 2); $h{a}'), 'Slot',
-        'flattened (%base, b=>2){a} is a HIT, NOT statically a miss -> not Slot');
+    isnt(subscript_repr('my %base = (a => 1); my %h = (%base, b => 2); $h{a}'), 'Undef',
+        'flattened (%base, b=>2){a} is a HIT, NOT statically a miss -> not Undef');
 };
 
 done_testing();
