@@ -802,7 +802,9 @@ sub go_round {
     # arm): that Region merged first, its merge one way into the next.
     while (1) {
         my %by = map { ( refaddr($_->{region}) => $_->{region} ) } grep { $_->{region} } @lat;
-        my ($inner) = grep { my $r = $_; my @o = $r->out_regions; @o == 1 } values %by;
+        # (innermost first: a Region no other way round still comes into)
+        my %fed = map { ( refaddr($_) => 1 ) } map { $_->out_regions } values %by;
+        my ($inner) = grep { my $r = $_; my @o = $r->out_regions; @o == 1 && !$fed{ refaddr($r) } } values %by;
         last unless $inner;
         my ($outer) = $inner->out_regions;
         my @in = grep { $_->{region} && refaddr($_->{region}) == refaddr($inner) } @lat;
