@@ -212,6 +212,10 @@ sub _list_use {
         @pos = grep { $_ != $u->inputs->$#* } @pos if $u->operation =~ /\A(?:Assign|EntryWrite|Delete|Exists)\z/
             && !( $u->operation eq 'Assign' && $u->can('targets') && defined $u->targets );
         @pos = () if $u->operation eq 'EntryDef';   # its input is its memory ($" read after the call)
+        # (a control node's first input is its control: a call on the chain
+        # before a loop is the Loop's way in, not a use of its value)
+        @pos = () if $op =~ /\A(?:Loop|Region|Proj)\z/;
+        @pos = grep { $_ != 0 } @pos if $op eq 'If';
         next unless @pos;
         my $at0 = grep { $_ == 0 } @pos;   # (a bare grep in an || chain takes the rest as its list)
         my $at1 = grep { $_ == 1 } @pos;
