@@ -530,7 +530,7 @@ sub if_stmt {
             local $b->{cur} = $vals{$arm}{block};
             local $b->{memo} = $vals{$arm}{memo};
             local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $if->inputs->[1], $arm );   # (its phi input made in that arm)
-            push @in, [ $ty eq '%Array*' ? $b->as_list( $p->inputs->[$k] ) : $b->as($b->value($p->inputs->[$k]), $ty), $arm ];
+            push @in, [ $b->phi_input( $p, $p->inputs->[$k], $ty ), $arm ];
             # MAKING IT MAY MAKE BLOCKS (a ?: B::SoN folded an inner if into):
             # the arm ends where that left off (it ended before, a phi from
             # the old end, and that block's condbr overwritten by the br).
@@ -574,7 +574,7 @@ sub join_jumps {
             my $pr = $preds[ $pred_of[$k] ];
             local $b->{cur}  = $pr->{block};
             local $b->{memo} = $pr->{memo};
-            push @in, [ $ty eq '%Array*' ? $b->as_list( $p->inputs->[$k] ) : $b->as($b->value($p->inputs->[$k]), $ty), $pr ];
+            push @in, [ $b->phi_input( $p, $p->inputs->[$k], $ty ), $pr ];
             $pr->{block} = $b->{cur};   # making it may make blocks (see if_stmt)
         }
         push @made, [ $p, $ty, \@in ];
@@ -907,7 +907,7 @@ sub merge_at {
             my $pr = $preds[ $pred_of[$k] ];
             local $b->{cur}  = $pr->{block};
             local $b->{memo} = $pr->{memo};
-            push @in, [ $ty eq '%Array*' ? $b->as_list( $p->inputs->[$k] ) : $b->as($b->value($p->inputs->[$k]), $ty), $pr ];
+            push @in, [ $b->phi_input( $p, $p->inputs->[$k], $ty ), $pr ];
             $pr->{block} = $b->{cur};
         }
         push @made, [ $p, $ty, \@in ];

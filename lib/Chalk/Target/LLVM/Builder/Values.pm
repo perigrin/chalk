@@ -29,13 +29,60 @@ sub phi_type {
     # there): each arm's a fresh list, the arm taken's at the join. (In a loop
     # a list made in the body would be made again each pass: not this.)
     if ($st =~ /\A(?:Array|List)\z/) {
-        out("a phi stamped $st") unless grep { blessed($_) && $_->operation eq 'ListAppend' } $phi->inputs->@*
-            or !( blessed( $phi->region ) && $phi->region->operation eq 'Loop' )
-               && !grep { !( blessed($_) && ( $_->operation eq 'ArrayLiteral' && ( $_->stamp // '' ) eq 'Array'   # static type
-                                              || $_->operation eq 'PostfixDeref' && $_->is_array_deref && $_->copy ) ) } $phi->inputs->@*;
-        return '%Array*';
+        return '%Array*' if grep { blessed($_) && $_->operation eq 'ListAppend' } $phi->inputs->@*;
+        # A MERGE (not a loop's) OF FRESH ARRAYS: list literals, copies of a deref.
+        return '%Array*' if !( blessed( $phi->region ) && $phi->region->operation eq 'Loop' )
+            && !grep { !( blessed($_) && ( $_->operation eq 'ArrayLiteral' && ( $_->stamp // '' ) eq 'Array'   # static type
+                                          || $_->operation eq 'PostfixDeref' && $_->is_array_deref && $_->copy ) ) } $phi->inputs->@*;
+        # A `my` ARRAY WHOLE-ASSIGNED IN AN ARM (`@a = sort @a` in one): each
+        # way in a fresh array of its own, or the variable itself. Fresh ones
+        # only: the join picks one (none is another variable's, which a later
+        # push would write too). With the variable: each fresh one is copied
+        # into it at its arm's end, and the join is the variable -- perl's
+        # whole assign, in place.
+        my %pad;
+        if (_fresh_arrays($phi, {}, \%pad) && keys %pad <= 1) {
+            ( $b->{phi_store}{ refaddr($phi) } ) = values %pad;
+            return '%Array*';
+        }
+        out("a phi stamped $st");
     }
     return $SCALAR{$st} // out("a phi stamped $st");
+}
+
+# _fresh_arrays($Phi, $seen, \%pad) -> true for a merge (not a loop's) each of
+# whose ways in is a fresh array -- a list literal made into one -- or a `my`
+# array (put in %pad by name), or such a merge.
+sub _fresh_arrays {
+    my ($phi, $seen, $pad) = @_;
+    return 1 if $seen->{ refaddr($phi) }++;
+    return 0 unless blessed( $phi->region ) && $phi->region->operation eq 'Region';
+    for my $in ($phi->inputs->@*) {
+        return 0 unless blessed($in);
+        next if $in->operation eq 'ArrayLiteral' && ( $in->stamp // '' ) eq 'Array';   # static type
+        next if $in->operation eq 'PostfixDeref' && $in->is_array_deref && $in->copy;   # (a copy of a deref)
+        next if $in->operation eq 'Phi' && _fresh_arrays($in, $seen, $pad);
+        # (a sub's list: a fresh array, the call's in list context)
+        next if $in->operation eq 'Call' && $in->is_sub_call && _list_use($in);
+        if ( $in->operation eq 'PadAccess' && $in->is_my_array && !$in->shared && !( $in->can('file') && $in->file ) ) {
+            $pad->{ $in->name . '#' . ( $in->can('targ') ? $in->targ // '' : '' ) } = $in;
+            next;
+        }
+        return 0;
+    }
+    return 1;
+}
+
+# phi_input($Phi, $in, $ty) -> the value a merge takes from one way in, made
+# at that way's end: an array's list (a `my` array's merge: copied into it).
+sub phi_input {
+    my ($b, $p, $in, $ty) = @_;
+    return $b->as($b->value($in), $ty) unless $ty eq '%Array*';
+    my $pad = ( $b->{phi_store} // {} )->{ refaddr($p) } or return $b->as_list($in);
+    my $var = $b->array_var($pad);
+    my $l = $b->as_list($in);
+    $b->emit(op => 'AAssign', type => 'void', inputs => [ $var, $l ]) unless refaddr($l) == refaddr($var);
+    return $var;
 }
 
 # A LOOP PHI'S TYPE: its stamp, except a Str one, which a Num may reach on a

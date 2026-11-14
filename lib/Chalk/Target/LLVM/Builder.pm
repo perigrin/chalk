@@ -194,6 +194,15 @@ our %PRINTED;
 our %LIST_FIELD;
 sub _list_use {
     my ($c) = @_;
+    my ($list, $scalar) = _use_counts($c, {});
+    out('a call used both as a list and as a scalar') if $list && $scalar;
+    return $list ? 1 : 0;
+}
+
+# _use_counts($n, $seen) -> (list uses, scalar uses) of $n's value; a merge
+# it is a way into is used as the merge is.
+sub _use_counts {
+    my ($c, $seen_phi) = @_;
     my ($list, $scalar) = (0, 0);
     $list++ if $PRINTED{ refaddr($c) };
     my %seen;
@@ -227,11 +236,19 @@ sub _list_use {
             || $op eq 'Return' && $u->inputs->@* == 2 && $at0
             || $op eq 'Assign' && $u->can('targets') && defined $u->targets) { $list++ }   # `my ($x, $y) = f()`
         elsif ($op eq 'Coerce' && $PRINTED{ refaddr($c) }) { }   # print's (counted above)
-        elsif ($op =~ /\A(?:Phi|Return)\z/) { }   # a merge or a tail call: its own use decides
+        elsif ($op eq 'Phi' && !$u->is_memory && blessed( $u->region ) && $u->region->operation eq 'Region'
+               && ( $u->stamp // '' ) =~ /\A(?:List|Array)\z/) {   # static type
+            # a merge of lists: its own use decides (`my @c = $p ? two() : ()`)
+            # (a merge of scalars is one value: T2 takes the call's scalar)
+            next if $seen_phi->{ refaddr($u) }++;
+            my ($l, $s) = _use_counts($u, $seen_phi);
+            $list += $l; $scalar += $s;
+        }
+        elsif ($op =~ /\A(?:Phi|Return)\z/) { }   # a loop's merge or a tail call: its own use decides
+        elsif ($op eq 'Region') { }   # (the call as a way into a merge: control, no value)
         else { $scalar++ }
     }
-    out('a call used both as a list and as a scalar') if $list && $scalar;
-    return $list ? 1 : 0;
+    return ($list, $scalar);
 }
 
 # list_only($n, $what): a list value (a slice, a range) is a list only where
