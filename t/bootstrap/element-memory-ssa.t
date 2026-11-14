@@ -1,5 +1,5 @@
 # ABOUTME: End-to-end memory-SSA phase 2a: element read/store ordering (lli == perl).
-# ABOUTME: Read-before-store snapshots the pre-store value; branch-guarded store is an honest GAP.
+# ABOUTME: Read-before-store snapshots the pre-store value; a branch-guarded store is seen after the join.
 
 use 5.42.0;
 use utf8;
@@ -190,14 +190,18 @@ subtest 'a guarded hash store is visible after the branch (memory-Phi over %Hash
     is("$kind:$out", 'value:9', 'guarded hash store is visible -> 9');
 };
 
-subtest 'a mixed scalar-rebind + element-store arm GAPs, never miscompiles (2b-3 mixed)' => sub {
+subtest 'a mixed scalar-rebind + element-store arm lowers to the right arm (2b-3 mixed)' => sub {
     # `if($c){$x=9; $a[0]=7} $x+$a[0]` -- ONE arm both rebinds a scalar (a
     # value-Phi) and stores an element (a memory-Phi) on the same Region. The
-    # value-Phi's arm order is not yet reconciled with the element store; wiring
-    # it read the wrong arm (12 instead of 16). Must GAP loudly, not miscompile.
+    # old backend read the wrong arm (12 instead of 16) and so refused it; T2
+    # lowers it. Both arms are asserted, so a value-Phi reading the other arm
+    # (12 taken, or 16 not taken) fails.
     my ($kind, $out) = lower_and_run(
         'my @a=(1,2,3); my $c=1; my $x=5; if($c){$x=9;$a[0]=7} $x+$a[0]');
-    is($kind, 'gap', 'the mixed scalar+element-store arm GAPs (not a wrong value)');
+    is("$kind:$out", 'value:16', 'taken: 9 + 7 -> 16');
+    my ($k0, $o0) = lower_and_run(
+        'my @a=(1,2,3); my $c=0; my $x=5; if($c){$x=9;$a[0]=7} $x+$a[0]');
+    is("$k0:$o0", 'value:6', 'not taken: 5 + 1 -> 6');
 };
 
 subtest 'a while-loop element store is visible after the loop (2b-4 memory-Phi)' => sub {
@@ -293,18 +297,14 @@ subtest 'a read BEFORE the loop snapshots pre-loop memory (WAR ordering holds)' 
     is("$kind:$out", 'value:52', 'pre-loop read snapshots 5, post-loop read 2 -> 52');
 };
 
-subtest 'a NESTED branch-guarded store still GAPs-or-errors, never miscompiles (out of 2b-3 scope)' => sub {
-    # Nested branches are out of scope for the flat if/else work. The outer
-    # if($c){if($d){...}} inner branch join used to be misread as an
-    # EXPR-while-COND loop back-edge and crash the while-loop translator; that
-    # crash is fixed (zhi 019f34cc), so the producer now GAPs LOUDLY (the arm
-    # does not converge) rather than crashing -- B::SoN emits no graph and
-    # lower_and_run returns 'err'. This subtest pins the ANTI-MISCOMPILE
-    # invariant (never a value): a future nested lowering (2b-3 composed
-    # branches) must stay non-value here -- a correct nested lowering or an
-    # honest GAP, never a silently-wrong value.
+subtest 'a NESTED branch-guarded store is visible after both joins' => sub {
+    # Nested branches were out of scope for the old flat if/else work and were
+    # refused there; T2 lowers them. Both the inner arm taken and not taken
+    # are asserted, so a store leaking past an untaken inner arm fails.
     my ($kind, $out) = lower_and_run('my @a=(1,2,3); my $c=1; my $d=1; if($c){if($d){$a[0]=7}} $a[0]');
-    isnt($kind, 'value', "nested branch store does not silently lower (got $kind:$out)");
+    is("$kind:$out", 'value:7', 'nested store taken -> 7');
+    my ($k0, $o0) = lower_and_run('my @a=(1,2,3); my $c=1; my $d=0; if($c){if($d){$a[0]=7}} $a[0]');
+    is("$k0:$o0", 'value:1', 'inner arm not taken -> 1');
 };
 
 subtest 'an element read-modify-write stores back (019f342f)' => sub {
