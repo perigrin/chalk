@@ -158,7 +158,7 @@ my sub method_name($method) {
         is(scalar $body->@*, 1, 'die merge: method body has 1 item');
         isa_ok($body->[0], 'Chalk::IR::Node::Unwind', 'die merge: body item is Unwind CFG node');
 
-        my $args = $body->[0]->inputs()->[1];
+        my $args = $body->[0]->value;   # Unwind: inputs[0]=value (Unwind.pm)
         is($args->[0]->value(), 'something went wrong', 'die merge: message preserved');
     }
 }
@@ -250,7 +250,7 @@ my sub method_name($method) {
                 parent      => $cparent,
                 method_name => method_name($method),
                 body_class  => ref($mbody->[0]),
-                die_msg     => $mbody->[0]->inputs()->[1][0]->value(),
+                die_msg     => $mbody->[0]->value->[0]->value(),   # Unwind: inputs[0]=value
             };
         } else {
             push @results, { seed => $seed, error => 'no IR' };
@@ -502,7 +502,7 @@ my sub method_name($method) {
         my $ret = $stmts->[0];
         ok($ret isa Chalk::IR::Node::Return, 'return scalar deref: is Return CFG node');
 
-        my $value = $ret->inputs()->[1];  # inputs[0]=control, inputs[1]=value
+        my $value = $ret->value;   # Return: inputs[0]=value, control in control_in
         ok(defined $value, 'return scalar deref: return value defined');
         is($value->class(), 'Call', 'return scalar deref: value is Call(scalar)');
         is($value->inputs()->[0]->value(), 'scalar', 'return scalar deref: builtin name');

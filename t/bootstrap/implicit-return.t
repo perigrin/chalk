@@ -106,10 +106,8 @@ my sub parse_source($source) {
                             isa_ok($ret_node, 'Chalk::IR::Node::Return',
                                 'first return is a Return node');
 
-                            # The Return node's inputs: [control, value]
-                            # The value input should be a Constant node with value 'Add'
-                            my $inputs = $ret_node->inputs();
-                            my $value_input = $inputs->[1];
+                            # Return: inputs[0] is the value; control rides control_in.
+                            my $value_input = $ret_node->value;
                             ok(defined $value_input,
                                 'Return node has a value input (the implicit return value)');
                         }
