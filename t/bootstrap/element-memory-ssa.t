@@ -251,22 +251,29 @@ subtest 'a do-block in a loop body with a body-local var lowers correctly (zhi 0
         "do-block accumulator lowers to 6 or GAPs, never a silent wrong value (got $k:$o)");
 };
 
-subtest 'unsound drain shapes GAP, never miscompile (soundness guards)' => sub {
-    # Each of these was found (adversarial verification) to miscompile/crash/hang
-    # before its guard. The in-place drain destroys the pre-loop array, so any of
-    # these shapes must GAP loudly rather than mislower:
-    #  - the drained array is ALSO read before the loop (`scalar @q`);
-    #  - the body RE-FILLS the array (`push @q, ...`);
-    #  - `defined(my $x = shift @q)` as the condition (Defined is not an icmp).
-    for my $body (
-        'my @q=(5,6,7); my $before=scalar @q; my $s=0; while (my $x=shift @q){$s+=$x} $before',
-        'my @q=(3); my $s=0; while (my $x = shift @q) { $s += $x; push @q, $x - 1 } $s',
-        'my @q=(1,2,0,3); my $s=0; while (defined(my $x = shift @q)) { $s += $x } $s',
-    ) {
-        my ($kind, $out) = lower_and_run($body);
-        isnt($kind, 'value', "[$body] does NOT lower to a value (GAPs)")
-            or diag("unexpectedly lowered to: $out");
-    }
+subtest 'drain shapes that touch the array besides the drain (soundness guards)' => sub {
+    # Each of these once miscompiled, crashed or hung. Two now lower right:
+    #  - the drained array is ALSO read before the loop (`scalar @q`): a read
+    #    at its own memory version sees the array as it stood (05bb1a05);
+    #  - the body RE-FILLS the array (`push @q, ...`): shift now gives up the
+    #    room of the slot it drops, so the push grows the buffer instead of
+    #    writing past it (it corrupted the heap).
+    my ($bk, $bo) = lower_and_run(
+        'my @q=(5,6,7); my $before=scalar @q; my $s=0; while (my $x=shift @q){$s+=$x} $before');
+    is("$bk:$bo", 'value:3', 'a pre-loop scalar @q is the count before the drain -> 3');
+    my ($rk, $ro) = lower_and_run(
+        'my @q=(3); my $s=0; while (my $x = shift @q) { $s += $x; push @q, $x - 1 } $s');
+    is("$rk:$ro", 'value:6', 'a drain the body re-fills -> 3+2+1 = 6');
+    my ($gk, $go) = lower_and_run(
+        'my @q=(1,2,3); my $s=0; while (my $x = shift @q) { $s += $x; push @q, 7, 8, 9 if $x == 2 } $s');
+    is("$gk:$go", 'value:30', 'a re-fill past the original buffer grows it -> 1+2+3+7+8+9 = 30');
+
+    #  - `defined(my $x = shift @q)` as the condition (Defined is not an icmp)
+    #    is still refused, never a wrong value.
+    my $body = 'my @q=(1,2,0,3); my $s=0; while (defined(my $x = shift @q)) { $s += $x } $s';
+    my ($kind, $out) = lower_and_run($body);
+    isnt($kind, 'value', "[$body] does NOT lower to a value (GAPs)")
+        or diag("unexpectedly lowered to: $out");
 
     # A drain over a constant RANGE `(1..4)` now lowers correctly (the folded
     # const AV is expanded to a 4-element ArrayRef, zhi 019f5942) -- it is no

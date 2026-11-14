@@ -16707,6 +16707,14 @@ sub _lower_builtin_shift_pop {
         my $new_elems = $self->_fresh;
         $self->_emit("  $new_elems = getelementptr inbounds %Slot, %Slot* $elems, i64 1  ; shift: drop front (elems+1)");
         $self->_emit("  store %Slot* $new_elems, %Slot** $elem_ptr  ; shift: store advanced elems");
+        # cap counts the room from elems: past the dropped slot there is one
+        # less. Left as it was, a push after a shift saw room it did not have
+        # and wrote one slot past the buffer (`shift @q; push @q, $x`).
+        my ($cap_ptr, $cap, $new_cap) = map { $self->_fresh } 1 .. 3;
+        $self->_emit("  $cap_ptr = getelementptr inbounds %Array, %Array* $arr_ref, i32 0, i32 1  ; shift: cap ptr");
+        $self->_emit("  $cap = load i64, i64* $cap_ptr  ; shift: load cap");
+        $self->_emit("  $new_cap = sub i64 $cap, 1  ; shift: one less room past the dropped slot");
+        $self->_emit("  store i64 $new_cap, i64* $cap_ptr  ; shift: store new cap");
     }
     $self->_set_terminator("  br label \%$lbl_end");
 
