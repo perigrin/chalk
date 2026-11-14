@@ -24,6 +24,9 @@ class Chalk::IR::Node::CellRead :isa(Chalk::IR::Value) {
     # rather than as an opaque box.
     method operation() { 'CellRead' }
 
+    # memory_operand -> it reads at its second input (the first is what it reads).
+    method memory_operand() { return $self->inputs->[1] }
+
     # A MUTABLE-LOCATION LOAD, exactly like PadAccess/Subscript/FieldAccess.
     # Its lowered value is program-point-dependent -- a later write changes
     # what an identical read returns -- so it must re-lower at every

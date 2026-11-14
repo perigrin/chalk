@@ -8,6 +8,9 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::Assign :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'Assign' }
+
+    # A MEMORY VERSION: a store (a read after it reads at it).
+    method is_memory_version() { return 1 }
     method staleness_kind() { 'opaque' }
 
     # FIXED: a store: it writes, so it is pinned to a point in the chain

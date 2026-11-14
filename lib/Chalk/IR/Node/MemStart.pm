@@ -8,6 +8,9 @@ use Chalk::IR::Node;
 
 class Chalk::IR::Node::MemStart :isa(Chalk::IR::Node) {
     method operation() { 'MemStart' }
+
+    # A MEMORY VERSION: the function's first, what a read before any store reads at.
+    method is_memory_version() { return 1 }
     method staleness_kind() { 'opaque' }
     sub identity_kind { 'hash_consed' }
 }

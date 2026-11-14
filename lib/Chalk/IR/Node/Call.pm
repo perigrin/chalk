@@ -107,6 +107,14 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
 
 
     method operation() { 'Call' }
+
+    # memory_operand -> the memory version it follows (its last input), where
+    # it has one (memory_input).
+    method memory_operand() { return $memory_input ? $self->inputs->[-1] : undef }
+
+    # A MEMORY VERSION where it runs as a statement (pinned): the callee may
+    # store anything.
+    method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'opaque' }
 
     # FIXED: may do anything, including I/O and aborting

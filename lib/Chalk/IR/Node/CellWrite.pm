@@ -21,6 +21,9 @@ class Chalk::IR::Node::CellWrite :isa(Chalk::IR::Value) {
     # which is why a capture cannot be a value on an edge: there would be
     # nothing for the write to reach.
     method operation() { 'CellWrite' }
+
+    # A MEMORY VERSION: a store (a read after it reads at it).
+    method is_memory_version() { return 1 }
     method staleness_kind() { 'opaque' }
 
     # PER-CALL, for the reason ListAppend is. Two writes of the same value to

@@ -20,6 +20,9 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
     field $package :param :reader = undef;   # (without strict refs a string names its variable)
 
     method operation() { 'PostfixDeref' }
+
+    # memory_operand -> it reads at its second input (the first is what it reads).
+    method memory_operand() { return $self->inputs->[1] }
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
 

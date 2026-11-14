@@ -15,6 +15,13 @@ use Chalk::IR::Node::UnaryOp;
 # arrived as Length now arrive as Count, and Length narrowed to strings.
 class Chalk::IR::Node::Count :isa(Chalk::IR::Node::UnaryOp) {
     method operation() { 'Count' }
+
+    # memory_operand -> it reads at its second input (the first is what it reads).
+    method memory_operand() { return $self->inputs->[1] }
+
+    # A MEMORY VERSION where pinned: B::SoN pins a read of a tied aggregate (a
+    # method call) and versions memory at it.
+    method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
     method op_str()    { 'scalar' }

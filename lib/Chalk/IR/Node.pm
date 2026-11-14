@@ -283,6 +283,71 @@ class Chalk::IR::Node {
     }
 
     # ---------------------------------------------------------------------
+    # QUESTIONS A BACKEND ASKS OF A NODE. Each is answered from the node, its
+    # inputs and its consumers alone, so it belongs to the node: T2 asked them
+    # as subs of its own (2026-11-14, step 1a of retiring Context.pm), where
+    # the next backend could not reach them. The answer here is every node's
+    # that does not say otherwise; a class that answers differently overrides.
+    # ---------------------------------------------------------------------
+
+    # is_pinned -> true for a node on the control chain (it has a control_in).
+    method is_pinned() { return blessed($control_in) ? 1 : 0 }
+
+    # is_memory_version -> true for a MEMORY VERSION: MemStart, a store, a
+    # call made as a statement, a memory phi -- a node a read of memory reads
+    # at. A node is none unless its class says so.
+    method is_memory_version() { return 0 }
+
+    # memory_operand -> the memory version a read reads at: its MEMORY input,
+    # not any input (a statement call is a version and a value, and reading
+    # its value is not reading memory). Undef for a node that reads no memory;
+    # each read says where its memory input is.
+    method memory_operand() { return undef }
+
+    # is_package_scalar -> true for a package scalar (EntryDef says which).
+    method is_package_scalar() { return 0 }
+
+    # successors -> the nodes whose control is this one, each once.
+    method successors() {
+        my %seen;
+        return grep { blessed($_) && $_->can('control_in') && blessed($_->control_in)
+                      && refaddr($_->control_in) == refaddr($self) && !$seen{ refaddr($_) }++ }
+               $consumers->@*;
+    }
+
+    # successors_by_input -> the nodes that take this one as an input (an If's
+    # or a Loop's Projs), each once.
+    method successors_by_input() {
+        my %seen;
+        return grep { blessed($_) && ( grep { blessed($_) && refaddr($_) == refaddr($self) } $_->inputs->@* ) && !$seen{ refaddr($_) }++ }
+               $consumers->@*;
+    }
+
+    # memory_phis -> the memory phis merging at this node (a Region's, a
+    # Loop's; no other node is a phi's region), each once.
+    method memory_phis() {
+        my %seen;
+        return grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($self)
+                      && $_->is_memory && !$seen{ refaddr($_) }++ }
+               grep { blessed($_) } $consumers->@*;
+    }
+
+    # flows_into_choice -> true when this value flows into a choice (?:, &&,
+    # ||, //, a phi), through what it feeds -- not through a memory version, a
+    # Return or a Print. Made unconditionally, it might be made where perl's
+    # is not.
+    method flows_into_choice($seen = {}) {
+        return 0 if $seen->{ refaddr($self) }++;
+        for my $c (grep { blessed($_) } $consumers->@*) {
+            my $op = $c->operation;
+            return 1 if $op =~ /\A(?:TernaryExpr|And|Or|DefinedOr|Phi)\z/;
+            next if $c->is_memory_version || $op =~ /\A(?:Return|Print)\z/;
+            return 1 if $c->flows_into_choice($seen);
+        }
+        return 0;
+    }
+
+    # ---------------------------------------------------------------------
     # DEPRECATED ALIAS. `representation` and `set_representation` are the same
     # storage as `stamp`/`set_stamp` -- ONE FIELD, TWO NAMES.
     #

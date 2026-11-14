@@ -29,6 +29,9 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     field $file :param :reader = 0;
 
     method operation() { 'PadAccess' }
+
+    # memory_operand -> a variable kept in memory is read at its input's version.
+    method memory_operand() { return $self->is_location ? $self->inputs->[0] : undef }
     sub identity_kind { q(hash_consed) }
 
     # A SCALAR THAT IS A LOCATION is read and stored through memory, not

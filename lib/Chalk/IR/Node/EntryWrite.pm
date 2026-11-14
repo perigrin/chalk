@@ -8,6 +8,9 @@ use Chalk::IR::Value;
 class Chalk::IR::Node::EntryWrite :isa(Chalk::IR::Value) {
     field $binds :param :reader = 0;
     method operation() { 'EntryWrite' }
+
+    # A MEMORY VERSION: a store (a read after it reads at it).
+    method is_memory_version() { return 1 }
     method staleness_kind() { 'opaque' }
     method is_fixed() { return true }
 }

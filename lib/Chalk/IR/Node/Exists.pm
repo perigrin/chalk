@@ -8,5 +8,12 @@ use Chalk::IR::Node::Access;
 class Chalk::IR::Node::Exists :isa(Chalk::IR::Node::Access) {
     field $kind :param :reader = undef;
     method operation() { 'Exists' }
+
+    # memory_operand -> it reads at its third input (after the aggregate and the key).
+    method memory_operand() { return $self->inputs->[2] }
+
+    # A MEMORY VERSION where pinned: B::SoN pins a read of a tied aggregate (a
+    # method call) and versions memory at it.
+    method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'opaque' }
 }

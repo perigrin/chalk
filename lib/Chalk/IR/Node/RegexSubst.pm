@@ -14,6 +14,9 @@ class Chalk::IR::Node::RegexSubst :isa(Chalk::IR::Node::Regex) {
     field $pattern_is_input :param :reader = 0;
 
     method operation() { 'RegexSubst' }
+
+    # A MEMORY VERSION where pinned: it stores its subject's new string (in place).
+    method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'opaque' }
 
     # FIXED: s/// mutates its subject

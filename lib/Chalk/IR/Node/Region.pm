@@ -56,4 +56,32 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node) {
         $head = $node;
         return;
     }
+
+    # goes_on -> true when control goes on from this merge: a statement after
+    # it, or a Region it is a way into that goes on (a loop's latch has
+    # neither: one that feeds only the latch does not).
+    method goes_on() {
+        return $self->successors || grep { blessed($_) && $_->operation eq 'Region' && ( grep { blessed($_) && refaddr($_) == refaddr($self) } $_->inputs->@* ) && $_->goes_on } $self->consumers->@*;
+    }
+
+    # out_regions -> the Regions this one is a way into, each once.
+    method out_regions() {
+        my %seen;
+        return grep { blessed($_) && $_->operation eq 'Region' && !$seen{ refaddr($_) }++ && grep { blessed($_) && refaddr($_) == refaddr($self) } $_->inputs->@* } $self->consumers->@*;
+    }
+
+    # reached_by($ctl) -> true when control $ctl reaches this merge by the
+    # control it goes on to: through the Regions it feeds, and what they head.
+    method reached_by($ctl) {
+        my (%seen, @q);
+        @q = ($ctl);
+        while (defined(my $n = shift @q)) {
+            next if $seen{ refaddr($n) }++;
+            return 1 if refaddr($n) == refaddr($self);
+            push @q, grep { blessed($_) && ( $_->operation eq 'Region'
+                            || ( $_->can('control_in') && blessed($_->control_in) && refaddr($_->control_in) == refaddr($n) ) ) }
+                ( $n->consumers // [] )->@*;
+        }
+        return 0;
+    }
 }

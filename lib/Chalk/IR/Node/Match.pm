@@ -8,6 +8,10 @@ use Chalk::IR::Node::BinOp;
 
 class Chalk::IR::Node::Match :isa(Chalk::IR::Node::BinOp) {
     method operation() { 'Match' }
+
+    # A MEMORY VERSION where pinned: B::SoN versions memory at a pinned match
+    # (a /g's pos); no value changes there.
+    method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'opaque' }
 
     # FIXED: sets the capture state a later $N read depends on

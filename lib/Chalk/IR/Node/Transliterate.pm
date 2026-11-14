@@ -10,6 +10,9 @@ class Chalk::IR::Node::Transliterate :isa(Chalk::IR::Value) {
     field $to    :param :reader = '';
     field $flags :param :reader = '';
     method operation() { 'Transliterate' }
+
+    # A MEMORY VERSION where pinned: it stores its subject's new string (in place).
+    method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'opaque' }
     method is_fixed() { return true }
 }

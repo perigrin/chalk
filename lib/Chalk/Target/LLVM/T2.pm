@@ -201,15 +201,6 @@ sub build {
     $b->{cur}{term} = [ 'ret' ];
 }
 
-# successors($ctl) -> the nodes whose control is $ctl, each once.
-sub successors {
-    my ($ctl) = @_;
-    my %seen;
-    return grep { blessed($_) && $_->can('control_in') && blessed($_->control_in)
-                  && refaddr($_->control_in) == refaddr($ctl) && !$seen{ refaddr($_) }++ }
-           ( $ctl->consumers // [] )->@*;
-}
-
 # walk($ctl): the statements after $ctl, in order, to a Return or the end of
 # a body. A statement of a kind T2 does not have makes the program fall back:
 # skipped, its effect would be lost.
@@ -221,7 +212,7 @@ sub walk {
         # at its Region, where the body's end and its catch meet.
         $b->open_eval($ctl);
         if (my $r = $b->eval_region_after($ctl)) { $ctl = $b->close_eval($r); next }
-        my @s = successors($ctl);
+        my @s = $ctl->successors;
         # ONLY THE PROGRAM'S Return ends it: another hung on the same control is
         # not this program's (a graph built over an earlier one).
         @s = grep { $_->operation ne 'Return' || refaddr($_) == refaddr($b->{ret}) } @s;
@@ -237,10 +228,10 @@ sub walk {
         # makes a waiting read at the store right after the read's own version)
         $b->{at}{ refaddr($s) } = [ ++$b->{seq}, refaddr( $b->{cur} // 0 ) ];
         # A STATEMENT A READ TAKES AS ITS MEMORY must be a version T2 orders
-        # reads by (_is_version): a new store kind missing there let reads after
+        # reads by (is_memory_version): a new store kind missing there let reads after
         # it be made after the next store (three wrong answers, slices 14-15).
         out("a statement $op that versions memory T2 does not order reads by")
-            if !_is_version($s) && grep { my $m = blessed($_) ? _memory_input($_) : undef; blessed($m) && refaddr($m) == refaddr($s) } ( $s->consumers // [] )->@*;
+            if !$s->is_memory_version && grep { my $m = blessed($_) ? $_->memory_operand : undef; blessed($m) && refaddr($m) == refaddr($s) } ( $s->consumers // [] )->@*;
         return $ctl if $op eq 'Return';
         if ($op eq 'Print') {
             # TO STDOUT OR STDERR BY NAME (B::SoN: has_filehandle, the glob
@@ -380,7 +371,7 @@ sub walk {
         # reading the global $_ needs it -- none in the program, a no-op.
         elsif ($op eq 'LocalAlias' && ( $s->can('name') ? $s->name // '' : '' ) eq '_') {
             out('a $_ aliased where the program reads $_')
-                if grep { _pkg_scalar($_) && $_->symbol eq '_' && grep { blessed($_) && $_->operation ne 'EntryWrite' } ( $_->consumers // [] )->@* }
+                if grep { $_->is_package_scalar && $_->symbol eq '_' && grep { blessed($_) && $_->operation ne 'EntryWrite' } ( $_->consumers // [] )->@* }
                    _all_nodes($b->{mop}, $b->{ret});
             $ctl = $s;
         }
@@ -397,13 +388,13 @@ sub walk {
         # for both -- the outer eval's message printed the inner's, "in" for
         # "out". Forgetting it would make a value saved from the first, used
         # later, read the second. A $@ read already made is refused here.)
-        elsif ($op eq 'EntryDef' && _pkg_scalar($s)) {
+        elsif ($op eq 'EntryDef' && $s->is_package_scalar) {
             out('a $@ read B::SoN made one node with an earlier one') if $s->symbol eq '@' && $b->{memo}{ refaddr($s) };
             $b->value($s);
             $ctl = $s;
         }
         # A PACKAGE SCALAR WRITTEN: what it held is read first, then stored.
-        elsif ($op eq 'EntryWrite' && _pkg_scalar($s->inputs->[0])) {
+        elsif ($op eq 'EntryWrite' && ( $s->inputs->[0] isa Chalk::IR::Node && $s->inputs->[0]->is_package_scalar )) {
             out('a local') if $s->can('local') && $s->local;
             my $val = $b->as($b->value($s->inputs->[1]), '%Slot');
             $b->hash_reads_settled('a package store');
@@ -589,7 +580,7 @@ sub close_eval {
         $b->{memo}{ refaddr($p) } = @vals == 1 ? $vals[0]
             : $b->emit(op => 'Phi', type => $ty, inputs => \@vals, attr => { from => [@from] });
     }
-    push $b->{passed}->@*, $r, _memory_phis($r);   # (its join's memory version: B::SoN's, the $@ a die set)
+    push $b->{passed}->@*, $r, $r->memory_phis;   # (its join's memory version: B::SoN's, the $@ a die set)
     return $r;
 }
 
@@ -661,24 +652,10 @@ sub hash_reads_settled {
             // ( $ver->operation eq 'MemStart' ? [ 0, refaddr( $b->{blocks}[0] // 0 ) ] : undef );   # (the function's entry: before its first statement)
         my $next = $at && $at->[0] == $b->{seq} - 1 && $at->[1] == refaddr( $b->{cur} // 0 );
         out("a read through a reference waiting across $what")
-            unless $next && !grep { _guarded($_, {}) } @waiting;
+            unless $next && !grep { $_->flows_into_choice } @waiting;
         $b->value($_) for @waiting;
     }
     $b->reads_before($_) for $b->{passed}->@*;
-}
-
-# _guarded($n) -> true when a value $n flows into a choice (?:, &&, ||, //, a
-# phi): made unconditionally, it might be made where perl's is not.
-sub _guarded {
-    my ($n, $seen) = @_;
-    return 0 if $seen->{ refaddr($n) }++;
-    for my $c (grep { blessed($_) } +($n->consumers // [])->@*) {
-        my $op = $c->operation;
-        return 1 if $op =~ /\A(?:TernaryExpr|And|Or|DefinedOr|Phi)\z/;
-        next if _is_version($c) || $op =~ /\A(?:Return|Print)\z/;
-        return 1 if _guarded($c, $seen);
-    }
-    return 0;
 }
 
 # _through_ref($read) -> true for a read through a reference: a hash element,
@@ -867,51 +844,16 @@ sub reads_before {
     # there (ref_reads_settled), not made after it.
     # (a read pinned on the chain is made where it stands -- a $@ read made
     # early read the inner eval's message after the outer's die: "in" for "out")
-    $b->value($_) for grep { !_pinned($_) && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_) }
+    $b->value($_) for grep { !$_->is_pinned && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_) }
         +($b->{readers}{ refaddr($version) } // [])->@*;
 }
 
 sub _needs_unmade_phi {
     my ($b, $n, $seen) = @_;
     return 0 unless blessed($n) && $n->can('operation') && !$seen->{ refaddr($n) }++;
-    return 0 if $b->{memo}{ refaddr($n) } || _is_version($n);
+    return 0 if $b->{memo}{ refaddr($n) } || $n->is_memory_version;
     return 1 if $n->operation eq 'Phi';
     return scalar grep { $b->_needs_unmade_phi($_, $seen) } $n->inputs->@*;
-}
-
-# _is_version($n) -> true for a memory version: MemStart, a store, a call made
-# as a statement, a memory phi.
-sub _is_version {
-    my ($n) = @_;
-    return 0 unless blessed($n) && $n->can('operation');
-    my $op = $n->operation;
-    return 1 if $op =~ /\A(?:MemStart|Assign|EntryWrite|Delete|CellWrite)\z/;   # a store's version
-    return 1 if $op eq 'Call' && $n->can('control_in') && blessed($n->control_in);
-    # A READ OF A TIED AGGREGATE is a method call: B::SoN pins it and versions memory at it.
-    return 1 if $op =~ /\A(?:Subscript|Count|Exists)\z/ && $n->can('control_in') && blessed($n->control_in);
-    # A PINNED MATCH: B::SoN versions memory at it (a /g's pos); no value changes there.
-    return 1 if $op =~ /\A(?:RegexMatch|Match)\z/ && $n->can('control_in') && blessed($n->control_in);
-    # A PINNED s/// stores its subject's new string (in place).
-    return 1 if $op =~ /\A(?:RegexSubst|Transliterate)\z/ && $n->can('control_in') && blessed($n->control_in);
-    return $op eq 'Phi' && $n->is_memory ? 1 : 0;
-}
-
-# _memory_input($n) -> the memory version a read reads at: its MEMORY input,
-# not any input -- a statement call is a version and a value, and reading its
-# value is not reading memory (taken so, fact's recursive call was made before
-# its if: unbounded). Each op says where its memory input is.
-sub _memory_input {
-    my ($n) = @_;
-    my $op = $n->operation;
-    my @in = $n->inputs->@*;
-    return $in[0] if $op eq 'PadAccess' && $n->is_location;
-    return $in[2] if $op eq 'Subscript' || $op eq 'Exists';
-    return $in[0] if _pkg_scalar($n);   # a package scalar's read, at its version
-    return $in[0] if $op eq 'FieldAccess';
-    return $in[1] if $op eq 'CellRead';
-    return $in[1] if $op eq 'Count' || $op eq 'PostfixDeref';
-    return $in[-1] if $op eq 'Call' && $n->can('memory_input') && $n->memory_input;
-    return undef;
 }
 
 # index_readers(@nodes): each memory version's reads -- the nodes, not on the
@@ -922,20 +864,20 @@ sub index_readers {
     for my $n (@nodes) {
         next if $n->can('control_in') && blessed($n->control_in);
         next if $n->operation =~ /\A(?:Phi|Region|Proj|Start|Return|MemStart)\z/;
-        my $m = _memory_input($n);
-        push $r{ refaddr($m) }->@*, $n if _is_version($m);
+        my $m = $n->memory_operand;
+        push $r{ refaddr($m) }->@*, $n if $m isa Chalk::IR::Node && $m->is_memory_version;
     }
     # A PACKAGE SCALAR READ WITH NO VERSION: B::SoN reads a write's target
     # node (`$x += 1` reads the node it writes). One write: the read is at that
     # write's memory. Several (local's save, store, restore): no one version --
     # refused where it is read. None: the function's starting memory.
     my @starts = grep { $_->operation eq 'MemStart' } @nodes;
-    for my $n (grep { ( _pkg_scalar($_) || $_->operation eq 'FieldAccess' ) && !$_->inputs->@* } @nodes) {
+    for my $n (grep { ( $_->is_package_scalar || $_->operation eq 'FieldAccess' ) && !$_->inputs->@* } @nodes) {
         my @w = grep { $_->operation =~ /\A(?:EntryWrite|Assign)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($n) }
             ( $n->consumers // [] )->@*;
         my %seen; @w = grep { !$seen{ refaddr($_) }++ } @w;
         if (@w > 1) { $b->{unversioned}{ refaddr($n) } = 1; next }
-        push $r{ refaddr($_) }->@*, $n for @w ? grep { _is_version($_) } $w[0]->inputs->[2] : @starts;
+        push $r{ refaddr($_) }->@*, $n for @w ? grep { $_ isa Chalk::IR::Node && $_->is_memory_version } $w[0]->inputs->[2] : @starts;
     }
     $b->{readers} = \%r;
 }
@@ -1059,19 +1001,16 @@ sub _is_list_target {
 # make_constant_arrays(@nodes): an array whose literal holds only constants
 # (`my @a = (1, 2)`, `my @a`) is made in the entry block -- first made where it
 # was first used, in a loop body it was made again each pass.
-# _pinned($n) -> true for a node on the control chain.
-sub _pinned { my ($n) = @_; return $n->can('control_in') && blessed($n->control_in) ? 1 : 0 }
-
 sub make_constant_arrays {
     my ($b, @nodes) = @_;
     for my $lit (grep { $_->operation eq 'ArrayLiteral' } @nodes) {
-        next if _pinned($lit);   # a `my @a` pinned where it runs: made there
+        next if $lit->is_pinned;   # a `my @a` pinned where it runs: made there
         next if _pkg_literal_of($lit);   # a package array, read where it is read
         next if grep { !( blessed($_) && $_->operation eq 'Constant' ) } $lit->inputs->@*;
         $b->value($lit);
     }
     # A `my %h = (...)` of constants, or of @_, is made at entry too.
-    for my $lit (grep { $_->operation eq 'HashLiteral' && ( $_->stamp // '' ) eq 'Hash' && !_pinned($_) && !_pkg_literal_of($_) } @nodes) { # static type
+    for my $lit (grep { $_->operation eq 'HashLiteral' && ( $_->stamp // '' ) eq 'Hash' && !$_->is_pinned && !_pkg_literal_of($_) } @nodes) { # static type
         next if grep { !( blessed($_) && ( $_->operation =~ /\A(?:Constant|ArgsSource)\z/ || $b->{args}{ refaddr($_) } ) ) } $lit->inputs->@*;
         $b->value($lit);
     }
@@ -1085,10 +1024,10 @@ sub hash_value {
     if ($op eq 'HashLiteral') {
         my $st = $v->stamp // ''; # static type
         out('a hash that is not a {...} or a `my %h`') unless $st =~ /\A(?:HashRef|Hash)\z/;
-        out('a {...} not made where it runs') if $st eq 'HashRef' && !_pinned($v);
+        out('a {...} not made where it runs') if $st eq 'HashRef' && !$v->is_pinned;
         # A `my %h` NOT MADE AT ENTRY, needed in an arm or a loop body, would be
         # made there -- again each pass, and gone after.
-        out('a hash first made in an arm or a loop body') if $st eq 'Hash' && $b->{depth} && !_pinned($v);
+        out('a hash first made in an arm or a loop body') if $st eq 'Hash' && $b->{depth} && !$v->is_pinned;
         my $h = $b->emit(op => 'HNew', type => '%Slot');
         if (grep { _is_list($_) } @in) {   # `my %o = @_`, `{ %$r, k => 1 }`: pairs of a list
             my $l = $b->emit(op => 'NewArray', type => '%Array*');
@@ -1304,7 +1243,7 @@ sub array_value {
     if ($op eq 'ArrayLiteral') {
         # ONE NOT MADE AT ENTRY, needed in an arm or a loop body, would be made
         # there -- again each pass, and gone after.
-        out('an array first made in an arm or a loop body') if $b->{depth} && !_pinned($v);
+        out('an array first made in an arm or a loop body') if $b->{depth} && !$v->is_pinned;
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
         for my $e (@in) {
             # A LIST IN IT is flattened: its elements appended (`(keys %h)`, `(@a, 4)`).
@@ -1475,16 +1414,6 @@ sub _aderef {
     return blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '@' ) eq '@';
 }
 
-# A PACKAGE SCALAR (`our $g`, `$::s`, `$P::v`): one global %Slot every sub
-# reads and writes. perl's own ($/, $", $0, $_, ...) are not. ($a and $b ARE: a sort sets them before each call of its comparator.)
-# ($_ is one: B::SoN spells a foreach's aliasing as stores to it, the
-# element written back, and its value restored after.)
-my %PERLS_OWN = map { ( $_ => 1 ) } qw(ARGV ENV INC STDIN STDOUT STDERR 0 AUTOLOAD);
-sub _pkg_scalar {
-    my ($n) = @_;
-    return blessed($n) && $n->operation eq 'EntryDef' && ( $n->sigil // '' ) eq '$'
-        && ( ( $n->symbol // '' ) =~ /\A[A-Za-z_]\w*\z/ && !$PERLS_OWN{ $n->symbol } || ( $n->symbol // '' ) eq '@' );   # ($@: the runtime's, die sets it)
-}
 sub global_of {
     my ($b, $n) = @_;
     return '@t2_err' if $n->symbol eq '@';
@@ -1540,7 +1469,7 @@ sub _list_use {
         # (the call as a memory version -- a read after it, a store's memory --
         # is not a use of its value)
         # (only its memory position: `push @a, f()` has f() as its value AND its memory)
-        my $m = _memory_input($u);
+        my $m = $u->memory_operand;
         if (blessed($m) && refaddr($m) == refaddr($c)) {
             my ($mi) = reverse grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($m) } 0 .. $u->inputs->$#*;
             @pos = grep { $_ != $mi } @pos;
@@ -1678,7 +1607,7 @@ sub _value_read {
     my ($b, $n) = @_;
     for my $c (grep { blessed($_) } ( $n->consumers // [] )->@*) {
         my @in = $c->inputs->@*;
-        my $mem = _memory_input($c) // ( $c->operation =~ /\A(?:EntryDef|PadAccess)\z/ ? $in[0] : undef );
+        my $mem = $c->memory_operand // ( $c->operation =~ /\A(?:EntryDef|PadAccess)\z/ ? $in[0] : undef );
         my $skip = blessed($mem) && refaddr($mem) == refaddr($n) ? 1 : 0;
         my $uses = grep { blessed($_) && refaddr($_) == refaddr($n) } @in;
         return 1 if $uses > $skip;
@@ -1785,7 +1714,7 @@ sub element_store {
 # a phi of each value the Region merges, from the end of each arm.
 sub if_stmt {
     my ($b, $if) = @_;
-    my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } successors_by_input($if);
+    my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } $if->successors_by_input;
     out('an if without two arms') unless $proj{0} && $proj{1};
     # EVERY READ MADE SO FAR IS MADE HERE, before the arms: one built in an arm
     # (before a store there) is the arm's, and a use after the join would load
@@ -1831,7 +1760,7 @@ sub if_stmt {
     # other, which is where its statements continue (pvm 093).
     unless ($region && grep { refaddr($_) == refaddr($end{1}) } grep { blessed($_) } $region->inputs->@*) {
         my %far = map { my $i = $_; ( $i => [ grep { $_->operation eq 'Region' } ( $end{$i}->consumers // [] )->@* ] ) } 0, 1;
-        my ($jump) = grep { my $i = $_; $far{$i}->@* == 1 && _merges_further($far{$i}[0], $end{ 1 - $i }) } 0, 1;
+        my ($jump) = grep { my $i = $_; $far{$i}->@* == 1 && $far{$i}[0]->reached_by($end{ 1 - $i }) } 0, 1;
         out('an if whose arms do not meet') unless defined $jump;
         my $r = $far{$jump}[0];
         push $b->{jumps}{ refaddr($r) }->@*, { $vals{$jump}->%*, end => $end{$jump} };
@@ -1875,24 +1804,8 @@ sub if_stmt {
         $b->{memo}{ refaddr($p) } = $b->emit(op => 'Phi', type => $ty,
             inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $vals{ $_->[1] }{block} } @$in ] });
     }
-    push $b->{passed}->@*, _memory_phis($region);
+    push $b->{passed}->@*, $region->memory_phis;
     return $region;
-}
-
-# _merges_further($region, $ctl) -> true when $ctl reaches $region by the
-# control it goes on to -- through the Regions it feeds, and what they head.
-sub _merges_further {
-    my ($r, $ctl) = @_;
-    my (%seen, @q);
-    @q = ($ctl);
-    while (defined(my $n = shift @q)) {
-        next if $seen{ refaddr($n) }++;
-        return 1 if refaddr($n) == refaddr($r);
-        push @q, grep { blessed($_) && ( $_->operation eq 'Region'
-                        || ( $_->can('control_in') && blessed($_->control_in) && refaddr($_->control_in) == refaddr($n) ) ) }
-            ( $n->consumers // [] )->@*;
-    }
-    return 0;
 }
 
 # join_jumps($ctl) -> the merge the walk goes on from, or undef: where control
@@ -1932,7 +1845,7 @@ sub join_jumps {
         $b->{memo}{ refaddr($p) } = $b->emit(op => 'Phi', type => $ty,
             inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $_->[1]{block} } @$in ] });
     }
-    push $b->{passed}->@*, _memory_phis($r);
+    push $b->{passed}->@*, $r->memory_phis;
     return $r;
 }
 
@@ -2387,7 +2300,7 @@ sub regex_split {
     my ($b, $c) = @_;
     my $k = 'rxp' . refaddr($c);
     return $b->{memo}{$k} if $b->{memo}{$k};
-    my ( $pat, $subj, $limit ) = grep { blessed($_) && !_is_version($_) } $c->inputs->@*;
+    my ( $pat, $subj, $limit ) = grep { blessed($_) && !$_->is_memory_version } $c->inputs->@*;
     out('a split of no subject') unless blessed($subj);
     my $fn;
     if ( blessed($pat) && $pat->operation eq 'Constant' && ( $pat->const_type // '' ) eq 'string' && ( $pat->value // '' ) eq ' ' ) {
@@ -2432,7 +2345,7 @@ sub regex_subst {
     # input) and the memory version: B::SoN makes it in the arm of a match of
     # its own -- ONCE.
     my @in = grep { blessed($_) } $s->inputs->@[ ( $s->pattern_is_input ? 2 : 1 ) .. $s->inputs->$#* ];
-    my $repl = @in && !_is_version( $in[0] ) && !( $in[0] isa Chalk::IR::Node::Phi && $in[0]->is_memory ) ? $in[0] : undef;
+    my $repl = @in && !$in[0]->is_memory_version ? $in[0] : undef;
     my $flags = $s->flags // '';
     out('an s///g whose replacement is made per match (B::SoN computes it once)') if $repl && $flags =~ /g/;
     $flags =~ s/[er]//g;
@@ -2929,7 +2842,7 @@ sub phi_type {
 # walked forward back to the header, and an exit.
 sub loop {
     my ($b, $L) = @_;
-    my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } successors_by_input($L);
+    my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } $L->successors_by_input;
     my ($bodyp, $exitp) = @proj{0, 1};
     return $b->loop_breaks($L) if !$bodyp && !$exitp && $b->loop_exit($L);
     out('a loop without a body and an exit') unless $bodyp && $exitp;
@@ -2938,7 +2851,7 @@ sub loop {
                       && !$_->is_memory } ( $L->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
-    my @cond = grep { $_->operation !~ /\A(?:Phi|Proj)\z/ } successors($L);
+    my @cond = grep { $_->operation !~ /\A(?:Phi|Proj)\z/ } $L->successors;
     out('a loop condition that is not one value') unless @cond == 1;
     out('a loop phi with other than two ways in') if grep { scalar( $_->inputs->@* ) != 2 } @phis;
 
@@ -2963,7 +2876,7 @@ sub loop {
     } 0 .. $#phis;
     # Reads at the loop's memory, each pass: made in the header, before the body
     # can store, and seen after the loop (the header runs as it exits).
-    my @mphis = _memory_phis($L);
+    my @mphis = $L->memory_phis;
     $b->reads_before($_) for @mphis;
     push $b->{passed}->@*, @mphis;
     my $cond = $b->truth($b->value($cond[0]));
@@ -2989,7 +2902,7 @@ sub loop {
     $head_end->{term} = [ 'condbr', $cond, $body, $exit ];
     my ($region) = grep { $_->operation eq 'Region' } ( $exitp->consumers // [] )->@*;
     # THE EXIT'S MEMORY is a version too: a read at it, before a store after.
-    push $b->{passed}->@*, _memory_phis($region) if $region;
+    push $b->{passed}->@*, $region->memory_phis if $region;
     return $region // $exitp;
 }
 
@@ -3022,7 +2935,7 @@ sub loop_breaks {
         my $p = $b->emit(op => 'Phi', type => $b->loop_type($phis[$_]), inputs => [ $init[$_] ], attr => { from => [$pre_end] });
         $b->{memo}{ refaddr( $phis[$_] ) } = $p;
     } 0 .. $#phis;
-    my @mphis = _memory_phis($L);
+    my @mphis = $L->memory_phis;
     $b->reads_before($_) for @mphis;
     push $b->{passed}->@*, @mphis;
     my $lx = { exit => $R, exits => [], latches => [] };
@@ -3045,9 +2958,9 @@ sub loop_breaks {
     # arm): that Region merged first, its merge one way into the next.
     while (1) {
         my %by = map { ( refaddr($_->{region}) => $_->{region} ) } grep { $_->{region} } @lat;
-        my ($inner) = grep { my $r = $_; my @o = _region_outs($r); @o == 1 } values %by;
+        my ($inner) = grep { my $r = $_; my @o = $r->out_regions; @o == 1 } values %by;
         last unless $inner;
-        my ($outer) = _region_outs($inner);
+        my ($outer) = $inner->out_regions;
         my @in = grep { $_->{region} && refaddr($_->{region}) == refaddr($inner) } @lat;
         my ( $blk, $memo ) = $b->merge_at( $inner, 'round', $head_memo, @in );
         @lat = ( ( grep { !( $_->{region} && refaddr($_->{region}) == refaddr($inner) ) } @lat ),
@@ -3073,7 +2986,7 @@ sub loop_breaks {
     my @out = grep { !$_->{block}{dead} } $lx->{exits}->@*;
     out('a loop that never leaves') unless @out;
     ( $b->{cur}, $b->{memo} ) = $b->merge_at( $R, 'exit', $outer_memo, @out );
-    push $b->{passed}->@*, _memory_phis($R);
+    push $b->{passed}->@*, $R->memory_phis;
     return $R;
 }
 
@@ -3134,7 +3047,7 @@ sub _alias_ref {
 # which has no way on), the one with a way on.
 sub loop_exit {
     my ($b, $L) = @_;
-    my @r = grep { $_->operation eq 'Region' && blessed( $_->head ) && refaddr( $_->head ) == refaddr($L) && _goes_on($_) }
+    my @r = grep { $_->operation eq 'Region' && blessed( $_->head ) && refaddr( $_->head ) == refaddr($L) && $_->goes_on }
         +($b->{own_nodes} // [])->@*;
     out('a loop with more than one exit') if @r > 1;
     return $r[0];
@@ -3145,27 +3058,11 @@ sub loop_exit {
 # reaching the sub's last merge): the walk after the loop joins it there.
 sub loop_jump {
     my ($b, $e, $arm) = @_;
-    return 0 unless blessed($e) && !successors($e);
+    return 0 unless blessed($e) && !$e->successors;
     my @r = grep { $_->operation eq 'Region' } ( $e->consumers // [] )->@*;
-    return 0 unless @r == 1 && _goes_on( $r[0] );
+    return 0 unless @r == 1 && $r[0]->goes_on;
     push $b->{jumps}{ refaddr( $r[0] ) }->@*, { %$arm, end => $e };
     return 1;
-}
-
-# _goes_on($Region) -> true when control goes on from it: a statement after
-# it, or a Region it is a way into (a latch has neither).
-sub _goes_on {
-    my ($r) = @_;
-    # (through a Region it feeds that goes on: one that feeds only the latch,
-    # a Region with no way on, does not)
-    return successors($r) || grep { blessed($_) && $_->operation eq 'Region' && ( grep { blessed($_) && refaddr($_) == refaddr($r) } $_->inputs->@* ) && _goes_on($_) } ( $r->consumers // [] )->@*;
-}
-
-# _region_outs($Region) -> the Regions it is a way into.
-sub _region_outs {
-    my ($r) = @_;
-    my %seen;
-    return grep { blessed($_) && $_->operation eq 'Region' && !$seen{ refaddr($_) }++ && grep { blessed($_) && refaddr($_) == refaddr($r) } $_->inputs->@* } ( $r->consumers // [] )->@*;
 }
 
 # loop_edge($lx, $end, $arm) -> true (and recorded) when control $end leaves
@@ -3176,9 +3073,9 @@ sub loop_edge {
     return 0 unless blessed($e);
     my @r = grep { $_->operation eq 'Region' } ( $e->consumers // [] )->@*;
     if ( @r == 1 && refaddr( $r[0] ) == refaddr( $lx->{exit} ) ) { push $lx->{exits}->@*, { %$arm, end => $e }; return 1 }
-    return 0 if successors($e);
+    return 0 if $e->successors;
     if ( !@r ) { push $lx->{latches}->@*, { %$arm, end => $e }; return 1 }
-    if ( @r == 1 && !_goes_on( $r[0] ) ) { push $lx->{latches}->@*, { %$arm, end => $e, region => $r[0] }; return 1 }
+    if ( @r == 1 && !$r[0]->goes_on ) { push $lx->{latches}->@*, { %$arm, end => $e, region => $r[0] }; return 1 }
     return 0;
 }
 
@@ -3216,23 +3113,6 @@ sub merge_at {
         $memo{ refaddr($p) } = $b->emit(op => 'Phi', type => $ty, inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $_->[1]{block} } @$in ] });
     }
     return ( $join, \%memo );
-}
-
-# _memory_phis($merge) -> the memory phis a Region or Loop merges.
-sub _memory_phis {
-    my ($m) = @_;
-    my %seen;
-    return grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($m)
-                  && $_->is_memory && !$seen{ refaddr($_) }++ }
-           grep { blessed($_) } ( $m->consumers // [] )->@*;
-}
-
-# successors_by_input($n) -> the nodes that take $n as an input (a Loop's Projs).
-sub successors_by_input {
-    my ($n) = @_;
-    my %seen;
-    return grep { blessed($_) && ( grep { blessed($_) && refaddr($_) == refaddr($n) } $_->inputs->@* ) && !$seen{ refaddr($_) }++ }
-           ( $n->consumers // [] )->@*;
 }
 
 # A LOOP PHI'S TYPE: its stamp, except a Str one, which a Num may reach on a
@@ -3290,7 +3170,7 @@ sub type_of {
     return '%Str' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
     return '%Array*' if _argv($v);
-    return '%Slot' if _pkg_scalar($v);   # what it holds is what was stored last, anywhere
+    return '%Slot' if $v->is_package_scalar;   # what it holds is what was stored last, anywhere
     return '%Slot*' if $op eq 'MakeCell' || $op eq 'CellParam';   # a captured variable's storage
     return '%Slot' if $op eq 'CellRead' || $op eq 'AnonSub';
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'indirect';
@@ -3396,7 +3276,7 @@ sub _value {
     if ($op eq 'AnonSub') { return $b->code_value($v) }
     # A push B::SoN left off the chain, a body's last statement (an ADJUST's):
     # made where its value is wanted -- its Return, the only use allowed.
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'push' && !_pinned($v)) {
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'push' && !$v->is_pinned) {
         out('a push off the chain used other than by a return')
             if grep { blessed($_) && $_->operation ne 'Return' } ( $v->consumers // [] )->@*;
         $b->array_stmt($v);
@@ -3449,7 +3329,7 @@ sub _value {
         my $slot = $b->emit(op => 'HGet', type => '%Slot', inputs => [ $self, $b->const_str($key) ]);
         return $sg eq '@' ? $b->emit(op => 'ADeref', type => '%Array*', inputs => [$slot]) : $slot;
     }
-    if (_pkg_scalar($v)) {
+    if ($v->is_package_scalar) {
         out('a package scalar read of no one version') if $b->{unversioned}{ refaddr($v) };
         return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_of($v) });
     }
@@ -3504,7 +3384,7 @@ sub _value {
     # chdir PATH: 1, or '' where it could not. A require of a file B::SoN
     # followed is done -- its subs are compiled in (1); of any other, not T2's.
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:ftdir|chdir|require)\z/) {
-        my @a = grep { blessed($_) && !_is_version($_) } $v->inputs->@*;
+        my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
         out( 'a ' . $v->name . ' of no argument' ) unless @a;
         if ( $v->name eq 'require' ) {
             my $f = $a[0];
@@ -3519,7 +3399,7 @@ sub _value {
     # int(X): X's number truncated toward zero. rand(X): a number in [0, X),
     # X 1 when absent or 0 (perl's), from libc's generator -- not perl's.
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:int|rand)\z/) {
-        my @a = grep { blessed($_) && !_is_version($_) } $v->inputs->@*;
+        my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
         out('an int of no argument (of $_)') if $v->name eq 'int' && !@a;
         my $x = @a ? $b->as( $b->value( $a[0] ), '%Slot' ) : $b->emit(op => 'Undef', type => '%Slot');
         return $b->as( $b->emit(op => $v->name eq 'int' ? 'IntOf' : 'Rand', type => '%Slot', inputs => [$x]), $ty );

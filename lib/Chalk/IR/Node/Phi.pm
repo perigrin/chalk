@@ -42,6 +42,9 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Value) {
     field $memory :param :reader = undef;
 
     method operation() { 'Phi' }
+
+    # A MEMORY VERSION where it merges memory (is_memory).
+    method is_memory_version() { return $self->is_memory ? 1 : 0 }
     method staleness_kind() { 'opaque' }
 
     # is_memory -> true for a MEMORY PHI: one merging memory versions (MemStart,
