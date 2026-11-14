@@ -77,12 +77,20 @@ subtest 'the length travels with the pointer' => sub {
         'the length rides IN the %Str value';
 };
 
-subtest 'an aggregate still GAPs, with a message that fits it' => sub {
-    # The arms above must not have widened the die into a catch-all. An
-    # ArrayRef genuinely has no stringification, and that refusal is correct.
+subtest 'a reference reads as perl prints it; what has no reading still refuses' => sub {
+    # An ArrayRef once had no stringification here and refused. It has one
+    # now (bb521c53): perl prints `ARRAY(0x...)`, Class= in front when
+    # blessed, and so does this arm.
     my $ctx = Chalk::Target::LLVM::Context->new;
-    my $err = dies { $ctx->_emit_to_str('ArrayRef', '%a', 'Coerce[ArrayRef->Str]') };
-    like $err, qr/GAP/, 'an aggregate refuses';
+    my $val = $ctx->_emit_to_str('ArrayRef', '%a', 'Coerce[ArrayRef->Str]');
+    ok defined $val, 'an ArrayRef is rendered, not refused';
+    like emitted($ctx), qr/"ARRAY"/, 'as ARRAY(0x...)';
+
+    # The arms above must not have widened the die into a catch-all. Void has
+    # no value to read, and that refusal is correct.
+    my $vctx = Chalk::Target::LLVM::Context->new;
+    my $err = dies { $vctx->_emit_to_str('Void', '%v', 'Coerce[Void->Str]') };
+    like $err, qr/^GAP: .*no stringification/, 'Void refuses, saying why';
 };
 
 done_testing;
