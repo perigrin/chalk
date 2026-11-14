@@ -247,6 +247,7 @@ sub list_only {
         next if $op eq 'Subscript' && $at0 && @pos == 1 && ( $u->can('kind') ? $u->kind // 'array' : 'array' ) eq 'array';
         next if $op eq 'Slice' && !grep { $_ == $u->inputs->$#* } @pos;   # its indices
         next if $op eq 'ListAppend' && !$at0;
+        next if $op eq 'TernaryExpr' && !$at0;   # an arm: the choice's own use decides
         next if $op eq 'Assign' && $u->can('targets') && defined $u->targets;
         next if $op eq 'Call' && ( $u->is_sub_call && !( $at0 && ( $u->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ )
                                    || ( $u->takes_a_list || ( $u->name // '' ) =~ /\A(?:push|unshift|join)\z/ ) && !$at0 );

@@ -471,6 +471,9 @@ sub array_of {
         }
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ]);
     }
+    # A CHOICE IN LIST CONTEXT (`$c ? @$x : ()`, `$c ? @a : 7`): the list of
+    # the arm taken, merged at the join.
+    return $b->list_choice($n) if blessed($n) && $n->operation eq 'TernaryExpr' && ( _is_list($n) || $b->type_of($n) eq '%Array*' );
     # A LIST A LOOP BUILDS (a phi of one, map's ListAppend) is its array.
     return $b->value($n) if blessed($n) && $n->operation =~ /\A(?:Phi|ListAppend)\z/ && $b->type_of($n) eq '%Array*';
     # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`).
@@ -503,6 +506,43 @@ sub array_of {
     out('an array that is not a `my` array (' . ( blessed($n) ? $n->operation . ( $n->can('symbol') && defined $n->symbol ? ' ' . $n->symbol : '' ) : 'none' ) . ')')
         unless blessed($n) && $b->type_of($n) eq '%Slot';
     return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ]);
+}
+
+# list_choice($TernaryExpr) -> c ? A : B read as a list: each arm made in its
+# own block as a list (a list as it is, a scalar a list of one -- B::SoN folds
+# `(7)` to 7), the arm taken's list at the join. Taken as a scalar it is
+# refused (list_only). Made once.
+sub list_choice {
+    my ($b, $v) = @_;
+    my $key = 'list:' . refaddr($v);
+    return $b->{memo}{$key} if $b->{memo}{$key};
+    $b->list_only($v, 'a choice of lists');
+    my ($cond, $then, $else) = $v->inputs->@*;
+    my $c = $b->truth($b->value($cond));
+    my $arm = sub {
+        my ($x) = @_;
+        return $b->array_of($x) if _is_list($x) || $b->type_of($x) eq '%Array*';
+        my $a = $b->emit(op => 'NewArray', type => '%Array*');
+        $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->as($b->value($x), '%Slot') ]);
+        return $a;
+    };
+    my $from = $b->{cur};
+    # (a value made in an arm is the arm's: not seen after the join)
+    my $tb = $b->new_block('then');
+    my ($tv, $ev);
+    { local $b->{memo} = { $b->{memo}->%* };
+      local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $cond, 0 );
+      $tv = $arm->($then); }
+    my $tend = $b->{cur};
+    my $eb = $b->new_block('else');
+    { local $b->{memo} = { $b->{memo}->%* };
+      $ev = $arm->($else); }
+    my $eend = $b->{cur};
+    my $jb = $b->new_block('join');
+    $from->{term} = [ 'condbr', $c, $tb, $eb ];
+    $tend->{term} = [ 'br', $jb ];
+    $eend->{term} = [ 'br', $jb ];
+    return $b->{memo}{$key} = $b->emit(op => 'Phi', type => '%Array*', inputs => [ $tv, $ev ], attr => { from => [ $tend, $eend ] });
 }
 
 # array_stmt($Call): push or unshift, or a shift or pop whose value is not used, in its
