@@ -1,0 +1,18 @@
+#!/usr/bin/env perl
+# ABOUTME: t2-case ID...  -- each pvm-corpus case through T2 alone: SAME, DIFFERS or
+# ABOUTME: REFUSED (T2's reason). ID is file:N (adjacency-02_variables:3) or the census's cNNN.
+use v5.42.0;
+use FindBin;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../t/lib";
+use Chalk::CodeGen::Harness::T2Case qw(case_by_id run_case);
+
+die "usage: t2-case ID...\n" unless @ARGV;
+my $bad = 0;
+for my $id (@ARGV) {
+    my $c = case_by_id($id) or do { say "NOCASE\t$id"; $bad++; next };
+    my $r = run_case($c);
+    say join "\t", $r->{verdict}, "$c->{id} ($c->{cid})", $r->{why} // '';
+    if ($r->{verdict} eq 'DIFFERS') { print "  got:  $r->{got}  want: $r->{want}" }
+    $bad++ unless $r->{verdict} eq 'SAME';
+}
+exit($bad ? 1 : 0);
