@@ -10,4 +10,6 @@ class Chalk::IR::Node::ElemRestore :isa(Chalk::IR::Value) {
     method operation() { 'ElemRestore' }
     method staleness_kind() { 'opaque' }
     method is_fixed() { return true }
+    # A MEMORY VERSION: a store (a read after it reads at it).
+    method is_memory_version() { return 1 }
 }

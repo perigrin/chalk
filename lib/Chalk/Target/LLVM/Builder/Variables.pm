@@ -177,8 +177,8 @@ sub index_readers {
 sub assign {
     my ($b, $s) = @_;
     return $b->list_assign($s) if $s->can('targets') && defined $s->targets;
-    out('a local') if $s->can('local') && $s->local;
     my ($target, $v) = $s->inputs->@[0, 1];
+    $b->local_elem($target) if $s->can('local') && $s->local;
     return $b->element_store($target, $v, $s) if blessed($target) && $target->operation eq 'Subscript';
     # $$r = v: into the variable r refers to; perl's die where r is none.
     if (blessed($target) && $target->operation eq 'PostfixDeref' && ( $target->sigil // '' ) eq '$') {
@@ -229,6 +229,46 @@ sub assign {
     my $val = $b->as($b->value($v), '%Slot');
     $b->emit(op => 'Store', type => 'void', inputs => [ $val, $ptr ]);
     $b->pos_reset($target);
+}
+
+# local_elem($Subscript): `local $r->{k} = ...` -- what the element held and
+# whether it existed, saved before the store (the reads B::SoN gives its
+# ElemRestore, made now); the ElemRestore at the scope's end puts them back.
+# A die unwinding past it would skip the restore: refused where one may.
+sub local_elem {
+    my ($b, $t) = @_;
+    out('a local') unless blessed($t) && $t->operation eq 'Subscript' && ( $t->can('kind') ? $t->kind // '' : '' ) eq 'hash';
+    out('a local of an element where a die may unwind past it') if $b->{has_eval};
+    my @r = grep { $_->operation eq 'ElemRestore' && ( $_->kind // '' ) eq 'hash'
+                   && refaddr( $_->inputs->[0] ) == refaddr( $t->inputs->[0] ) && refaddr( $_->inputs->[1] ) == refaddr( $t->inputs->[1] ) }
+        +($b->{own_nodes} // [])->@*;
+    out('a local of an element restored other than once') unless @r == 1;
+    $b->hash_reads_settled('a local');
+    $b->value($_) for $r[0]->inputs->@[2, 3];
+}
+
+# elem_restore($ElemRestore): the element put back where the scope ends --
+# its saved value stored, or (it did not exist) its key deleted.
+sub elem_restore {
+    my ($b, $s) = @_;
+    my ($c, $k, $old, $ex) = $s->inputs->@*;
+    out('a restore of an element not saved before its local')
+        unless $b->{memo}{ refaddr($old) } && $b->{memo}{ refaddr($ex) };
+    my $was = $b->truth( $b->{memo}{ refaddr($ex) } );
+    my $sv = $b->as( $b->{memo}{ refaddr($old) }, '%Slot' );
+    my $key = $b->as( $b->value($k), '%Str' );
+    my $h = $b->hash_of($c);
+    $b->hash_reads_settled('a local\'s restore');
+    $b->reads_before($_) for $b->{passed}->@*;
+    my $from = $b->{cur};
+    my $put = $b->new_block('restore');
+    $b->emit(op => 'HSet', type => 'void', inputs => [ $h, $key, $sv ]);
+    my $del = $b->new_block('unset');
+    $b->emit(op => 'HDelete', type => '%Slot', inputs => [ $h, $key ]);
+    my $j = $b->new_block('restored');
+    $from->{term} = [ 'condbr', $was, $put, $del ];
+    $put->{term} = [ 'br', $j ];
+    $del->{term} = [ 'br', $j ];
 }
 
 # list_assign($Assign): `my ($x, undef, $y) = LIST`. Its inputs are its

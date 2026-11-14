@@ -219,6 +219,8 @@ sub walk {
             }
             $ctl = $s;
         }
+        # A `local` ON AN ELEMENT ENDS: what it held put back (local_elem).
+        elsif ($op eq 'ElemRestore' && ( $s->kind // '' ) eq 'hash') { $b->elem_restore($s); push $b->{passed}->@*, $s; $ctl = $s }
         # `package X;` names the package code after it is in: nothing T2 reads.
         elsif ($op eq 'PackageMark') { $ctl = $s }
         # A CHOICE PINNED WHERE IT RUNS (B::SoN pins one that reads memory, `$n
