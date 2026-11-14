@@ -59,7 +59,8 @@ sub type_of {
     return $v->sigil eq '@' ? '%Array*' : '%Slot' if $v->is_package_aggregate;   # a hash is its %Slot
     return '%Slot' if $op eq 'ArrayLiteral' && ( $v->stamp // '' ) eq 'ArrayRef'; # static type
     return '%Slot' if $op eq 'Ref';
-    return '%Slot' if $op eq 'PostfixDeref' && ( $v->sigil // '' ) =~ /\A[\$%]\z/;   # (a hash: its %Slot)
+    return '%Slot' if $op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '$';
+    return $v->copy ? '%Slot' : '%Array*' if $op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '%';   # (a copy: its own hash; else its pairs)
     return '%Array*' if $op eq 'ArrayLiteral' || $v->is_array_deref || $v->is_my_array || $op eq 'ArgsSource' || $op eq 'ListAppend';
     return '%Array*' if $op eq 'Slice' || $op eq 'Range';   # a list of its own, made where it is
     return 'i64' if $op eq 'Count';

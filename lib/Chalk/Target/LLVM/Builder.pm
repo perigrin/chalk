@@ -235,7 +235,7 @@ sub _list_use {
 # a list assign, map's and grep's walk (its count and elements). Taken as a
 # scalar (a slice's last element, a range's flip-flop) it is refused.
 sub list_only {
-    my ($b, $n, $what) = @_;
+    my ($b, $n, $what, %o) = @_;
     for my $u (grep { blessed($_) } ( $n->consumers // [] )->@*) {
         my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
         next unless @pos;
@@ -244,6 +244,9 @@ sub list_only {
         next if $op eq 'Coerce' && !grep { blessed($_) && $_->operation ne 'Print' } ( $u->consumers // [] )->@*;
         next if $op =~ /\A(?:ArrayLiteral|HashLiteral|Print)\z/;
         next if $op eq 'Count' && $at0;
+        # (a hash's: its elements, keys and values are the hash's own)
+        next if $o{hash_ok} && $at0 && ( $op =~ /\A(?:Subscript|Exists|Delete)\z/
+                                         || $op eq 'Call' && ( $u->name // '' ) =~ /\A(?:keys|values|each)\z/ );
         next if $op eq 'Subscript' && $at0 && @pos == 1 && ( $u->can('kind') ? $u->kind // 'array' : 'array' ) eq 'array';
         next if $op eq 'Slice' && !grep { $_ == $u->inputs->$#* } @pos;   # its indices
         next if $op eq 'ListAppend' && !$at0;

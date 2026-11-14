@@ -50,12 +50,12 @@ my @CASES = qw(
     chalk-found-gaps:87 chalk-found-gaps:89 chalk-found-gaps:9
     chalk-found-gaps:91 chalk-found-gaps:92 chalk-found-gaps:95
     chalk-found-gaps:96 chalk-found-gaps:97 chalk-found-gaps:99
-    class-feature:1 class-feature:11 class-feature:12 class-feature:2
-    class-feature:3 class-feature:4 class-feature:5 class-feature:6
-    class-feature:7 class-feature:8 class-feature:9 code-references:1
-    code-references:2 comparison:1 comparison:2 comparison:3 comparison:4
-    comparison:5 comparison:6 compile-phase:1 compile-phase:2
-    compile-phase:3 compile-phase:4 compound-assignment:1
+    class-feature:1 class-feature:10 class-feature:11 class-feature:12
+    class-feature:2 class-feature:3 class-feature:4 class-feature:5
+    class-feature:6 class-feature:7 class-feature:8 class-feature:9
+    code-references:1 code-references:2 comparison:1 comparison:2
+    comparison:3 comparison:4 comparison:5 comparison:6 compile-phase:1
+    compile-phase:2 compile-phase:3 compile-phase:4 compound-assignment:1
     compound-assignment:2 compound-assignment:3 compound-assignment:4
     compound-assignment:5 conditionals:1 conditionals:2 conditionals:3
     conditionals:4 context-from-inside:2 declarations:1 declarations:2

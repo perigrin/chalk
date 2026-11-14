@@ -242,6 +242,31 @@ sub list_assign {
     my @in = $s->inputs->@*;
     pop @in if $s->can('memory_input') && $s->memory_input;
     my @t = splice @in, 0, $s->targets;
+    # AN ARRAY OR HASH FIELD ASSIGNED WHOLE (`@l = (9)`, `%h = $r->%*`): the
+    # list made first (it may read the field), then the field's own
+    # aggregate cleared and refilled -- a reference to it sees the new
+    # contents. Its value (a count, or the list, by context) is not T2's.
+    if (@t == 1 && blessed($t[0]) && $t[0]->operation eq 'FieldAccess' && ( $b->field_of($t[0]) )[1] =~ /\A[\@%]\z/) {
+        my $h = ( $b->field_of($t[0]) )[1] eq '%';
+        # (a read after it takes it as its memory; the next statement as its control)
+        out('the value of a list assignment to an array or hash') if grep {
+            my $u = $_;
+            my $m = $u->memory_operand;
+            $u->operation !~ /\A(?:Loop|If|Region|Proj)\z/
+                && ( grep { blessed($_) && refaddr($_) == refaddr($s) } $u->inputs->@* ) > ( blessed($m) && refaddr($m) == refaddr($s) ? 1 : 0 )
+        } grep { blessed($_) } ( $s->consumers // [] )->@*;
+        my @v = grep { blessed($_) } @in;
+        my $list = $b->emit(op => 'NewArray', type => '%Array*');
+        for my $e (@v) {
+            if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $list, $b->array_of($e) ]) }
+            else { $b->emit(op => 'APush', type => 'void', inputs => [ $list, $b->as($b->value($e), '%Slot') ]) }
+        }
+        $b->hash_reads_settled('a whole assign');
+        $b->reads_before($_) for $b->{passed}->@*;
+        $b->emit(op => $h ? 'HAssign' : 'AAssign', type => 'void', inputs => [ $h ? $b->hash_of($t[0]) : $b->array_of($t[0]), $list ]);
+        push $b->{passed}->@*, $s;
+        return;
+    }
     out('a list assignment to an array or hash') if grep {
         !( blessed($_) && ( $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$'
                             || $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'undef' ) )

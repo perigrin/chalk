@@ -56,6 +56,13 @@ sub hash_value {
         return $h;
     }
     return $b->hash_var($v) if $v->is_my_hash;
+    # %$r READ WHOLE AS A LIST: its pairs, key then value, as they are where
+    # it is read (a read through a reference, ordered as one). Taken as a
+    # scalar it is refused; its keys, count and elements go to the hash itself.
+    if ($op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '%' && !$v->copy) {
+        $b->list_only($v, 'a hash read whole', hash_ok => 1);
+        return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($v) ]);
+    }
     # `my %p = %$r` (B::SoN's copy): a new hash of r's pairs as they are here
     # -- a later store through r does not reach it. (r no hash: a stop.)
     if ($op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '%' && $v->copy) {
@@ -479,8 +486,10 @@ sub array_of {
     # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`).
     return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if ( $n isa Chalk::IR::Node && $n->is_named_hash )
         || blessed($n) && $n->operation eq 'FieldAccess' && ( $b->field_of($n) )[1] eq '%';
-    return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n->inputs->[0]) ])
-        if blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%';
+    if (blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%') {
+        return $b->value($n) unless $n->copy;   # (its pairs, read once)
+        return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]);   # (the copy's)
+    }
     # THROUGH AN ELEMENT (`$a[1][0]`, `@{$h{l}}`): the array the element holds. A
     # deref for a write B::SoN spells as the element made an array first (`//= []`).
     # (WRITTEN -- push, unshift, ... -- one undef there stops: B::SoN makes it an
