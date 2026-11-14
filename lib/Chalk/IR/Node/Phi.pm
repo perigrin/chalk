@@ -38,11 +38,54 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Value) {
 
     # Whether this Phi merges MEMORY versions rather than a value, when the
     # producer said: B::SoN flags its memory Phis. Undef is "not said", and
-    # the backend then guesses from the inputs (_is_memory_phi).
+    # is_memory then reads it from the inputs.
     field $memory :param :reader = undef;
 
     method operation() { 'Phi' }
     method staleness_kind() { 'opaque' }
+
+    # is_memory -> true for a MEMORY PHI: one merging memory versions (MemStart,
+    # an element store, ...), not values. It is a scheduling token: the read
+    # that consumes it loads the merged heap. Told from a value phi by its
+    # inputs being memory nodes; the producer's flag (memory) settles the
+    # cases the inputs alone cannot.
+    method is_memory($seen = {}) {
+        return 0 if $seen->{ refaddr($self) }++;   # a loop's phis reach each other
+        my $inputs = $self->inputs // [];
+        return 0 unless $inputs->@*;
+        for my $in ($inputs->@*) {
+            next unless blessed($in);
+            return 1 if $in->operation eq 'MemStart';
+            # an element store: an Assign whose lhs is a Subscript -- or a field,
+            # or a shared file lexical, each a location stored through memory
+            if ($in->operation eq 'Assign') {
+                return 1 if grep { blessed($_) && $_->operation eq 'Subscript' }
+                                 $in->inputs->@*;
+                my $lhs = $in->inputs->[0];
+                return 1 if blessed($lhs) && ( $lhs->operation eq 'FieldAccess'
+                    || ( $lhs->operation eq 'PadAccess' && $lhs->is_location )
+                    || ( $lhs->operation eq 'PostfixDeref' && ($lhs->sigil // '') eq '$' ) );
+            }
+            # a list assignment the producer merges as memory: its value is a List
+            # no arm can flatten (`($lo, $u) = ...` in each arm, then a push)
+            return 1 if $in->operation eq 'Assign' && ( $in->stamp // '' ) eq 'List' && $memory;  # static type
+            # a package scalar's store
+            return 1 if $in->operation eq 'EntryWrite';
+            # a direct call: an inlined sub may store any of those
+            # ...or a method call, which runs one (taking the producer's flag
+            # wholesale instead let an arm walk that cycles through, pvm 124)
+            return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') =~ /\A(?:direct|method)\z/
+                && !( defined $memory && !$memory );
+            # ...or a builtin that versions memory (a push, a sort that runs code),
+            # on a phi the producer says is memory (a value phi may merge a
+            # sort's result).
+            return 1 if $in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'builtin'
+                && $memory;
+            # a memory phi of a nested structure
+            return 1 if $in->operation eq 'Phi' && $in->is_memory($seen);
+        }
+        return 0;
+    }
 
     # NOT in the content hash, for the same reason control_in is not: it is a
     # per-use decoration recording where a value came from, not part of what

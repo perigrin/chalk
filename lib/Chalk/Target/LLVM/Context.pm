@@ -34,6 +34,7 @@ use Chalk::IR::NodeFactory;   # is_statement_node() classifier used by the value
 use Chalk::IR::Analysis;      # return_reading_for_want: which of a callee reading a callsite takes
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 use Chalk::IR::Node;   # stamp reads gate on isa Chalk::IR::Node
+use Chalk::IR::Graph;  # program_nodes, component: a program's nodes and a sub's
 use Chalk::Regex::Pattern;   # G6 front half: a constant regex read into atoms
 use List::Util ();     # min, for the arguments a callee shifts
 
@@ -1650,7 +1651,7 @@ sub _is_memory_version {
     return 1 if $op eq 'RegexMatch' && ( $node->flags // '' ) =~ /g/;
     # a match whose `(?{ ... })` blocks run writes what they write
     return 1 if $op =~ /\A(?:RegexMatch|Match)\z/ && $node->can('code_bodies') && $node->code_bodies;
-    return $op eq 'Phi' && _is_memory_phi($node) ? 1 : 0;
+    return $op eq 'Phi' && $node->is_memory ? 1 : 0;
 }
 
 # _location_ptr($pad) -> the %Slot* a location PadAccess (is_location) is
@@ -3152,7 +3153,7 @@ sub _bit_string_of {
 sub _users_by_inputs {
     my ($self, $n) = @_;
     my $ret = $self->{_program_return} or return _value_users($n);
-    my $all = $self->{_bit_all_nodes} //= [ _program_nodes($ret) ];
+    my $all = $self->{_bit_all_nodes} //= [ Chalk::IR::Graph::program_nodes($ret) ];
     return grep { my $u = $_; grep { blessed($_) && $_ == $n } $u->inputs->@* } @$all;
 }
 
@@ -3161,7 +3162,7 @@ sub _users_by_inputs {
 sub _bit_readers_of {
     my ($self, $leaf) = @_;
     my $ret = $self->{_program_return} or return ();
-    my $all = $self->{_bit_all_nodes} //= [ _program_nodes($ret) ];
+    my $all = $self->{_bit_all_nodes} //= [ Chalk::IR::Graph::program_nodes($ret) ];
     my $is = sub ($x) { blessed($x) && ( $x == $leaf || ( $x->operation eq 'Coerce' && ( $x->to_repr // '' ) =~ /\A(?:Int|Num)\z/ && blessed($x->inputs->[0]) && $x->inputs->[0] == $leaf ) ) };
     return grep { $_->operation =~ /\A(?:Bit(?:And|Or|Xor)|Complement|LeftShift|RightShift)\z/ && grep { $is->($_) } $_->inputs->@* } @$all;
 }
@@ -3337,7 +3338,7 @@ sub _freeze_merge_reads {
     my $r = $s->can('region') ? $s->region : undef;
     return unless blessed($r);
     my @phis = grep {
-        blessed($_) && $_->operation eq 'Phi' && _is_memory_phi($_)
+        blessed($_) && $_->operation eq 'Phi' && $_->is_memory
             && blessed($_->region) && refaddr($_->region) == refaddr($r)
     } ( $r->consumers // [] )->@*;
     # IN AN EVAL'S BODY a read made here is the body's, and the eval's join
@@ -5296,7 +5297,7 @@ sub _is_empty_sub {
     return 0 unless $g && $g->returns && $g->returns->@* == 1;
     my $r = $g->returns->[0];
     return 0 unless blessed($r->control_in) && $r->control_in->operation eq 'Start';
-    return !grep { blessed($_) && $_->operation !~ /\A(?:Start|Constant|Return)\z/ } _graph_component($g);
+    return !grep { blessed($_) && $_->operation !~ /\A(?:Start|Constant|Return)\z/ } $g->component;
 }
 
 # _on_straight_line($node): its control reaches Start through no branch,
@@ -5326,7 +5327,7 @@ sub _lvalue_sub_variable {
     my $v = $r->inputs->[0];
     return undef unless blessed($v) && $v->operation eq 'PadAccess' && $v->shared && ( $v->sigil // '' ) eq '$';
     return undef if grep { blessed($_) && $_->operation !~ /\A(?:Start|MemStart|PadAccess|Return)\z/ }
-        _graph_component($g);
+        $g->component;
     return $v;
 }
 
@@ -7119,7 +7120,7 @@ sub _lower_phi {
         # is the control chain's to place: driven from an early read it ran
         # out of place and again in place ("A A C A C" for "A C").
         && $self->{_loops_made}{ refaddr($region) }
-        && !( grep { blessed($_) && $_->operation eq 'Phi' && _is_memory_phi($_)
+        && !( grep { blessed($_) && $_->operation eq 'Phi' && $_->is_memory
                         && blessed($_->region) && refaddr($_->region) == refaddr($region) }
                   ($region->consumers // [])->@* );
 
@@ -7754,7 +7755,7 @@ sub _scan_memory_shape {
         while (my $n = shift @q2) {
             next unless blessed($n);
             next if $s2{ $n->id }++;
-            if ($n->operation eq 'Phi' && _is_memory_phi($n)) {
+            if ($n->operation eq 'Phi' && $n->is_memory) {
                 # THE STORES BEFORE A MERGED ONE in its arm or loop body reach
                 # it by control, so they are ordered as it is: walked back
                 # along control_in to the arm's start (pvm 125, 191).
@@ -8199,7 +8200,7 @@ sub _wire_region_phis_with_preblock {
     # the branch, and the post-merge read re-loads from the aggregate at its own
     # program point, so it needs no value phi line (lowering its arms as values
     # would hit MemStart/Assign, which are not values). Wire only the value phis.
-    my @phis = grep { !Chalk::Target::LLVM::Context::_is_memory_phi($_) } @all_phis;
+    my @phis = grep { !$_->is_memory } @all_phis;
 
     # 2b-3 mixed effect (an arm that BOTH rebinds a scalar and stores an element,
     # so a value-Phi and a memory-Phi merge on the same Region) USED to refuse
@@ -8746,7 +8747,7 @@ sub _prelower_loop_drain_operands {
     # pre-lower its loop-invariant array operand in the preheader.
     my %seen;
     for my $c (($loop_node->consumers // [])->@*) {
-        next unless blessed($c) && $c->operation eq 'Phi' && _is_memory_phi($c);
+        next unless blessed($c) && $c->operation eq 'Phi' && $c->is_memory;
         my $r = $c->region;
         next unless defined $r && $r->id eq $loop_node->id;
         for my $n ($c->inputs->@*, ($c->consumers // [])->@*) {
@@ -9036,7 +9037,7 @@ sub _record_break_block {
         my $i = 1 + scalar(($ctx->{break_blocks} // [])->@*);
         my %cached_before = map { $_ => 1 } keys %{ $self->{cache} };
         for my $phi (grep {
-            blessed($_) && $_->operation eq 'Phi' && !_is_memory_phi($_) && _phi_has_live_consumer($_)
+            blessed($_) && $_->operation eq 'Phi' && !$_->is_memory && _phi_has_live_consumer($_)
                 && $_->inputs->@* > $i
         } ( blessed($ctx->{exit_region}) ? $ctx->{exit_region}->consumers // [] : [] )->@*) {
             $ctx->{break_vals}[$i]{ $phi->id } = $self->lower_value($phi->inputs->[$i]);
@@ -9065,7 +9066,7 @@ sub _merge_phis {
     my ($region) = @_;
     return grep {
         blessed($_) && $_->operation eq 'Phi' && blessed($_->region)
-            && $_->region->id eq $region->id && !_is_memory_phi($_)
+            && $_->region->id eq $region->id && !$_->is_memory
     } ($region->consumers // [])->@*;
 }
 
@@ -9363,7 +9364,7 @@ sub close_eval {
     # is no value: taken for one, "a value nothing typed" refused the eval)
     my @phis = grep {
         blessed($_) && $_->operation eq 'Phi' && blessed($_->region) && $_->region->id eq $region->id
-            && !_is_memory_phi($_)
+            && !$_->is_memory
     } ($region->consumers // [])->@*;
     # THE BODY'S VALUE IS MADE IN THE BODY, the eval still open: a division
     # in it that dies is this eval's die (_die_on_zero).
@@ -9446,7 +9447,7 @@ sub close_eval {
         # through a phi -- undef along a die, where no path reads it.
         my %made_here = map { $_ => 1 } grep { !$f->{cached_before}{$_} } keys %{ $self->{cache} };
         my %done;
-        for my $later (grep { blessed($_) && $_->operation eq 'Phi' && !_is_memory_phi($_) } @Chalk::Target::LLVM::Context::PROGRAM) {
+        for my $later (grep { blessed($_) && $_->operation eq 'Phi' && !$_->is_memory } @Chalk::Target::LLVM::Context::PROGRAM) {
             for my $v (grep { blessed($_) && $made_here{ $_->id } } $later->inputs->@*) {
                 next if $done{ $v->id }++ || $v->operation eq 'Phi';
                 my $repr = $self->_repr_of($v) // next;
@@ -9719,7 +9720,7 @@ sub _process_loop_node {
                 while (defined(my $n = shift @q)) {
                     next unless blessed($n) && !$seen{ refaddr($n) }++;
                     next if refaddr($n) == refaddr($phi_node);
-                    if ($n->operation eq 'Phi' && ( $n->stamp // '' ) eq 'Unknown' && !_is_memory_phi($n)) {  # static type
+                    if ($n->operation eq 'Phi' && ( $n->stamp // '' ) eq 'Unknown' && !$n->is_memory) {  # static type
                         push @q, $n->inputs->@*;
                         next;
                     }
@@ -9751,7 +9752,7 @@ sub _process_loop_node {
                 my (@q, %seen) = ($inputs->[1]);
                 while (defined(my $n = shift @q)) {
                     next unless blessed($n) && !$seen{ refaddr($n) }++ && refaddr($n) != refaddr($phi_node);
-                    next unless $n->operation eq 'Phi' && ( $n->stamp // '' ) eq 'Unknown' && !_is_memory_phi($n);  # static type
+                    next unless $n->operation eq 'Phi' && ( $n->stamp // '' ) eq 'Unknown' && !$n->is_memory;  # static type
                     $self->{cache}{ 'repr:' . $n->id } = $lr;
                     push @q, $n->inputs->@*;
                 }
@@ -9795,7 +9796,7 @@ sub _process_loop_node {
     # loop carries round (`$o .= $p * 10`, the back edge) read the location
     # after the pass stored the next pass's `$p`: perl's 0.10.20. printed
     # 10.20.30. (found under pvm 154).
-    for my $m (grep { blessed($_) && $_->operation eq 'Phi' && _is_memory_phi($_)
+    for my $m (grep { blessed($_) && $_->operation eq 'Phi' && $_->is_memory
                       && blessed($_->region) && refaddr($_->region) == refaddr($loop_node) }
                ($loop_node->consumers // [])->@*) {
         for my $c (grep { blessed($_) && $_->operation eq 'PadAccess' && $_->is_location
@@ -9864,7 +9865,7 @@ sub _process_loop_node {
     {
         local $self->{_freezing_a_pass} = 1;
         $self->_freeze_memory_reads($_)
-            for grep { blessed($_) && $_->operation eq 'Phi' && _is_memory_phi($_)
+            for grep { blessed($_) && $_->operation eq 'Phi' && $_->is_memory
                        && blessed($_->region) && refaddr($_->region) == refaddr($loop_node) }
                 ($loop_node->consumers // [])->@*;
     }
@@ -9998,7 +9999,7 @@ sub _process_loop_node {
         my @live_exit_phis = grep {
             defined $_ && ref($_) && $_->can('operation') && $_->operation eq 'Phi'
                 && !exists $self->{cache}{ $_->id }
-                && !_is_memory_phi($_)
+                && !$_->is_memory
                 && _phi_has_live_consumer($_)
         } ($exit_region->consumers // [])->@*;
 
@@ -10353,7 +10354,7 @@ sub _collect_loop_phis {
     my $consumers = $loop_node->consumers // [];
     for my $c (@$consumers) {
         next unless defined $c && $c->can('operation');
-        if ($c->operation eq 'Phi' && !_is_memory_phi($c)) {
+        if ($c->operation eq 'Phi' && !$c->is_memory) {
             # Check that this Phi's region IS the loop node.
             my $r = $c->region;
             if (defined $r && $r->id eq $loop_node->id) {
@@ -10362,50 +10363,6 @@ sub _collect_loop_phis {
         }
     }
     return @phis;
-}
-
-# A memory-Phi merges memory versions (MemStart / element-store Assign), not
-# scalar values. It is a scheduling token: the read that consumes it loads the
-# merged heap. Distinguished from a value-Phi by its inputs being memory nodes.
-sub _is_memory_phi {
-    my ($phi, $seen) = @_;
-    return 0 unless blessed($phi) && $phi->operation eq 'Phi';
-    $seen //= {};
-    return 0 if $seen->{ refaddr($phi) }++;   # a loop's phis reach each other
-    my $inputs = $phi->inputs // [];
-    return 0 unless @$inputs;
-    for my $in (@$inputs) {
-        next unless blessed($in);
-        return 1 if $in->operation eq 'MemStart';
-        # an element store: an Assign whose lhs is a Subscript -- or a field,
-        # or a shared file lexical, each a location stored through memory
-        if ($in->operation eq 'Assign') {
-            return 1 if grep { blessed($_) && $_->operation eq 'Subscript' }
-                             $in->inputs->@*;
-            my $lhs = $in->inputs->[0];
-            return 1 if blessed($lhs) && ( $lhs->operation eq 'FieldAccess'
-                || ( $lhs->operation eq 'PadAccess' && $lhs->is_location )
-                || ( $lhs->operation eq 'PostfixDeref' && ($lhs->sigil // '') eq '$' ) );
-        }
-        # a list assignment the producer merges as memory: its value is a List
-        # no arm can flatten (`($lo, $u) = ...` in each arm, then a push)
-        return 1 if $in->operation eq 'Assign' && ( $in->stamp // '' ) eq 'List' && $phi->memory;  # static type
-        # a package scalar's store
-        return 1 if $in->operation eq 'EntryWrite';
-        # a direct call: an inlined sub may store any of those
-        # ...or a method call, which runs one (taking the producer's flag
-        # wholesale instead let an arm walk that cycles through, pvm 124)
-        return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') =~ /\A(?:direct|method)\z/
-            && !( defined $phi->memory && !$phi->memory );
-        # ...or a builtin that versions memory (a push, a sort that runs code),
-        # on a phi the producer says is memory (a value phi may merge a
-        # sort's result).
-        return 1 if $in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'builtin'
-            && $phi->can('memory') && $phi->memory;
-        # a memory phi of a nested structure
-        return 1 if $in->operation eq 'Phi' && _is_memory_phi($in, $seen);
-    }
-    return 0;
 }
 
 # _prelower_condition_mutation_backedges: lower, in the CURRENT (header) block,
@@ -11503,26 +11460,8 @@ sub _lower_local_alias {
 # graph, through the callees its calls name.
 sub _scan_local_aliases {
     my ($return) = @_;
-    my %names = map { ( $_->name // '_' ) => 1 } grep { $_->operation eq 'LocalAlias' } _program_nodes($return);
+    my %names = map { ( $_->name // '_' ) => 1 } grep { $_->operation eq 'LocalAlias' } Chalk::IR::Graph::program_nodes($return);
     return sort keys %names;
-}
-
-# _program_nodes($return) -> every node of the program: this graph and the
-# graph of every sub it calls.
-sub _program_nodes {
-    my ($return) = @_;
-    my (%seen, @all);
-    my @q = ($return);
-    while (defined(my $n = shift @q)) {
-        next unless blessed($n) && !$seen{ refaddr($n) }++;
-        push @all, $n;
-        push @q, grep { blessed($_) } $n->inputs->@*, ($n->can('control_in') ? $n->control_in : ()),
-            ($n->consumers // [])->@*;
-        if ($n->operation eq 'Call' && $n->can('target') && blessed(my $t = $n->target)) {
-            push @q, $t->graph->returns->@* if $t->can('graph') && $t->graph;
-        }
-    }
-    return @all;
 }
 
 # $READS_ERROR: does the program read $@? A die whose message this backend
@@ -11540,7 +11479,7 @@ our %ANON_SUBS;
 our %CLOSURE_DEFINE;
 our @CLOSURE_DEFINES;
 
-# @PROGRAM: every node of the program (_program_nodes of its Return).
+# @PROGRAM: every node of the program (Chalk::IR::Graph::program_nodes of its Return).
 our @PROGRAM;
 
 # %EVAL_BY_ENTRY: each block eval's join (a Region with eval_entry), by the
@@ -14611,7 +14550,7 @@ sub _may_write_topic {
         blessed($n) && $n->operation eq 'EntryDef' && ( $n->symbol // '' ) eq '_'
             && ( $n->sigil // '$' ) eq '$' && ( $n->package // 'main' ) eq 'main'
     };
-    for my $n (_graph_component($graph)) {
+    for my $n ($graph->component) {
         next unless blessed($n);
         my $op = $n->operation;
         return 1 if $op =~ /\A(?:EntryWrite|Assign|RegexSubst|Transliterate|Chomp|ChompValue)\z/
@@ -14647,7 +14586,7 @@ sub _value_readers {
     return grep {
         my $r = $_;
         blessed($r) && grep { $is->($_) } $r->inputs->@*
-            and !( $r->operation eq 'Phi' && _is_memory_phi($r) )
+            and !( $r->operation eq 'Phi' && $r->is_memory )
             and $r->operation !~ /\A(?:Region|Loop)\z/
             and !( $is->(_memory_input_of($r)) && 1 == grep { $is->($_) } $r->inputs->@* )
     } ( $node->consumers // [] )->@*;
@@ -14672,7 +14611,7 @@ sub _is_can_read_as_truth {
         next if $seen{ refaddr($v) }++;
         for my $r (grep { blessed($_) } ( $v->consumers // [] )->@*) {
             next unless grep { $is->($_, $v) } $r->inputs->@*;
-            next if $r->operation eq 'Phi' && _is_memory_phi($r);
+            next if $r->operation eq 'Phi' && $r->is_memory;
             next if $r->operation =~ /\A(?:Region|Loop)\z/;   # its control, not its value
             next if $is->($mem_of->($r), $v) && !grep { $is->($_, $v) } @{ $r->inputs }[ 0 .. $#{ $r->inputs } - 1 ];
             my $op = $r->operation;
@@ -14873,13 +14812,13 @@ sub _bind_captures {
     # A CAPTURE IS A CELL PARAMETER. A frame's own MakeCell (`my $w; $w =
     # sub {...}` writes $w's cell) is its variable, lowered where it is made.
     my $captured = sub ($n) { my $c = $n->inputs->[0]; blessed($c) && $c->operation eq 'CellParam' };
-    my @reads = grep { blessed($_) && $_->operation eq 'CellRead' && $captured->($_) } _graph_component($graph);
-    my @writes = grep { blessed($_) && $_->operation eq 'CellWrite' && $captured->($_) } _graph_component($graph);
+    my @reads = grep { blessed($_) && $_->operation eq 'CellRead' && $captured->($_) } $graph->component;
+    my @writes = grep { blessed($_) && $_->operation eq 'CellWrite' && $captured->($_) } $graph->component;
     # A CELL USED BUT THROUGH A CELL READ OR WRITE is a shape not known here:
     # B::SoN spells `$t += 1` on a capture as Coerce(CellParam) + 1 -- the
     # cell's reference read as a number, and no write. Lowered, $t never
     # changed (silently wrong).
-    for my $p (grep { blessed($_) && $_->operation eq 'CellParam' } _graph_component($graph)) {
+    for my $p (grep { blessed($_) && $_->operation eq 'CellParam' } $graph->component) {
         die "GAP: a closure ('$name') uses what it captured other than by reading or "
           . "writing it (an op-assign to a capture) -- not lowered\n"
             if grep { blessed($_) && $_->operation !~ /\A(?:CellRead|CellWrite|MakeCell)\z/ }
@@ -14989,7 +14928,7 @@ sub _closure_calls_itself {
     my $g = blessed($anon->sub) && $anon->sub->can('graph') ? $anon->sub->graph : undef;
     return 0 unless $g;
     my @cells = grep { blessed($_) } $anon->inputs->@*;
-    for my $c (grep { blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'indirect' } _graph_component($g)) {
+    for my $c (grep { blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'indirect' } $g->component) {
         my $code = $c->inputs->[0];
         next unless blessed($code) && $code->operation eq 'CellRead';
         my $p = $code->inputs->[0];
@@ -15013,7 +14952,7 @@ sub _closure_called_only_in_void {
     my @reads = grep { blessed($_) && $_->operation eq 'CellRead' && !$seen{ refaddr($_) }++ } (
         ( $cells[$i]->consumers // [] )->@*,
         ( map { ( $_->consumers // [] )->@* }
-          grep { blessed($_) && $_->operation eq 'CellParam' && $_->index == $i } _graph_component($g) ),
+          grep { blessed($_) && $_->operation eq 'CellParam' && $_->index == $i } $g->component ),
     );
     my %is_read = map { ( refaddr($_) => 1 ) } @reads;
     my %call_seen;
@@ -15082,7 +15021,7 @@ sub _closure_define {
     $b->{_closure_anon} = $anon;
     $b->{_arg_bind} = {
         ( map { ( 'cell:' . refaddr($_) => '%cell' . $_->index ) }
-          grep { blessed($_) && $_->operation eq 'CellParam' } _graph_component($g) ),
+          grep { blessed($_) && $_->operation eq 'CellParam' } $g->component ),
         ( map { ( refaddr( $reads[$_] ) => { ref => "%arg$_", repr => 'Scalar' } ) } 0 .. $#reads ),
     };
     Chalk::Target::LLVM::_process_control_chain($b, $ret);
@@ -15770,7 +15709,7 @@ sub _lower_builtin_sort {
 sub _emit_sort_block_out_of_order {
     my ($self, $node, $sub, $pa, $pb) = @_;
     my $pkg = $node->sort_package // 'main';
-    my @nodes = _graph_component($sub->graph);
+    my @nodes = $sub->graph->component;
     die "GAP: a sort block that writes \$a or \$b is not lowered\n"
         if grep { blessed($_) && $_->operation eq 'EntryWrite' && blessed($_->inputs->[0])
                   && ( $_->inputs->[0]->symbol // '' ) =~ /\A[ab]\z/ } @nodes;
@@ -16603,7 +16542,7 @@ sub _lower_builtin_shift_pop {
             my @ci = blessed($c) ? $c->inputs->@* : ();
             my @at = grep { blessed($ci[$_]) && refaddr($ci[$_]) == refaddr($node) } 0 .. $#ci;
             blessed($c) && $c->operation !~ /\A(?:Region|Proj|If|Loop)\z/ && @at
-                && !( $c->operation eq 'Phi' && _is_memory_phi($c) )
+                && !( $c->operation eq 'Phi' && $c->is_memory )
                 && !( @at == 1 && $at[0] == $#ci && @ci > 1
                       && $c->operation =~ /\A(?:Subscript|Count|Call|Exists|PadAccess|EntryDef|FieldAccess|Phi)\z/ )
         } ($node->consumers // [])->@*;
@@ -16643,7 +16582,7 @@ sub _lower_builtin_shift_pop {
             next if blessed($ci[-1]) && refaddr($ci[-1]) == refaddr($node)
                 && $cop =~ /\A(?:Subscript|Count|Call|Exists|PadAccess|EntryDef|FieldAccess|Phi)\z/
                 && !grep { blessed($_) && refaddr($_) == refaddr($node) } @ci[0 .. $#ci - 1];
-            next if $cop eq 'Phi' && _is_memory_phi($c);
+            next if $cop eq 'Phi' && $c->is_memory;
             die "GAP: $name of an Int array read by a $cop is not lowered -- an "
               . "empty array gives undef, which only a number reads as 0\n";
         }
@@ -18825,7 +18764,7 @@ sub _lower_call_direct {
         # A SIGNATURE'S slurpy is its Parameter node, read as it is.
         $self->{_arg_bind}{ refaddr($slurpy) } = { ref => $ref, repr => $repr }
             if $slurpy->operation eq 'Parameter';
-        for my $n ($slurpy->can('symbol') ? _graph_component($graph) : ()) {
+        for my $n ($slurpy->can('symbol') ? $graph->component : ()) {
             next unless blessed($n) && $n->operation eq 'PadAccess'
                 && ( $n->sigil // '' ) eq $sig && ( $n->symbol // '' ) eq ( $slurpy->symbol // '' );
             $self->{_arg_bind}{ refaddr($n) } = { ref => $ref, repr => $repr };
@@ -19236,55 +19175,6 @@ sub _is_args_array {
     return $node->operation eq 'ArgsSource';
 }
 
-# _graph_component($graph) -> @nodes
-#
-# EVERY NODE OF A CALLEE, not its membership. Graph::nodes walks data edges,
-# and an if's condition hangs off the If, which is reached by control: in
-# `sub f { my $n = shift; if ($n) {...} }` the shift is read only by the
-# condition, so membership never held it and the arguments went unbound
-# ("reads 0 positional argument(s)").
-#
-# BACKWARD from what membership holds -- inputs, control_in, a Region's head
-# -- and FORWARD only from a control node to what it controls (an If's or a
-# Loop's Projs, the statements a Proj or Region heads). Following every
-# consumer walked out of the callee through any node another graph shared:
-# the coercion passes once minted one Coerce for two graphs, and g's walk
-# counted f's shift as its own (review of 4e1e9969).
-sub _graph_component {
-    my ($graph) = @_;
-    my (%seen, @out);
-    my @q = grep { blessed($_) } $graph->nodes->@*;
-    while (defined(my $n = shift @q)) {
-        next if $seen{ refaddr($n) }++;
-        push @out, $n;
-        my $op = $n->operation;
-        push @q, grep { blessed($_) } (
-            $n->inputs->@*,
-            ($n->can('control_in') ? $n->control_in : ()),
-            ($n->can('head')       ? $n->head       : ()),
-        );
-        # @_ IS READ BY WHAT CONSUMES IT, and a `my (...) = @_` is consumed by
-        # nothing: the walk reaches it from @_, or from a target it assigns.
-        # Only the list assignment: an @_ hash-consed across graphs (an older
-        # wire) has every sub's reads for consumers, and they are not ours.
-        push @q, grep { blessed($_) && $_->operation eq 'Assign' } ($n->consumers // [])->@*
-            if $op eq 'ArgsSource' && $n->can('consumers');
-        push @q, grep {
-            blessed($_) && $_->operation eq 'Assign'
-                && blessed($_->inputs->[-1]) && _is_args_array($_->inputs->[-1])
-        } ($n->consumers // [])->@*
-            if $op eq 'PadAccess' && $n->can('consumers');
-        next unless $op =~ /\A(?:If|Loop|Proj|Region)\z/ && $n->can('consumers');
-        push @q, grep {
-            blessed($_) && (
-                $_->operation eq 'Proj'
-                || ( $_->can('control_in') && blessed($_->control_in)
-                     && refaddr($_->control_in) == refaddr($n) ) )
-        } ($n->consumers // [])->@*;
-    }
-    return @out;
-}
-
 # _collect_positional_arg_reads($graph, $name) -> @shift_nodes
 #
 # Find the callee graph's positional argument reads: Call(builtin, shift) nodes
@@ -19306,7 +19196,7 @@ sub _collect_positional_arg_reads {
     $self->{_args_written} = undef;
     $self->{_args_signature} = 0;
     $self->{_args_slurpy}    = undef;
-    for my $n (_graph_component($graph)) {
+    for my $n ($graph->component) {
         next unless blessed($n);
         my $op = $n->operation;
 

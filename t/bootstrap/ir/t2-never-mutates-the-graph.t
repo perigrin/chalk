@@ -30,7 +30,7 @@ for my $src (
     Chalk::CodeGen::Pipeline->new->run_detail($json, sub ($graphs, $mop) {
         my $g = $graphs->{'main::__PROGRAM__'} or return ();
         my $ret = $g->returns->[0];
-        my @nodes = map { Chalk::Target::LLVM::Context::_graph_component($_) } values %$graphs;
+        my @nodes = map { $_->component } values %$graphs;
         $before = snapshot(@nodes);
         Chalk::Target::LLVM::T2->lower_program($ret, mop => $mop);
         $after = snapshot(@nodes);

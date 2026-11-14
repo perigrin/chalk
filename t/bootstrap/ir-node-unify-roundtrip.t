@@ -63,7 +63,7 @@ sub make_effectful_loop_graph {
     # Assign (backedge) -- the Assign is the Phi's INPUT (the Phi represents
     # "the memory version after the store"), matching the shape B::SoN emits
     # (probed live via B::SoN for `$a[$i]=$i+1` in a while loop) and
-    # Target::LLVM::Context::_is_memory_phi's detection (an input is
+    # Chalk::IR::Node::Phi::is_memory's detection (an input is
     # MemStart, or an Assign over a Subscript).
     my $mem_start = $f->make('MemStart');
     my $mem_phi   = $f->make('Phi', region => $loop, values => [$mem_start]);

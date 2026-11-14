@@ -322,4 +322,83 @@ class Chalk::IR::Graph {
 
         return \@order;
     }
+
+    # component -> @nodes: EVERY NODE OF THE GRAPH (a sub's body), not its
+    # membership. nodes() walks data edges, and an if's condition hangs off
+    # the If, which is reached by control: in `sub f { my $n = shift; if ($n)
+    # {...} }` the shift is read only by the condition, so membership never
+    # held it and the arguments went unbound ("reads 0 positional
+    # argument(s)").
+    #
+    # BACKWARD from what membership holds -- inputs, control_in, a Region's
+    # head -- and FORWARD only from a control node to what it controls (an
+    # If's or a Loop's Projs, the statements a Proj or Region heads).
+    # Following every consumer walked out of the graph through any node
+    # another graph shared: the coercion passes once minted one Coerce for two
+    # graphs, and g's walk counted f's shift as its own (review of 4e1e9969).
+    method component() {
+        my (%seen, @out);
+        my @q = grep { blessed($_) } $self->nodes->@*;
+        while (defined(my $n = shift @q)) {
+            next if $seen{ refaddr($n) }++;
+            push @out, $n;
+            my $op = $n->operation;
+            push @q, grep { blessed($_) } (
+                $n->inputs->@*,
+                ($n->can('control_in') ? $n->control_in : ()),
+                ($n->can('head')       ? $n->head       : ()),
+            );
+            # @_ IS READ BY WHAT CONSUMES IT, and a `my (...) = @_` is consumed by
+            # nothing: the walk reaches it from @_, or from a target it assigns.
+            # Only the list assignment: an @_ hash-consed across graphs (an older
+            # wire) has every sub's reads for consumers, and they are not ours.
+            push @q, grep { blessed($_) && $_->operation eq 'Assign' } ($n->consumers // [])->@*
+                if $op eq 'ArgsSource' && $n->can('consumers');
+            push @q, grep {
+                blessed($_) && $_->operation eq 'Assign'
+                    && blessed($_->inputs->[-1]) && $_->inputs->[-1]->operation eq 'ArgsSource'
+            } ($n->consumers // [])->@*
+                if $op eq 'PadAccess' && $n->can('consumers');
+            next unless $op =~ /\A(?:If|Loop|Proj|Region)\z/ && $n->can('consumers');
+            push @q, grep {
+                blessed($_) && (
+                    $_->operation eq 'Proj'
+                    || ( $_->can('control_in') && blessed($_->control_in)
+                         && refaddr($_->control_in) == refaddr($n) ) )
+            } ($n->consumers // [])->@*;
+        }
+        return @out;
+    }
+
+    # program_nodes($return) -> every node of the program a Return (or any of
+    # its nodes) is in: that graph, and the graph of every sub it calls,
+    # walked through each node's inputs, control and consumers. A function of
+    # a node, not a method: it starts from one, and from no node it is ().
+    sub program_nodes($return) {
+        my (%seen, @all);
+        my @q = ($return);
+        while (defined(my $n = shift @q)) {
+            next unless blessed($n) && !$seen{ refaddr($n) }++;
+            push @all, $n;
+            push @q, grep { blessed($_) } $n->inputs->@*, ($n->can('control_in') ? $n->control_in : ()),
+                ($n->consumers // [])->@*;
+            if ($n->operation eq 'Call' && $n->can('target') && blessed(my $t = $n->target)) {
+                push @q, $t->graph->returns->@* if $t->can('graph') && $t->graph;
+            }
+        }
+        return @all;
+    }
+
+    # own_nodes($return) -> the program's OWN nodes: program_nodes less those
+    # of the subs it calls, which are theirs.
+    sub own_nodes($return) {
+        my @all = program_nodes($return);
+        my %callee;
+        for my $c (grep { $_->operation eq 'Call' && blessed($_->can('target') ? $_->target : undef) } @all) {
+            my $t = $c->target;
+            next unless $t->can('graph') && $t->graph;
+            $callee{ refaddr($_) } = 1 for $t->graph->component;
+        }
+        return grep { !$callee{ refaddr($_) } } @all;
+    }
 }

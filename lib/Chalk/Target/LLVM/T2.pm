@@ -128,6 +128,7 @@ package Chalk::Target::LLVM::T2::Builder;
 use Chalk::Regex::Graph;   # a constant regex as its own graph
 use Chalk::MOP::Sub;
 require Chalk::IR::Serialize::JSON;
+use Chalk::IR::Graph;   # program_nodes, own_nodes, component: whose nodes are whose
 
 use Scalar::Util qw(blessed refaddr);
 
@@ -160,16 +161,16 @@ sub build {
                : out('no way back to Start from ' . $start->operation);
     }
     $b->{ret} = $ret;
-    $b->{own_nodes} = [ _own_nodes($ret) ];
+    $b->{own_nodes} = [ Chalk::IR::Graph::own_nodes($ret) ];
     $b->{eval_at} = { map { ( refaddr( $_->eval_entry ) => $_ ) } grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed( $_->eval_entry ) } $b->{own_nodes}->@* };
     $b->{evals} = [];
-    $b->{passed} = [ _memstarts($ret, 1) ];
-    $b->index_readers(_own_nodes($ret));
+    $b->{passed} = [ grep { $_->operation eq 'MemStart' } Chalk::IR::Graph::own_nodes($ret) ];
+    $b->index_readers(Chalk::IR::Graph::own_nodes($ret));
     $b->new_block('entry');
     $b->emit(op => 'SaveArgs', type => 'void');   # argv, for @ARGV
     # (a tie calls its class's methods too)
     $b->make_mop if grep { $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) eq 'method' || ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' ) } _all_nodes($b->{mop}, $ret);
-    $b->make_constant_arrays(_own_nodes($ret));
+    $b->make_constant_arrays(Chalk::IR::Graph::own_nodes($ret));
     # PHASE BLOCKS, each a function as a sub is (its file lexicals shared as a
     # sub's are): a BEGIN runs first, in order, at the program's start; an END
     # is registered with atexit(3), which runs them last defined first at every
@@ -182,7 +183,7 @@ sub build {
         # run first here, the `my` reset it. Refused.
         out('a BEGIN block reading or writing a lexical of the main program')
             if $kind eq 'BEGIN' && grep { $_->operation eq 'PadAccess' && ( $_->shared || !defined $_->inputs->[0] ) }
-                Chalk::Target::LLVM::Context::_program_nodes( $g->returns->[0] );
+                Chalk::IR::Graph::program_nodes( $g->returns->[0] );
         my $sub = Chalk::MOP::Sub->new( name => "main::$kind", class => undef, graph => $g, params => ['@_'], uses_args => 1 );
         my $fn = $b->func( $sub, lc($kind) . '_' . ++$b->{nphase} );
         out("a $kind block read as taking arguments") if $fn->{nargs} || $fn->{list} || $fn->{closure};
@@ -537,7 +538,7 @@ sub close_eval {
     out('an eval closed at another depth') if ( $b->{depth} // 0 ) != $f->{depth};
     out('an eval Region of more than one way in') if $r->inputs->@* != 1;
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
-                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $r->consumers // [] )->@*;
+                      && !$_->is_memory } ( $r->consumers // [] )->@*;
     my %seen; @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     my $dead = $b->{cur}{dead};
     my @in;
@@ -892,7 +893,7 @@ sub _is_version {
     return 1 if $op =~ /\A(?:RegexMatch|Match)\z/ && $n->can('control_in') && blessed($n->control_in);
     # A PINNED s/// stores its subject's new string (in place).
     return 1 if $op =~ /\A(?:RegexSubst|Transliterate)\z/ && $n->can('control_in') && blessed($n->control_in);
-    return $op eq 'Phi' && Chalk::Target::LLVM::Context::_is_memory_phi($n) ? 1 : 0;
+    return $op eq 'Phi' && $n->is_memory ? 1 : 0;
 }
 
 # _memory_input($n) -> the memory version a read reads at: its MEMORY input,
@@ -1162,7 +1163,7 @@ sub hash_value {
             # sort sets for the comparator's calls (@t2_cmp_env), by position.
             my (%idx, @envpad);
             for my $p (grep { $_->operation eq 'PadAccess' && $_->can('shared') && $_->shared && !( $_->can('file') && $_->file ) }
-                       Chalk::Target::LLVM::Context::_graph_component($sub->graph)) {
+                       $sub->graph->component) {
                 my $k = ( $p->sigil // '$' ) . $p->name . '#' . ( $p->can('targ') ? $p->targ // '' : '' );
                 $idx{$k} //= do { push @envpad, $p; $#envpad };
                 $cmp_env{ refaddr($p) } = $idx{$k};
@@ -1418,7 +1419,7 @@ sub array_value {
         # $" IS " " until written: a program that writes it is not T2's yet.
         out('$" written') if $b->{writes_list_sep} //= scalar grep {
             $_->operation =~ /\A(?:EntryWrite|LocalAlias)\z/ && grep { blessed($_) && $_->can('symbol') && ( $_->symbol // '' ) eq '"' } ( $_, $_->inputs->@* )
-        } Chalk::Target::LLVM::Context::_program_nodes( $b->{ret} );
+        } Chalk::IR::Graph::program_nodes( $b->{ret} );
         $b->{strs}{' '} //= scalar keys $b->{strs}->%*;
         return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => ' ', id => $b->{strs}{' '} });
     }
@@ -1840,7 +1841,7 @@ sub if_stmt {
         return $end{$go};
     }
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($region)
-                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $region->consumers // [] )->@*;
+                      && !$_->is_memory } ( $region->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     # Each Region input is an arm's end; the phi's input of the same place is
@@ -1908,7 +1909,7 @@ sub join_jumps {
     my @pred_of = map { my $in = $_; ( grep { blessed($in) && refaddr($preds[$_]{end}) == refaddr($in) } 0 .. $#preds )[0] } @ways;
     out('a merge with a way in no arm reached') if grep { !defined } @pred_of;
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
-                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $r->consumers // [] )->@*;
+                      && !$_->is_memory } ( $r->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     my @made;
@@ -2126,18 +2127,18 @@ sub _arg_subscript {
 
 sub _all_nodes {
     my ($mop, $ret) = @_;
-    my @n = Chalk::Target::LLVM::Context::_program_nodes($ret);
+    my @n = Chalk::IR::Graph::program_nodes($ret);
     for my $sub ( $mop ? map { $_->subs } $mop->classes : () ) {
-        push @n, Chalk::Target::LLVM::Context::_graph_component($sub->graph) if $sub->graph;
+        push @n, $sub->graph->component if $sub->graph;
     }
     # (AN ADJUST BLOCK'S too: `new` runs it, so a method only it calls --
     # `ADJUST { $self->mark("d") }` -- must be in its stash, or the lookup
     # dies where perl finds it.)
     for my $adj ( $mop ? map { $_->adjust_blocks } $mop->classes : () ) {
-        push @n, Chalk::Target::LLVM::Context::_graph_component($adj->graph) if $adj->can('graph') && $adj->graph;
+        push @n, $adj->graph->component if $adj->can('graph') && $adj->graph;
     }
     # (A PHASE BLOCK'S too: its method calls, its derefs, are the program's.)
-    push @n, Chalk::Target::LLVM::Context::_program_nodes( $_->[1]->returns->[0] )
+    push @n, Chalk::IR::Graph::program_nodes( $_->[1]->returns->[0] )
         for grep { blessed( $_->[1] ) } @Chalk::IR::Serialize::JSON::PHASE_GRAPHS;
     return @n;
 }
@@ -2419,7 +2420,7 @@ sub regex_subst {
         my $g = $Chalk::IR::Serialize::JSON::CODE_GRAPHS{$body} // out('an s///e replacement whose body B::SoN did not give');
         out('an s///e replacement holding an s///e (its matches would overwrite the captures it reads)')
             if grep { $_->operation eq 'RegexSubst' && $_->can('replacement_body') && defined $_->replacement_body }
-               Chalk::Target::LLVM::Context::_graph_component($g);
+               $g->component;
         my $sub = $b->{rxcode}{$body} //= Chalk::MOP::Sub->new( name => $body, class => undef, graph => $g, params => ['@_'], uses_args => 1 );
         my $code = $b->emit(op => 'CodeOfFn', type => '%Slot', attr => { fn => $b->func( $sub, 'rxrepl_' . scalar keys $b->{rxcode}->%* )->{name} });
         ( my $flags = $s->flags // '' ) =~ s/[er]//g;
@@ -2431,7 +2432,7 @@ sub regex_subst {
     # input) and the memory version: B::SoN makes it in the arm of a match of
     # its own -- ONCE.
     my @in = grep { blessed($_) } $s->inputs->@[ ( $s->pattern_is_input ? 2 : 1 ) .. $s->inputs->$#* ];
-    my $repl = @in && !_is_version( $in[0] ) && !Chalk::Target::LLVM::Context::_is_memory_phi( $in[0] ) ? $in[0] : undef;
+    my $repl = @in && !_is_version( $in[0] ) && !( $in[0] isa Chalk::IR::Node::Phi && $in[0]->is_memory ) ? $in[0] : undef;
     my $flags = $s->flags // '';
     out('an s///g whose replacement is made per match (B::SoN computes it once)') if $repl && $flags =~ /g/;
     $flags =~ s/[er]//g;
@@ -2726,7 +2727,7 @@ sub func {
     my %margs;
     my $is_method = blessed($sub) && ( $sub->isa('Chalk::MOP::Method') || $sub->isa('Chalk::MOP::Phaser::Adjust') );   # ADJUST: a method of no parameters
     if ($is_method) {
-        my @gn = Chalk::Target::LLVM::Context::_graph_component($g);
+        my @gn = $g->component;
         out("method $name reads \@_") if grep { $_->operation eq 'ArgsSource' } @gn;
         my $np = $sub->can('params') ? scalar +($sub->params // [])->@* : 0;
         out("method $name has a parameter past its declared ones")
@@ -2758,9 +2759,9 @@ sub func {
     # (0 for 16). Refused, as Context.pm refuses it.
     out("closure $name uses a capture other than by reading or writing it (an op-assign)")
         if grep { my $p = $_; grep { blessed($_) && $_->operation !~ /\A(?:CellRead|CellWrite|MakeCell)\z/ } ( $p->consumers // [] )->@* }
-           grep { $_->operation eq 'CellParam' } Chalk::Target::LLVM::Context::_graph_component($g);
+           grep { $_->operation eq 'CellParam' } $g->component;
     out("sub $name captures a variable (a named sub's closure)") if !$closure
-        && grep { $_->operation eq 'CellParam' } Chalk::Target::LLVM::Context::_graph_component($g);
+        && grep { $_->operation eq 'CellParam' } $g->component;
     # $_[N] READ ANYWHERE is the Nth argument: Context.pm's binder keeps one
     # read per index, and a position never read is a hole it refuses. A sub
     # that reads @_ only so binds every such read -- after a store, twice --
@@ -2771,7 +2772,7 @@ sub func {
             && !$an->{_args_slurpy} && !$an->{_args_signature}
             && !grep { blessed($_) && !_arg_subscript($_) } @reads) {
         my %by;
-        push $by{ $_->inputs->[1]->value }->@*, $_ for grep { _arg_subscript($_) } Chalk::Target::LLVM::Context::_graph_component($g);
+        push $by{ $_->inputs->[1]->value }->@*, $_ for grep { _arg_subscript($_) } $g->component;
         my $max = -1;   # (not sort: a sort block's $b is the builder here)
         $max < $_ and $max = $_ for keys %by;
         @reads = map { $by{$_} ? $by{$_}[0] : bless( {}, 'Chalk::Target::LLVM::T2::Unread' ) } 0 .. $max;
@@ -2806,7 +2807,7 @@ sub func {
     # sub shifts first would be of the shifted array.
     local $b->{args_mutated} = $list && scalar grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
         && ( $_->name // '' ) =~ /\A(?:shift|pop|push|unshift|splice)\z/ && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'ArgsSource' }
-        Chalk::Target::LLVM::Context::_graph_component($g);
+        $g->component;
     local $b->{blocks} = $fn->{blocks};
     local $b->{cur};
     local $b->{seq} = 0;   # (its own statements' turns: its entry is turn 0)
@@ -2816,15 +2817,15 @@ sub func {
                                   : { ( map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads ), ( map { ( refaddr( $_->[0] ) => $argn[ $_->[1] ] ) } @also ) };
     local $b->{self} = $is_method ? $argn[0] : undef;   # a field's object
     local $b->{env} = $closure ? do { my $e = Chalk::Target::LLVM::T2::_n(op => 'Arg', type => '%Slot**', attr => { index => 1 }); $e->set_name('%env'); $e } : undef;
-    local $b->{own_nodes} = [ Chalk::Target::LLVM::Context::_graph_component($g) ];
+    local $b->{own_nodes} = [ $g->component ];
     local $b->{eval_at} = { map { ( refaddr( $_->eval_entry ) => $_ ) } grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed( $_->eval_entry ) } $b->{own_nodes}->@* };
     local $b->{evals} = [];
     local $b->{eval_opened} = {};
     local $b->{in_func} = 1;
     local $b->{ret} = $ret;
-    local $b->{passed} = [ grep { $_->operation eq 'MemStart' } Chalk::Target::LLVM::Context::_graph_component($g) ];
+    local $b->{passed} = [ grep { $_->operation eq 'MemStart' } $g->component ];
     local $b->{readers};
-    $b->index_readers(Chalk::Target::LLVM::Context::_graph_component($g));
+    $b->index_readers($g->component);
     local $b->{depth} = 0;
     my $start = $ret;
     for (1 .. 100_000) {
@@ -2843,7 +2844,7 @@ sub func {
         $b->emit(op => 'ArgsPairs', type => 'void', inputs => [ $argsarr ], attr => { n => scalar @positional })
             if $sig && ( $slurpy->can('sigil') ? $slurpy->sigil // '' : '' ) eq '%';
         # ITS PARAMETERS, made here: each its argument, the slurpy one the rest.
-        for my $p (grep { $_->operation eq 'Parameter' } Chalk::Target::LLVM::Context::_graph_component($g)) {
+        for my $p (grep { $_->operation eq 'Parameter' } $g->component) {
             my $sg = $p->can('sigil') ? $p->sigil // '$' : '$';
             $b->{memo}{ refaddr($p) } = $sg eq '$'
                 ? $b->emit(op => 'AGet', type => '%Slot', inputs => [ $argsarr, $b->emit(op => 'Const', type => 'i64', attr => { value => $p->index }) ])
@@ -2854,7 +2855,7 @@ sub func {
     my $tail = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation eq 'Call'
         && ( $ret->inputs->[0]->dispatch_kind // '' ) eq 'direct' ? $ret->inputs->[0] : undef;
     local $b->{tail} = $tail ? { call => refaddr($tail), want => $want } : undef;
-    $b->make_constant_arrays(Chalk::Target::LLVM::Context::_graph_component($g));
+    $b->make_constant_arrays($g->component);
     local $b->{jumps} = {};   # this function's early exits
     $b->walk($start);
     out('an early exit to a merge never reached') if $b->{jumps}->%*;
@@ -2934,7 +2935,7 @@ sub loop {
     out('a loop without a body and an exit') unless $bodyp && $exitp;
     local $b->{loopx};   # (its body's ifs are its own: an outer loop's edges are not here)
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($L)
-                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $L->consumers // [] )->@*;
+                      && !$_->is_memory } ( $L->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     my @cond = grep { $_->operation !~ /\A(?:Phi|Proj)\z/ } successors($L);
@@ -3003,7 +3004,7 @@ sub loop_breaks {
     my ($b, $L) = @_;
     my $R = $b->loop_exit($L);
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($L)
-                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $L->consumers // [] )->@*;
+                      && !$_->is_memory } ( $L->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     out('a loop phi with other than two ways in') if grep { scalar( $_->inputs->@* ) != 2 } @phis;
@@ -3190,7 +3191,7 @@ sub merge_at {
     my @pred_of = map { my $in = $_; ( grep { refaddr( $preds[$_]{end} ) == refaddr($in) } 0 .. $#preds )[0] } @ways;
     my @live = grep { defined $pred_of[$_] } 0 .. $#ways;   # (a way from an arm that died is no way in)
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
-                      && !Chalk::Target::LLVM::Context::_is_memory_phi($_) } ( $r->consumers // [] )->@*;
+                      && !$_->is_memory } ( $r->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     my @made;
@@ -3222,24 +3223,9 @@ sub _memory_phis {
     my ($m) = @_;
     my %seen;
     return grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($m)
-                  && Chalk::Target::LLVM::Context::_is_memory_phi($_) && !$seen{ refaddr($_) }++ }
+                  && $_->is_memory && !$seen{ refaddr($_) }++ }
            grep { blessed($_) } ( $m->consumers // [] )->@*;
 }
-
-# _own_nodes($ret) -> the program's own nodes: those of the subs it calls are
-# theirs.
-sub _own_nodes {
-    my ($ret) = @_;
-    my @all = Chalk::Target::LLVM::Context::_program_nodes($ret);
-    my %callee;
-    for my $c (grep { $_->operation eq 'Call' && blessed($_->can('target') ? $_->target : undef) } @all) {
-        my $t = $c->target;
-        next unless $t->can('graph') && $t->graph;
-        $callee{ refaddr($_) } = 1 for Chalk::Target::LLVM::Context::_graph_component($t->graph);
-    }
-    return grep { !$callee{ refaddr($_) } } @all;
-}
-sub _memstarts { return grep { $_->operation eq 'MemStart' } _own_nodes($_[0]) }
 
 # successors_by_input($n) -> the nodes that take $n as an input (a Loop's Projs).
 sub successors_by_input {

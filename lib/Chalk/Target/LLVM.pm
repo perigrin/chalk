@@ -15,6 +15,7 @@ use Chalk::IR::NodeFactory;   # %STATEMENT_EFFECT_OPS (the shared statement-effe
 use Chalk::IR::Schedule::Dominators;
 use Chalk::IR::Schedule::Elaborate;
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
+use Chalk::IR::Graph;  # program_nodes, component: a program's nodes and a sub's
 
 # lower($return_node) -> $llvm_ir_text
 #
@@ -1916,13 +1917,13 @@ sub _context_sees_maybe_as_scalar {
     require Chalk::Target::LLVM::T2;
     my @nodes = Chalk::Target::LLVM::T2::Builder::_all_nodes($mop, $ret);
     for my $m ( $mop ? map { $_->can('methods') ? $_->methods : () } $mop->classes : () ) {
-        push @nodes, Chalk::Target::LLVM::Context::_graph_component($m->graph) if $m->can('graph') && $m->graph;
+        push @nodes, $m->graph->component if $m->can('graph') && $m->graph;
     }
     my ( %seen, @undo, @all );
     # an anonymous sub's body is a graph of its own (closures nest: repeat)
     while (my @new = grep { blessed($_) && !$seen{ refaddr($_) }++ } @nodes) {
         push @all, @new;
-        @nodes = map { Chalk::Target::LLVM::Context::_graph_component($_) }
+        @nodes = map { $_->component }
             grep { $_ } map { $_->graph // ( $_->sub && $_->sub->can('graph') ? $_->sub->graph : undef ) }
             grep { $_->operation eq 'AnonSub' } @new;
     }
@@ -2010,8 +2011,8 @@ sub lower_with_elaboration {
         my @in = $n->inputs->@*;
         shift @in if $n->operation eq 'EntryWrite';
         grep { blessed($_) && $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq '@' } @in
-    } Chalk::Target::LLVM::Context::_program_nodes($return_node);
-    local @Chalk::Target::LLVM::Context::PROGRAM = Chalk::Target::LLVM::Context::_program_nodes($return_node);
+    } Chalk::IR::Graph::program_nodes($return_node);
+    local @Chalk::Target::LLVM::Context::PROGRAM = Chalk::IR::Graph::program_nodes($return_node);
     local %Chalk::Target::LLVM::Context::EVAL_BY_ENTRY;
     for my $r (grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed($_->eval_entry) }
                @Chalk::Target::LLVM::Context::PROGRAM) {
@@ -2024,16 +2025,16 @@ sub lower_with_elaboration {
     local %Chalk::Target::LLVM::Context::CLOSURE_DEFINE;
     local @Chalk::Target::LLVM::Context::CLOSURE_DEFINES;
     local %Chalk::Target::LLVM::Context::ANON_SUBS = map { ( $_->name // '' ) => $_ }
-        grep { $_->operation eq 'AnonSub' } Chalk::Target::LLVM::Context::_program_nodes($return_node);
+        grep { $_->operation eq 'AnonSub' } Chalk::IR::Graph::program_nodes($return_node);
     # Whether the program selects a handle, before any print lowers.
     # Which variables a scalar m//g matches: each keeps a pos().
     local %Chalk::Target::LLVM::Context::POS_VARS = map { ( $_->inputs->[0]->name => 1 ) } grep {
         $_->operation eq 'RegexMatch' && ( $_->flags // '' ) =~ /g/
             && blessed($_->inputs->[0]) && $_->inputs->[0]->operation eq 'PadAccess'
-    } Chalk::Target::LLVM::Context::_program_nodes($return_node);
+    } Chalk::IR::Graph::program_nodes($return_node);
     local $Chalk::Target::LLVM::Context::SELECTS = grep {
         $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'select'
-    } Chalk::Target::LLVM::Context::_program_nodes($return_node);
+    } Chalk::IR::Graph::program_nodes($return_node);
     # Which package scalars a LocalAlias moves, before any graph lowers.
     local %Chalk::Target::LLVM::Context::ALIASED =
         map { ("main::$_" => 1) } grep { $_ eq '_' }
@@ -2050,7 +2051,7 @@ sub lower_with_elaboration {
     for my $ph (@phase) {
         die "GAP: a $ph->[0] block reading a variable of the main program is not lowered\n"
             if grep { $_->operation eq 'PadAccess' && ( $_->shared || !defined $_->inputs->[0] ) }
-                Chalk::Target::LLVM::Context::_program_nodes($ph->[1]->returns->[0]);
+                Chalk::IR::Graph::program_nodes($ph->[1]->returns->[0]);
     }
     # A phase block is a graph of its own, numbered from its own factory:
     # sharing the main line's cache, `Print#2` of one hit the other's.
