@@ -112,7 +112,10 @@ sub make_5ary_comp {
     isa_ok($one, 'Chalk::Bootstrap::Context', '2-ary one() returns a Context');
     ok(!$one->is_zero(), '2-ary one() has is_zero=false');
     ok(!$comp->is_zero($one), '2-ary is_zero(one()) returns false');
-    ok(defined $one->annotations()->{cfg}, '2-ary one() has cfg annotation');
+    # SA's parse state rides on Context fields, not annotations->{cfg}
+    # (deleted in 885beb87; split into bindings + control_head in 959f82cd).
+    ok(defined $one->bindings(), '2-ary one() carries bindings');
+    isa_ok($one->control_head(), 'Chalk::IR::Node::Start', '2-ary one() control_head');
 }
 
 {
@@ -122,7 +125,8 @@ sub make_5ary_comp {
     isa_ok($one, 'Chalk::Bootstrap::Context', '5-ary one() returns a Context');
     ok(!$one->is_zero(), '5-ary one() has is_zero=false');
     ok(!$comp->is_zero($one), '5-ary is_zero(one()) returns false');
-    ok(defined $one->annotations()->{cfg},        '5-ary one() has cfg annotation');
+    ok(defined $one->bindings(),                   '5-ary one() carries bindings');
+    isa_ok($one->control_head(), 'Chalk::IR::Node::Start', '5-ary one() control_head');
     ok(defined $one->annotations()->{precedence},  '5-ary one() has precedence annotation');
     ok(defined $one->annotations()->{structural},  '5-ary one() has structural annotation');
 }
@@ -169,8 +173,10 @@ sub make_5ary_comp {
     isa_ok($result, 'Chalk::Bootstrap::Context', '5-ary multiply(one,one) returns Context');
     ok(!$comp->is_zero($result), '5-ary multiply(one,one) is not zero');
 
-    # Annotations are preserved on multiply result
-    ok(defined $result->annotations()->{cfg}, '5-ary multiply result has cfg annotation');
+    # SA's parse state is preserved on the multiply result
+    ok(defined $result->bindings(), '5-ary multiply result carries bindings');
+    isa_ok($result->control_head(), 'Chalk::IR::Node::Start',
+        '5-ary multiply result control_head');
 }
 
 # ========================================================================
