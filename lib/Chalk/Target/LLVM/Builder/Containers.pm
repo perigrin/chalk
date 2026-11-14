@@ -277,6 +277,7 @@ sub array_value {
         return $b->value($t) if blessed($t) && ( $t->is_named_hash || $t->is_package_aggregate && $t->sigil eq '%' ) && ( $v->stamp // '' ) eq 'HashRef';   # static type
         out('a reference to what is not an array') unless blessed($t)
             && ( $t->operation eq 'ArrayLiteral' && ( $t->stamp // '' ) eq 'Array' || $t->is_array_deref || $t->is_my_array || $t->is_argv
+                 || $t->operation eq 'Phi' && $b->type_of($t) eq '%Array*'   # a list a loop builds (`my @c = map ...`), a merge of an array's
                  || $t->is_package_aggregate && $t->sigil eq '@' ) # static
             && ( $v->stamp // '' ) eq 'ArrayRef';   # \(@a) is a reference to each element type
         return $b->emit(op => 'ARef', type => '%Slot', inputs => [ $b->array_of($t) ]);

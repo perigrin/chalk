@@ -25,8 +25,14 @@ sub phi_type {
     return '%Slot' if $st =~ /\A(?:Str|Unknown|None|Scalar)\z/ || $st =~ /\AMaybe\[/;   # a Maybe: T or undef
     # A LIST A LOOP BUILDS (map, grep): one array, its back edge a ListAppend
     # to it. Another array phi (`@p = ()` in a loop) is not this.
+    # AN ARRAY ASSIGNED WHOLE IN EACH ARM of an if (`@e = @in` here, `@e = (...)`
+    # there): each arm's a fresh list, the arm taken's at the join. (In a loop
+    # a list made in the body would be made again each pass: not this.)
     if ($st =~ /\A(?:Array|List)\z/) {
-        out("a phi stamped $st") unless grep { blessed($_) && $_->operation eq 'ListAppend' } $phi->inputs->@*;
+        out("a phi stamped $st") unless grep { blessed($_) && $_->operation eq 'ListAppend' } $phi->inputs->@*
+            or !( blessed( $phi->region ) && $phi->region->operation eq 'Loop' )
+               && !grep { !( blessed($_) && ( $_->operation eq 'ArrayLiteral' && ( $_->stamp // '' ) eq 'Array'   # static type
+                                              || $_->operation eq 'PostfixDeref' && $_->is_array_deref && $_->copy ) ) } $phi->inputs->@*;
         return '%Array*';
     }
     return $SCALAR{$st} // out("a phi stamped $st");
