@@ -9,14 +9,17 @@ use Chalk::Bootstrap::Semiring::TypeInferenceActions;
 use Chalk::Grammar::Perl::TypeLibrary;
 
 
-# Helper to create a Context with given focus and children.
-# Simulates the Context tree that extend() receives.
-sub mock_ctx($focus, $children = []) {
+# Helper to create a Context carrying a TI tag hash and children.
+# Simulates the Context tree that extend() receives. Since #707 (a19d7928)
+# TI's tags live on the shared Context as annotations->{type}, not as the
+# focus of a private TI Context, and the actions read them from there.
+sub mock_ctx($tag, $children = []) {
     return Chalk::Bootstrap::Context->new(
-        focus    => $focus,
-        children => $children,
-        position => 0,
-        rule     => undef,
+        focus       => undef,
+        children    => $children,
+        position    => 0,
+        rule        => undef,
+        annotations => { type => $tag },
     );
 }
 
