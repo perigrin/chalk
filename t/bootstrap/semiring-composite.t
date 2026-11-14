@@ -126,8 +126,11 @@ sub ctx_with_annotations($focus, $extra_annotations) {
 
     isa_ok($one, 'Chalk::Bootstrap::Context', 'one returns a Context');
     ok(!$one->is_zero(), 'one returns a Context with is_zero=false');
-    # [Boolean, SA]: no annotation semirings, but SA's cfg annotation is present
-    ok(defined $one->annotations()->{cfg}, 'one has cfg annotation from SA');
+    # [Boolean, SA]: no annotation semirings. SA's parse state rides on
+    # Context fields, not annotations->{cfg} (deleted in 885beb87; scope
+    # became bindings + control_head in 959f82cd).
+    ok(defined $one->bindings(), 'one carries bindings from SA');
+    isa_ok($one->control_head(), 'Chalk::IR::Node::Start', 'one control_head from SA');
 }
 
 # ========================================================================
@@ -604,7 +607,8 @@ sub ctx_with_structural($focus_value, $struct_tag, $rule = undef) {
     isa_ok($one, 'Chalk::Bootstrap::Context', '4-ary one returns a Context');
     ok(!$one->is_zero(), '4-ary one is non-zero');
     ok(defined $one->annotations()->{precedence}, '4-ary one has precedence annotation');
-    ok(defined $one->annotations()->{cfg},        '4-ary one has cfg annotation from SA');
+    ok(defined $one->bindings(),                  '4-ary one carries bindings from SA');
+    isa_ok($one->control_head(), 'Chalk::IR::Node::Start', '4-ary one control_head from SA');
 
     my $zero = $comp->zero();
     isa_ok($zero, 'Chalk::Bootstrap::Context', '4-ary zero returns a Context');
