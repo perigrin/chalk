@@ -29,7 +29,9 @@ sub hash_reads_settled {
     return if $b->{settling};
     local $b->{settling} = 1;
     for my $ver ($b->{passed}->@*) {
-        my @waiting = grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) } } +($b->{readers}{ refaddr($ver) } // [])->@*;
+        # (a %{...} is no value of its own: what reads the hash makes it)
+        my @waiting = grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) }
+                             && !( $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '%' ) } +($b->{readers}{ refaddr($ver) } // [])->@*;
         next unless @waiting;
         # MADE HERE WHERE NOTHING RAN BETWEEN: the read's version is the
         # statement just before this one, in this block, and the read is under
@@ -250,8 +252,7 @@ sub local_elem {
                    && refaddr( $_->inputs->[0] ) == refaddr( $t->inputs->[0] ) && refaddr( $_->inputs->[1] ) == refaddr( $t->inputs->[1] ) }
         +($b->{own_nodes} // [])->@*;
     out('a local of an element restored other than once') unless @r == 1;
-    $b->hash_reads_settled('a local');
-    $b->value($_) for $r[0]->inputs->@[2, 3];
+    $b->value($_) for $r[0]->inputs->@[2, 3];   # (reads at the version the store replaces: made now, before it)
 }
 
 # elem_restore($ElemRestore): the element put back where the scope ends --
