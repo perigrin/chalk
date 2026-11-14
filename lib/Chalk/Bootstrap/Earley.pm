@@ -655,6 +655,27 @@ class Chalk::Bootstrap::Earley {
                     # in its multiply and applies its rule-completion logic.
                     my $rule_name = $ci_rule_names->[$core_id];
                     my $alt_idx = $ci_alt_idxs->[$core_id];
+                    if (!$is_late && $value isa Chalk::Bootstrap::Earley::LeoThunk
+                            && !$self->_has_waiters(\@chart, $rule_name, $origin)) {
+                        # The top of a lazy Leo chain that nothing consumes
+                        # (e.g. the start rule): keep its reification lazy
+                        # too, so a right-recursive chain is not walked at
+                        # every position. Reading the value (_force) applies
+                        # the reification, and a zero then surfaces there.
+                        my $lazy = Chalk::Bootstrap::Earley::LeoThunk->new(
+                            inner => $value,
+                            reify => [$rule_name, $alt_idx, $pos, $origin],
+                        );
+                        $self->_chart_set(\@chart, $pos, $core_id, $origin, $lazy);
+                        if (defined $on_epoch_commit && $rule_name eq 'StatementItem') {
+                            $on_epoch_commit->($origin, $pos);
+                        }
+                        $completed_at{$rule_name}{$origin}{$pos} //= [];
+                        push $completed_at{$rule_name}{$origin}{$pos}->@*, [$core_id, $origin];
+                        $completed_at_origin_rules{$origin}{$rule_name} = 1;
+                        next;
+                    }
+                    $value = $self->_force($value);
                     my $complete_ctx = $self->_make_complete_context(
                         $value, $rule_name, $alt_idx, $pos, $origin
                     );
@@ -668,7 +689,7 @@ class Chalk::Bootstrap::Earley {
                         # already indexed in %completed_at and its epoch commit
                         # already fired.
                         next if !defined($completed_value) || $semiring->is_zero($completed_value);
-                        my $existing_val = $chart[$pos][$core_id][($pos - $origin)];
+                        my $existing_val = $self->_force($chart[$pos][$core_id][($pos - $origin)]);
                         my $merged_value;
                         try {
                             $merged_value = $semiring->add($existing_val, $completed_value);
@@ -725,7 +746,7 @@ class Chalk::Bootstrap::Earley {
                                 if ($self->_is_processed_here($pos, $skip_core, $origin)) {
                                     push @agenda, [$skip_core, $origin, $skip_value];
                                 } elsif (defined $skip_oh && defined $skip_oh->[$skip_rd]) {
-                                    my $existing_val = $skip_oh->[$skip_rd];
+                                    my $existing_val = $self->_force($skip_oh->[$skip_rd]);
                                     my $merged;
                                     try {
                                         $merged = $semiring->add(
@@ -1046,7 +1067,7 @@ class Chalk::Bootstrap::Earley {
 
             my $end_oh = $chart[$n][$core_id];
             if (defined $end_oh && defined $end_oh->[$n]) {
-                return $end_oh->[$n];
+                return $self->_force($end_oh->[$n]);
             }
         }
 
@@ -1079,7 +1100,7 @@ class Chalk::Bootstrap::Earley {
                         my $new_cid = $core_index->advance($cid);
                         # Place at $n (zero-width virtual token)
                         if ($self->_chart_has(\@chart, $n, $new_cid, $item_origin)) {
-                            my $existing = $self->_chart_get(\@chart, $n, $new_cid, $item_origin);
+                            my $existing = $self->_force($self->_chart_get(\@chart, $n, $new_cid, $item_origin));
                             my $merged = $semiring->add($existing, $new_value);
                             $self->_chart_set(\@chart, $n, $new_cid, $item_origin, $merged);
                         } else {
@@ -1107,7 +1128,7 @@ class Chalk::Bootstrap::Earley {
                 for my $entry (@virt_agenda) {
                     my ($cid, $origin) = $entry->@*;
                     $self->_complete(
-                        $cid, $origin, $chart[$n][$cid][($n - $origin)],
+                        $cid, $origin, $self->_force($chart[$n][$cid][($n - $origin)]),
                         $n, \@chart, \@virt_new,
                     );
                 }
@@ -1125,7 +1146,7 @@ class Chalk::Bootstrap::Earley {
                     my $check_id = $core_index->id_for($start_rule->name(), $alt_idx, $end_dot);
                     my $check_oh = $chart[$n][$check_id];
                     if (defined $check_oh && defined $check_oh->[$n]) {
-                        return $check_oh->[$n];
+                        return $self->_force($check_oh->[$n]);
                     }
                 }
             }
@@ -1144,7 +1165,7 @@ class Chalk::Bootstrap::Earley {
                 for my $rd (0 .. $end_oh->$#*) {
                     next unless defined $end_oh->[$rd];
                     # Found a completed start rule from a recovery origin
-                    return $end_oh->[$rd];
+                    return $self->_force($end_oh->[$rd]);
                 }
             }
         }
@@ -1383,7 +1404,7 @@ class Chalk::Bootstrap::Earley {
             push $agenda->@*, [$new_core_id, $origin, $new_value];
         } elsif ($self->_chart_has($chart, $end_pos, $new_core_id, $origin)) {
             # Merge with existing value using semiring add
-            my $existing_val = $self->_chart_get($chart, $end_pos, $new_core_id, $origin);
+            my $existing_val = $self->_force($self->_chart_get($chart, $end_pos, $new_core_id, $origin));
             my $merged_value;
             try {
                 $merged_value = $semiring->add($existing_val, $new_value);
@@ -1420,9 +1441,10 @@ class Chalk::Bootstrap::Earley {
         # Leo resolution: check if a Leo item exists for this rule at origin.
         # Leo items are keyed by (rule_name, origin) where origin is where the
         # waiting items live. When a completion has this origin, the Leo item
-        # shortcuts the chain by one level. Each Leo item covers exactly one
-        # chain level — resolution invokes multiply(leo->value, completed)
-        # which matches the non-Leo path's multiply(waiting_value, completed)
+        # shortcuts the chain. Each Leo item still holds one chain level's
+        # waiting value; resolution invokes multiply(leo->value, completed)
+        # (directly, or level by level when a LeoThunk is read), which
+        # matches the non-Leo path's multiply(waiting_value, completed)
         # byte for byte, so Leo-on and Leo-off produce isomorphic Context
         # graphs. The $_leo_enabled flag is always true in production; the
         # test harness at t/bootstrap/leo-graph-equivalence.t uses
@@ -1431,19 +1453,28 @@ class Chalk::Bootstrap::Earley {
         my $leo_resolved_origin;
         if ($_leo_enabled
             && (my $leo = $leo_items{$rule_name}{$origin})) {
-            my $combined = $semiring->multiply($leo->{value}, $completed_value);
-            unless ($semiring->is_zero($combined)) {
-                my $top_core_id = $leo->{top_core_id};
-                my $top_origin  = $leo->{top_origin};
+            # A Leo item linked to the one above it (next) starts a lazy
+            # chain: jump straight to the topmost item and give it a
+            # LeoThunk that builds every level's value -- exactly the
+            # one-level products and reifications -- only when the value is
+            # read. Unlinked, resolve one level now, as before.
+            my $top = defined $leo->{next} ? $leo->{top} : $leo;
+            my $combined = defined $leo->{next}
+                ? Chalk::Bootstrap::Earley::LeoThunk->new(
+                    leo => $leo, completed => $completed_value, pos => $pos)
+                : $semiring->multiply($leo->{value}, $completed_value);
+            unless (!defined $leo->{next} && $semiring->is_zero($combined)) {
+                my $top_core_id = $top->{wait_core_id};
+                my $top_origin  = $top->{wait_origin};
                 my $new_core_id = $core_index->advance($top_core_id);
 
                 if ($self->_is_processed_here($pos, $new_core_id, $top_origin)) {
                     push $agenda->@*, [$new_core_id, $top_origin, $combined];
                 } elsif ($self->_chart_has($chart, $pos, $new_core_id, $top_origin)) {
-                    my $existing_val = $self->_chart_get($chart, $pos, $new_core_id, $top_origin);
+                    my $existing_val = $self->_force($self->_chart_get($chart, $pos, $new_core_id, $top_origin));
                     my $merged_value;
                     try {
-                        $merged_value = $semiring->add($existing_val, $combined);
+                        $merged_value = $semiring->add($existing_val, $self->_force($combined));
                     } catch ($e) {
                         die "Ambiguity resolving Leo item for '$rule_name' "
                             . "(top_core=$top_core_id, top_origin=$top_origin, pos=$pos): $e";
@@ -1477,6 +1508,10 @@ class Chalk::Bootstrap::Earley {
 
         # Count non-zero waiting items and track the single candidate for Leo
         my $eligible_count = 0;
+        # Every live waiting item, zero products included: a Leo item is
+        # "sole" when its completion has exactly one consumer at all, which
+        # is what lets a lazy chain skip that level's item.
+        my $waiter_count = 0;
         my $leo_candidate_core_id;
         my $leo_candidate_w_origin;
         my $leo_candidate_value;
@@ -1492,6 +1527,7 @@ class Chalk::Bootstrap::Earley {
 
             for my $w_rd ($rd_list->@*) {
                 next unless defined $oh->[$w_rd];
+                $waiter_count++;
                 my $w_origin = $origin - $w_rd;
 
                 # Skip the waiting item already handled by Leo resolution above.
@@ -1518,7 +1554,7 @@ class Chalk::Bootstrap::Earley {
 
                 my $new_rd = $pos - $w_origin;
                 my $existing_oh = $chart->[$pos][$new_core_id];
-                my $existing_val = defined($existing_oh) ? $existing_oh->[$new_rd] : undef;
+                my $existing_val = defined($existing_oh) ? $self->_force($existing_oh->[$new_rd]) : undef;
                 if ($self->_is_processed_here($pos, $new_core_id, $w_origin)) {
                     push $agenda->@*, [$new_core_id, $w_origin, $new_value];
                 } elsif (defined $existing_val) {
@@ -1579,7 +1615,17 @@ class Chalk::Bootstrap::Earley {
                 #
                 # wait_core_id/wait_origin track the immediate waiting item
                 # so _complete can skip it.
-                $leo_items{$rule_name}{$origin} = {
+                #
+                # Lazy chains: when the waiting item's own rule, at its
+                # origin, already has a Leo item whose completion has a sole
+                # consumer, this item links to it (next) and shares its top.
+                # Completing this rule then never creates the intermediate
+                # items in the chart: it jumps to the top with a LeoThunk
+                # (see _force), so right recursion is linear again, and the
+                # value read from the thunk is the same tree the one-level
+                # walk builds.
+                my $parent = $leo_items{$w_rule_name}{$leo_candidate_w_origin};
+                my $item = {
                     leo          => true,
                     rule_name    => $rule_name,
                     top_origin   => $leo_candidate_w_origin,
@@ -1587,7 +1633,15 @@ class Chalk::Bootstrap::Earley {
                     top_core_id  => $leo_candidate_core_id,
                     wait_core_id => $leo_candidate_core_id,
                     wait_origin  => $leo_candidate_w_origin,
+                    sole         => ($waiter_count == 1),
                 };
+                if (defined $parent && $parent->{sole}) {
+                    $item->{next} = $parent;
+                    $item->{top}  = $parent->{top};
+                } else {
+                    $item->{top}  = $item;
+                }
+                $leo_items{$rule_name}{$origin} = $item;
             }
         }
     }
@@ -1609,6 +1663,65 @@ class Chalk::Bootstrap::Earley {
                 predicted => $predicted_at,
             },
         );
+    }
+
+    # Read a chart value. A LeoThunk (a lazy Leo chain, or the lazy
+    # reification of one) is built here on first read and memoised: the
+    # chain is walked bottom-up doing exactly what the one-level Leo walk
+    # does at each level -- multiply the level's waiting value by the
+    # value below, then (below the top) reify that completion -- stopping
+    # at a zero. The top level is left unreified, as a chart value is.
+    # Every other value is returned as is.
+    method _force($v) {
+        return $v unless $v isa Chalk::Bootstrap::Earley::LeoThunk;
+        return $v->{memo} if exists $v->{memo};
+        my $result;
+        if (my $reify = $v->{reify}) {
+            my $inner = $self->_force($v->{inner});
+            if (!defined $inner || $semiring->is_zero($inner)) {
+                $result = $inner;
+            } else {
+                my ($rn, $alt, $rpos, $rorigin) = $reify->@*;
+                $result = $semiring->multiply($inner,
+                    $self->_make_complete_context($inner, $rn, $alt, $rpos, $rorigin));
+            }
+        } else {
+            my $leo = $v->{leo};
+            my $lpos = $v->{pos};
+            my $val = $v->{completed};
+            while (true) {
+                $val = $semiring->multiply($leo->{value}, $val);
+                last if !defined $val || $semiring->is_zero($val);
+                my $next = $leo->{next};
+                last unless defined $next;
+                my $done_id = $core_index->advance($leo->{wait_core_id});
+                $val = $semiring->multiply($val, $self->_make_complete_context(
+                    $val, $core_index->rule_name_for($done_id),
+                    $core_index->alt_idx_for($done_id), $lpos, $leo->{wait_origin}));
+                last if !defined $val || $semiring->is_zero($val);
+                $leo = $next;
+            }
+            $result = $val;
+        }
+        $v->{memo} = $result;
+        delete $v->@{qw(inner completed leo)};
+        return $result;
+    }
+
+    # True when some live item at chart[$origin] waits for $rule_name.
+    method _has_waiters($chart, $rule_name, $origin) {
+        my $ids = $_waiting_core_ids{$rule_name};
+        return false unless defined $ids;
+        for my $w_core_id ($ids->@*) {
+            my $oh = $chart->[$origin][$w_core_id];
+            next unless defined $oh;
+            my $rd_list = $_chart_rd_list[$origin][$w_core_id];
+            next unless defined $rd_list;
+            for my $w_rd ($rd_list->@*) {
+                return true if defined $oh->[$w_rd];
+            }
+        }
+        return false;
     }
 
     # Create an annotated Context for a completion event.
@@ -1646,7 +1759,7 @@ class Chalk::Bootstrap::Earley {
 
         for my $cref ($completed_refs->@*) {
             my ($c_core_id, $c_origin) = $cref->@*;
-            my $completed_val = $self->_chart_get($chart, $pos, $c_core_id, $c_origin);
+            my $completed_val = $self->_force($self->_chart_get($chart, $pos, $c_core_id, $c_origin));
             next unless defined $completed_val;
 
             # Advance the waiting item past the completed reference
@@ -1661,7 +1774,7 @@ class Chalk::Bootstrap::Earley {
             if ($self->_is_processed_here($pos, $new_core_id, $waiting_origin)) {
                 push $agenda->@*, [$new_core_id, $waiting_origin, $new_value];
             } elsif ($self->_chart_has($chart, $pos, $new_core_id, $waiting_origin)) {
-                my $existing_val = $self->_chart_get($chart, $pos, $new_core_id, $waiting_origin);
+                my $existing_val = $self->_force($self->_chart_get($chart, $pos, $new_core_id, $waiting_origin));
                 my $merged_value;
                 try {
                     $merged_value = $semiring->add($existing_val, $new_value);
@@ -1679,4 +1792,12 @@ class Chalk::Bootstrap::Earley {
             }
         }
     }
+}
+
+# A lazy chart value made by a Leo chain (see Earley::_force). Either
+# { leo, completed, pos }: the chain from Leo item `leo` up to its top,
+# applied to the completion `completed` at `pos`; or { inner, reify }: the
+# reification of another thunk. Only Earley::_force reads it.
+package Chalk::Bootstrap::Earley::LeoThunk {
+    sub new($class, %args) { return bless {%args}, $class }
 }
