@@ -324,7 +324,7 @@ its own commit, with T2's 72 `t2-*.t` files as the test. Do not copy them.
 18. **Delete.** Producer: `lib/SoN/Deparse.pm`, the `--via` switch, the
     Deparse lines of `CONTRIBUTING.md`. Chalk:
     `lib/Chalk/Bootstrap/Perl/Target/Perl.pm`, the EagerPinning scheduler and
-    its `t/bootstrap/scheduler/` tests, if perigrin agrees (question 3).
+    its `t/bootstrap/scheduler/` tests (decision 3).
     *Test first:* the full producer suite with `SoN::Deparse` absent.
 
 `EmitHelpers.pm`, `Perl/Target/C.pm` and the BNF C/XS targets leave with the
@@ -401,7 +401,7 @@ Risks to the plan itself:
   (2.4) is the guard. So is the analysed gate, later.
 - **A hollow suite.** Half the producer's test files will need a chalk clone.
   If they skip without one, the suite passes while testing nothing. See
-  question 2.
+  decision 2: they skip, so the gate counts the skips.
 - **The pin.** A functor fix lands in chalk, then the producer's pin moves.
   A census read at a stale pin is the wrong number
   (`P:docs/memory/MEMORY.md:161`). The census prints the pin it used.
@@ -409,15 +409,14 @@ Risks to the plan itself:
   about 0.05 s (measured). Fine for 431 cases; measure it for the 359 test
   files at step 15.
 
-## 8. Questions for perigrin
+## 8. Decisions (perigrin, 2026-11-14)
 
-1. **Which graph does the producer's gate render: loaded, or analysed?**
-   Recommended: loaded, with no Analysis (2.4). The analysed graph becomes a
-   second gate later (step 17).
-2. **Without a chalk clone, do the producer's round-trip tests fail or
-   skip?** Recommended: fail. `SON_CHALK` is already set by
-   `P:tools/cloud-setup.sh:88`.
-3. **Is the old Schedule-driven target deleted at step 18, or kept for the
-   grammar parser's output?** Recommended: deleted. When chalk's parser
-   replaces B::SoN it must emit the wire's dialect, and then the functor
-   serves it too.
+1. **The producer's gate renders the LOADED graph**, with no Analysis
+   (2.4). The analysed graph becomes a second gate later (step 17).
+2. **Without a chalk clone, the producer's round-trip tests SKIP**, with a
+   message naming `SON_CHALK`. The hollow-suite risk (section 7) stands:
+   the census and the gate must say how many tests skipped, so a run
+   without chalk cannot read as green.
+3. **The old Schedule-driven target is deleted at step 18.** When chalk's
+   parser replaces B::SoN it must emit the wire's dialect, and then the
+   functor serves it too.
