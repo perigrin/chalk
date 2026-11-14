@@ -21,6 +21,9 @@ class Chalk::Target::LLVM::Node::Exit :isa(Chalk::Target::LLVM::Node) { method t
 class Chalk::Target::LLVM::Node::AtExit :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { 'call void @t2_atexit(void ()* ' . $self->attr->{fn} . ')' }
 }
+# A STOP AT RUN TIME (exit 255, the message to STDERR) where a condition T2
+# cannot answer at build time fails: refused there, never answered wrong.
+class Chalk::Target::LLVM::Node::StopUnless :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_stop_unless') } }
 class Chalk::Target::LLVM::Node::RunEnds :isa(Chalk::Target::LLVM::Node) { method to_ll () { 'call void @t2_run_ends()' } }
 
 1;

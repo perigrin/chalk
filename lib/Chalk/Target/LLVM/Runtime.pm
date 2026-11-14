@@ -1410,6 +1410,17 @@ define internal void @t2_stop(i8* %m, i64 %n) {
   call void @exit(i32 255)
   unreachable
 }
+define internal void @t2_stop_unless(i1 %ok, %Str %m) {
+entry:
+  br i1 %ok, label %yes, label %no
+no:
+  %p = extractvalue %Str %m, 0
+  %n = extractvalue %Str %m, 1
+  call void @t2_stop(i8* %p, i64 %n)
+  unreachable
+yes:
+  ret void
+}
 define internal void @t2_refscalar() {
   call void @t2_stop(i8* getelementptr ([62 x i8], [62 x i8]* @msg_refstr, i64 0, i64 0), i64 61)
   unreachable

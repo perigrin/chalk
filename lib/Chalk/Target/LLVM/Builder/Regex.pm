@@ -173,8 +173,50 @@ sub regex_subst {
     out('an s///g whose replacement is made per match (B::SoN computes it once)') if $repl && $flags =~ /g/;
     $flags =~ s/[er]//g;
     my @args = ( $b->as( $b->value( $s->inputs->[0] ), '%Slot' ) );
-    push @args, $b->as( $b->value($repl), '%Slot' ) if $repl;
+    push @args, $b->subst_replacement( $s, $repl ) if $repl;
     return $b->{memo}{$k} = $b->subst_call( $s, $flags, $repl ? { computed => 1 } : { replacement => $s->replacement // '' }, @args );
+}
+
+# subst_replacement($RegexSubst, $repl) -> the %Slot of a computed replacement.
+# ITS CAPTURES ($1 in `s/(y)/$1/`) are of a match B::SoN gives of the subst's
+# own subject and pattern: perl reads them only where the subst matched. Made
+# in the arm where that match succeeded (undef in the other, never used).
+sub subst_replacement {
+    my ($b, $s, $repl) = @_;
+    my (%own, @todo, %seen);
+    @todo = ($repl);
+    while ( my $x = shift @todo ) {
+        next unless blessed($x) && !$seen{ refaddr($x) }++;
+        if ( $x->operation eq 'RegexCapture' ) {
+            my $m = $x->inputs->[0];
+            $own{ refaddr($m) } = $m
+                if blessed($m) && $m->operation eq 'RegexMatch' && !( $m->can('control_in') && blessed( $m->control_in ) )
+                && blessed( $m->inputs->[0] ) && refaddr( $m->inputs->[0] ) == refaddr( $s->inputs->[0] )
+                && ( $m->pattern // '' ) eq ( $s->pattern // "\0" ) && !$s->pattern_is_input
+                && ( $m->flags // '' ) =~ s/[gcer]//gr eq ( $s->flags // '' ) =~ s/[gcer]//gr;
+            next;
+        }
+        push @todo, grep { !( $_->can('is_memory_version') && $_->is_memory_version ) } grep { blessed($_) } $x->inputs->@*
+            unless $x->operation =~ /\A(?:Phi|PadAccess|EntryDef)\z/;
+    }
+    return $b->as( $b->value($repl), '%Slot' ) unless %own;
+    out('an s/// whose replacement reads the captures of more than one match') if keys %own > 1;
+    my ($m) = values %own;
+    my $cond = $b->emit(op => 'Defined', type => 'i1', inputs => [ $b->regex_result($m) ]);
+    my $from = $b->{cur};
+    my $tb = $b->new_block('then');
+    my $tv;
+    { local $b->{memo} = { $b->{memo}->%* };
+      local $b->{rx_ok} = { ( $b->{rx_ok} // {} )->%*, refaddr($m) => 1 };
+      $tv = $b->as( $b->value($repl), '%Slot' ); }
+    my $tend = $b->{cur};
+    my $eb = $b->new_block('else');
+    my $ev = $b->emit(op => 'Undef', type => '%Slot');
+    my $jb = $b->new_block('join');
+    $from->{term} = [ 'condbr', $cond, $tb, $eb ];
+    $tend->{term} = [ 'br', $jb ];
+    $eb->{term} = [ 'br', $jb ];
+    return $b->emit(op => 'Phi', type => '%Slot', inputs => [ $tv, $ev ], attr => { from => [ $tend, $eb ] });
 }
 
 # subst_call($RegexSubst, $flags, \%opts, @args) -> what its subst graph gives.
@@ -316,10 +358,22 @@ sub regex_capture {
         my $caps = $b->emit(op => 'GArray', type => '%Array*', attr => { global => $b->global_named('pkgarr::T2::SubstCaps') });
         return $b->as( $b->emit(op => 'AGet', type => '%Slot', inputs => [ $caps, $b->emit(op => 'Const', type => 'i64', attr => { value => $c->n }) ]), $b->type_of($c) );
     }
-    out('a capture read where its match may have failed (perl reads the last match that succeeded)')
-        unless ( $b->{rx_ok} // {} )->{ refaddr($m) };
+    # A CAPTURE OF A MATCH THAT MAY HAVE FAILED reads, in perl, the last match
+    # that succeeded (here, or in a caller): where its own match was made on
+    # the way here, it is read where that succeeded, and a failed one stops
+    # the program at run time -- refused there, not answered wrong.
+    unless ( ( $b->{rx_ok} // {} )->{ refaddr($m) } ) {
+        my $r = $b->{memo}{ 'rx' . refaddr($m) }
+            // out('a capture read where its match may have failed (perl reads the last match that succeeded)');
+        $b->emit(op => 'StopUnless', type => 'void', inputs => [ $b->emit(op => 'Defined', type => 'i1', inputs => [$r]),
+            $b->const_str("a capture read where its match failed (perl reads the last match that succeeded): stopped (chalk, T2)\n") ]);
+    }
     my $n = $c->n;
     out('a capture of no group of its pattern') if $n < 1;
+    # ITS MATCH MADE IN AN ARM (of an &&) is not here: made again, which is
+    # the same match unless running it changes something (pos, a code block).
+    out('a capture of a /g match or one with code blocks, made again in another block')
+        if !$b->{memo}{ 'rx' . refaddr($m) } && ( ( $m->flags // '' ) =~ /g/ || ( $m->can('code_bodies') && $m->code_bodies && $m->code_bodies->@* ) );
     my $arr = $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->regex_result($m) ]);
     my ( $s, $e ) = map { $b->as( $b->emit(op => 'AGet', type => '%Slot', inputs => [ $arr, $b->emit(op => 'Const', type => 'i64', attr => { value => 2 * $n + $_ }) ]), 'i64' ) } 0, 1;
     my $str = $b->as( $b->value( $m->inputs->[0] ), '%Str' );
@@ -367,6 +421,10 @@ sub _rx_arm {
     my ($ok, $cond, $arm) = @_;
     my %ok = +($ok // {})->%*;
     if ( blessed($cond) && $cond->operation =~ /\A(?:RegexMatch|Match)\z/ ) { $ok{ refaddr($cond) } = 1 if $arm == 0 }
+    # `A && B` TRUE: both held; `A || B` FALSE: neither did.
+    elsif ( blessed($cond) && ( $cond->operation eq 'And' && $arm == 0 || $cond->operation eq 'Or' && $arm == 1 ) ) {
+        %ok = _rx_arm( _rx_arm( \%ok, $cond->inputs->[0], $arm ), $cond->inputs->[1], $arm )->%*;
+    }
     elsif ( blessed($cond) && $cond->operation eq 'Not' && blessed( $cond->inputs->[0] ) && $cond->inputs->[0]->operation =~ /\A(?:RegexMatch|Match)\z/ ) {
         $ok{ refaddr( $cond->inputs->[0] ) } = 1 if $arm == 1;
     }

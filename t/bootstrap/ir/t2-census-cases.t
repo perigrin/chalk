@@ -24,17 +24,18 @@ my @CASES = qw(
     chalk-found-gaps:5 chalk-found-gaps:6 chalk-found-gaps:7
     chalk-found-gaps:9 chalk-found-gaps:14 chalk-found-gaps:17
     chalk-found-gaps:18 chalk-found-gaps:19 chalk-found-gaps:28
-    chalk-found-gaps:30 chalk-found-gaps:33 chalk-found-gaps:34
-    chalk-found-gaps:39 chalk-found-gaps:40 chalk-found-gaps:41
-    chalk-found-gaps:42 chalk-found-gaps:44 chalk-found-gaps:45
-    chalk-found-gaps:46 chalk-found-gaps:48 chalk-found-gaps:51
-    chalk-found-gaps:52 chalk-found-gaps:55 chalk-found-gaps:56
-    chalk-found-gaps:57 chalk-found-gaps:60 chalk-found-gaps:62
-    chalk-found-gaps:69 chalk-found-gaps:87 chalk-found-gaps:89
-    chalk-found-gaps:91 chalk-found-gaps:92 chalk-found-gaps:97
-    chalk-found-gaps:100 chalk-found-gaps:102 chalk-found-gaps:103
-    chalk-found-gaps:105 chalk-found-gaps:114 chalk-found-gaps:117
-    chalk-found-gaps:133 chalk-found-gaps:140 chalk-found-gaps:142
+    chalk-found-gaps:30 chalk-found-gaps:32 chalk-found-gaps:33
+    chalk-found-gaps:34 chalk-found-gaps:39 chalk-found-gaps:40
+    chalk-found-gaps:41 chalk-found-gaps:42 chalk-found-gaps:44
+    chalk-found-gaps:45 chalk-found-gaps:46 chalk-found-gaps:48
+    chalk-found-gaps:51 chalk-found-gaps:52 chalk-found-gaps:55
+    chalk-found-gaps:56 chalk-found-gaps:57 chalk-found-gaps:60
+    chalk-found-gaps:62 chalk-found-gaps:69 chalk-found-gaps:87
+    chalk-found-gaps:89 chalk-found-gaps:91 chalk-found-gaps:92
+    chalk-found-gaps:97 chalk-found-gaps:100 chalk-found-gaps:102
+    chalk-found-gaps:103 chalk-found-gaps:105 chalk-found-gaps:114
+    chalk-found-gaps:117 chalk-found-gaps:133 chalk-found-gaps:135
+    chalk-found-gaps:136 chalk-found-gaps:140 chalk-found-gaps:142
     chalk-found-gaps:143 chalk-found-gaps:149 chalk-found-gaps:157
     chalk-found-gaps:161 chalk-found-gaps:162 chalk-found-gaps:165
     chalk-found-gaps:169 chalk-found-gaps:171 class-feature:1
@@ -60,7 +61,7 @@ my @CASES = qw(
     packages:3 pod-and-data:1 pod-and-data:2 quote-like-terms:5 range:3
     read-position:1 read-position:2 read-position:3 regex-delimiters:1
     regex-delimiters:2 regex-delimiters:3 regex-matching:1 regex-matching:2
-    regex-matching:3 regex-matching:4 regex-matching:5
+    regex-matching:3 regex-matching:4 regex-matching:5 regex-matching:7
     regex-pattern-positions:1 regex-pattern-positions:2 regex-quote-likes:1
     regex-quote-likes:2 strings:1 strings:2 strings:3 subroutines:1
     subroutines:7 subroutines:8 subroutines:9 subroutines:10 subroutines:11
