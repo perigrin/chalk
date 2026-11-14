@@ -11,4 +11,10 @@ class Chalk::IR::Node::DefinedOr :isa(Chalk::IR::Node::BinOp) {
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
     method op_str()    { '//' }
+
+    # makes_a_string -> a default of strings is a string.
+    method makes_a_string() {
+        my ( $l, $r ) = $self->inputs->@[ 0, 1 ];
+        return ( $l isa Chalk::IR::Node ? $l->makes_a_string : 0 ) && ( $r isa Chalk::IR::Node ? $r->makes_a_string : 0 );
+    }
 }

@@ -46,7 +46,7 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
         return undef unless blessed($s) && $s->operation eq 'Subscript' && ( $s->can('kind') ? $s->kind // 'array' : 'array' ) eq 'array';
         my $args = $s->inputs->[0];
         return undef unless blessed($args) && $args->operation eq 'ArgsSource';
-        return undef if grep { blessed($_) && $_->operation eq 'Call' && ( $_->name // '' ) =~ /\A(?:shift|pop|push|unshift|splice)\z/
+        return undef if grep { blessed($_) && $_->operation eq 'Call' && $_->mutates_array
                                && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($args) } $args->consumers->@*;
         return $s;
     }

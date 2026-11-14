@@ -5,6 +5,8 @@ use utf8;
 use experimental 'class';
 
 use Chalk::IR::Value;
+use Chalk::Grammar::Perl::TypeLibrary;   # a builtin's signature
+use Chalk::Grammar::Perl::BuiltinTable;  # its facts the signatures lack
 
 class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     field $dispatch_kind :param :reader;
@@ -163,4 +165,51 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
         $eval_id = $v;
         return;
     }
+
+    # ---------------------------------------------------------------------
+    # PERL'S FACTS ABOUT A BUILTIN, asked of the Call of one: from its
+    # signature (Chalk::Grammar::Perl::TypeLibrary) or, for a fact the
+    # signatures lack, the table beside them (BuiltinTable) -- so no backend
+    # keeps a list of builtins. A call of a sub answers no (undef for
+    # result_type): its name is the sub's, not the builtin's.
+    # ---------------------------------------------------------------------
+
+    method is_builtin() { return ( $dispatch_kind // '' ) eq 'builtin' ? 1 : 0 }
+
+    # is_sub_call -> true for a call of a sub: named (direct), a method, or
+    # through a code value (indirect).
+    method is_sub_call() { return ( $dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/ ? 1 : 0 }
+
+    # result_type -> the type the builtin returns, or undef.
+    method result_type() {
+        return undef unless $self->is_builtin;
+        my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin( $name // '' );
+        return $sig ? $sig->{return_type} : Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'return_type' );
+    }
+
+    # returns_string -> true for a builtin whose value is a string.
+    method returns_string() { return ( $self->result_type // '' ) eq 'Str' ? 1 : 0 }
+
+    # mutates_array -> true for a builtin that changes the array it is given
+    # first (push, pop, shift, unshift, splice): its signature takes the Array
+    # itself there, not a list of it.
+    method mutates_array() {
+        return 0 unless $self->is_builtin;
+        my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin( $name // '' ) or return 0;
+        return ( ( $sig->{arg_types} // [] )->[0] // '' ) eq 'Array' ? 1 : 0;
+    }
+
+    # changes_case -> true for lc, uc, lcfirst, ucfirst.
+    method changes_case() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'changes_case' ) ? 1 : 0 }
+
+    # is_tie_builtin -> true for tie, tied, untie: each of a variable's tie.
+    method is_tie_builtin() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'tie' ) ? 1 : 0 }
+
+    # takes_a_list -> true for a builtin whose operands (after its first, for
+    # push's array, join's separator, a format) are a LIST: what it is given
+    # there is in list context.
+    method takes_a_list() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'list_args' ) ? 1 : 0 }
+
+    # makes_a_string -> a builtin that returns a string makes one.
+    method makes_a_string() { return $self->returns_string }
 }

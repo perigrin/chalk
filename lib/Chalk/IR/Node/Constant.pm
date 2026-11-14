@@ -25,5 +25,6 @@ class Chalk::IR::Node::Constant :isa(Chalk::IR::Value) {
 
     # A string or an integer is the one string it spells.
     method const_choices() { return ( $const_type // '' ) =~ /\A(?:string|integer)\z/ ? ( $value // '' ) : () }
+    method makes_a_string() { return ( $const_type // '' ) =~ /\A(?:string|integer)\z/ ? 1 : 0 }
     method const_pattern() { return ( $const_type // '' ) =~ /\A(?:string|integer)\z/ ? $value // '' : undef }
 }

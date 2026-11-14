@@ -16,6 +16,9 @@ class Chalk::IR::Node::EnvRead :isa(Chalk::IR::Value) {
     method staleness_kind() { 'opaque' }
     sub identity_kind { 'hash_consed' }
 
+    # makes_a_string -> it makes a string (never a qr value).
+    method makes_a_string() { return 1 }
+
     method content_hash() {
         return join('|', 'EnvRead', "key=$key", $self->_serialize_inputs());
     }

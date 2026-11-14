@@ -327,6 +327,11 @@ class Chalk::IR::Node {
     # constants (a string, or strings joined), else undef.
     method const_pattern() { return undef }
 
+    # makes_a_string -> 1 where what makes this value makes a string, never a
+    # qr value: input (%ENV), a concatenation, a constant, a builtin returning
+    # a string, a default of those.
+    method makes_a_string() { return 0 }
+
     # successors -> the nodes whose control is this one, each once.
     method successors() {
         my %seen;

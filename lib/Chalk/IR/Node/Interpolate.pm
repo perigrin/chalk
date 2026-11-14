@@ -10,4 +10,7 @@ class Chalk::IR::Node::Interpolate :isa(Chalk::IR::Node::Aggregate) {
     method operation() { 'Interpolate' }
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
+
+    # makes_a_string -> it makes a string (never a qr value).
+    method makes_a_string() { return 1 }
 }

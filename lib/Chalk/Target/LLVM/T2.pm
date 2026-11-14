@@ -474,7 +474,7 @@ sub walk {
         elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'substr') { $b->substr_write($s); $ctl = $s }
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands.
-        elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || ( $s->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/ )) {
+        elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || $s->is_sub_call )) {
             $b->value($s);
             push $b->{passed}->@*, $s;   # B::SoN versions memory at a call
             $ctl = $s;
@@ -1252,7 +1252,7 @@ sub array_value {
     }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin') {
         my $name = $v->name // '';
-        if ($name =~ /\A(?:tie|tied|untie)\z/) {
+        if ($v->is_tie_builtin) {
             # (a tie's methods may die, and nothing after them looks: not T2's in a program with an eval)
             out("a $name in a program with an eval") if $b->{has_eval};
             my @args = @in;
@@ -1313,7 +1313,7 @@ sub _is_list {
     my ($n) = @_;
     # A CALL IN LIST CONTEXT: its result is a list (of one value, maybe). Its
     # use decides, not its stamp (a call stamped List is a scalar's in `my $n =`).
-    return _list_use($n) if $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/;
+    return _list_use($n) if $n->operation eq 'Call' && $n->is_sub_call;
     return 1 if ( $n->stamp // '' ) =~ /\A(?:List|Array|Hash)\z/; # static type
     # A MATCH IN LIST CONTEXT (B::SoN stamps it Boolean): by what takes it.
     return _match_in_list($n) if $n->operation =~ /\A(?:RegexMatch|Match)\z/;
@@ -1324,9 +1324,8 @@ sub _is_list {
 
 # _match_in_list($match) -> 1 if what takes the match takes a list: print (a
 # Coerce B::SoN put there is no scalar context), a list's element, a sub
-# call's argument, push/unshift/join/sprintf/die/warn, a list assignment.
+# call's argument, a builtin's list (Call::takes_a_list), a list assignment.
 # Returned, its context is the caller's: refused.
-my %LIST_BUILTIN = map { ( $_ => 1 ) } qw(push unshift join sprintf die warn printf);
 sub _match_in_list {
     my ($n) = @_;
     my $list = 0;
@@ -1341,8 +1340,8 @@ sub _match_in_list {
         Chalk::Target::LLVM::T2::Builder::out('a match returned (its context is its caller\'s)') if $op eq 'Return';
         if ( $op eq 'Coerce' && grep { blessed($_) && $_->operation eq 'Print' } ( $c->consumers // [] )->@* ) { $list = 1; next }
         $list = 1 if $op =~ /\A(?:Print|ArrayLiteral|ListAppend)\z/ && $is_in->($n);
-        $list = 1 if $op eq 'Call' && ( $c->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/;
-        $list = 1 if $op eq 'Call' && ( $c->dispatch_kind // '' ) eq 'builtin' && $LIST_BUILTIN{ $c->name // '' };
+        $list = 1 if $op eq 'Call' && $c->is_sub_call;
+        $list = 1 if $op eq 'Call' && $c->takes_a_list;
         $list = 1 if $op eq 'Assign' && blessed( $c->inputs->[-1] ) && refaddr( $c->inputs->[-1] ) == refaddr($n)
             && ( ( $c->can('targets') && defined $c->targets ) || grep { blessed($_) && $_->can('sigil') && ( $_->sigil // '' ) =~ /\A[\@%]\z/ } $c->inputs->@[ 0 .. $c->inputs->$#* - 1 ] );
     }
@@ -2123,7 +2122,7 @@ sub regex_result {
         unless ( blessed($re) && $re->operation eq 'Constant' && ( $re->const_type // '' ) eq 'regex' ) {
             # (a string by what makes it -- not by its stamp: B::SoN stamps a
             # qr value Str where it is also joined to one -- a pattern built at run time)
-            out('a match against a pattern built at run time') if _made_a_string($re);
+            out('a match against a pattern built at run time') if $re isa Chalk::IR::Node && $re->makes_a_string;
             out('a match against a qr value with flags of its own (' . $flags . ')') if $flags =~ /[^u]/;
             return $b->{memo}{$k} = $b->emit_call(op => 'QrMatch', type => '%Slot', inputs => [ $b->as( $b->value($re), '%Slot' ), $subj ]);
         }
@@ -2454,19 +2453,6 @@ sub _pattern_parts {
     return defined $pat ? ( $pat, \@lits ) : ();
 }
 
-# _made_a_string($node) -> 1 where what makes it makes a string, never a qr
-# value: input (%ENV), a concatenation, a string builtin, a default of those.
-sub _made_a_string {
-    my ($n) = @_;
-    return 0 unless blessed($n);
-    my $op = $n->operation;
-    return 1 if $op =~ /\A(?:EnvRead|Concat|Interpolate)\z/;
-    return 1 if $op eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:string|integer)\z/;
-    return 1 if $op eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) =~ /\A(?:join|sprintf|lc|uc|lcfirst|ucfirst|substr|quotemeta|sprintf)\z/;
-    return _made_a_string( $n->inputs->[0] ) && _made_a_string( $n->inputs->[1] ) if $op eq 'DefinedOr';
-    return 0;
-}
-
 # _rx_arm(\%ok, $cond, $arm) -> the matches known to have succeeded in arm
 # $arm (0 the true one) of a branch on $cond: a match, or not a match.
 sub _rx_arm {
@@ -2586,8 +2572,8 @@ sub func {
     local $b->{argsarr} = $argsarr;
     # A READ OF `my (...) = @_` made where it is used reads @_ then: one the
     # sub shifts first would be of the shifted array.
-    local $b->{args_mutated} = $list && scalar grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
-        && ( $_->name // '' ) =~ /\A(?:shift|pop|push|unshift|splice)\z/ && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'ArgsSource' }
+    local $b->{args_mutated} = $list && scalar grep { $_->operation eq 'Call' && $_->mutates_array
+        && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'ArgsSource' }
         $g->component;
     local $b->{blocks} = $fn->{blocks};
     local $b->{cur};
@@ -2983,7 +2969,7 @@ sub type_of {
     return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:sort|reverse)\z/
         && ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/;   # static type
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
-    return '%Str' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/;
+    return '%Str' if $op eq 'Call' && $v->changes_case;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
     return '%Array*' if $v->is_argv;
     return '%Slot' if $v->is_package_scalar;   # what it holds is what was stored last, anywhere
@@ -3000,7 +2986,7 @@ sub type_of {
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) =~ /\A(?:direct|method)\z/;
     # AN OBJECT is its blessed reference; ref() of one its class, or HASH.
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless' || $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'blessed';
-    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:tie|tied|untie)\z/;
+    return '%Slot' if $op eq 'Call' && $v->is_tie_builtin;
     return '%Str' if $op eq 'RefType';
     return 'i64' if $op eq 'Print';
     # ARITHMETIC ON A %Slot is perl's: Ints stay Ints until they overflow. Done
@@ -3149,7 +3135,7 @@ sub _value {
         out('a package scalar read of no one version') if $b->{unversioned}{ refaddr($v) };
         return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_of($v) });
     }
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:uc|lc|ucfirst|lcfirst)\z/) {
+    if ($op eq 'Call' && $v->changes_case) {
         # ASCII CASE: past ASCII perl's case is a character's (refused there).
         $b->{past_ascii} //= scalar grep { $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'string' && ( $_->value // '' ) =~ /[^\x00-\x7f]/ }
             _all_nodes($b->{mop}, $b->{ret});

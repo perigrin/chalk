@@ -12,6 +12,9 @@ class Chalk::IR::Node::Concat :isa(Chalk::IR::Node::BinOp) {
     sub identity_kind { 'hash_consed' }
     method op_str()    { '.' }
 
+    # makes_a_string -> it makes a string (never a qr value).
+    method makes_a_string() { return 1 }
+
     # const_choices -> each left choice joined to each right one.
     method const_choices() {
         my ( $l, $r ) = $self->inputs->@[ 0, 1 ];
