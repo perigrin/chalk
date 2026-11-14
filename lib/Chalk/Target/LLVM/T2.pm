@@ -29,6 +29,16 @@ class Chalk::Target::LLVM::T2::Node {
     field $attr   :param :reader = {};
     field $name   :reader;                  # its SSA name, given by the printer
     method set_name ($n) { $name = $n }
+
+    # Each op is a subclass (T2::Node::<op>, beside the printer) whose
+    # to_ll is its line of .ll. What they share: nodes as `type name`
+    # arguments; a call of the runtime over the inputs, for a value or
+    # not; a string constant @s<id> as an i8*, and with its length.
+    method _args (@n) { join ', ', map { $_->type . ' ' . $_->name } @n }
+    method _call ($sig) { "$name = call $sig(" . $self->_args($inputs->@*) . ')' }
+    method _void ($fn) { "call void $fn(" . $self->_args($inputs->@*) . ')' }
+    method _gep ($len, $id) { "i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$id, i64 0, i64 0)" }
+    method _cstr ($s, $id) { my $len = do { use bytes; length $s }; $self->_gep($len, $id) . ", i64 $len" }
 }
 
 package Chalk::Target::LLVM::T2;
@@ -41,7 +51,15 @@ my %ARITH  = (Add => 'add', Subtract => 'sub', Multiply => 'mul');
 my %SCMP   = (StrEq => 'eq', StrNe => 'ne', StrLt => 'lt', StrGt => 'gt', StrLe => 'le', StrGe => 'ge');
 my %CMP    = (NumLt => 'lt', NumGt => 'gt', NumLe => 'le', NumGe => 'ge', NumEq => 'eq', NumNe => 'ne');
 
-sub _n { Chalk::Target::LLVM::T2::Node->new(@_) }
+# A node of its op's class: T2::Node::<op>. An op with no class is refused
+# here, by name, rather than printed as nothing.
+sub _n {
+    my %a = @_;
+    my $class = 'Chalk::Target::LLVM::T2::Node::' . ( $a{op} // '' );
+    die 'T2: no class for the op ' . ( $a{op} // '(none)' ) . "\n"
+        unless $a{op} && $a{op} =~ /\A\w+\z/ && $class->isa('Chalk::Target::LLVM::T2::Node');
+    return $class->new(@_);
+}
 
 # lower_program($return_node) -> the module's text, or undef when the program
 # is not slice 1's.
@@ -3788,7 +3806,7 @@ sub _blocks {
     my @L;
     for my $blk (@$blocks) {
         push @L, "$blk->{label}:";
-        push @L, map { '  ' . _line($_) } $blk->{nodes}->@*;
+        push @L, map { '  ' . $_->to_ll } $blk->{nodes}->@*;
         my ($k, @t) = +($blk->{term} // ['ret'])->@*;
         push @L, $k eq 'unreachable' ? '  unreachable'
                : $k eq 'ret'    ? '  ret i32 0'
@@ -3801,186 +3819,318 @@ sub _blocks {
 
 sub _c { my $s = shift; $s =~ s/([^\x20-\x21\x23-\x5b\x5d-\x7e])/sprintf('\\%02X', ord $1)/ge; $s }
 
-sub _line {
-    my ($n) = @_;
-    my ($op, $ty, $nm, @in) = ($n->op, $n->type, $n->name, $n->inputs->@*);
-    my %a = $n->attr->%*;
-    my $arg = sub { join ', ', map { $_->type . ' ' . $_->name } @_ };
-    if ($op eq 'Const') {
+# ONE CLASS PER LLVM OP: each T2::Node subclass prints its own line (or
+# lines) with to_ll. The builder's `_n(op => 'X', ...)` makes a
+# T2::Node::X, so an op without a class dies where it is made, by name.
+# Most are a call of the runtime: `_call` (a value) or `_void`, over the
+# node's inputs.
+
+class Chalk::Target::LLVM::T2::Node::Const :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my ($ty, $nm, %a) = ($self->type, $self->name, $self->attr->%*);
         return "$nm = add i64 0, " . ( 0 + $a{value} ) if $ty eq 'i64';
-        return "$nm = fadd double 0.0, " . _double($a{value}) if $ty eq 'double';
+        return "$nm = fadd double 0.0, " . Chalk::Target::LLVM::T2::Printer::_double($a{value}) if $ty eq 'double';
         return "$nm = add i1 0, " . ( $a{value} ? 1 : 0 ) if $ty eq 'i1';
         die "T2: a constant of $ty";
     }
-    if ($op eq 'ConstStr') {
-        my $len = do { use bytes; length $a{value} };
-        return "$nm = call %Str \@t2_str(i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
-    }
-    if ($op eq 'Env') {
+}
+class Chalk::Target::LLVM::T2::Node::ConstStr :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { my %a = $self->attr->%*; $self->name . ' = call %Str @t2_str(' . $self->_cstr($a{value}, $a{id}) . ')' }
+}
+class Chalk::Target::LLVM::T2::Node::Env :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
         my $len = do { use bytes; length $a{key} };
-        return "$nm = call %Slot \@t2_env(i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0))";
+        return $self->name . ' = call %Slot @t2_env(' . $self->_gep($len, $a{id}) . ')';
     }
-    if ($op eq 'Arith') {
+}
+class Chalk::Target::LLVM::T2::Node::Arith :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my ($ty, $nm, @in) = ($self->type, $self->name, $self->inputs->@*);
+        my %a = $self->attr->%*;
         my %fop = (add => 'fadd', sub => 'fsub', mul => 'fmul', div => 'fdiv');
         my $o = $ty eq 'double' ? $fop{ $a{op} } : $a{op};
         return "$nm = $o $ty " . $in[0]->name . ', ' . $in[1]->name;
     }
-    if ($op eq 'Cmp') {
+}
+class Chalk::Target::LLVM::T2::Node::Cmp :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my ($nm, @in) = ($self->name, $self->inputs->@*);
+        my %a = $self->attr->%*;
         my $t = $in[0]->type;
         my $o = $t eq 'double' ? "fcmp o$a{op}" : 'icmp ' . ( { eq => 'eq', ne => 'ne' }->{ $a{op} } // "s$a{op}" );
         $o = 'fcmp une' if $t eq 'double' && $a{op} eq 'ne';
         return "$nm = $o $t " . $in[0]->name . ', ' . $in[1]->name;
     }
-    return "$nm = call %Slot \@t2_slot(i8 0, i64 0)" if $op eq 'Undef';
-    return "$nm = call %Slot $a{fn}(" . $arg->(@in) . ')' if $op eq 'Call';
-    return "$nm = alloca %Slot  ; my $a{name}\n  store %Slot zeroinitializer, %Slot* $nm" if $op eq 'Alloca';
-    return "$nm = call %Slot* \@t2_cell_new()  ; my $a{name}, captured" if $op eq 'HeapCell';
-    return "call void \@t2_die(" . $arg->(@in) . ')' if $op eq 'Die';
-    return "$nm = call %Str \@t2_die_msg(" . $arg->(@in) . ')' if $op eq 'DieMsg';
-    return "call void \@t2_die_unwind(" . $arg->(@in) . ')' if $op eq 'DieUnwind';
-    return "call void \@t2_set_err(" . $arg->(@in) . ')' if $op eq 'SetErr';
-    return "call void \@t2_eval_enter()" if $op eq 'EvalEnter';
-    return "call void \@t2_eval_leave()" if $op eq 'EvalLeave';
-    return "store i1 0, i1* \@t2_dying" if $op eq 'ClearDying';
-    return "$nm = load i1, i1* \@t2_dying" if $op eq 'IsDying';
-    return "$nm = call %Slot** \@t2_env_new(" . $arg->(@in) . ')' if $op eq 'EnvNew';
-    return "call void \@t2_env_set(" . $arg->(@in) . ')' if $op eq 'EnvSet';
-    return "$nm = call %Slot* \@t2_env_get(" . $arg->(@in) . ')' if $op eq 'EnvGet';
-    return "$nm = call %Slot \@t2_code_new(i8* bitcast (%Slot (%Array*, %Slot**)* $a{fn}_cw to i8*), " . $arg->(@in) . ')' if $op eq 'CodeNew';
-    if ($op eq 'CallCode') {
+}
+class Chalk::Target::LLVM::T2::Node::Undef :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = call %Slot @t2_slot(i8 0, i64 0)' }
+}
+class Chalk::Target::LLVM::T2::Node::Call :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->_call('%Slot ' . $self->attr->{fn}) }
+}
+class Chalk::Target::LLVM::T2::Node::Alloca :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my $nm = $self->name;
+        return "$nm = alloca %Slot  ; my " . $self->attr->{name} . "\n  store %Slot zeroinitializer, %Slot* $nm";
+    }
+}
+class Chalk::Target::LLVM::T2::Node::HeapCell :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = call %Slot* @t2_cell_new()  ; my ' . $self->attr->{name} . ', captured' }
+}
+class Chalk::Target::LLVM::T2::Node::Die :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_die') } }
+class Chalk::Target::LLVM::T2::Node::DieMsg :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Str @t2_die_msg') } }
+class Chalk::Target::LLVM::T2::Node::DieUnwind :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_die_unwind') } }
+class Chalk::Target::LLVM::T2::Node::SetErr :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_set_err') } }
+class Chalk::Target::LLVM::T2::Node::EvalEnter :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { 'call void @t2_eval_enter()' } }
+class Chalk::Target::LLVM::T2::Node::EvalLeave :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { 'call void @t2_eval_leave()' } }
+class Chalk::Target::LLVM::T2::Node::ClearDying :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { 'store i1 0, i1* @t2_dying' } }
+class Chalk::Target::LLVM::T2::Node::IsDying :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->name . ' = load i1, i1* @t2_dying' } }
+class Chalk::Target::LLVM::T2::Node::EnvNew :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot** @t2_env_new') } }
+class Chalk::Target::LLVM::T2::Node::EnvSet :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_env_set') } }
+class Chalk::Target::LLVM::T2::Node::EnvGet :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot* @t2_env_get') } }
+class Chalk::Target::LLVM::T2::Node::CodeNew :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        return $self->name . ' = call %Slot @t2_code_new(i8* bitcast (%Slot (%Array*, %Slot**)* ' . $self->attr->{fn} . '_cw to i8*), '
+            . $self->_args($self->inputs->@*) . ')';
+    }
+}
+class Chalk::Target::LLVM::T2::Node::CallCode :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my ($nm, @in) = ($self->name, $self->inputs->@*);
         return "$nm.e = call %Slot** \@t2_code_env(%Slot " . $in[0]->name . ")\n  $nm.p = call i8* \@t2_code_fn(%Slot " . $in[0]->name
             . ")\n  $nm.f = bitcast i8* $nm.p to %Slot (%Array*, %Slot**)*\n  $nm = call %Slot $nm.f(%Array* " . $in[1]->name . ", %Slot** $nm.e)";
     }
-    return "$nm = load %Slot, %Slot* " . $in[0]->name if $op eq 'Load';
-    return "$nm = call %Slot \@t2_slot_numify(" . $arg->(@in) . ')' if $op eq 'Numify';
-    return "$nm = call %Slot \@t2_slot_int(" . $arg->(@in) . ')' if $op eq 'IntOf';
-    return "$nm = call %Slot \@t2_ftdir(" . $arg->(@in) . ')' if $op eq 'FtDir';
-    return "$nm = call %Slot \@t2_chdir(" . $arg->(@in) . ')' if $op eq 'Chdir';
-    return "$nm = call %Slot \@t2_slot_rand(" . $arg->(@in) . ')' if $op eq 'Rand';
-    return "store %Slot " . $in[0]->name . ", %Slot* " . $in[1]->name if $op eq 'Store';
-    return "$nm = call %Slot \@t2_slot_$a{op}(" . $arg->(@in) . ')' if $op eq 'SlotStep';
-    return "$nm = call %Slot \@t2_slot_$a{op}(" . $arg->(@in) . ')' if $op eq 'SlotArith';
-    if ($op eq 'Mod') {
-        my $len = do { use bytes; length $a{msg} };
-        return "$nm = call i64 \@t2_mod(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
+}
+class Chalk::Target::LLVM::T2::Node::Load :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = load %Slot, %Slot* ' . $self->inputs->[0]->name }
+}
+class Chalk::Target::LLVM::T2::Node::Numify :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_slot_numify') } }
+class Chalk::Target::LLVM::T2::Node::IntOf :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_slot_int') } }
+class Chalk::Target::LLVM::T2::Node::FtDir :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_ftdir') } }
+class Chalk::Target::LLVM::T2::Node::Chdir :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_chdir') } }
+class Chalk::Target::LLVM::T2::Node::Rand :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_slot_rand') } }
+class Chalk::Target::LLVM::T2::Node::Store :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { my @in = $self->inputs->@*; 'store %Slot ' . $in[0]->name . ', %Slot* ' . $in[1]->name }
+}
+class Chalk::Target::LLVM::T2::Node::SlotStep :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_slot_' . $self->attr->{op}) } }
+class Chalk::Target::LLVM::T2::Node::SlotArith :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_slot_' . $self->attr->{op}) } }
+class Chalk::Target::LLVM::T2::Node::Mod :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call i64 @t2_mod(' . $self->_args($self->inputs->@*) . ', ' . $self->_cstr($a{msg}, $a{id}) . ')';
     }
-    if ($op eq 'SDeref' || $op eq 'SStore') {
-        my $len = do { use bytes; length $a{msg} };
-        my $at = "i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len";
-        my $pl = do { use bytes; length $a{pk} };
-        $at .= ", i8* getelementptr ([" . ( $pl + 1 ) . " x i8], [" . ( $pl + 1 ) . " x i8]* \@s$a{pkid}, i64 0, i64 0), i64 $pl";
-        return "$nm = call %Slot \@t2_sderef(" . $arg->(@in) . ", i1 $a{strict}, $at)" if $op eq 'SDeref';
-        return "call void \@t2_sstore(" . $arg->(@in) . ", i1 $a{strict}, $at)";
+}
+# A scalar deref of a string: its message and package as constants.
+class Chalk::Target::LLVM::T2::Node::SDeref :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        my $at = $self->_cstr($a{msg}, $a{id}) . ', ' . $self->_cstr($a{pk}, $a{pkid});
+        return $self->name . ' = call %Slot @t2_sderef(' . $self->_args($self->inputs->@*) . ", i1 $a{strict}, $at)";
     }
-    return "$nm = call %Slot \@t2_sref(%Slot* " . $in[0]->name . ')' if $op eq 'SRef';
-    if ($op eq 'SCell') { my $p = $in[0]->name; return "$nm.p = extractvalue %Slot $p, 1\n  $nm = inttoptr i64 $nm.p to %Slot*" }
-    if ($op eq 'Div') {
-        my $len = do { use bytes; length $a{msg} };
-        return "$nm = call double \@t2_div(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
+}
+class Chalk::Target::LLVM::T2::Node::SStore :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        my $at = $self->_cstr($a{msg}, $a{id}) . ', ' . $self->_cstr($a{pk}, $a{pkid});
+        return 'call void @t2_sstore(' . $self->_args($self->inputs->@*) . ", i1 $a{strict}, $at)";
     }
-    return "$nm = call %Str \@t2_concat(" . $arg->(@in) . ')' if $op eq 'Concat';
-    return "$nm = call i64 \@t2_strcmp(" . $arg->(@in) . ')' if $op eq 'StrCmp';
-    return "$nm = call %Str \@t2_strcase(" . $arg->(@in) . ')' if $op eq 'StrCase';
-    return "$nm = extractvalue %Str " . $in[0]->name . ', 1' if $op eq 'StrLen';
-    return "$nm = call %Slot \@t2_slot_length(" . $arg->(@in) . ')' if $op eq 'SlotLength';
-    return "$nm = call %Array* \@t2_new_array()" if $op eq 'NewArray';
-    return "$nm = call %Slot \@t2_hnew()" if $op eq 'HNew';
-    return "call void \@t2_save_args(i32 %argc, i8** %argv)" if $op eq 'SaveArgs';
-    return "$nm = load i1, i1* \@t2_want" if $op eq 'GetWant';
-    return "store i1 " . $in[0]->name . ", i1* \@t2_want" if $op eq 'SetWant';
-    return "$nm = select i1 " . $in[0]->name . ', ' . $arg->( @in[ 1, 2 ] ) if $op eq 'Select';
-    return "$nm = load %Slot, %Slot* $a{global}" if $op eq 'GLoad';
-    return "$nm = call %Slot \@t2_ghash(%Slot* $a{global})" if $op eq 'GHash';
-    return "$nm = call %Array* \@t2_garray(%Slot* $a{global})" if $op eq 'GArray';
-    return "$nm = getelementptr %Slot, %Slot* $a{global}, i64 0" if $op eq 'GAddr';
-    return "store %Slot " . $in[0]->name . ", %Slot* $a{global}" if $op eq 'GStore';
-    return "$nm = call %Array* \@t2_argv()" if $op eq 'Argv';
-    return "$nm = call %Slot \@t2_bless(" . $arg->(@in) . ')' if $op eq 'Bless';
-    return "$nm = call %Slot \@t2_code_new(i8* bitcast (%Slot (%Array*, %Slot**)* \@t2_stash_tramp to i8*), %Slot** bitcast (%Slot (%Array*)* $a{fn}_w to %Slot**))" if $op eq 'CodeOfFn';
-    return "$nm = call %Slot \@t2_qr_match(" . $arg->(@in) . ')' if $op eq 'QrMatch';
-    return "call void \@t2_pos_update(%Slot " . $in[0]->name . ", %Slot* " . $in[1]->name . ", %Slot* " . $in[2]->name . ", i1 " . ( $a{keep} ? 1 : 0 ) . ")" if $op eq 'PosUpdate';
-    return "$nm = call %Slot \@t2_class_of(" . $arg->(@in) . ')' if $op eq 'ClassOf';
-    return "$nm = call %Str \@t2_reftype(" . $arg->(@in) . ')' if $op eq 'RefType';
-    return "call void \@t2_universal_setup()" if $op eq 'MopUniversal';
-    return "call void \@t2_mop_var(" . $arg->(@in) . ", %Slot* $a{global})" if $op eq 'MopVar';
-    return "call void \@t2_mop_class(" . $arg->(@in) . ')' if $op eq 'MopClass';
-    return "call void \@t2_mop_isa(" . $arg->(@in) . ')' if $op eq 'MopIsa';
-    return "$nm = call %Array* \@t2_mop_isa_arr(" . $arg->(@in) . ')' if $op eq 'MopIsaArr';
-    return "call void \@t2_mop_isa_set(" . $arg->(@in) . ')' if $op eq 'MopIsaSet';
-    return "call void \@t2_mop_def(" . $arg->(@in) . ", i8* bitcast (%Slot (%Array*)* $a{fn}_w to i8*))" if $op eq 'MopDef';
-    return "$nm = call i8* \@t2_mresolve(" . $arg->(@in) . ", i8 $a{mode})" if $op eq 'MResolve';
-    if ($op eq 'MCall') {
+}
+class Chalk::Target::LLVM::T2::Node::SRef :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = call %Slot @t2_sref(%Slot* ' . $self->inputs->[0]->name . ')' }
+}
+class Chalk::Target::LLVM::T2::Node::SCell :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { my ($nm, $p) = ($self->name, $self->inputs->[0]->name); "$nm.p = extractvalue %Slot $p, 1\n  $nm = inttoptr i64 $nm.p to %Slot*" }
+}
+class Chalk::Target::LLVM::T2::Node::Div :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call double @t2_div(' . $self->_args($self->inputs->@*) . ', ' . $self->_cstr($a{msg}, $a{id}) . ')';
+    }
+}
+class Chalk::Target::LLVM::T2::Node::Concat :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Str @t2_concat') } }
+class Chalk::Target::LLVM::T2::Node::StrCmp :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('i64 @t2_strcmp') } }
+class Chalk::Target::LLVM::T2::Node::StrCase :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Str @t2_strcase') } }
+class Chalk::Target::LLVM::T2::Node::StrLen :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = extractvalue %Str ' . $self->inputs->[0]->name . ', 1' }
+}
+class Chalk::Target::LLVM::T2::Node::SlotLength :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_slot_length') } }
+class Chalk::Target::LLVM::T2::Node::NewArray :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->name . ' = call %Array* @t2_new_array()' } }
+class Chalk::Target::LLVM::T2::Node::HNew :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->name . ' = call %Slot @t2_hnew()' } }
+class Chalk::Target::LLVM::T2::Node::SaveArgs :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { 'call void @t2_save_args(i32 %argc, i8** %argv)' } }
+class Chalk::Target::LLVM::T2::Node::GetWant :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->name . ' = load i1, i1* @t2_want' } }
+class Chalk::Target::LLVM::T2::Node::SetWant :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { 'store i1 ' . $self->inputs->[0]->name . ', i1* @t2_want' }
+}
+class Chalk::Target::LLVM::T2::Node::Select :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { my @in = $self->inputs->@*; $self->name . ' = select i1 ' . $in[0]->name . ', ' . $self->_args( @in[ 1, 2 ] ) }
+}
+# A package variable, by its global.
+class Chalk::Target::LLVM::T2::Node::GLoad :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = load %Slot, %Slot* ' . $self->attr->{global} }
+}
+class Chalk::Target::LLVM::T2::Node::GHash :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = call %Slot @t2_ghash(%Slot* ' . $self->attr->{global} . ')' }
+}
+class Chalk::Target::LLVM::T2::Node::GArray :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = call %Array* @t2_garray(%Slot* ' . $self->attr->{global} . ')' }
+}
+class Chalk::Target::LLVM::T2::Node::GAddr :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = getelementptr %Slot, %Slot* ' . $self->attr->{global} . ', i64 0' }
+}
+class Chalk::Target::LLVM::T2::Node::GStore :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { 'store %Slot ' . $self->inputs->[0]->name . ', %Slot* ' . $self->attr->{global} }
+}
+class Chalk::Target::LLVM::T2::Node::Argv :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->name . ' = call %Array* @t2_argv()' } }
+class Chalk::Target::LLVM::T2::Node::Bless :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_bless') } }
+class Chalk::Target::LLVM::T2::Node::CodeOfFn :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        return $self->name . ' = call %Slot @t2_code_new(i8* bitcast (%Slot (%Array*, %Slot**)* @t2_stash_tramp to i8*), %Slot** bitcast (%Slot (%Array*)* '
+            . $self->attr->{fn} . '_w to %Slot**))';
+    }
+}
+class Chalk::Target::LLVM::T2::Node::QrMatch :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_qr_match') } }
+class Chalk::Target::LLVM::T2::Node::PosUpdate :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my @in = $self->inputs->@*;
+        return 'call void @t2_pos_update(%Slot ' . $in[0]->name . ', %Slot* ' . $in[1]->name . ', %Slot* ' . $in[2]->name
+            . ', i1 ' . ( $self->attr->{keep} ? 1 : 0 ) . ')';
+    }
+}
+class Chalk::Target::LLVM::T2::Node::ClassOf :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_class_of') } }
+class Chalk::Target::LLVM::T2::Node::RefType :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Str @t2_reftype') } }
+# The MOP, built at start.
+class Chalk::Target::LLVM::T2::Node::MopUniversal :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { 'call void @t2_universal_setup()' } }
+class Chalk::Target::LLVM::T2::Node::MopVar :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { 'call void @t2_mop_var(' . $self->_args($self->inputs->@*) . ', %Slot* ' . $self->attr->{global} . ')' }
+}
+class Chalk::Target::LLVM::T2::Node::MopClass :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_mop_class') } }
+class Chalk::Target::LLVM::T2::Node::MopIsa :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_mop_isa') } }
+class Chalk::Target::LLVM::T2::Node::MopIsaArr :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Array* @t2_mop_isa_arr') } }
+class Chalk::Target::LLVM::T2::Node::MopIsaSet :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_mop_isa_set') } }
+class Chalk::Target::LLVM::T2::Node::MopDef :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { 'call void @t2_mop_def(' . $self->_args($self->inputs->@*) . ', i8* bitcast (%Slot (%Array*)* ' . $self->attr->{fn} . '_w to i8*))' }
+}
+class Chalk::Target::LLVM::T2::Node::MResolve :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = call i8* @t2_mresolve(' . $self->_args($self->inputs->@*) . ', i8 ' . $self->attr->{mode} . ')' }
+}
+class Chalk::Target::LLVM::T2::Node::MCall :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my ($nm, @in) = ($self->name, $self->inputs->@*);
         return "$nm.f = bitcast i8* " . $in[0]->name . " to %Slot (%Array*)*\n  $nm = call %Slot $nm.f(%Array* " . $in[1]->name . ')';
     }
-    return "call void \@t2_hset(" . $arg->(@in) . ')' if $op eq 'HSet';
-    return "$nm = call %Slot \@t2_hget(" . $arg->(@in) . ')' if $op eq 'HGet';
-    return "$nm = call i1 \@t2_hexists(" . $arg->(@in) . ')' if $op eq 'HExists';
-    return "$nm = call %Slot \@t2_hdelete(" . $arg->(@in) . ')' if $op eq 'HDelete';
-    return "call void \@t2_hfroma(" . $arg->(@in) . ')' if $op eq 'HFromArray';
-    return "$nm = call i64 \@t2_hcount(" . $arg->(@in) . ')' if $op eq 'HCount';
-    return "$nm = call %Array* \@t2_hkeys(" . $arg->(@in) . ')' if $op eq 'HKeys';
-    return "$nm = call %Array* \@t2_hpairs(" . $arg->(@in) . ')' if $op eq 'HPairs';
-    return "$nm = call %Array* \@t2_hvalues(" . $arg->(@in) . ')' if $op eq 'HValues';
-    return "call void \@t2_apush(" . $arg->(@in) . ')' if $op eq 'APush';
-    return "call void \@t2_aunshift(" . $arg->(@in) . ')' if $op eq 'AUnshift';
-    return "$nm = call %Array* \@t2_args_from(" . $arg->(@in) . ')' if $op eq 'ArgsFrom';
-    return "call void \@t2_args_min(%Array* " . $in[0]->name . ", i64 $a{n})" if $op eq 'ArgsMin';
-    return "call void \@t2_args_pairs(%Array* " . $in[0]->name . ", i64 $a{n})" if $op eq 'ArgsPairs';
-    return "$nm = call %Array* \@t2_asort(" . $arg->(@in) . ", i1 $a{num}, i1 $a{desc})" if $op eq 'ASort';
-    return "$nm = call %Array* \@t2_asort_by(" . $arg->(@in) . ", %Slot ()* $a{fn}, %Slot* $a{ga}, %Slot* $a{gb})" if $op eq 'ASortBy';
-    return "$nm = call %Slot \@t2_cmp_env_at(i64 $a{index})" if $op eq 'CmpEnv';
-    return "$nm = call %Slot \@t2_hderef_r(" . $arg->(@in) . ')' if $op eq 'HDerefR';
-    return "$nm = call %Array* \@t2_arev(" . $arg->(@in) . ')' if $op eq 'ARev';
-    return "call void \@t2_aassign(" . $arg->(@in) . ')' if $op eq 'AAssign';
-    return "call void \@t2_hassign(" . $arg->(@in) . ')' if $op eq 'HAssign';
-    return "call void \@t2_aunshiftl(" . $arg->(@in) . ')' if $op eq 'AUnshiftL';
-    return "$nm = call %Slot \@t2_tie_array(" . $arg->(@in) . ')' if $op eq 'TieArray';
-    return "$nm = call %Slot \@t2_tie_hash(" . $arg->(@in) . ')' if $op eq 'TieHash';
-    return "$nm = call %Slot \@t2_tied(" . $arg->(@in) . ')' if $op eq 'TiedA';
-    return "$nm = call %Slot \@t2_tied_h(" . $arg->(@in) . ')' if $op eq 'TiedH';
-    return "call void \@t2_untie(" . $arg->(@in) . ')' if $op eq 'UntieA';
-    return "call void \@t2_untie_h(" . $arg->(@in) . ')' if $op eq 'UntieH';
-    return "call void \@t2_aappend(" . $arg->(@in) . ')' if $op eq 'AAppend';
-    return "call void \@t2_apush_if(" . $arg->(@in) . ')' if $op eq 'APushIf';
-    return "$nm = call %Slot \@t2_one_of(" . $arg->(@in) . ')' if $op eq 'OneOf';
-    return "$nm = call %Slot \@t2_aref(" . $arg->(@in) . ')' if $op eq 'ARef';
-    return "$nm = call %Array* \@t2_aderef(" . $arg->(@in) . ')' if $op eq 'ADeref';
-    return "$nm = call %Array* \@t2_aderef_r(" . $arg->(@in) . ')' if $op eq 'ADerefR';
-    if ($op eq 'ASet') {
-        my $len = do { use bytes; length $a{msg} };
-        return "call void \@t2_aset(" . $arg->(@in) . ", i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$a{id}, i64 0, i64 0), i64 $len)";
+}
+# Hashes.
+class Chalk::Target::LLVM::T2::Node::HSet :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_hset') } }
+class Chalk::Target::LLVM::T2::Node::HGet :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_hget') } }
+class Chalk::Target::LLVM::T2::Node::HExists :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('i1 @t2_hexists') } }
+class Chalk::Target::LLVM::T2::Node::HDelete :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_hdelete') } }
+class Chalk::Target::LLVM::T2::Node::HFromArray :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_hfroma') } }
+class Chalk::Target::LLVM::T2::Node::HCount :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('i64 @t2_hcount') } }
+class Chalk::Target::LLVM::T2::Node::HKeys :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Array* @t2_hkeys') } }
+class Chalk::Target::LLVM::T2::Node::HPairs :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Array* @t2_hpairs') } }
+class Chalk::Target::LLVM::T2::Node::HValues :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Array* @t2_hvalues') } }
+# Arrays and argument lists.
+class Chalk::Target::LLVM::T2::Node::APush :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_apush') } }
+class Chalk::Target::LLVM::T2::Node::AUnshift :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_aunshift') } }
+class Chalk::Target::LLVM::T2::Node::ArgsFrom :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Array* @t2_args_from') } }
+class Chalk::Target::LLVM::T2::Node::ArgsMin :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { 'call void @t2_args_min(%Array* ' . $self->inputs->[0]->name . ', i64 ' . $self->attr->{n} . ')' }
+}
+class Chalk::Target::LLVM::T2::Node::ArgsPairs :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { 'call void @t2_args_pairs(%Array* ' . $self->inputs->[0]->name . ', i64 ' . $self->attr->{n} . ')' }
+}
+class Chalk::Target::LLVM::T2::Node::ASort :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call %Array* @t2_asort(' . $self->_args($self->inputs->@*) . ", i1 $a{num}, i1 $a{desc})";
     }
-    my %aop = (ALen => 'i64 @t2_alen', AGet => '%Slot @t2_aget', AShift => '%Slot @t2_ashift', APop => '%Slot @t2_apop', Join => '%Str @t2_join');
-    return "$nm = call $aop{$op}(" . $arg->(@in) . ')' if $aop{$op};
-    return "call void \@t2_" . ( ( $a{fd} // 1 ) == 2 ? 'eprint' : 'print' ) . '(' . $arg->(@in) . ')' if $op eq 'Print';
-    return "call void \@t2_exit(" . $arg->(@in) . ')' if $op eq 'Exit';
-    return "call void \@t2_atexit(void ()* $a{fn})" if $op eq 'AtExit';
-    return 'call void @t2_run_ends()' if $op eq 'RunEnds';
-    return "call void \@t2_frame_push(" . $arg->(@in) . ')' if $op eq 'FramePush';
-    return 'call void @t2_frame_pop()' if $op eq 'FramePop';
-    return "$nm = call %Array* \@t2_caller(" . $arg->(@in) . ')' if $op eq 'Caller';
-    return "$nm = call %Slot \@t2_caller_pkg(" . $arg->(@in) . ')' if $op eq 'CallerPkg';
-    return "$nm = call %Slot \@t2_substr(" . $arg->(@in) . ')' if $op eq 'Substr';
-    return "$nm = call %Slot \@t2_substr_rep(" . $arg->(@in) . ')' if $op eq 'SubstrRep';
-    return "$nm = call %Slot \@t2_slot_neg(" . $arg->(@in) . ')' if $op eq 'SlotNeg';
-    return "$nm = call %Slot \@t2_kind_of_ref(" . $arg->(@in) . ')' if $op eq 'KindOfRef';
-    return "$nm = call i1 \@t2_aexists(" . $arg->(@in) . ')' if $op eq 'AExists';
-    return "call void \@t2_aset_len(" . $arg->(@in) . ')' if $op eq 'ASetLen';
-    return "$nm = call i64 \@t2_index(" . $arg->(@in) . ')' if $op eq 'Index';
-    return "$nm = call i1 \@t2_defined(" . $arg->(@in) . ')' if $op eq 'Defined';
-    if ($op eq 'Truth') {
+}
+class Chalk::Target::LLVM::T2::Node::ASortBy :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call %Array* @t2_asort_by(' . $self->_args($self->inputs->@*) . ", %Slot ()* $a{fn}, %Slot* $a{ga}, %Slot* $a{gb})";
+    }
+}
+class Chalk::Target::LLVM::T2::Node::CmpEnv :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->name . ' = call %Slot @t2_cmp_env_at(i64 ' . $self->attr->{index} . ')' }
+}
+class Chalk::Target::LLVM::T2::Node::HDerefR :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_hderef_r') } }
+class Chalk::Target::LLVM::T2::Node::ARev :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Array* @t2_arev') } }
+class Chalk::Target::LLVM::T2::Node::AAssign :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_aassign') } }
+class Chalk::Target::LLVM::T2::Node::HAssign :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_hassign') } }
+class Chalk::Target::LLVM::T2::Node::AUnshiftL :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_aunshiftl') } }
+# tie and its family.
+class Chalk::Target::LLVM::T2::Node::TieArray :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_tie_array') } }
+class Chalk::Target::LLVM::T2::Node::TieHash :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_tie_hash') } }
+class Chalk::Target::LLVM::T2::Node::TiedA :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_tied') } }
+class Chalk::Target::LLVM::T2::Node::TiedH :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_tied_h') } }
+class Chalk::Target::LLVM::T2::Node::UntieA :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_untie') } }
+class Chalk::Target::LLVM::T2::Node::UntieH :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_untie_h') } }
+class Chalk::Target::LLVM::T2::Node::AAppend :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_aappend') } }
+class Chalk::Target::LLVM::T2::Node::APushIf :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_apush_if') } }
+class Chalk::Target::LLVM::T2::Node::OneOf :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_one_of') } }
+class Chalk::Target::LLVM::T2::Node::ARef :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_aref') } }
+class Chalk::Target::LLVM::T2::Node::ADeref :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Array* @t2_aderef') } }
+class Chalk::Target::LLVM::T2::Node::ADerefR :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Array* @t2_aderef_r') } }
+class Chalk::Target::LLVM::T2::Node::ASet :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return 'call void @t2_aset(' . $self->_args($self->inputs->@*) . ', ' . $self->_cstr($a{msg}, $a{id}) . ')';
+    }
+}
+class Chalk::Target::LLVM::T2::Node::ALen :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('i64 @t2_alen') } }
+class Chalk::Target::LLVM::T2::Node::AGet :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_aget') } }
+class Chalk::Target::LLVM::T2::Node::AShift :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_ashift') } }
+class Chalk::Target::LLVM::T2::Node::APop :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_apop') } }
+class Chalk::Target::LLVM::T2::Node::Join :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Str @t2_join') } }
+# Output, exit, END blocks, caller's frames.
+class Chalk::Target::LLVM::T2::Node::Print :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { $self->_void( '@t2_' . ( ( $self->attr->{fd} // 1 ) == 2 ? 'eprint' : 'print' ) ) }
+}
+class Chalk::Target::LLVM::T2::Node::Exit :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_exit') } }
+class Chalk::Target::LLVM::T2::Node::AtExit :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { 'call void @t2_atexit(void ()* ' . $self->attr->{fn} . ')' }
+}
+class Chalk::Target::LLVM::T2::Node::RunEnds :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { 'call void @t2_run_ends()' } }
+class Chalk::Target::LLVM::T2::Node::FramePush :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_frame_push') } }
+class Chalk::Target::LLVM::T2::Node::FramePop :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { 'call void @t2_frame_pop()' } }
+class Chalk::Target::LLVM::T2::Node::Caller :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Array* @t2_caller') } }
+class Chalk::Target::LLVM::T2::Node::CallerPkg :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_caller_pkg') } }
+# Strings, numbers and references through the runtime.
+class Chalk::Target::LLVM::T2::Node::Substr :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_substr') } }
+class Chalk::Target::LLVM::T2::Node::SubstrRep :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_substr_rep') } }
+class Chalk::Target::LLVM::T2::Node::SlotNeg :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_slot_neg') } }
+class Chalk::Target::LLVM::T2::Node::KindOfRef :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('%Slot @t2_kind_of_ref') } }
+class Chalk::Target::LLVM::T2::Node::AExists :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('i1 @t2_aexists') } }
+class Chalk::Target::LLVM::T2::Node::ASetLen :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_void('@t2_aset_len') } }
+class Chalk::Target::LLVM::T2::Node::Index :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('i64 @t2_index') } }
+class Chalk::Target::LLVM::T2::Node::Defined :isa(Chalk::Target::LLVM::T2::Node) { method to_ll () { $self->_call('i1 @t2_defined') } }
+class Chalk::Target::LLVM::T2::Node::Truth :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
         my %f = ('i64' => 't2_truth_i64', double => 't2_truth_num', '%Str' => 't2_truth_str', '%Slot' => 't2_truth_slot');
-        return "$nm = call i1 \@$f{ $in[0]->type }(" . $arg->(@in) . ')';
+        return $self->_call( 'i1 @' . $f{ $self->inputs->[0]->type } );
     }
-    if ($op eq 'Convert') {
-        my $f = $CONVERT{"$a{from}>$ty"} // die "T2: no conversion $a{from} -> $ty";
-        return "$nm = $f $a{from} " . $in[0]->name . " to $ty" if $f =~ /\A(?:sitofp|zext|fptosi)\z/;
-        return "$nm = call $ty \@$f(" . $arg->(@in) . ')';
+}
+# A conversion between representations: an LLVM cast, or the runtime's.
+class Chalk::Target::LLVM::T2::Node::Convert :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my ($ty, $nm, %a) = ($self->type, $self->name, $self->attr->%*);
+        my $f = $Chalk::Target::LLVM::T2::Printer::CONVERT{"$a{from}>$ty"} // die "T2: no conversion $a{from} -> $ty";
+        return "$nm = $f $a{from} " . $self->inputs->[0]->name . " to $ty" if $f =~ /\A(?:sitofp|zext|fptosi)\z/;
+        return $self->_call("$ty \@$f");
     }
-    if ($op eq 'Phi') {
+}
+class Chalk::Target::LLVM::T2::Node::Phi :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () {
+        my ($ty, $nm, @in) = ($self->type, $self->name, $self->inputs->@*);
+        my %a = $self->attr->%*;
         return "$nm = phi $ty " . join(', ', map { '[ ' . $in[$_]->name . ", %$a{from}[$_]{label} ]" } 0 .. $#in);
     }
-    die "T2: cannot print $op";
+}
+# A sub's argument: named by its function's header, never a line of its own.
+class Chalk::Target::LLVM::T2::Node::Arg :isa(Chalk::Target::LLVM::T2::Node) {
+    method to_ll () { die 'T2: cannot print ' . $self->op }
 }
 
 # A double's bits: a hex pattern as given (0x7FF0000000000000 is +Inf), else
