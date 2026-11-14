@@ -321,7 +321,8 @@ sub array_value {
             my $arr = ( @list == 1 && _is_list($list[0]) ) ? $b->array_of($list[0]) : do {
                 my $t = $b->emit(op => 'NewArray', type => '%Array*');
                 for my $e (@list) {
-                    out('a join of a list') if _is_list($e); # static type
+                    # (a list among them -- a method's, an array -- its elements)
+                    if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $t, $b->array_of($e) ]); next }
                     $b->emit(op => 'APush', type => 'void', inputs => [ $t, $b->as($b->value($e), '%Slot') ]);
                 }
                 $t;

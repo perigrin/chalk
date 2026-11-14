@@ -448,7 +448,12 @@ sub func {
         && ( $ret->inputs->[0]->dispatch_kind // '' ) eq 'builtin' && ( $ret->inputs->[0]->name // '' ) =~ /\A(?:keys|values)\z/
         && ( $ret->inputs->[0]->can('want') ? $ret->inputs->[0]->want // '' : '' ) ne 'scalar'   # `scalar(keys %h)`: a count always
         ? $ret->inputs->[0] : undef;
-    my $listret = $ret->inputs->@* == 2 || $valueless || $hkv;
+    # `return @a` (one input, an array): in the caller's context, its
+    # elements or its count. A list return too.
+    my $arrret = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && !$hkv
+        && ( $ret->inputs->[0]->is_my_array || $ret->inputs->[0]->operation eq 'ArrayLiteral' && ( $ret->inputs->[0]->stamp // '' ) eq 'Array' )   # static type
+        ? $ret->inputs->[0] : undef;
+    my $listret = $ret->inputs->@* == 2 || $valueless || $hkv || $arrret;
     out("sub $name returns more than one reading") if $ret->inputs->@* > 2;
     # A METHOD OF THE CLASS FEATURE: $self is its first argument, its signature's
     # parameter i the i+1th (B::SoN's Parameter nodes). One reading @_, or with
@@ -615,7 +620,8 @@ sub func {
         my $copy = $b->emit(op => 'NewArray', type => '%Array*');
         $b->emit(op => 'AAppend', type => 'void', inputs => [ $copy, $b->as_list($v) ]);
         my $l = $b->emit(op => 'ARef', type => '%Slot', inputs => [$copy]);
-        my $sv = blessed( $ret->inputs->[1] ) ? $b->as($b->value( $ret->inputs->[1] ), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
+        my $sv = $arrret ? $b->as( $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($arrret) ]), '%Slot' )
+               : blessed( $ret->inputs->[1] ) ? $b->as($b->value( $ret->inputs->[1] ), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
         $r = $b->emit(op => 'Select', type => '%Slot', inputs => [ $want, $l, $sv ]);
     }
     elsif ($tail) {
