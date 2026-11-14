@@ -56,6 +56,14 @@ sub hash_value {
         return $h;
     }
     return $b->hash_var($v) if $v->is_my_hash;
+    # `my %p = %$r` (B::SoN's copy): a new hash of r's pairs as they are here
+    # -- a later store through r does not reach it. (r no hash: a stop.)
+    if ($op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '%' && $v->copy) {
+        my $h = $b->emit(op => 'HNew', type => '%Slot');
+        my $pairs = $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->as($b->value($in[0]), '%Slot') ]);
+        $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $pairs ]);
+        return $h;
+    }
     my $kind = $v->can('kind') ? $v->kind // '' : '';
     if ($op =~ /\A(?:Subscript|Exists|Delete)\z/ && $kind eq 'hash') {
         my $h = $b->hash_of($in[0]);
@@ -215,10 +223,17 @@ sub hash_of {
         my (undef, $sg) = $b->field_of($n);
         return $b->value($n) if $sg eq '%';
     }
+    # %$r: the hash r refers to; `my %p = %$r` (B::SoN's copy) a hash of its
+    # own, made where it is first read (its version's reads keep it in order).
+    if ($n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%') {
+        return $b->value($n) if $n->copy;
+        return $b->as($b->value( $n->inputs->[0] ), '%Slot');
+    }
     # THROUGH AN ELEMENT (`$h{x}{y}`): the reference the element holds. A deref
     # for a write B::SoN spells as the element made a hash first (`//= {}`).
     out('a hash element of a named hash') if ( $n->can('sigil') ? $n->sigil // '' : '' ) eq '%'
-        || $n->operation eq 'EntryDef' || $n->operation eq 'Constant';   # a package hash by name: $ENV{K}
+        || $n->operation eq 'EntryDef' && !$n->is_package_scalar   # a package hash by name: $ENV{K} (not `$a->{k}`: a reference)
+        || $n->operation eq 'Constant';
     return $b->as($b->value($n), '%Slot');
 }
 
