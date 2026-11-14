@@ -13,6 +13,11 @@ use Chalk::IR::NodeFactory;
 
 my $parser = build_parser();
 
+# The parse yields Chalk::Grammar::Rule / Chalk::Grammar::Symbol objects
+# (c90b95f0 replaced the Constructor:Rule/Expression/Symbol nodes): a Rule
+# has a name and expressions, an arrayref of alternatives, each an arrayref
+# of Symbols (type terminal|reference, value).
+
 # Test 1: Parse simple identifier-only rule
 {
     my $input = "Identifier ::= /[A-Za-z_][A-Za-z_0-9]*/ ;";
@@ -21,34 +26,19 @@ my $parser = build_parser();
     ok(defined $ir, 'parse single rule returns defined IR');
     isa_ok($ir, 'ARRAY', 'Grammar action returns arrayref');
 
-    # Grammar produces arrayref of Rule nodes
     is(scalar($ir->@*), 1, 'single rule produces 1 Rule');
     my $rule = $ir->[0];
-    isa_ok($rule, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($rule->class(), 'Rule', 'element is Rule');
+    isa_ok($rule, 'Chalk::Grammar::Rule');
+    is($rule->name, 'Identifier', 'rule name is "Identifier"');
 
-    # Check rule name
-    my $name = $rule->inputs()->[0];
-    isa_ok($name, 'Chalk::Bootstrap::IR::Node::Constant', 'rule name is Constant');
-    is($name->value(), 'Identifier', 'rule name is "Identifier"');
-
-    # Check expressions
-    my $exprs = $rule->inputs()->[1];
+    my $exprs = $rule->expressions;
     isa_ok($exprs, 'ARRAY', 'expressions is arrayref');
     is(scalar($exprs->@*), 1, 'rule has 1 alternative');
 
-    my $expr = $exprs->[0];
-    isa_ok($expr, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($expr->class(), 'Expression', 'alternative is Expression');
-
-    # The expression should have 1 element (the InlineRegex terminal)
-    my $elements = $expr->inputs()->[0];
+    my $elements = $exprs->[0];
     is(scalar($elements->@*), 1, 'expression has 1 element');
-
-    my $elem = $elements->[0];
-    isa_ok($elem, 'Chalk::Bootstrap::IR::Node::Constructor');
-    is($elem->class(), 'Symbol', 'element is Symbol');
-    is($elem->inputs()->[0]->value(), 'terminal', 'element type is terminal');
+    isa_ok($elements->[0], 'Chalk::Grammar::Symbol');
+    ok($elements->[0]->is_terminal, 'element type is terminal');
 }
 
 # Test 2: Parse rule with alternatives
@@ -59,21 +49,14 @@ my $parser = build_parser();
     ok(defined $ir, 'parse rule with alternatives returns defined IR');
     is(scalar($ir->@*), 1, 'single rule produces 1 Rule');
     my $rule = $ir->[0];
+    is($rule->name, 'Atom', 'rule name is "Atom"');
 
-    is($rule->inputs()->[0]->value(), 'Atom', 'rule name is "Atom"');
-
-    my $exprs = $rule->inputs()->[1];
+    my $exprs = $rule->expressions;
     is(scalar($exprs->@*), 2, 'rule has 2 alternatives');
-
-    # First alternative: Identifier (reference)
-    my $alt1_elements = $exprs->[0]->inputs()->[0];
-    is(scalar($alt1_elements->@*), 1, 'first alternative has 1 element');
-    is($alt1_elements->[0]->inputs()->[0]->value(), 'reference', 'first alt element is reference');
-
-    # Second alternative: InlineRegex (reference to InlineRegex rule)
-    my $alt2_elements = $exprs->[1]->inputs()->[0];
-    is(scalar($alt2_elements->@*), 1, 'second alternative has 1 element');
-    is($alt2_elements->[0]->inputs()->[0]->value(), 'reference', 'second alt element is reference');
+    is(scalar($exprs->[0]->@*), 1, 'first alternative has 1 element');
+    ok($exprs->[0][0]->is_reference, 'first alt element is reference');
+    is(scalar($exprs->[1]->@*), 1, 'second alternative has 1 element');
+    ok($exprs->[1][0]->is_reference, 'second alt element is reference');
 }
 
 # Test 3: Parse rule with sequence of elements
@@ -84,21 +67,18 @@ my $parser = build_parser();
     ok(defined $ir, 'parse rule with sequence returns defined IR');
     is(scalar($ir->@*), 1, 'single rule produces 1 Rule');
     my $rule = $ir->[0];
+    is($rule->name, 'Rule', 'rule name is "Rule"');
 
-    is($rule->inputs()->[0]->value(), 'Rule', 'rule name is "Rule"');
-
-    my $exprs = $rule->inputs()->[1];
+    my $exprs = $rule->expressions;
     is(scalar($exprs->@*), 1, 'rule has 1 alternative');
-
-    my $elements = $exprs->[0]->inputs()->[0];
+    my $elements = $exprs->[0];
     is(scalar($elements->@*), 4, 'sequence has 4 elements');
 
-    # Verify element types in order
-    is($elements->[0]->inputs()->[0]->value(), 'reference', 'element 1 is reference');
-    is($elements->[0]->inputs()->[1]->value(), 'Identifier', 'element 1 is Identifier');
-    is($elements->[1]->inputs()->[0]->value(), 'terminal', 'element 2 is terminal');
-    is($elements->[2]->inputs()->[0]->value(), 'reference', 'element 3 is reference');
-    is($elements->[3]->inputs()->[0]->value(), 'terminal', 'element 4 is terminal');
+    ok($elements->[0]->is_reference, 'element 1 is reference');
+    is($elements->[0]->value, 'Identifier', 'element 1 is Identifier');
+    ok($elements->[1]->is_terminal, 'element 2 is terminal');
+    ok($elements->[2]->is_reference, 'element 3 is reference');
+    ok($elements->[3]->is_terminal, 'element 4 is terminal');
 }
 
 # Test 4: Parse multiple rules
@@ -108,10 +88,9 @@ my $parser = build_parser();
 
     ok(defined $ir, 'parse multiple rules returns defined IR');
     is(scalar($ir->@*), 2, 'two rules produce 2 Rule nodes');
-    is($ir->[0]->inputs()->[0]->value(), 'Identifier', 'first rule is Identifier');
-    is($ir->[1]->inputs()->[0]->value(), 'Comment', 'second rule is Comment');
+    is($ir->[0]->name, 'Identifier', 'first rule is Identifier');
+    is($ir->[1]->name, 'Comment', 'second rule is Comment');
 }
-
 # Test 5: Invalid input returns undef
 {
     my $ir = parse_ir($parser, 'not valid BNF at all');

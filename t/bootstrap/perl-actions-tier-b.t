@@ -149,7 +149,7 @@ my sub is_constant($node, $expected_value, $msg) {
         my $cls = find_class_decl_in_stmts($stmts);
         ok(defined $cls, 'Constant.pm: found class declaration');
         is(class_name_str($cls), 'Chalk::IR::Node::Constant', 'Constant.pm class name');
-        is(class_parent_str($cls), 'Chalk::IR::Node', 'Constant.pm parent class');
+        is(class_parent_str($cls), 'Chalk::IR::Value', 'Constant.pm parent class');
 
         my $body = class_body($cls);
         is(ref $body, 'ARRAY', 'Constant.pm: class body is arrayref');
@@ -250,7 +250,7 @@ my sub is_constant($node, $expected_value, $msg) {
         ok($ret isa Chalk::IR::Node::Return, 'Statement.pm return: is Return CFG node');
 
         # Return value should be Interpolate (legacy InterpolatedString)
-        my $interp = $ret->inputs()->[1];
+        my $interp = $ret->inputs()->[0];   # Return: inputs[0]=value, control in control_in
         ok(defined $interp && $interp->operation eq 'Interpolate',
             'Statement.pm interpolated string is Interpolate node');
         my $parts = $interp->inputs()->[0];
@@ -303,7 +303,7 @@ my sub is_constant($node, $expected_value, $msg) {
         my $ret = $meth_body->[0];
         ok($ret isa Chalk::IR::Node::Return, 'Module.pm return: is Return CFG node');
 
-        my $interp = $ret->inputs()->[1];
+        my $interp = $ret->inputs()->[0];   # Return: inputs[0]=value, control in control_in
         ok(defined $interp && $interp->operation eq 'Interpolate',
             'Module.pm interpolated string is Interpolate node');
         my $parts = $interp->inputs()->[0];

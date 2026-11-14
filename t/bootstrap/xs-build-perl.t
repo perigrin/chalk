@@ -1,4 +1,4 @@
-# ABOUTME: Build integration test for XS code generation of the 64-rule Perl grammar.
+# ABOUTME: Build integration test for XS code generation of the 66-rule Perl grammar.
 # ABOUTME: Compiles generated XS and validates two-way recognizer equivalence (M4=M5).
 use 5.42.0;
 use utf8;
@@ -33,7 +33,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 my $ir = perl_pipeline();
 ok(defined $ir, 'perl_pipeline produces IR');
 is(ref($ir), 'ARRAY', 'pipeline IR is an arrayref');
-is(scalar $ir->@*, 64, 'pipeline IR has 64 rules');
+is(scalar $ir->@*, 66, 'pipeline IR has 66 rules');
 
 my $target = Chalk::Bootstrap::BNF::Target::XS->new(
     module_name => 'Chalk::Grammar::Perl::Rules',
@@ -96,7 +96,7 @@ eval $perl_code;
 is($@, '', 'M4: generated Perl evals without error') or diag $@;
 my $m4_grammar = Chalk::Grammar::Perl::XSBuildGenerated::grammar();
 ok(defined $m4_grammar, 'M4: Perl-generated grammar loaded');
-is(scalar $m4_grammar->@*, 64, 'M4: 64 rules');
+is(scalar $m4_grammar->@*, 66, 'M4: 66 rules');
 
 # Extract rule names from M4 grammar dynamically
 my @rule_names = map { $_->name() } $m4_grammar->@*;
@@ -118,7 +118,7 @@ for my $name (@rule_names) {
 
 # === Two-way grammar equivalence (M4 = M5) ===
 
-is(scalar @xs_rules, 64, 'M5: XS-generated grammar has 64 rules');
+is(scalar @xs_rules, 66, 'M5: XS-generated grammar has 66 rules');
 ok(grammars_match($m4_grammar, \@xs_rules), 'M4 == M5: Perl-generated matches XS-generated');
 
 # === Recognizer acceptance tests ===
@@ -131,8 +131,8 @@ my @grammars = (
 
 # Read representative .pm files (one per tier)
 my @test_files = (
-    'lib/Chalk/Bootstrap/IR/Node/Start.pm',      # Tier A (smallest)
-    'lib/Chalk/Bootstrap/IR/Node/Constant.pm',    # Tier B
+    'lib/Chalk/IR/Node/Start.pm',      # Tier A (smallest)
+    'lib/Chalk/IR/Node/Constant.pm',    # Tier B
     'lib/Chalk/Grammar/Symbol.pm',                # Tier C
     'lib/Chalk/Grammar/Rule.pm',                  # Tier D
 );

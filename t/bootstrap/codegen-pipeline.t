@@ -21,7 +21,7 @@ my $parser = build_parser();
     my $ir = parse_ir($parser, "Identifier ::= /[A-Za-z_][A-Za-z_0-9]*/ ;");
     ok(defined $ir, 'parse Identifier rule');
     is(scalar($ir->@*), 1, 'Identifier: 1 rule');
-    is($ir->[0]->inputs()->[0]->value(), 'Identifier', 'Identifier: correct name');
+    is($ir->[0]->name, 'Identifier', 'Identifier: correct name');
 }
 
 # Test: Parse rule with alternatives
@@ -29,7 +29,7 @@ my $parser = build_parser();
     my $ir = parse_ir($parser, "Atom ::= Identifier | InlineRegex ;");
     ok(defined $ir, 'parse Atom rule');
     is(scalar($ir->@*), 1, 'Atom: 1 rule');
-    my $exprs = $ir->[0]->inputs()->[1];
+    my $exprs = $ir->[0]->expressions;
     is(scalar($exprs->@*), 2, 'Atom: 2 alternatives');
 }
 
@@ -45,7 +45,7 @@ my $parser = build_parser();
     my $ir = parse_ir($parser, "Sequence ::= Element /(?:\\s|#[^\\n]*)+/ Sequence | Element ;");
     ok(defined $ir, 'parse Sequence rule');
     is(scalar($ir->@*), 1, 'Sequence: 1 rule');
-    my $exprs = $ir->[0]->inputs()->[1];
+    my $exprs = $ir->[0]->expressions;
     is(scalar($exprs->@*), 2, 'Sequence: 2 alternatives');
 }
 
@@ -64,7 +64,7 @@ SKIP: {
     my @expected_names = qw(Grammar Rule Alternatives Sequence Element Atom Quantifier Comment Identifier InlineRegex);
     for my $i (0 .. $#expected_names) {
         my $rule = $ir->[$i];
-        is($rule->inputs()->[0]->value(), $expected_names[$i], "rule $i is $expected_names[$i]");
+        is($rule->name, $expected_names[$i], "rule $i is $expected_names[$i]");
     }
 
     # === Code Generation ===

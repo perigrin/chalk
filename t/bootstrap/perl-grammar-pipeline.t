@@ -1,4 +1,4 @@
-# ABOUTME: Phase 0 test — feed 64-rule Perl grammar through existing BNF pipeline.
+# ABOUTME: Phase 0 test — feed 66-rule Perl grammar through existing BNF pipeline.
 # ABOUTME: Validates that chalk-bootstrap.bnf parses, produces IR, and generates compilable Perl.
 use 5.42.0;
 use utf8;
@@ -31,7 +31,7 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
         skip 'Parse failed — cannot validate IR', 7 unless defined $ir;
 
         is(ref($ir), 'ARRAY', 'Phase 0: IR is an arrayref of rules');
-        is(scalar($ir->@*), 64, 'Phase 0: IR contains 64 rules');
+        is(scalar($ir->@*), 66, 'Phase 0: IR contains 66 rules');
         diag sprintf("Parse time: %.3f seconds", $elapsed);
 
         # Phase 0 Gate 2: Code generation produces compilable output
@@ -54,7 +54,7 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
             # Verify the generated grammar has the expected number of rules
             my $gen_grammar = Chalk::Grammar::Perl::Generated::grammar();
             is(ref($gen_grammar), 'ARRAY', 'Phase 0: generated grammar() returns arrayref');
-            is(scalar($gen_grammar->@*), 64, 'Phase 0: generated grammar has 64 rules');
+            is(scalar($gen_grammar->@*), 66, 'Phase 0: generated grammar has 66 rules');
 
             # Phase 0 Gate 3: Generated recognizer is functional
             # Build a Boolean recognizer from the generated grammar and smoke test
@@ -94,7 +94,7 @@ like($perl_bnf, qr/Expression ::=/, 'BNF contains Expression rule');
         my $opt_ir = $ir;
 
         ok(defined $opt_ir, 'Phase 0: optimized pipeline produces IR');
-        is(scalar($opt_ir->@*), 64, 'Phase 0: optimized IR retains 64 rules');
+        is(scalar($opt_ir->@*), 66, 'Phase 0: optimized IR retains 66 rules');
 
         # Generate and compile optimized version
         my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
