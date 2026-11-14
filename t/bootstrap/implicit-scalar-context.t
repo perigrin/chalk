@@ -9,6 +9,34 @@ use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
 use Chalk::IR::Serialize::JSON qw(from_json);
 use Chalk::Target::LLVM;
+use Chalk::IR::NodeFactory;
+
+# Append a Print of the returned value onto the graph's EXISTING control chain,
+# after the last effect, and return Undef instead: a program's observable
+# contract is what it prints. The brackets separate "printed the empty string"
+# from "printed nothing at all".
+sub print_program ($ret) {
+    my $val  = $ret->inputs->[0];
+    my $repr = $val->stamp // 'Int';
+    my $f    = Chalk::IR::NodeFactory->new;
+    my $str = $repr eq 'Str' ? $val : do {
+        my $c = $f->make( 'Coerce',
+            inputs => [$val], from_repr => $repr, to_repr => 'Str' );
+        $c->set_stamp('Str');
+        $c;
+    };
+    my $lb = $f->make( 'Constant', value => '[', const_type => 'string' );
+    $lb->set_stamp('Str');
+    my $rb = $f->make( 'Constant', value => ']', const_type => 'string' );
+    $rb->set_stamp('Str');
+    my $print = $f->make( 'Print', inputs => [ $lb, $str, $rb ] );
+    $print->set_control_in( $ret->control_in );
+    my $u = $f->make( 'Constant', value => undef, const_type => 'undef' );
+    $u->set_stamp('Undef');
+    my $nret = $f->make_cfg( 'Return', inputs => [$u] );
+    $nret->set_control_in($print);
+    return $nret;
+}
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
@@ -18,7 +46,7 @@ plan skip_all => "perl5-son not found at $SON" unless -f "$SON/B/SoN.pm";
 plan skip_all => "lli not found at $LLI"        unless -x $LLI;
 
 # Compile a corpus_case body through B::SoN -> loader -> Target::LLVM -> lli and
-# return the type-tagged value lli prints. An array in scalar context (assigned
+# return what the program prints for corpus_case's value (see print_program). An array in scalar context (assigned
 # to a scalar pad) must yield its element count as an Int.
 sub run_i64 ($body) {
     my ($fh, $tmp) = tempfile(SUFFIX => '.pl', UNLINK => 1);
@@ -29,14 +57,13 @@ sub run_i64 ($body) {
     my $mop = (values %$graphs)[0]->mop;
     my $g = $graphs->{'main::corpus_case'} or return (undef, "no graph");
     my $ret = $g->returns->[0] or return (undef, "no Return");
-    my $ll  = eval { Chalk::Target::LLVM->lower($ret, (defined $mop ? (mop => $mop) : ())) };
+    my $ll  = eval { Chalk::Target::LLVM->lower(print_program($ret), (defined $mop ? (mop => $mop) : ())) };
     return (undef, "lower: $@") if $@;
     my ($lfh, $lltmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $lfh $ll; close $lfh;
     my $out = qx($LLI $lltmp 2>&1);
     my $exit = $? >> 8;
     return (undef, "lli exit $exit: $out") if $exit != 0;
-    chomp $out;
     return ($out, undef);
 }
 
@@ -44,15 +71,15 @@ sub run_i64 ($body) {
 # over an aggregate value). The result is the count, exactly like `scalar @a`.
 subtest 'array assigned to a scalar yields the count (019f300f)' => sub {
     my ($v, $e) = run_i64('my @a = (1, 2, 3); my $n = @a; $n');
-    is($v, 'Int:3', 'my $n = @a -> Int:3 (count, not ArrayRef)') or diag($e // '');
+    is($v, '[3]', 'my $n = @a prints 3 (count, not ArrayRef)') or diag($e // '');
 
     # Non-boundary length so a wrong count is caught.
     my ($v5, $e5) = run_i64('my @a = (10, 20, 30, 40, 50); my $n = @a; $n');
-    is($v5, 'Int:5', 'my $n = @a over 5 elems -> Int:5') or diag($e5 // '');
+    is($v5, '[5]', 'my $n = @a over 5 elems prints 5') or diag($e5 // '');
 
     # Empty array -> 0.
     my ($v0, $e0) = run_i64('my @a = (); my $n = @a; $n');
-    is($v0, 'Int:0', 'my $n = @a over () -> Int:0') or diag($e0 // '');
+    is($v0, '[0]', 'my $n = @a over () prints 0') or diag($e0 // '');
 };
 
 # A hash assigned to a scalar (my $n = %h) imposes scalar context: the producer
@@ -61,9 +88,9 @@ subtest 'array assigned to a scalar yields the count (019f300f)' => sub {
 # perl oracle rather than a hardcoded number.
 sub oracle_int ($body) {
     my ($fh, $tmp) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-    print $fh "use 5.42.0;\nmy \$_result = do {\n$body\n};\nprint qq{Int:\$_result};\n";
+    print $fh "use 5.42.0;\nmy \$_result = do {\n$body\n};\nprint qq{[\$_result]};\n";
     close $fh;
-    my $out = qx($PERL $tmp 2>&1); chomp $out; return $out;
+    my $out = qx($PERL $tmp 2>&1); return $out;
 }
 
 subtest 'hash in scalar context yields the key count (019f3004)' => sub {

@@ -15,20 +15,48 @@ skip_all "perl 5.42 not found" unless -x $PERL;
 use lib 'lib', 't/lib';
 require Chalk::CodeGen::Harness::MdtestCorpus;
 require Chalk::Target::LLVM;
+use Chalk::IR::NodeFactory;
 
-# Lower a hand-built IR block through the corpus path and run it under lli.
-# Returns the printed integer (e.g. 5 from "Int:5"), or ('gap', $err).
+# Append a Print of the returned value onto the graph's EXISTING control chain,
+# after the last effect, and return Undef instead: a program's observable
+# contract is what it prints. The brackets separate "printed the empty string"
+# from "printed nothing at all".
+sub print_program ($ret) {
+    my $val  = $ret->inputs->[0];
+    my $repr = $val->stamp // 'Int';
+    my $f    = Chalk::IR::NodeFactory->new;
+    my $str = $repr eq 'Str' ? $val : do {
+        my $c = $f->make( 'Coerce',
+            inputs => [$val], from_repr => $repr, to_repr => 'Str' );
+        $c->set_stamp('Str');
+        $c;
+    };
+    my $lb = $f->make( 'Constant', value => '[', const_type => 'string' );
+    $lb->set_stamp('Str');
+    my $rb = $f->make( 'Constant', value => ']', const_type => 'string' );
+    $rb->set_stamp('Str');
+    my $print = $f->make( 'Print', inputs => [ $lb, $str, $rb ] );
+    $print->set_control_in( $ret->control_in );
+    my $u = $f->make( 'Constant', value => undef, const_type => 'undef' );
+    $u->set_stamp('Undef');
+    my $nret = $f->make_cfg( 'Return', inputs => [$u] );
+    $nret->set_control_in($print);
+    return $nret;
+}
+
+# Lower a hand-built IR block through the corpus path, its returned value
+# printed (print_program), and run it under lli. Returns ('value', $printed)
+# -- the value between the brackets, e.g. 5 from "[5]" -- or ('gap', $err).
 sub lower_and_run ($ir) {
     my ($rn, $mop) = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir);
     my $ll = eval {
-        Chalk::Target::LLVM->lower($rn, (defined $mop ? (mop => $mop) : ()));
+        Chalk::Target::LLVM->lower(print_program($rn), (defined $mop ? (mop => $mop) : ()));
     };
     return ('gap', $@) if $@;
     my ($lfh, $lltmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $lfh $ll; close $lfh;
     my $out = qx($LLI $lltmp 2>&1);
-    chomp $out;
-    my $val = ($out =~ /Int:(-?\d+)/) ? $1 : $out;
+    my $val = ($out =~ /\A\[(.*)\]\z/s) ? $1 : $out;
     return ('value', $val);
 }
 

@@ -17,6 +17,34 @@ skip_all "perl 5.42 not found" unless -x $PERL;
 use lib 'lib', 't/lib';
 require Chalk::IR::Serialize::JSON;
 require Chalk::Target::LLVM;
+use Chalk::IR::NodeFactory;
+
+# Append a Print of the returned value onto the graph's EXISTING control chain,
+# after the last effect, and return Undef instead: a program's observable
+# contract is what it prints. The brackets separate "printed the empty string"
+# from "printed nothing at all".
+sub print_program ($ret) {
+    my $val  = $ret->inputs->[0];
+    my $repr = $val->stamp // 'Int';
+    my $f    = Chalk::IR::NodeFactory->new;
+    my $str = $repr eq 'Str' ? $val : do {
+        my $c = $f->make( 'Coerce',
+            inputs => [$val], from_repr => $repr, to_repr => 'Str' );
+        $c->set_stamp('Str');
+        $c;
+    };
+    my $lb = $f->make( 'Constant', value => '[', const_type => 'string' );
+    $lb->set_stamp('Str');
+    my $rb = $f->make( 'Constant', value => ']', const_type => 'string' );
+    $rb->set_stamp('Str');
+    my $print = $f->make( 'Print', inputs => [ $lb, $str, $rb ] );
+    $print->set_control_in( $ret->control_in );
+    my $u = $f->make( 'Constant', value => undef, const_type => 'undef' );
+    $u->set_stamp('Undef');
+    my $nret = $f->make_cfg( 'Return', inputs => [$u] );
+    $nret->set_control_in($print);
+    return $nret;
+}
 
 # Drive a full program (class decls + a main::corpus_case sub) through
 # B::SoN under package=main ONLY -> Chalk load -> LLVM lower -> lli. The
@@ -33,7 +61,7 @@ sub lower_and_run ($program) {
     my $mop = (values %$graphs)[0]->mop;
     my $g = $graphs->{'main::corpus_case'} or return ( 'err', 'no graph' );
     my $ll = eval {
-        Chalk::Target::LLVM->lower( $g->returns->[0],
+        Chalk::Target::LLVM->lower( print_program( $g->returns->[0] ),
             ( defined $mop ? ( mop => $mop ) : () ) );
     };
     return ( 'gap', $@ ) if $@;
@@ -41,23 +69,18 @@ sub lower_and_run ($program) {
     print $lfh $ll;
     close $lfh;
     my $out = qx($LLI $lltmp 2>&1);
-    chomp $out;
     return ( 'value', $out );
 }
 
 # Run the same program under real perl (calling corpus_case) as the oracle.
-# Mirror the LLVM backend's tagged print: a number is Int:<v>, anything else
-# Str:<v>, undef is Undef:.
+# Print the value as print_program does: between brackets, undef as [].
 sub perl_val ($program) {
     my ( $fh, $tmp ) = tempfile( SUFFIX => '.pl', UNLINK => 1 );
     print $fh $program,
       qq{\nmy \$r = main::corpus_case();\n}
-      . qq{use Scalar::Util qw(looks_like_number);\n}
-      . qq{print !defined \$r ? "Undef:"\n}
-      . qq{    : looks_like_number(\$r) ? "Int:\$r" : "Str:\$r";\n};
+      . qq{print "[", ( \$r // "" ), "]";\n};
     close $fh;
     my $out = qx($PERL $tmp 2>&1);
-    chomp $out;
     return $out;
 }
 
@@ -76,7 +99,7 @@ subtest 'the teaching case: my $x = $c->get lowers to 5 (lli == perl)' => sub {
       . qq{sub corpus_case { my \$c = Counter->new(n => 5); my \$x = \$c->get; \$x }\n};
     my ( $kind, $out ) = lower_and_run($prog);
     is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
-    is( $out, 'Int:5', 'lli returns 5' );
+    is( $out, '[5]', 'lli returns 5' );
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
@@ -95,7 +118,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
-    is( $out, 'Str:hi', 'lli returns the string value' );
+    is( $out, '[hi]', 'lli returns the string value' );
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
@@ -113,7 +136,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
-    is( $out, 'Int:7', 'lli returns the inherited get -> 7' );
+    is( $out, '[7]', 'lli returns the inherited get -> 7' );
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
@@ -132,7 +155,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
-    is( $out, 'Int:9', 'lli returns 9' );
+    is( $out, '[9]', 'lli returns 9' );
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
@@ -140,7 +163,7 @@ subtest 'arith over two method-call results does not miscompile (GAP or correct)
     # `$a + $b` where both operands are method Calls. The Add's repr-propagation
     # runs before the method-Call reprs are stamped (a Chalk loader ordering
     # gap), so the Add currently GAPs. This subtest pins the ANTI-MISCOMPILE
-    # invariant: a future Chalk fix must produce the correct value (Int:18) or
+    # invariant: a future Chalk fix must produce the correct value (18) or
     # keep an honest GAP -- never a silently-wrong value.
     my $prog = <<'PL' . qq{sub corpus_case { my \$c = Box->new(v => 9); my \$a = \$c->val; my \$b = \$c->val; \$a + \$b }\n};
 use feature 'class';
@@ -153,7 +176,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     if ( $kind eq 'value' ) {
-        is( $out, 'Int:18', 'if it lowers, it lowers to the correct 9 + 9 -> 18' );
+        is( $out, '[18]', 'if it lowers, it lowers to the correct 9 + 9 -> 18' );
         is( $out, perl_val($prog), 'lli == perl' );
     }
     else {
@@ -178,7 +201,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     if ( $kind eq 'value' ) {
-        # lli emits '1' for true (i1); perl's oracle prints Int:1. Either the
+        # lli emits '1' for true (i1); perl's oracle prints 1. Either the
         # backend lowers the i1 return correctly or it must GAP -- but the lli
         # output must NOT be an LLVM verify error / crash.
         unlike( $out, qr/\berror\b|Stack dump|Segmentation|expected 'i64/i,

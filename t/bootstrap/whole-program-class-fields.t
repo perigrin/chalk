@@ -17,6 +17,34 @@ skip_all "perl 5.42 not found" unless -x $PERL;
 use lib 'lib', 't/lib';
 require Chalk::IR::Serialize::JSON;
 require Chalk::Target::LLVM;
+use Chalk::IR::NodeFactory;
+
+# Append a Print of the returned value onto the graph's EXISTING control chain,
+# after the last effect, and return Undef instead: a program's observable
+# contract is what it prints. The brackets separate "printed the empty string"
+# from "printed nothing at all".
+sub print_program ($ret) {
+    my $val  = $ret->inputs->[0];
+    my $repr = $val->stamp // 'Int';
+    my $f    = Chalk::IR::NodeFactory->new;
+    my $str = $repr eq 'Str' ? $val : do {
+        my $c = $f->make( 'Coerce',
+            inputs => [$val], from_repr => $repr, to_repr => 'Str' );
+        $c->set_stamp('Str');
+        $c;
+    };
+    my $lb = $f->make( 'Constant', value => '[', const_type => 'string' );
+    $lb->set_stamp('Str');
+    my $rb = $f->make( 'Constant', value => ']', const_type => 'string' );
+    $rb->set_stamp('Str');
+    my $print = $f->make( 'Print', inputs => [ $lb, $str, $rb ] );
+    $print->set_control_in( $ret->control_in );
+    my $u = $f->make( 'Constant', value => undef, const_type => 'undef' );
+    $u->set_stamp('Undef');
+    my $nret = $f->make_cfg( 'Return', inputs => [$u] );
+    $nret->set_control_in($print);
+    return $nret;
+}
 
 # Drive a full program (class decls + a main::corpus_case sub) through B::SoN
 # under package=main ONLY -> Chalk load -> LLVM lower -> lli. The referenced
@@ -31,7 +59,7 @@ sub lower_and_run ($program) {
     my $mop = (values %$graphs)[0]->mop;
     my $g = $graphs->{'main::corpus_case'} or return ( 'err', 'no graph' );
     my $ll = eval {
-        Chalk::Target::LLVM->lower( $g->returns->[0],
+        Chalk::Target::LLVM->lower( print_program( $g->returns->[0] ),
             ( defined $mop ? ( mop => $mop ) : () ) );
     };
     return ( 'gap', $@ ) if $@;
@@ -39,7 +67,6 @@ sub lower_and_run ($program) {
     print $lfh $ll;
     close $lfh;
     my $out = qx($LLI $lltmp 2>&1);
-    chomp $out;
     return ( 'value', $out );
 }
 
@@ -48,12 +75,9 @@ sub perl_val ($program) {
     my ( $fh, $tmp ) = tempfile( SUFFIX => '.pl', UNLINK => 1 );
     print $fh $program,
       qq{\nmy \$r = main::corpus_case();\n}
-      . qq{use Scalar::Util qw(looks_like_number);\n}
-      . qq{print !defined \$r ? "Undef:"\n}
-      . qq{    : looks_like_number(\$r) ? "Int:\$r" : "Str:\$r";\n};
+      . qq{print "[", ( \$r // "" ), "]";\n};
     close $fh;
     my $out = qx($PERL $tmp 2>&1);
-    chomp $out;
     return $out;
 }
 
@@ -72,7 +96,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
-    is( $out, 'Int:30', 'lli returns 30' );
+    is( $out, '[30]', 'lli returns 30' );
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
@@ -89,7 +113,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
-    is( $out, 'Int:10', 'lli returns 10' );
+    is( $out, '[10]', 'lli returns 10' );
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
@@ -111,7 +135,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
-    is( $out, 'Int:14', 'lli returns 14' );
+    is( $out, '[14]', 'lli returns 14' );
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
@@ -131,7 +155,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
-    is( $out, 'Int:5', 'lli returns the read field -> 5' );
+    is( $out, '[5]', 'lli returns the read field -> 5' );
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
@@ -150,7 +174,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
-    is( $out, 'Str:hi', 'lli returns the Str default -> hi' );
+    is( $out, '[hi]', 'lli returns the Str default -> hi' );
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
@@ -169,7 +193,7 @@ package main;
 PL
     my ( $kind, $out ) = lower_and_run($prog);
     is( $kind, 'value', 'lowered (not a GAP)' ) or diag($out);
-    is( $out, 'Str:bye', 'lli returns the supplied arg -> bye' );
+    is( $out, '[bye]', 'lli returns the supplied arg -> bye' );
     is( $out, perl_val($prog), 'lli == perl' );
 };
 
