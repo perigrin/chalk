@@ -76,6 +76,18 @@ class Chalk::Bootstrap::Earley {
     # reducing O(n) items per recursive chain to O(1).
     field %leo_items;
 
+    # Items already processed at the position being processed:
+    # $_processed[$core_id][$origin] is true once the agenda has handled
+    # that item at $_processed_pos. A derivation that reaches such an item
+    # afterwards is "late": its value was already reified (if complete) or
+    # scanned/advanced (if not), so merging it raw into the chart would
+    # either mix a raw value into a reified one or drop it. Late
+    # derivations go back on the agenda as [$core_id, $origin, $value] and
+    # are processed on their own. $_processed_pos is -1 outside the
+    # position loop, so no derivation is late there.
+    field @_processed;
+    field $_processed_pos = -1;
+
 
     # Scan result cache: {pos}{pattern_string} => $end_pos (or undef)
     # Avoids redundant regex matching when multiple items scan the same
@@ -330,6 +342,17 @@ class Chalk::Bootstrap::Earley {
         }
     }
 
+    # True when ($core_id, $origin) at $pos was already processed by the
+    # agenda at the position being processed. A derivation for such an item
+    # is late and must be queued as [$core_id, $origin, $value] rather than
+    # merged into the chart (see @_processed).
+    method _is_processed_here($pos, $core_id, $origin) {
+        return false unless $pos == $_processed_pos;
+        my $slot = $_processed[$core_id];
+        return false unless defined $slot;
+        return $slot->[$origin] ? true : false;
+    }
+
     # Report the chart origin dimension type (for testing)
     method chart_origin_type() { return 'ARRAY'; }
 
@@ -562,7 +585,8 @@ class Chalk::Bootstrap::Earley {
                 $furthest_chart_pos = $pos if $pos > $furthest_chart_pos;
             }
 
-            my @processed;
+            @_processed = ();
+            $_processed_pos = $pos;
             my %predicted_at;  # Track which rules have been predicted at this pos
 
             # Pre-predict nonterminals and pre-scan terminals in a single pass
@@ -599,22 +623,30 @@ class Chalk::Bootstrap::Earley {
             }
 
             while (my $entry = shift @agenda) {
-                my ($core_id, $origin) = $entry->@*;
+                my ($core_id, $origin, $late_value) = $entry->@*;
+                my $is_late = defined $late_value;
 
-                # Skip if already processed (2D array avoids pack + hash lookup)
-                # Uses explicit if-block instead of postfix next-if for XS
-                # codegen compatibility (postfix next-if with && falls to eval_pv)
-                my $p_slot = $processed[$core_id];
-                if (defined $p_slot) {
-                    my $already = $p_slot->[$origin];
-                    next if $already;
+                my $value;
+                if ($is_late) {
+                    # A derivation that arrived after this item was processed
+                    # (see @_processed). Process this derivation alone.
+                    $value = $late_value;
+                } else {
+                    # Skip if already processed (2D array avoids pack + hash lookup)
+                    # Uses explicit if-block instead of postfix next-if for XS
+                    # codegen compatibility (postfix next-if with && falls to eval_pv)
+                    my $p_slot = $_processed[$core_id];
+                    if (defined $p_slot) {
+                        my $already = $p_slot->[$origin];
+                        next if $already;
+                    }
+                    $_processed[$core_id] //= [];
+                    $_processed[$core_id][$origin] = true;
+
+                    # Read value from chart (may have been updated by a merge since
+                    # this entry was pushed to the agenda)
+                    $value = $chart[$pos][$core_id][($pos - $origin)];
                 }
-                $processed[$core_id] //= [];
-                $processed[$core_id][$origin] = true;
-
-                # Read value from chart (may have been updated by a merge since
-                # this entry was pushed to the agenda)
-                my $value = $chart[$pos][$core_id][($pos - $origin)];
 
                 if ($ci_completions->[$core_id]) {
                     # Apply completion reification via multiply: build an annotated
@@ -627,6 +659,27 @@ class Chalk::Bootstrap::Earley {
                         $value, $rule_name, $alt_idx, $pos, $origin
                     );
                     my $completed_value = $semiring->multiply($value, $complete_ctx);
+                    if ($is_late) {
+                        # The chart already holds this item's reified value and
+                        # its parents already received it. Merge the newly
+                        # reified derivation into the chart and propagate only
+                        # it: multiply distributes over add, so the parents end
+                        # up with the sum of every derivation. The item is
+                        # already indexed in %completed_at and its epoch commit
+                        # already fired.
+                        next if !defined($completed_value) || $semiring->is_zero($completed_value);
+                        my $existing_val = $chart[$pos][$core_id][($pos - $origin)];
+                        my $merged_value;
+                        try {
+                            $merged_value = $semiring->add($existing_val, $completed_value);
+                        } catch ($e) {
+                            die "Ambiguity merging late completion of '$rule_name' "
+                                . "(origin=$origin, pos=$pos): $e";
+                        }
+                        $self->_chart_set(\@chart, $pos, $core_id, $origin, $merged_value);
+                        $self->_complete($core_id, $origin, $completed_value, $pos, \@chart, \@agenda);
+                        next;
+                    }
                     # Update the chart entry with the reification-applied value
                     $self->_chart_set(\@chart, $pos, $core_id, $origin, $completed_value);
                     # Skip propagation of zero-valued completions. A zero
@@ -669,7 +722,9 @@ class Chalk::Bootstrap::Earley {
                                 my $skip_core = $core_index->advance($core_id);
                                 my $skip_rd = $pos - $origin;
                                 my $skip_oh = $chart[$pos][$skip_core];
-                                if (defined $skip_oh && defined $skip_oh->[$skip_rd]) {
+                                if ($self->_is_processed_here($pos, $skip_core, $origin)) {
+                                    push @agenda, [$skip_core, $origin, $skip_value];
+                                } elsif (defined $skip_oh && defined $skip_oh->[$skip_rd]) {
                                     my $existing_val = $skip_oh->[$skip_rd];
                                     my $merged;
                                     try {
@@ -684,10 +739,7 @@ class Chalk::Bootstrap::Earley {
                                     my $merged_is_zero = $semiring->is_zero($merged);
                                     if (!$merged_is_zero) {
                                         $self->_chart_set(\@chart, $pos, $skip_core, $origin, $merged);
-                                        my $sp_slot = $processed[$skip_core];
-                                        my $sp_done = defined $sp_slot && $sp_slot->[$origin];
-                                        push @agenda, [$skip_core, $origin]
-                                            unless $sp_done;
+                                        push @agenda, [$skip_core, $origin];
                                     }
                                 } else {
                                     $self->_chart_set(\@chart, $pos, $skip_core, $origin, $skip_value);
@@ -734,7 +786,8 @@ class Chalk::Bootstrap::Earley {
                                 $lateral_seed = $ch;
                             }
                         }
-                        $self->_predict($w_rule, $pos, \@chart, \@agenda, \%predicted_at, $lateral_seed);
+                        $self->_predict($w_rule, $pos, \@chart, \@agenda, \%predicted_at, $lateral_seed)
+                            unless $is_late;
                         # Advance from already-completed items at this position.
                         # When a nullable nonterminal (e.g. _) appears multiple
                         # times in a rule, the second prediction is suppressed
@@ -965,6 +1018,7 @@ class Chalk::Bootstrap::Earley {
 
             $pos++;
         }
+        $_processed_pos = -1;
 
         if ($ENV{CHALK_CHART_PROFILE}) {
             for my $p (0 .. $#chart) {
@@ -1324,7 +1378,10 @@ class Chalk::Bootstrap::Earley {
         # Advance dot
         my $new_core_id = $core_index->advance($core_id);
 
-        if ($self->_chart_has($chart, $end_pos, $new_core_id, $origin)) {
+        if ($agenda && $self->_is_processed_here($end_pos, $new_core_id, $origin)) {
+            # Zero-width scan reaching an item already processed here
+            push $agenda->@*, [$new_core_id, $origin, $new_value];
+        } elsif ($self->_chart_has($chart, $end_pos, $new_core_id, $origin)) {
             # Merge with existing value using semiring add
             my $existing_val = $self->_chart_get($chart, $end_pos, $new_core_id, $origin);
             my $merged_value;
@@ -1380,7 +1437,9 @@ class Chalk::Bootstrap::Earley {
                 my $top_origin  = $leo->{top_origin};
                 my $new_core_id = $core_index->advance($top_core_id);
 
-                if ($self->_chart_has($chart, $pos, $new_core_id, $top_origin)) {
+                if ($self->_is_processed_here($pos, $new_core_id, $top_origin)) {
+                    push $agenda->@*, [$new_core_id, $top_origin, $combined];
+                } elsif ($self->_chart_has($chart, $pos, $new_core_id, $top_origin)) {
                     my $existing_val = $self->_chart_get($chart, $pos, $new_core_id, $top_origin);
                     my $merged_value;
                     try {
@@ -1460,7 +1519,9 @@ class Chalk::Bootstrap::Earley {
                 my $new_rd = $pos - $w_origin;
                 my $existing_oh = $chart->[$pos][$new_core_id];
                 my $existing_val = defined($existing_oh) ? $existing_oh->[$new_rd] : undef;
-                if (defined $existing_val) {
+                if ($self->_is_processed_here($pos, $new_core_id, $w_origin)) {
+                    push $agenda->@*, [$new_core_id, $w_origin, $new_value];
+                } elsif (defined $existing_val) {
                     # Merge with existing value using semiring add
                     my $merged_value;
                     try {
@@ -1597,7 +1658,9 @@ class Chalk::Bootstrap::Earley {
 
             my $new_core_id = $core_index->advance($waiting_core_id);
 
-            if ($self->_chart_has($chart, $pos, $new_core_id, $waiting_origin)) {
+            if ($self->_is_processed_here($pos, $new_core_id, $waiting_origin)) {
+                push $agenda->@*, [$new_core_id, $waiting_origin, $new_value];
+            } elsif ($self->_chart_has($chart, $pos, $new_core_id, $waiting_origin)) {
                 my $existing_val = $self->_chart_get($chart, $pos, $new_core_id, $waiting_origin);
                 my $merged_value;
                 try {
