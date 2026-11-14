@@ -605,7 +605,7 @@ sub infer ($class, $graphs) {
                     $_->fieldix == $fa->field_index && $_->sigil eq '%'
                 } ( eval { $mop->for_class($fa->field_stash)->fields } )
             } $v->inputs->@*;
-        next if grep { !/\A(?:scalar|list|void)\z/ } keys %{ $wants{$m} // {} };
+        next if grep { !/\A(?:scalar|list|void)\z/ } keys +($wants{$m} // {})->%*;
         $LIST_VALUED_METHOD{$m} = 1;
         for my $g (values %graphs) {
             $_->set_stamp( ( $_->want // '' ) eq 'list' ? 'Array' : 'Int' ) for grep {
@@ -1158,7 +1158,7 @@ sub _widen_shared_scalar_reads ($graphs) {
         my ($t, $v) = $n->inputs->@[0, 1];
         next unless blessed($t) && $t->operation eq 'PadAccess' && $t->shared
             && ( $t->sigil // '' ) eq '$' && blessed($v);
-        push @{ $stored{ $t->symbol } }, $v->stamp // 'Unknown';   # static type
+        push $stored{ $t->symbol }->@*, $v->stamp // 'Unknown';   # static type
     }
     for my $n (grep { $_->operation eq 'PadAccess' && $_->shared && ( $_->sigil // '' ) eq '$' } @all) {
         my $kinds = $stored{ $n->symbol } or next;
@@ -1222,7 +1222,7 @@ sub _type_run_time_method_calls ($graphs, $mop) {
         for my $sub ($cls->subs) {
             my @r = grep { blessed($_) && $_->operation eq 'Return' } ( $sub->graph->returns // [] )->@*;
             my $all = @r && !grep { !( blessed($_->inputs->[0]) && ( $_->inputs->[0]->stamp // '' ) eq 'Scalar' ) } @r;
-            push @{ $returns_scalar{ $sub->name } }, $all ? 1 : 0;
+            push $returns_scalar{ $sub->name }->@*, $all ? 1 : 0;
         }
     }
     for my $gname (sort keys $graphs->%*) {
@@ -2530,7 +2530,7 @@ sub _replay_classes ($classes, $graphs) {
             $cls->declare_adjust(graph => $ag);
         }
         # A followed module's subs the program never reaches: names only.
-        $cls->declare_unloaded($_) for sort @{ $cd->{unloaded} // [] };
+        $cls->declare_unloaded($_) for sort +($cd->{unloaded} // [])->@*;
     }
 
     $mop->seal;

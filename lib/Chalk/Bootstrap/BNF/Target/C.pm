@@ -225,7 +225,7 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
             my $tmap   = $state->{terminal_map};
             my @slices;
 
-            for my $pattern (sort keys %{$tmap}) {
+            for my $pattern (sort keys $tmap->%*) {
                 # Assign a unique index to this pattern if not seen before
                 unless (exists $pattern_index{$pattern}) {
                     $pattern_index{$pattern} = scalar @unique_patterns;
@@ -312,7 +312,7 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
             my $cmap   = $state->{completion_map};
             my @slices;
 
-            for my $nt (sort keys %{$cmap}) {
+            for my $nt (sort keys $cmap->%*) {
                 unless (exists $nonterm_index{$nt}) {
                     $nonterm_index{$nt} = scalar @unique_nonterms;
                     push @unique_nonterms, $nt;
@@ -393,7 +393,7 @@ class Chalk::Bootstrap::BNF::Target::C :isa(Chalk::Bootstrap::Target) {
             my $state      = $states->[$sid];
             my $goto_table = $state->{goto_table};
             push @so_vals, scalar @flat_entries;
-            my @syms = sort keys %{$goto_table};
+            my @syms = sort keys $goto_table->%*;
             push @sc_vals, scalar @syms;
             for my $sym_key (@syms) {
                 push @flat_entries, { symbol_key => $sym_key, target_state => $goto_table->{$sym_key} };

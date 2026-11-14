@@ -328,11 +328,11 @@ sub _flatten_inheritance {
             # own fields are renumbered to follow them. Inherited reader
             # methods (below) and FieldAccess nodes both name flattened slots.
             my @inherited = map { { %$_, inherited_from => $parent } }
-                @{ $parent_reg->{fields} };
+                $parent_reg->{fields}->@*;
             my $base = scalar @inherited;
             my @own;
             my %remap;   # old per-class field_index -> flattened slot
-            for my $fi (0 .. $#{ $child->{fields} }) {
+            for my $fi (0 .. $child->{fields}->$#*) {
                 my $old = $child->{fields}[$fi]{field_index};
                 $remap{$old} = $base + $fi;
                 push @own, { $child->{fields}[$fi]->%*, field_index => $base + $fi };
@@ -341,7 +341,7 @@ sub _flatten_inheritance {
 
             # Own :reader methods were synthesized with the pre-renumber
             # field index — fix them to the flattened slot.
-            for my $m (@{ $child->{methods} }) {
+            for my $m ($child->{methods}->@*) {
                 next unless $m->{is_reader_synth};
                 next if exists $m->{inherited_from};
                 $m->{reader_field_index} = $remap{ $m->{reader_field_index} }
@@ -351,11 +351,11 @@ sub _flatten_inheritance {
             # Methods: copy parent slots the child does not override. Reader
             # methods carry reader_field_index — these are inherited fields,
             # already at their parent slot, so the index is correct as-is.
-            for my $pmeth (@{ $parent_reg->{methods} }) {
-                unless (grep { ($_->{name} // '') eq $pmeth->{name} } @{ $child->{methods} }) {
-                    push @{ $child->{methods} }, {
+            for my $pmeth ($parent_reg->{methods}->@*) {
+                unless (grep { ($_->{name} // '') eq $pmeth->{name} } $child->{methods}->@*) {
+                    push $child->{methods}->@*, {
                         %$pmeth,
-                        vtable_slot => scalar(@{ $child->{methods} }),
+                        vtable_slot => scalar($child->{methods}->@*),
                         inherited_from => $parent,
                     };
                 }
@@ -363,7 +363,7 @@ sub _flatten_inheritance {
 
             # ADJUST: base-first. The parent's (already-flattened) adjusts
             # run before the child's own.
-            $child->{adjusts} = [ @{ $parent_reg->{adjusts} }, @{ $child->{adjusts} } ];
+            $child->{adjusts} = [ $parent_reg->{adjusts}->@*, $child->{adjusts}->@* ];
         }
         delete $in_progress{$cname};
         $done{$cname} = 1;
@@ -480,7 +480,7 @@ sub _sub_param_decl {
     my ($param_reprs) = @_;
     my @d;
     my $i = 0;
-    for my $r (@{ $param_reprs // [] }) {
+    for my $r (+($param_reprs // [])->@*) {
         push @d, _method_fn_llvm_ret_type($r) . ' %arg' . $i;
         $i++;
     }
@@ -528,7 +528,7 @@ sub _method_param_decl {
     my ($param_reprs) = @_;
     my @d = ('i8* %self');
     my $i = 0;
-    for my $r (@{ $param_reprs // [] }) {
+    for my $r (+($param_reprs // [])->@*) {
         push @d, _method_fn_llvm_ret_type($r) . ' %arg' . $i;
         $i++;
     }
@@ -747,7 +747,7 @@ sub _sub_has_define {
     return $sinfo->{has_define} = 0 if $sinfo->{optional};
     # A SCALAR PARAMETER (a reference, an object) only for a sub that must
     # be called -- one calling itself; any other is inlined, as before.
-    my $ok = !grep { !$_DEFINE_REPR{$_} } @{ $sinfo->{param_reprs} // [] };
+    my $ok = !grep { !$_DEFINE_REPR{$_} } +($sinfo->{param_reprs} // [])->@*;
     if ($ok) {
         _settle_recursive_return($registry, $cname, $sinfo);
         my $body = $_DEFINE_REPR{ $sinfo->{return_repr} // '' }
@@ -805,7 +805,7 @@ sub _method_body_return {
              . "control root.";
     my @returns = grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Return'
-    } @{ $graph->returns };
+    } $graph->returns->@*;
     die "GAP: method '$mname' has " . scalar(@returns) . " Returns — the body "
       . "control root must be exactly one (a multi-exit body is not lowered yet)."
         unless @returns == 1;
@@ -895,7 +895,7 @@ sub _populate_registry_from_mop_class {
     # every direct call.
     for my $s ($cls->subs) {
         my $sname = $s->name;
-        next if grep { ($_->{name} // '') eq $sname } @{ $registry->{$cname}{subs} };
+        next if grep { ($_->{name} // '') eq $sname } $registry->{$cname}{subs}->@*;
 
         # A callee that reads @_ has no bound arguments OUTSIDE an inline, so
         # its body root carries no repr and _require_repr below would refuse
@@ -915,7 +915,7 @@ sub _populate_registry_from_mop_class {
         next if $s->uses_args && !$arg_reads;
 
         my $body_node = _method_body_root($s);
-        push @{ $registry->{$cname}{subs} }, {
+        push $registry->{$cname}{subs}->@*, {
             name        => $sname,
             body_node   => $body_node,
             body_return => _method_body_return($s),
@@ -944,7 +944,7 @@ sub _populate_registry_from_mop_class {
         };
     }
 
-    my $mslot = scalar @{ $registry->{$cname}{methods} };
+    my $mslot = scalar $registry->{$cname}{methods}->@*;
 
     for my $m ($cls->methods) {
         my $mname     = $m->name;
@@ -966,14 +966,14 @@ sub _populate_registry_from_mop_class {
             && blessed($body_node) && $body_node->operation eq 'Assign'
             && grep { blessed($_) && $_->operation eq 'FieldAccess'
                       && ( $_->stamp // "" ) =~ /\A(?:Hash|Array)(?:Ref)?\z/ } $body_node->inputs->[0];
-        unless (grep { ($_->{name} // '') eq $mname } @{ $registry->{$cname}{methods} }) {
+        unless (grep { ($_->{name} // '') eq $mname } $registry->{$cname}{methods}->@*) {
             # THE SIGNATURE COMES FROM THE BODY GRAPH, not from a wire field.
             # A method's parameters are exactly its Parameter nodes, each
             # carrying its own index and stamp, so the graph is the authority
             # and there is nothing to keep in sync with it. Sorted by index so
             # the emitted argument order is the declared order rather than
             # whatever order the walk happened to reach them in.
-            push @{ $registry->{$cname}{methods} }, {
+            push $registry->{$cname}{methods}->@*, {
                 name        => $mname,
                 body_node   => $body_node,
                 body_return => _method_body_return($m),
@@ -998,14 +998,14 @@ sub _populate_registry_from_mop_class {
         # silently dropped, shifting no slots but losing the field). Croak on the
         # real collision; skip only the exact re-add.
         my ($existing) = grep { ($_->{field_index} // -1) == $fidx }
-                              @{ $registry->{$cname}{fields} };
+                              $registry->{$cname}{fields}->@*;
         if ($existing && ($existing->{name} // '') ne $fname) {
             die "GAP: class '$cname' has two distinct fields at field_index "
               . "$fidx ('$existing->{name}' and '$fname') — a duplicate field_index "
               . "would silently drop the second field.";
         }
         unless ($existing) {
-            push @{ $registry->{$cname}{fields} }, {
+            push $registry->{$cname}{fields}->@*, {
                 name         => $fname,
                 # The bare :param key (sigil-free, e.g. 'n' for field '$n').
                 # A constructor Call binds by this key; native callers that
@@ -1024,8 +1024,8 @@ sub _populate_registry_from_mop_class {
             # sigil stripped ($left -> left); the call site dispatches on that
             # bare name.
             my $rname = $fname =~ s/^[\$\@%]//r;
-            unless (grep { ($_->{name} // '') eq $rname } @{ $registry->{$cname}{methods} }) {
-                push @{ $registry->{$cname}{methods} }, {
+            unless (grep { ($_->{name} // '') eq $rname } $registry->{$cname}{methods}->@*) {
+                push $registry->{$cname}{methods}->@*, {
                     name               => $rname,
                     body_node          => undef,
                     return_repr        => $f_repr,
@@ -1039,7 +1039,7 @@ sub _populate_registry_from_mop_class {
 
     for my $phaser ($cls->adjust_blocks) {
         my @returns = grep { blessed($_) && $_->operation eq 'Return' } $phaser->graph->returns->@*;
-        push @{ $registry->{$cname}{adjusts} }, {
+        push $registry->{$cname}{adjusts}->@*, {
             body_nodes  => _phaser_body_in_control_order($phaser),
             # One Return: the body is lowered along its control chain, as a
             # method's is, so a store inside a branch keeps its branch.
@@ -1065,7 +1065,7 @@ sub _emit_class_registry_ir {
         # Subs share the %Str return ABI, so they must be in this pre-scan
         # too -- a Str-returning SUB in a class whose methods all return Int
         # would otherwise emit insertvalue over an undeclared %Str.
-        for my $m (@{ $reg->{methods} }, @{ $reg->{subs} // [] }) {
+        for my $m ($reg->{methods}->@*, +($reg->{subs} // [])->@*) {
             $need_strpair = 1 if ($m->{return_repr} // '') eq 'Str';
         }
     }
@@ -1522,7 +1522,7 @@ sub _emit_class_registry_ir {
         my $emit_sub_defines = $ENV{CHALK_EMIT_SUB_DEFINES} ? 1 : 0;
         # A SUB THAT CALLS ITSELF is the exception: it is never inlined
         # (_lower_call_direct calls its define), so its body is emitted once.
-        for my $sinfo (grep { $emit_sub_defines || _sub_has_define($registry, $cname, $_) } @{ $reg->{subs} // [] }) {
+        for my $sinfo (grep { $emit_sub_defines || _sub_has_define($registry, $cname, $_) } +($reg->{subs} // [])->@*) {
             _settle_recursive_return($registry, $cname, $sinfo);
             my $sname    = $sinfo->{name};
             my $fn_name  = '@"' . $cname . '__' . $sname . '"';
@@ -1629,7 +1629,7 @@ sub _emit_class_registry_ir {
         # of the same class cache-hit the body's statement nodes and
         # silently skipped the second object's stores (review I6).
         my $adjusts = $reg->{adjusts} // [];
-        if (grep { $_->{body_return} || @{ $_->{body_nodes} // [] } } @$adjusts) {
+        if (grep { $_->{body_return} || +($_->{body_nodes} // [])->@* } @$adjusts) {
             my $adj_ctx = Chalk::Target::LLVM::Context->new;
             $adj_ctx->configure_as_method_body(
                 class_name     => $cname,
@@ -1640,7 +1640,7 @@ sub _emit_class_registry_ir {
 
             for my $adj (@$adjusts) {
                 if (my $ret = $adj->{body_return}) { _process_control_chain($adj_ctx, $ret) }
-                else { $adj_ctx->lower_value($_) for @{ $adj->{body_nodes} // [] } }
+                else { $adj_ctx->lower_value($_) for +($adj->{body_nodes} // [])->@* }
             }
             # Same back-propagation as the method-body path above: an ADJUST
             # block is lowered in its own Context, so a %Str built there is
@@ -1953,7 +1953,7 @@ sub _context_sees_maybe_as_scalar {
 }
 
 package Chalk::Target::LLVM::_MaybeView {
-    sub DESTROY { $_->() for reverse @{ $_[0] } }
+    sub DESTROY { $_->() for reverse $_[0]->@* }
 }
 
 sub lower_with_elaboration {

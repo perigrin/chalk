@@ -1417,7 +1417,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             my @body_strs = map { $self->_emit_node($_) } @body_items;
             my $block_str = '{ ' . join(' ', @body_strs) . ' }';
 
-            my @rest = $args->@[1 .. $#{$args}];
+            my @rest = $args->@[1 .. $args->$#*];
             if (@rest) {
                 my @rest_strs = map { $self->_emit_expr($_) } @rest;
                 return "$name $block_str " . join(', ', @rest_strs);

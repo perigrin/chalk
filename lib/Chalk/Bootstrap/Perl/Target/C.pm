@@ -1355,7 +1355,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 # Multi-item args (map/grep BLOCK shape): first N-1 args are block body,
                 # last arg is the list source (e.g., map { STMT; EXPR } LIST).
                 $list_node = $args->[-1];
-                @block_body_items = $args->@[0 .. $#{$args} - 1];
+                @block_body_items = $args->@[0 .. $args->$#* - 1];
             } else {
                 # Single arg: range only, block was lost in parsing.
                 # Default to empty hashref (map { {} } RANGE pattern).

@@ -764,7 +764,7 @@ sub _deserialize_graph ($method_data) {
             $args{sigil} = $fields->{sigil};
             $args{copy}  = 1 if $fields->{copy};
             if (defined $fields->{line}) {
-                @args{qw(eval_id file line)} = @{$fields}{qw(eval_id file line)};
+                @args{qw(eval_id file line)} = $fields->@{qw(eval_id file line)};
                 $args{strict} = $fields->{strict} ? 1 : 0;
                 $args{package} = $fields->{package} if defined $fields->{package};
             }
@@ -802,7 +802,7 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'SubDefined') {
             $args{$_} = $fields->{$_} for qw(name answer);
-            $args{unless} = [ @{ $fields->{unless} // [] } ];
+            $args{unless} = [ +($fields->{unless} // [])->@* ];
         }
         # B::SoN's ops the backend does not lower yet still LOAD, so it can say
         # by name what it lacks instead of the loader dying on the op.
@@ -1081,7 +1081,7 @@ sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
     my %by_sub;
     for my $name (keys %$methods) {
         my ($sub) = $name =~ /::(\w+)\z/ or next;
-        push @{ $by_sub{$sub} }, $name;
+        push $by_sub{$sub}->@*, $name;
     }
     while (defined( my $g = shift @work )) {
         my ( @sure, @maybe );
@@ -1108,13 +1108,13 @@ sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
                 if $sure{$g} && defined $runs && defined $refused->{$runs};
             $CALLED{ $runs // $name } = 1;
             if ( defined $runs ) { push @sure, $runs }
-            else { push @maybe, $name, @{ $by_sub{ $name =~ s/\A.*:://r } // [] } }
+            else { push @maybe, $name, +($by_sub{ $name =~ s/\A.*:://r } // [])->@* }
             # UNIVERSAL::can BY A NAME KNOWN HERE: the sub it names may be
             # handed back and run, so it is loaded. (A name not known here
             # reaches none: an unreached sub stays in its stash by name.)
             if ( ( $f->{dispatch_kind} // '' ) eq 'method' && $name eq 'can' && !defined $hit ) {
                 my $arg = $by_id{ ( $n->{inputs} // [] )->[1] // '' } // {};
-                push @maybe, @{ $by_sub{ $arg->{fields}{value} } // [] }
+                push @maybe, +($by_sub{ $arg->{fields}{value} } // [])->@*
                     if ( $arg->{op} // '' ) eq 'Constant' && defined $arg->{fields}{value};
             }
         }
@@ -1264,7 +1264,7 @@ sub from_json ($json_string) {
     # THE MODULES AND FILES B::SoN FOLLOWED (a sub's `module`: Foo::Bar, or a
     # required .pl by its path): compiled in, so a require of one is done.
     our %FOLLOWED = map { ( $_->{module} => 1 ) } grep { ref $_ eq 'HASH' && defined $_->{module} }
-        values %{ $data->{methods} // {} };
+        values +($data->{methods} // {})->%*;
     my $phase_n = 0;
     # Each sub's prototype, by its full name: prototype(\&f) reads it. A sub
     # the program defines with none is there, undef.
@@ -1313,20 +1313,20 @@ sub from_json ($json_string) {
     }
     # A FOLLOWED MODULE'S SUB the program never reaches is not loaded.
     my %run = map { $_ => 1 } _reachable_methods( $data->{methods} // {}, $data->{classes} // {}, $data->{refused} // {} );
-    my @gone = grep { !$run{$_} } keys %{ $data->{methods} // {} };
+    my @gone = grep { !$run{$_} } keys +($data->{methods} // {})->%*;
     # (what runs, for the passes that ask: Analysis::_answer_sub_defined)
     %RUN = %run;
-    %ON_WIRE = map { ( $_ => 1 ) } keys %{ $data->{methods} // {} };
-    %REFUSED = %{ $data->{refused} // {} };
-    delete @{ $data->{methods} }{@gone};
+    %ON_WIRE = map { ( $_ => 1 ) } keys +($data->{methods} // {})->%*;
+    %REFUSED = +($data->{refused} // {})->%*;
+    delete $data->{methods}->@{@gone};
     # ...and its class's record of it: a module's class keeps its shape, and
     # the name stays in its stash, unloaded (can() asks by name).
     my %gone = map { $_ => 1 } @gone;
-    for my $cd ( values %{ $data->{classes} // {} } ) {
+    for my $cd ( values +($data->{classes} // {})->%* ) {
         for my $kind (qw(subs methods)) {
             my $h = $cd->{$kind} or next;
             my @out = grep { $gone{ ref $h->{$_} eq 'HASH' ? $h->{$_}{graph} // '' : $h->{$_} // '' } } keys %$h;
-            push @{ $cd->{unloaded} }, @out;
+            push $cd->{unloaded}->@*, @out;
             delete @$h{@out};
         }
     }

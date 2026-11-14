@@ -48,7 +48,7 @@ class Chalk::Bootstrap::Semiring::FilterComposite {
         $_annotation_semirings_cache //= [
             grep {
                 blessed($_) && $_->can('slot_name') && defined $_->slot_name()
-            } $semirings->@[0 .. $#{ $semirings } - 1]
+            } $semirings->@[0 .. $semirings->$#* - 1]
         ];
         return $_annotation_semirings_cache->@*;
     }

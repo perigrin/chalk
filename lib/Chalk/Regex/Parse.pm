@@ -48,7 +48,7 @@ sub parse ( $pattern, $flags = '' ) {
     die "GAP: regex flag /$_ (a character set) is not lowered as a graph\n" for grep { $f{$_} } qw(a l);
     my $st = { c => [ split //, $pattern ], i => 0, p => $pattern, f => \%f, ng => 0, nc => 0 };
     my $tree = _alt($st);
-    die "GAP: unbalanced ')' in regex pattern '$pattern'\n" if $st->{i} <= $#{ $st->{c} };
+    die "GAP: unbalanced ')' in regex pattern '$pattern'\n" if $st->{i} <= $st->{c}->$#*;
     return { tree => $tree, ngroups => $st->{ng}, ncode => $st->{nc}, flags => { map { ( $_ => $f{$_} // 0 ) } qw(i m s x) } };
 }
 
@@ -81,7 +81,7 @@ sub _quant ( $st, $atom ) {
     if    ( $c eq '*' ) { ( $min, $max ) = ( 0, undef ); $st->{i}++ }
     elsif ( $c eq '+' ) { ( $min, $max ) = ( 1, undef ); $st->{i}++ }
     elsif ( $c eq '?' ) { ( $min, $max ) = ( 0, 1 );     $st->{i}++ }
-    elsif ( $c eq '{' && ( join '', @{ $st->{c} }[ $st->{i} .. $#{ $st->{c} } ] ) =~ /\A\{[ \t]*(?:(\d+)[ \t]*(,[ \t]*(\d*))?|,[ \t]*(\d+))[ \t]*\}/ ) {
+    elsif ( $c eq '{' && ( join '', $st->{c}->@[ $st->{i} .. $st->{c}->$#* ] ) =~ /\A\{[ \t]*(?:(\d+)[ \t]*(,[ \t]*(\d*))?|,[ \t]*(\d+))[ \t]*\}/ ) {
         ( $min, $max ) = defined $4 ? ( 0, $4 ) : ( $1, defined $2 ? ( length( $3 // '' ) ? $3 : undef ) : $1 );
         die "regex {n,m} with m < n in pattern '$st->{p}'\n" if defined $max && $max < $min;
         $st->{i} += length $&;
@@ -165,7 +165,7 @@ sub _close ($st) {
 # assertion) stands for; $st->{i} is at the character after the backslash.
 sub _escape ($st) {
     if ( ( _peek($st) // '' ) eq 'x' && ( _peek( $st, 1 ) // '' ) eq '{' ) {
-        my $rest = join '', @{ $st->{c} }[ $st->{i} .. $#{ $st->{c} } ];
+        my $rest = join '', $st->{c}->@[ $st->{i} .. $st->{c}->$#* ];
         $rest =~ /\Ax\{([0-9A-Fa-f]+)\}/ or die "malformed \\x{} escape in regex pattern '$st->{p}'\n";
         $st->{i} += length $&;
         return hex $1;
@@ -205,7 +205,7 @@ sub _class ($st) {
         last if $c eq ']' && !$first;
         $first = 0;
         if ( $c eq '[' && ( _peek( $st, 1 ) // '' ) eq ':' ) {
-            my $rest = join '', @{ $st->{c} }[ $st->{i} .. $#{ $st->{c} } ];
+            my $rest = join '', $st->{c}->@[ $st->{i} .. $st->{c}->$#* ];
             $rest =~ /\A\[:(\^?)(\w+):\]/ or _gap( $st, 'a [: in a class' );
             my $set = $POSIX{$2} // _gap( $st, "the posix class [:$2:]" );
             _gap( $st, 'a negated posix class' ) if $1;
@@ -218,7 +218,7 @@ sub _class ($st) {
         if ( $c eq '\\' ) {
             $st->{i}++;
             my $e = _peek($st) // die "regex class in '$st->{p}' ends with a bare backslash\n";
-            if ( $e =~ /\A[dws]\z/ ) { push @r, @{ $SHORT{$e} }; $ascii = 1; $st->{i}++; next }
+            if ( $e =~ /\A[dws]\z/ ) { push @r, $SHORT{$e}->@*; $ascii = 1; $st->{i}++; next }
             _gap( $st, "\\$e inside [...]" ) if $e =~ /\A[DWShHvVpPNRXbBAzZG1-9]\z/;
             $lo = _escape($st);
         }
@@ -236,7 +236,7 @@ sub _class ($st) {
         push @r, [ $lo, $lo ];
     }
     $st->{i}++;    # the ]
-    if ( $st->{f}{i} ) { @r = @{ _fold( \@r ) }; $ascii = 1 }
+    if ( $st->{f}{i} ) { @r = +(_fold( \@r ))->@*; $ascii = 1 }
     return { t => 'set', ranges => \@r, neg => $neg, ( $ascii ? ( ascii => 1 ) : () ) };
 }
 
@@ -245,8 +245,8 @@ sub _width ($n) {
     my $t = $n->{t};
     return 1 if $t eq 'set';
     return 0 if $t eq 'assert' || $t eq 'look';
-    if ( $t eq 'seq' ) { my $w = 0; for ( @{ $n->{items} } ) { my $x = _width($_) // return undef; $w += $x } return $w }
-    if ( $t eq 'alt' ) { my @w = map { _width($_) } @{ $n->{alts} }; return undef if grep { !defined || $_ != $w[0] } @w; return $w[0] }
+    if ( $t eq 'seq' ) { my $w = 0; for ( $n->{items}->@* ) { my $x = _width($_) // return undef; $w += $x } return $w }
+    if ( $t eq 'alt' ) { my @w = map { _width($_) } $n->{alts}->@*; return undef if grep { !defined || $_ != $w[0] } @w; return $w[0] }
     return _width( $n->{body} ) if $t eq 'group';
     if ( $t eq 'quant' ) { return undef unless defined $n->{max} && $n->{max} == $n->{min}; my $w = _width( $n->{body} ) // return undef; return $w * $n->{min} }
     return undef;

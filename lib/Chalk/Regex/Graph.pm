@@ -79,7 +79,7 @@ sub matcher ( $pattern, $flags, $flavor = 'scalar', %o ) {
             unless ( $o{codes} // 0 ) == $g->{ncode};
     }
     $g->emit_prog( $p->{tree} );
-    push @{ $g->{prog} }, ['match'];
+    push $g->{prog}->@*, ['match'];
     $g->{flavor} = $flavor;
     $g->{awk}    = $o{awk} ? 1 : 0;
     $g->{nrlit}  = $o{rlits} // 0;    # literals known at run time: arguments after the others
@@ -157,17 +157,17 @@ sub _tr_chars ($spec) {
 
 sub _any_ascii ($n) {
     return 1 if $n->{ascii} || ( $n->{t} eq 'assert' && $n->{kind} =~ /\A[bB]\z/ );
-    return scalar grep { _any_ascii($_) } ( @{ $n->{items} // [] }, @{ $n->{alts} // [] }, $n->{body} // () );
+    return scalar grep { _any_ascii($_) } ( +($n->{items} // [])->@*, +($n->{alts} // [])->@*, $n->{body} // () );
 }
 
 # --- the program -------------------------------------------------------------
 
-sub here ($g) { return scalar @{ $g->{prog} } }
-sub ins ( $g, @i ) { push @{ $g->{prog} }, [@i]; return $#{ $g->{prog} } }
+sub here ($g) { return scalar $g->{prog}->@* }
+sub ins ( $g, @i ) { push $g->{prog}->@*, [@i]; return $g->{prog}->$#* }
 
 sub emit_prog ( $g, $n ) {
     my $t = $n->{t};
-    if ( $t eq 'seq' ) { $g->emit_prog($_) for @{ $n->{items} }; return }
+    if ( $t eq 'seq' ) { $g->emit_prog($_) for $n->{items}->@*; return }
     if ( $t eq 'set' )    { $g->ins( 'set', $n ); return }
     if ( $t eq 'rlit' )   { $g->ins( 'rlit', $n->{k} ); return }
     return if $t eq 'code';    # (zero-width: called on the hit -- accept)
@@ -184,7 +184,7 @@ sub emit_prog ( $g, $n ) {
     }
     if ( $t eq 'alt' ) {
         my @jumps;
-        my @alts = @{ $n->{alts} };
+        my @alts = $n->{alts}->@*;
         for my $i ( 0 .. $#alts ) {
             if ( $i < $#alts ) {
                 my $sp = $g->ins( 'split', undef, undef );
@@ -199,7 +199,7 @@ sub emit_prog ( $g, $n ) {
         return;
     }
     if ( $t eq 'quant' ) {
-        my ( $min, $max, $greedy, $body ) = @{$n}{qw(min max greedy body)};
+        my ( $min, $max, $greedy, $body ) = $n->@{qw(min max greedy body)};
         die "GAP: a quantifier of more than $MAX_COPIES copies is not lowered as a graph\n"
             if $min > $MAX_COPIES || ( defined $max && $max > $MAX_COPIES );
         $g->emit_prog($body) for 1 .. $min;
@@ -214,7 +214,7 @@ sub emit_prog ( $g, $n ) {
             $g->ins( 'check', $mark ) if $empty;
             $g->ins( 'jmp', $L );
             my $E = $g->here;
-            @{ $g->{prog}[$L] }[ 1, 2 ] = $greedy ? ( $B, $E ) : ( $E, $B );
+            $g->{prog}[$L]->@[ 1, 2 ] = $greedy ? ( $B, $E ) : ( $E, $B );
             return;
         }
         # up to max-min more, each optional: split B E; B: body; split B2 E; ...
@@ -227,14 +227,14 @@ sub emit_prog ( $g, $n ) {
         my $E = $g->here;
         for my $sp (@splits) {
             my $B = $g->{prog}[$sp][1];
-            @{ $g->{prog}[$sp] }[ 1, 2 ] = $greedy ? ( $B, $E ) : ( $E, $B );
+            $g->{prog}[$sp]->@[ 1, 2 ] = $greedy ? ( $B, $E ) : ( $E, $B );
         }
         return;
     }
     if ( $t eq 'look' ) {
         die "GAP: a capture inside a negative lookaround is not lowered as a graph\n" if $n->{neg} && _has_group( $n->{body} );
-        push @{ $g->{looks} }, { neg => $n->{neg}, ahead => $n->{ahead}, width => $n->{width} };
-        my $id = $#{ $g->{looks} };
+        push $g->{looks}->@*, { neg => $n->{neg}, ahead => $n->{ahead}, width => $n->{width} };
+        my $id = $g->{looks}->$#*;
         $g->ins( 'look', $id );
         $g->emit_prog( $n->{body} );
         $g->ins( 'lookend', $id );
@@ -249,8 +249,8 @@ sub emit_prog ( $g, $n ) {
 sub _all_literal ($n) {
     my $t = $n->{t};
     return 1 if $t eq 'code';
-    return !$n->{neg} && @{ $n->{ranges} } == 1 && $n->{ranges}[0][0] == $n->{ranges}[0][1] if $t eq 'set';
-    return !grep { !_all_literal($_) } @{ $n->{items} } if $t eq 'seq';
+    return !$n->{neg} && $n->{ranges}->@* == 1 && $n->{ranges}[0][0] == $n->{ranges}[0][1] if $t eq 'set';
+    return !grep { !_all_literal($_) } $n->{items}->@* if $t eq 'seq';
     return _all_literal( $n->{body} ) if $t eq 'group';
     return 0;
 }
@@ -260,26 +260,26 @@ sub _may_be_empty ($n) {
     return 0 if $t eq 'set';
     return 1 if $t eq 'rlit';
     return 1 if $t eq 'assert' || $t eq 'look';
-    return !grep { !_may_be_empty($_) } @{ $n->{items} } if $t eq 'seq';
-    return scalar grep { _may_be_empty($_) } @{ $n->{alts} } if $t eq 'alt';
+    return !grep { !_may_be_empty($_) } $n->{items}->@* if $t eq 'seq';
+    return scalar grep { _may_be_empty($_) } $n->{alts}->@* if $t eq 'alt';
     return _may_be_empty( $n->{body} ) if $t eq 'group';
     return $n->{min} == 0 || _may_be_empty( $n->{body} ) if $t eq 'quant';
     return 1;
 }
 sub _has_group ($n) {
     return 1 if $n->{t} eq 'group' && defined $n->{cap};
-    return scalar grep { _has_group($_) } ( @{ $n->{items} // [] }, @{ $n->{alts} // [] }, $n->{body} // () );
+    return scalar grep { _has_group($_) } ( +($n->{items} // [])->@*, +($n->{alts} // [])->@*, $n->{body} // () );
 }
 
 # --- the wire, a node at a time ---------------------------------------------
 
 sub node ( $g, $op, %a ) {
-    my $n = { id => scalar @{ $g->{n} }, op => $op, inputs => $a{in} // [] };
+    my $n = { id => scalar $g->{n}->@*, op => $op, inputs => $a{in} // [] };
     $n->{fields}     = $a{f}     if $a{f};
     $n->{control_in} = $a{ctl}   if defined $a{ctl};
     $n->{head}       = $a{head}  if defined $a{head};
     $n->{stamp}      = $a{stamp} if $a{stamp};
-    push @{ $g->{n} }, $n;
+    push $g->{n}->@*, $n;
     return $n->{id};
 }
 # stmt(...): a node on the control chain, which goes on from it.
@@ -316,7 +316,7 @@ sub get ( $g, $name ) { return $g->{var}{$name} // die "Chalk::Regex::Graph: no 
 # (fresh: the Loop is its control). A variable live at entry has a phi.
 sub while_ ( $g, $cond_cb, $body_cb ) {
     my $L = $g->node( 'Loop', in => [ $g->{ctl} ], ctl => $g->{ctl}, f => { bound => 'each' } );
-    my %entry = %{ $g->{var} };
+    my %entry = $g->{var}->%*;
     my %phi;
     for my $v ( sort keys %entry ) {
         $phi{$v} = $g->node( 'Phi', in => [ $entry{$v}, undef ], f => { region => $L }, stamp => $g->{stamp}{$v} );
@@ -337,13 +337,13 @@ sub while_ ( $g, $cond_cb, $body_cb ) {
 # leave differently gets a phi there.
 sub if_ ( $g, $cond, $then_cb, $else_cb = undef ) {
     my $I = $g->node( 'If', in => [ $g->{ctl}, $cond ], ctl => $g->{ctl} );
-    my %before = %{ $g->{var} };
+    my %before = $g->{var}->%*;
     my @end;
     for my $arm ( [ 0, $then_cb ], [ 1, $else_cb ] ) {
         $g->{var} = {%before};
         my $pj = $g->{ctl} = $g->node( 'Proj', in => [$I], f => { index => $arm->[0] } );
         $arm->[1]->() if $arm->[1];
-        push @end, [ $pj, $g->{ctl}, { %{ $g->{var} } } ];
+        push @end, [ $pj, $g->{ctl}, { $g->{var}->%* } ];
     }
     my $R = $g->{ctl} = $g->node( 'Region', in => [ map { $_->[1] } @end ], head => $I );
     $g->{var} = {};
@@ -384,7 +384,7 @@ sub build ( $g, $p ) {
                       $g->{pnoempty} = $g->node( 'PadAccess', f => { sigil => '$', symbol => 'noempty' }, stamp => 'Scalar' );
     }
     push @params, $g->{rv} = $g->node( 'PadAccess', f => { sigil => '$', symbol => 'rv' }, stamp => 'Scalar' )
-        if $g->{segs} && grep { $_->{kind} =~ /\A(?:val|call)\z/ } @{ $g->{segs} };
+        if $g->{segs} && grep { $_->{kind} =~ /\A(?:val|call)\z/ } $g->{segs}->@*;
     push @params, map { $g->{rlit}[$_] = $g->node( 'PadAccess', f => { sigil => '$', symbol => "lit$_" }, stamp => 'Str' ) } 0 .. $g->{nrlit} - 1;
     push @params, map { $g->{code}[$_] = $g->node( 'PadAccess', f => { sigil => '$', symbol => "code$_" }, stamp => 'Scalar' ) } 0 .. $g->{ncode} - 1;
     $g->node( 'Assign', in => [ @params, $g->node( 'ArgsSource', stamp => 'Array' ) ], f => { targets => scalar @params }, stamp => 'List' );
@@ -451,7 +451,7 @@ sub build_subst ($g) {
         $g->search( $g->get('from'), $g->get('noempty') );
         $g->if_( $g->lt_( $g->get('found'), $g->int_(0) ), sub { $g->set( done => $g->int_(1) ) }, sub {
             $g->set( acc => $g->cat( $g->get('acc'), $g->text( $g->get('last'), $g->get('r0') ) ) );
-            for my $seg ( @{ $g->{segs} } ) {
+            for my $seg ( $g->{segs}->@* ) {
                 if    ( $seg->{kind} eq 'lit' ) { $g->set( acc => $g->cat( $g->get('acc'), $g->str_( $seg->{text} ) ) ) }
                 elsif ( $seg->{kind} eq 'val' ) { $g->set( acc => $g->cat( $g->get('acc'), $g->{rv} ) ) }
                 elsif ( $seg->{kind} eq 'call' ) {
@@ -608,7 +608,7 @@ sub search ( $g, $from, $noempty ) {
 # attempt(): run the program from `start`; a match sets found and r0...
 sub attempt ($g) {
     my $NS = $g->{nslots};
-    my $last = $#{ $g->{prog} };
+    my $last = $g->{prog}->$#*;
     $g->set( pc => $g->int_(0) );
     $g->set( pos => $g->get('start') );
     $g->set( run => $g->int_(1) );
@@ -632,7 +632,7 @@ sub next_ ( $g, $k ) { $g->set( pc => $g->int_( $k + 1 ) ) }
 
 # step($k): instruction k.
 sub step ( $g, $k ) {
-    my ( $op, @a ) = @{ $g->{prog}[$k] };
+    my ( $op, @a ) = $g->{prog}[$k]->@*;
     my $pos = $g->get('pos');
     if ( $op eq 'set' ) {
         $g->if_( $g->and_( $g->lt_( $pos, $g->{len} ), $g->in_set( $a[0], $g->char($pos) ) ),
@@ -697,7 +697,7 @@ sub accept ($g) {
         $g->set( r1 => $pos );
         $g->set( "r$_" => $g->get("k$_") ) for 2 .. 1 + 2 * $g->{ng};
         $g->set( run => $g->int_(0) );
-        $g->stmt( 'Call', in => [$_], f => { dispatch_kind => 'indirect', name => '', param_names => [] }, stamp => 'Unknown' ) for @{ $g->{code} // [] };
+        $g->stmt( 'Call', in => [$_], f => { dispatch_kind => 'indirect', name => '', param_names => [] }, stamp => 'Unknown' ) for +($g->{code} // [])->@*;
     }
 }
 
@@ -711,7 +711,7 @@ sub fail_look ( $g, $id ) {
 # lookaround's barrier ends its body's choices -- or, none left, stop.
 sub backtrack ($g) {
     my $NS = $g->{nslots};
-    my $nl = scalar @{ $g->{looks} };
+    my $nl = scalar $g->{looks}->@*;
     $g->while_(
         sub { $g->and_( $g->eq_( $g->get('fail'), $g->int_(1) ), $g->lt_( $g->int_(0), $g->depth ) ) },
         sub {
@@ -744,11 +744,11 @@ sub in_set ( $g, $s, $c ) {
         my ( $lo, $hi ) = @$_;
         $lo == $hi ? $g->op2( 'StrEq', $c, $g->str_( chr $lo ) )
           : $g->and_( $g->op2( 'StrGe', $c, $g->str_( chr $lo ) ), $g->op2( 'StrLe', $c, $g->str_( chr( $hi > 127 ? 127 : $hi ) ) ) )
-    } grep { $_->[0] <= 127 } @{ $s->{ranges} };
-    die "GAP: a character class past ASCII is not lowered as a graph\n" if grep { $_->[0] > 127 || ( $_->[1] > 127 && $_->[1] != 0x10FFFF ) } @{ $s->{ranges} };
+    } grep { $_->[0] <= 127 } $s->{ranges}->@*;
+    die "GAP: a character class past ASCII is not lowered as a graph\n" if grep { $_->[0] > 127 || ( $_->[1] > 127 && $_->[1] != 0x10FFFF ) } $s->{ranges}->@*;
     my $x = @in ? $g->or_(@in) : $g->op2( 'NumLt', $g->int_(1), $g->int_(0) );
     # (a range reaching 0x10FFFF -- `.` under /s -- takes every character past ASCII too)
-    $x = $g->or_( $x, $g->op2( 'StrGt', $c, $g->str_("\x7f") ) ) if grep { $_->[1] == 0x10FFFF } @{ $s->{ranges} };
+    $x = $g->or_( $x, $g->op2( 'StrGt', $c, $g->str_("\x7f") ) ) if grep { $_->[1] == 0x10FFFF } $s->{ranges}->@*;
     return $s->{neg} ? $g->and_( $g->op2( 'StrNe', $c, $g->str_('') ), $g->not_($x) ) : $x;
 }
 
@@ -820,7 +820,7 @@ sub prune ($g) {
         $changed = 0;
         for my $n (@$N) {
             next if $n->{op} ne 'Phi' || $to{ $n->{id} };
-            my %u = map { ( $_ => 1 ) } grep { $_ != $n->{id} } map { $find->($_) } @{ $n->{inputs} };
+            my %u = map { ( $_ => 1 ) } grep { $_ != $n->{id} } map { $find->($_) } $n->{inputs}->@*;
             next unless keys %u == 1;
             $to{ $n->{id} } = ( keys %u )[0];
             $changed = 1;
@@ -832,12 +832,12 @@ sub prune ($g) {
     $new{ $keep[$_]{id} } = $_ for 0 .. $#keep;
     my $map = sub ($x) { defined $x ? $new{ $find->($x) } // die "Chalk::Regex::Graph: pruned node $x still used" : undef };
     for my $n (@keep) {
-        $n->{inputs} = [ map { $map->($_) } @{ $n->{inputs} } ];
+        $n->{inputs} = [ map { $map->($_) } $n->{inputs}->@* ];
         $n->{control_in} = $map->( $n->{control_in} ) if defined $n->{control_in};
         $n->{head} = $map->( $n->{head} ) if defined $n->{head};
         if ( my $f = $n->{fields} ) {
             $f->{region} = $map->( $f->{region} ) if defined $f->{region};
-            $f->{predecessors} = [ map { $map->($_) } @{ $f->{predecessors} } ] if $f->{predecessors};
+            $f->{predecessors} = [ map { $map->($_) } $f->{predecessors}->@* ] if $f->{predecessors};
         }
     }
     $g->{ret} = $map->( $g->{ret} );

@@ -44,7 +44,7 @@ sub escape_byte {
         return ($REGEX_ESCAPE_BYTE{$e}, 1); # \t \n \r \f \a \e \0
     }
     if ($e eq 'x') {
-        my $hex = join '', grep { defined } @{$chars}[ $idx + 1, $idx + 2 ];
+        my $hex = join '', grep { defined } $chars->@[ $idx + 1, $idx + 2 ];
         die "malformed \\x escape in regex pattern '$pattern' "
           . "(need two hex digits)" unless $hex =~ /^[0-9A-Fa-f]{2}$/;
         return (hex($hex), 3);
