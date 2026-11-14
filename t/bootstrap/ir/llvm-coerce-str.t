@@ -46,6 +46,15 @@ sub perl_oracle_str_to_bool {
     return scalar qx($cmd 2>/dev/null);
 }
 
+# main_body($ll) -> the text of @main alone. The runtime T2 prints ahead of it
+# calls its own conversions, so a witness looked for in the whole module would
+# be found whatever the program did.
+sub main_body {
+    my ($ll) = @_;
+    my ($main) = $ll =~ /^(define i32 \@main\(.*?^\})/ms;
+    return $main // '';
+}
+
 # ---------------------------------------------------------------------------
 # Wrap a value node in a program: print it bracketed by literal sentinels, then
 # return Undef. A program's observable contract is stdout plus exit status.
@@ -77,7 +86,7 @@ sub make_print_program {
 # The second Coerce is not decoration: Print takes a Str, so a Num must be
 # stringified exactly as a source program stringifies it. Printing a Num erases
 # the Num-vs-Int distinction that the old Num: tag carried; the caller recovers
-# that half from the emitted IR, which routes a Num through @chalk_str_to_num
+# that half from the emitted IR, which numifies a Num (T2: @t2_slot_numify in @main)
 # where an Int would not go.
 sub make_str_to_num_graph {
     my ($str_val) = @_;
@@ -210,11 +219,12 @@ subtest 'Coerce(Str->Num) adversarial cases: printed value == perl' => sub {
 
         # The type half of the old Num: tag. Asserting $num_node->stamp
         # would be a tautology -- make_str_to_num_graph sets that field itself.
-        # The emitted IR is the independent witness: the Num path routes through
-        # @chalk_str_to_num (perl's leading-numeric scan) and stringifies the
-        # resulting double with snprintf("%.15g"). An Int-repr value takes
-        # neither, so this fails if the node stops being a Num.
-        like($ll, qr/call double \@chalk_str_to_num/,
+        # The emitted IR is the independent witness: T2 numifies the string
+        # (@t2_slot_numify, perl's leading-numeric scan) in @main, where an
+        # Int-repr value is stringified directly and never numified, so this
+        # fails if the node stops being a Num. (Context's witness was
+        # @chalk_str_to_num; T2 lowers these programs.)
+        like(main_body($ll), qr/call %Slot \@t2_slot_numify\(/,
             "$desc: lowered through the Num path (the type half of the old tag)");
 
         my ($lli_out, $lli_exit) = run_lli($ll);
@@ -293,9 +303,10 @@ subtest 'Coerce(Str->Boolean) edge cases: printed Str face == perl' => sub {
 
         # The type half of the old Bool: tag, asserted on the emitted IR rather
         # than on the node (the test sets the node's field itself, so reading it
-        # back proves nothing). A Boolean reaches stdout only by selecting
-        # between the "1" and "" faces on an i1; a plain Str never does.
-        like($ll, qr/select i1 .*Coerce\[Boolean->Str\]/,
+        # back proves nothing). A Boolean reaches stdout only through its "1"/""
+        # face of an i1 -- in T2, @t2_bool_str in @main; a plain Str never does.
+        # (Context's witness was a select tagged Coerce[Boolean->Str].)
+        like(main_body($ll), qr/call %Str \@t2_bool_str\(i1 /,
             "$desc: lowered through the Boolean path (the type half of the old tag)");
 
         my ($lli_out, $lli_exit) = run_lli($ll);

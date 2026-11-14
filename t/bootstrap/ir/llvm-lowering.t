@@ -25,6 +25,14 @@ unless (-x $LLI) {
 #
 # The Print is appended AFTER the graph's last existing effect, so any
 # control ordering under test (if/else merges, loop exits) is preserved.
+# main_body($ll) -> the text of @main alone. T2 prints its runtime ahead of
+# @main, and that runtime does every kind of arithmetic, so an assertion about
+# what THIS program's arithmetic emits must look at @main or it can never fail.
+sub main_body ($ll) {
+    my ($main) = $ll =~ /^(define i32 \@main\(.*?^\})/ms;
+    return $main // '';
+}
+
 sub print_and_return {
     my ($f, $value, $last_effect) = @_;
 
@@ -149,9 +157,10 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
-    like($ll, qr/fadd double/,  'L4b .ll: Num-repr Add emits fadd double');
-    like($ll, qr/sitofp i64/,   'L4b .ll: Int operand promoted with sitofp');
-    unlike($ll, qr/add i64 %tmp\S* to|add i64.*Add\(repr=Int\)/,
+    my $main = main_body($ll);
+    like($main, qr/fadd double/,  'L4b .ll: Num-repr Add emits fadd double');
+    like($main, qr/sitofp i64/,   'L4b .ll: Int operand promoted with sitofp');
+    unlike($main, qr/= add i64 %/,
         'L4b .ll: no i64 add for the Num Add');
 
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -181,9 +190,10 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
 
-    like($ll, qr/add i64/,       'L4c .ll: Int-repr Add stays add i64');
-    unlike($ll, qr/fadd double/, 'L4c .ll: no fadd double for the Int Add');
-    unlike($ll, qr/sitofp/,      'L4c .ll: no sitofp for all-Int arithmetic');
+    my $main = main_body($ll);
+    like($main, qr/= add i64 %/,   'L4c .ll: Int-repr Add stays add i64');
+    unlike($main, qr/fadd double/, 'L4c .ll: no fadd double for the Int Add');
+    unlike($main, qr/sitofp/,      'L4c .ll: no sitofp for all-Int arithmetic');
 
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
