@@ -29,4 +29,7 @@ class Chalk::Target::LLVM::Node::MCall :isa(Chalk::Target::LLVM::Node) {
     }
 }
 
+class Chalk::Target::LLVM::Node::IsaOp :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_isa_op') } }
+class Chalk::Target::LLVM::Node::DynName :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_dyn_name') } }
+
 1;

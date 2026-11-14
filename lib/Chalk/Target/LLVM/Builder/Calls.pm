@@ -195,6 +195,9 @@ sub make_mop {
     # (ADJUST blocks run in the `new` made where it is called)
     my %called = map { ( $_->name =~ s/\A.*:://r => 1 ) }
         grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'method' } _all_nodes($mop, $b->{ret});
+    # A METHOD NAMED AT RUN TIME (`$o->$m`) may be any of them.
+    my $dynamic = grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'dynamic_method' } _all_nodes($mop, $b->{ret});
+    out('a method named at run time in a program with an AUTOLOAD') if $dynamic && grep { $_->name eq 'AUTOLOAD' } map { ( $_->subs, $_->methods ) } $mop->classes;
     # A TIE'S METHODS are the runtime's to call, by these names.
     $called{$_} = 1 for grep { my $t = $_; grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' } _all_nodes($mop, $b->{ret}) } qw(TIEARRAY TIEHASH FETCH STORE FETCHSIZE PUSH POP SHIFT UNSHIFT EXISTS DELETE CLEAR EXTEND STORESIZE FIRSTKEY NEXTKEY);
     # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES, VERSION), else
@@ -211,7 +214,7 @@ sub make_mop {
         $b->emit(op => 'MopClass', type => 'void', inputs => [$cs]);
         $b->emit(op => 'MopIsa', type => 'void', inputs => [ $cs, $b->const_str($cls->parent_name) ])
             if defined $cls->parent_name && length $cls->parent_name;
-        my %sub = map { ( $_->name => $_ ) } grep { ( $called{can} || $called{ $_->name } ) && $_->graph } ( $cls->subs, $cls->methods );
+        my %sub = map { ( $_->name => $_ ) } grep { ( $called{can} || $dynamic || $called{ $_->name } ) && $_->graph } ( $cls->subs, $cls->methods );
         for my $sub (@sub{ sort keys %sub }) {
             my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
             $b->emit(op => 'MopDef', type => 'void', inputs => [ $cs, $b->const_str($sub->name) ], attr => { fn => $fn->{name} });
@@ -314,6 +317,9 @@ sub method_call {
     }
     my @args = $c->inputs->@*;
     pop @args if $c->can('memory_input') && $c->memory_input;
+    # `$o->$m(...)`: the method's name is a value, the input after the invocant.
+    my $dyn = ( $c->dispatch_kind // '' ) eq 'dynamic_method' ? ( splice @args, 1, 1 ) : undef;
+    out('a method named at run time by a list') if $dyn && _is_list($dyn);
     out('a method call with no invocant') unless @args && blessed($args[0]);
     out('a method call on a list') if _is_list($args[0]);
     # @_, each argument pushed, a list's elements appended.
@@ -331,11 +337,13 @@ sub method_call {
     # A QUALIFIED NAME starts its lookup at its package (mode 1); Pkg::SUPER::m
     # at the @ISA of Pkg, the package the call is in (mode 2).
     my ($start, $mode, $m) = ( '', 0, $c->name );
-    if ($m =~ /\A(.+)::SUPER::(\w+)\z/) { ( $start, $mode, $m ) = ( $1, 2, $2 ) }
+    if ($dyn) { $m = undef }
+    elsif ($m =~ /\A(.+)::SUPER::(\w+)\z/) { ( $start, $mode, $m ) = ( $1, 2, $2 ) }
     elsif ($m =~ /\A(.+)::(\w+)\z/)     { ( $start, $mode, $m ) = ( $1, 1, $2 ) }
-    out('a method name T2 cannot split') if $m =~ /::|'/;
+    out('a method name T2 cannot split') if defined $m && $m =~ /::|'/;
+    my $mn = $dyn ? $b->emit(op => 'DynName', type => '%Str', inputs => [ $b->as( $b->value($dyn), '%Slot' ) ]) : $b->const_str($m);
     my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => $mode },
-        inputs => [ $inv, $b->const_str($m), $b->const_str($at), $b->const_str($start) ]);
+        inputs => [ $inv, $mn, $b->const_str($at), $b->const_str($start) ]);
     return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ], site => $c);
 }
 
@@ -415,8 +423,14 @@ sub code_value {
 # cells, in the call's context.
 sub code_call {
     my ($b, $c, $code, @args) = @_;
-    # `&$code;` IS CALLED WITH THE CALLER'S OWN @_: not built here -- refused.
-    out('an & call of a code value sharing @_') if $c->can('shares_args') && $c->shares_args;
+    # `&$code;` IS CALLED WITH THE CALLER'S OWN @_ (the same array): the
+    # caller must take @_ as an array.
+    if ($c->can('shares_args') && $c->shares_args) {
+        out('an & call of a code value sharing @_ of a sub not taking it as a list') unless $b->{argsarr};
+        $b->hash_reads_settled('a call of a code value');
+        $b->set_want($c);
+        return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $b->{argsarr} ], site => $c);
+    }
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
     for my $a (@args) {
         if (_is_list($a)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($a) ]) }
@@ -485,7 +499,9 @@ sub func {
     # $_[N] (the caller's variable) or a signature is not T2's.
     # A CLOSURE takes @_ as one array always (its code value's calling
     # convention), its captured cells as its environment.
-    my $list = !$is_method && !$@ && ( $an->{_args_read_as_a_list} || $closure ) && !$an->{_args_written} && !$an->{_args_slurpy} && !$an->{_args_signature};
+    # A SUB THAT HANDS ITS @_ ON (`&f;`, `&$code;`) takes it as one array too.
+    my $hands_on = grep { $_->operation eq 'Call' && $_->can('shares_args') && $_->shares_args } $g->component;
+    my $list = !$is_method && !$@ && ( $an->{_args_read_as_a_list} || $closure || $hands_on ) && !$an->{_args_written} && !$an->{_args_slurpy} && !$an->{_args_signature};
     # A SLURPY TAIL (`my ($c, @x) = @_`, `sub f ($c, @x)` -- perigrin: the same)
     # takes @_ as one array: the positional targets its elements 0..k-1, the
     # slurpy one a copy of the rest.

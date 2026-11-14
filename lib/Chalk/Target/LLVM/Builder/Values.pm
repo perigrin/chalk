@@ -98,7 +98,7 @@ sub type_of {
     return '%Str' if $op eq 'EntryDef';
     return '%Slot' if $op eq 'PadAccess' && $v->is_location;
     return '%Slot' if $op eq 'Increment' || $op eq 'Decrement';
-    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) =~ /\A(?:direct|method)\z/;
+    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) =~ /\A(?:direct|method|dynamic_method)\z/;
     # AN OBJECT is its blessed reference; ref() of one its class, or HASH.
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless' || $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'blessed';
     return '%Slot' if $op eq 'Call' && $v->is_tie_builtin;
@@ -179,7 +179,7 @@ sub _value {
     my $op = $v->operation;
     my $ty = $b->type_of($v);
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'direct') { return $b->call($v) }
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'method') { return $b->method_call($v) }
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) =~ /\A(?:method|dynamic_method)\z/) { return $b->method_call($v) }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'indirect') {
         my ($code, @args) = $v->inputs->@*;
         pop @args if $v->can('memory_input') && $v->memory_input;
@@ -498,6 +498,11 @@ sub _value {
         return $b->as( $b->emit(op => 'Repeat', type => '%Str', inputs => [ $b->as( $b->value($l), '%Str' ), $k ]), $ty );
     }
     return $b->bitwise($v) if $op =~ /\A(?:BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/;
+    # `$o isa C`: through the run-time MOP's @ISA.
+    if ($op eq 'IsaOp') {
+        my ($o, $c) = $v->inputs->@[0, 1];
+        return $b->as( $b->emit(op => 'IsaOp', type => 'i1', inputs => [ $b->as( $b->value($o), '%Slot' ), $b->as( $b->value($c), '%Str' ) ]), $ty );
+    }
     # `A xor B`: their truths differ.
     if ($op eq 'Xor') {
         my ($x, $y) = map { $b->truth( $b->value($_) ) } $v->inputs->@[0, 1];
@@ -506,7 +511,7 @@ sub _value {
     if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:open|close|eof|readline|select|sselect)\z/) {
         return $b->as( $b->io_value($v), $ty );
     }
-    if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:chr|ord|time|ftis|reverse|sprintf|lock|formline)\z/) {
+    if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:chr|ord|time|ftis|reverse|sprintf|lock|formline|prototype|pack)\z/) {
         return $b->builtin_value($v, $ty);
     }
     # A REGEX MATCH OF A CONSTANT PATTERN is a call of its own graph
@@ -551,6 +556,32 @@ sub builtin_value {
     }
     return $b->sprintf_value($v, $ty, @a) if $name eq 'sprintf';
     return $b->format_write($v, $ty, @a) if $name eq 'formline';
+    if ($name eq 'prototype') {
+        # prototype(\&f) OF A SUB NAMED HERE: its prototype as B::SoN gave it, undef for none.
+        my $r = $a[0];
+        my $c = blessed($r) && $r->operation eq 'Ref' ? $r->inputs->[0] : undef;
+        out('a prototype of other than \&name') unless @a == 1 && blessed($c) && $c->operation eq 'Constant' && ( $c->const_type // '' ) eq 'code';
+        out('a prototype of a sub the program does not define') unless exists $Chalk::IR::Serialize::JSON::PROTOTYPES{ $c->value // '' };
+        my $p = $Chalk::IR::Serialize::JSON::PROTOTYPES{ $c->value };
+        return $b->as( defined $p ? $b->as( $b->const_str($p), '%Slot' ) : $b->emit(op => 'Undef', type => '%Slot'), $ty );
+    }
+    if ($name eq 'pack') {
+        # pack of C (a byte each) only: each value's byte, as chr's.
+        my ($t, @vals) = @a;
+        out('a pack of a template made at run time') unless blessed($t) && $t->operation eq 'Constant' && defined $t->value;
+        out('a pack of a list') if grep { _is_list($_) } @vals;
+        my $want = 0;
+        for my $item ( $t->value =~ /\G\s*(C(?:\d+|\*)?)/gc ) {
+            my ($k) = $item =~ /C(.*)/;
+            $want = $k eq '*' ? scalar @vals : $want + ( length $k ? $k : 1 );
+        }
+        out('a pack template other than C') unless $t->value =~ /\A(?:\s*C(?:\d+|\*)?)+\s*\z/;
+        out('a pack of other than one value a byte') unless $want == @vals;
+        out('a pack where a string goes past ASCII') if $b->past_ascii;
+        my $r = $b->const_str('');
+        $r = $b->emit(op => 'Concat', type => '%Str', inputs => [ $r, $b->emit(op => 'Chr', type => '%Str', inputs => [ $b->as( $b->value($_), '%Slot' ) ]) ]) for @vals;
+        return $b->as( $r, $ty );
+    }
     out("a $name of other than one argument (of \$_)") unless @a == 1;
     out("a $name of a list") if _is_list( $a[0] );
     # lock: perl's without threads is a no-op, its value its argument.

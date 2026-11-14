@@ -5254,6 +5254,45 @@ done:
   %r = call %Str @t2_str(i8* %p, i64 %k)
   ret %Str %r
 }
+; ---- isa, a method named at run time ----
+; `$o isa C`: o a blessed reference whose class is, or inherits from, C.
+define internal i1 @t2_isa_op(%Slot %o, %Str %c) {
+entry:
+  %cl = call %Slot @t2_class_of(%Slot %o)
+  %t = extractvalue %Slot %cl, 0
+  %none = icmp eq i8 %t, 0
+  br i1 %none, label %no, label %walk
+walk:
+  %cs = call %Str @t2_slot_str(%Slot %cl)
+  %r = call i1 @t2_isa_walk(%Str %cs, %Str %c)
+  ret i1 %r
+no:
+  ret i1 0
+}
+@msg_dyn = private unnamed_addr constant [76 x i8] c"a method named at run time by other than a plain name: stopped (chalk, T2)\0A\00"
+; t2_dyn_name(m): `$o->$m`'s name -- a string with no package in it; a code
+; value (perl calls it) or a qualified name, a stop.
+define internal %Str @t2_dyn_name(%Slot %m) {
+entry:
+  %t = extractvalue %Slot %m, 0
+  %isstr = icmp eq i8 %t, 3
+  br i1 %isstr, label %chk, label %stop
+chk:
+  %s = call %Str @t2_slot_str(%Slot %m)
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %c1 = call i8* @memchr(i8* %p, i32 58, i64 %n)
+  %c2 = call i8* @memchr(i8* %p, i32 39, i64 %n)
+  %h1 = icmp ne i8* %c1, null
+  %h2 = icmp ne i8* %c2, null
+  %bad = or i1 %h1, %h2
+  br i1 %bad, label %stop, label %ok
+ok:
+  ret %Str %s
+stop:
+  call void @t2_stop(i8* getelementptr ([76 x i8], [76 x i8]* @msg_dyn, i64 0, i64 0), i64 75)
+  unreachable
+}
 LL
 
 1;

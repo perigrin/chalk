@@ -69,7 +69,8 @@ sub build {
     $b->new_block('entry');
     $b->emit(op => 'SaveArgs', type => 'void');   # argv, for @ARGV
     # (a tie calls its class's methods too)
-    $b->make_mop if grep { $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) eq 'method' || ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' ) } _all_nodes($b->{mop}, $ret);
+    # (and `isa`, and a method named at run time, look through it)
+    $b->make_mop if grep { $_->operation eq 'IsaOp' || $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) =~ /\A(?:method|dynamic_method)\z/ || ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' ) } _all_nodes($b->{mop}, $ret);
     $b->make_constant_arrays(Chalk::IR::Graph::own_nodes($ret));
     # PHASE BLOCKS, each a function as a sub is (its file lexicals shared as a
     # sub's are): a BEGIN runs first, in order, at the program's start; an END
