@@ -27,7 +27,11 @@ class Chalk::Bootstrap::Semiring::Precedence {
     #   "1:::"       for valid=true, no level/assoc/is_operator (one)
     #   "1:N:A:1"    for valid=true, level=N, assoc=A, is_operator=true
     #   "1:N:A:"     for valid=true, level=N, assoc=A, is_operator=false
-    sub _intern($valid, $level, $assoc, $is_operator, $op = undef) {
+    # $arg_level is the level of a single-Expression argument list (see
+    # ExpressionList in _complete_prec). It travels only as far as the
+    # CallExpression that consumes the list, which checks it against a
+    # named-unary head and then drops it.
+    sub _intern($valid, $level, $assoc, $is_operator, $op = undef, $arg_level = undef) {
         my $key;
         if (!$valid) {
             $key = '0';
@@ -35,7 +39,8 @@ class Chalk::Bootstrap::Semiring::Precedence {
             my $l  = $level       // '';
             my $a  = $assoc       // '';
             my $io = $is_operator ? '1' : '';
-            $key = "1:$l:$a:$io";
+            my $al = $arg_level   // '';
+            $key = "1:$l:$a:$io:$al";
         }
         unless (exists $_cache{$key}) {
             $_cache{$key} = {
@@ -44,6 +49,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 assoc       => $assoc,
                 is_operator => $is_operator ? true : false,
                 op          => $op,
+                arg_level   => $arg_level,
             };
         }
         return $_cache{$key};
@@ -404,7 +410,11 @@ class Chalk::Bootstrap::Semiring::Precedence {
         }
         # Note: is_operator from $right is intentionally NOT propagated above
         if (!defined($right->{level})) {
-            return _intern(true, $left->{level}, $left->{assoc}, false, $left->{op});
+            # A named-unary head (level 4.5) meeting its bare argument list:
+            # keep the list's arg_level so CallExpression can check it.
+            my $arg_level = $left->{level} == Chalk::Grammar::Perl::PrecedenceTable::named_unary_level()
+                ? $right->{arg_level} : undef;
+            return _intern(true, $left->{level}, $left->{assoc}, false, $left->{op}, $arg_level);
         }
 
         # Both have operator info — validate precedence nesting
@@ -621,7 +631,34 @@ class Chalk::Bootstrap::Semiring::Precedence {
                     && $value->{level} == $nu_level) {
                 return $self->one();
             }
+            # perlop L10: a named unary operator binds tighter than any
+            # binary operator from L11 on, so its bare operand cannot be a
+            # looser expression. `defined $a == 1` is defined($a) == 1, never
+            # defined($a == 1).
+            if (defined($value->{level}) && $value->{level} == $nu_level
+                    && defined($value->{arg_level})
+                    && $value->{arg_level} > $nu_level) {
+                if ($ENV{DEBUG_PRECEDENCE}) {
+                    warn "  PREC_REJECT_NAMED_UNARY_OPERAND: arg_level=$value->{arg_level}\n";
+                }
+                return $self->zero();
+            }
+            if (defined $value->{arg_level}) {
+                return _intern(true, $value->{level}, $value->{assoc},
+                    $value->{is_operator}, $value->{op});
+            }
             return $value;
+        }
+
+        # ExpressionList of one Expression (alt 0): record the Expression's
+        # level as arg_level, with no level of its own, so a named-unary
+        # CallExpression can reject a looser operand. Every other context
+        # sees a list with no precedence, as before.
+        if ($rule_name eq 'ExpressionList') {
+            if (defined($alt_idx) && $alt_idx == 0 && defined($value->{level})) {
+                return _intern(true, undef, undef, false, undef, $value->{level});
+            }
+            return $self->one();
         }
 
         # PostfixDeref: bracket form (alt_idx == 4, the ->@[range] alternative)

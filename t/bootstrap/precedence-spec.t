@@ -637,6 +637,23 @@ subtest 'L11 isa looser than L10 named-unary: defined $a isa Foo is IsaOp(Call(d
 # B::Concise: `defined $a == 1` → defined sK/1 then eq vK/2; NumEq(Defined($a), 1)
 # B::Concise: `defined $a eq "x"` → defined sK/1 then seq vK/2; StrEq(Defined($a), "x")
 
+# perlop L10: a named unary's bare operand binds tighter than it, so no
+# looser expression can be that operand. As a PostfixExpression (whose only
+# reading here is a CallExpression, which gets predicted so the named-unary
+# head is marked), `defined $a == 1` is not a parse: it is only
+# NumEq(defined $a, 1).
+subtest 'L10 named-unary rejects a looser bare operand' => sub {
+    my $parser = build_perl_ir_parser($grammar, start => 'PostfixExpression');
+    for my $src ('defined $a == 1', 'defined $a && $b', 'ref $x eq "y"') {
+        my $result = eval { $parser->parse_value($src) };
+        ok(!defined $result || $result->is_zero(), "$src is not a PostfixExpression");
+    }
+    my $ok = eval { $parser->parse_value('defined $h{key}') };
+    ok(defined $ok && !$ok->is_zero(), 'defined $h{key} still is (tighter operand)');
+    $ok = eval { $parser->parse_value('defined($a == 1)') };
+    ok(defined $ok && !$ok->is_zero(), 'defined($a == 1) still is (parenthesised)');
+};
+
 subtest 'L13 == looser than L10 named-unary: defined $a == 1 is NumEq(Call(defined,$a),1)' => sub {
     # perlop: L13 (==) looser than L10 (defined); "defined $a == 1" is
     # NumEq(Defined($a), 1) per B::Concise. Named-unary applies only to $a.
