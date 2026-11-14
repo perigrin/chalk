@@ -86,27 +86,16 @@ PROG
               . "  the headless Region -- every effect behind it was dropped");
 };
 
-# A CAUGHT `die` MUST REFUSE, NOT ABORT -- and this subtest is the reason the
-# previous version of it was not good enough.
+# A CAUGHT `die` GIVES PERL'S ANSWER -- never an abort that kills every
+# statement after the try/catch.
 #
-# It used to assert the KNOWN WRONG ANSWER with `isnt`, because the producer
-# dropped the die and the whole catch body. perl5-son then fixed that
-# (b97f06f: two independent silent drops -- the catch arm was never walked,
-# and the try body's die fell through an ungated path). My `isnt` KEPT PASSING
-# across that fix, for a completely different reason: chalk had begun printing
-# `caught` and then exiting 255, which is still not equal to perl.
-#
-# THAT IS THE FAILURE MODE THE ASSERTION WAS SUPPOSED TO CATCH. `isnt` says
-# only "these differ" and cannot tell "the producer drops it" from "chalk
-# aborts mid-program" -- two different defects, one green check. perl5-son
-# asked me to verify it had started failing; it had not, and the check was the
-# thing at fault.
-#
-# The property is now stated positively: a caught die must GAP. Chalk has no
-# landingpad and no personality function, so an exception that must transfer
-# control to a catch arm is genuinely unlowerable -- and the honest outcome is
-# a refusal, not an `exit(255)` that kills every statement after the try/catch.
-subtest 'a caught die REFUSES rather than aborting the program' => sub {
+# This once asserted a refusal: the old backend had no landingpad and no
+# personality function, so control could not reach a catch arm, and the honest
+# outcome was a GAP rather than an `exit(255)` mid-program. T2 transfers a die
+# to its catch (a208ed6c and the slices after it), so the program now runs as
+# perl does. The property is stated positively and compared to perl's output
+# in full: "caught" alone, or a missing "2", is the abort this guarded against.
+subtest 'a caught die runs the catch arm and continues, as perl does' => sub {
     my ($perl, $lli, $err) = compile_and_run(<<'PROG');
 use feature "try";
 no warnings "experimental::try";
@@ -116,15 +105,8 @@ print $x, "\n";
 PROG
 
     is $perl, "caught\n2\n", 'perl catches and continues' or return;
-
-    ok defined $err, 'chalk REFUSES rather than emitting a program'
-        or diag("  it lowered and produced: " . (($lli // '') =~ s/\n/\\n/gr)
-              . "\n  aborting at a caught die kills every statement after the\n"
-              . "  try/catch -- a wrong answer where a GAP was available");
-
-    like $err, qr/landingpad|personality|caught die|inside a try/i,
-        'and the refusal names what is missing'
-        if defined $err;
+    ok !defined $err, 'it lowers' or do { diag("  $err"); return };
+    is $lli, $perl, 'lli agrees: the catch arm runs and the program goes on';
 };
 
 # THE GUARD THAT KEEPS THE FIX HONEST. An if/else Region HAS a head, and that
