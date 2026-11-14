@@ -109,9 +109,9 @@ sub lower_program {
         # element, `\(@a)`, `\$_[0]`): refused, not stopped at run time. T2
         # makes one to a `my` scalar kept in memory, an array's, a hash's.
         Chalk::Target::LLVM::T2::Builder::out('a scalar deref where a reference T2 does not make may reach it')
-            if ( grep { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' && !Chalk::Target::LLVM::T2::Builder::_alias_elem($_) } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret) )
+            if ( grep { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' && !$_->alias_element } Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret) )
             && grep { $_->operation eq 'Ref' && !( ( $_->stamp // '' ) =~ /\A(?:ArrayRef|HashRef)\z/
-                          || Chalk::Target::LLVM::T2::Builder::_alias_ref($_)
+                          || $_->is_alias_ref
                           || blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'PadAccess' && ( $_->inputs->[0]->sigil // '' ) eq '$' && $_->inputs->[0]->is_location ) }
                      Chalk::Target::LLVM::T2::Builder::_all_nodes($opt{mop}, $ret);
         $b->build($ret); 1 };
@@ -379,7 +379,7 @@ sub walk {
         # A CHOICE PINNED WHERE IT RUNS (B::SoN pins one that reads memory, `$n
         # > 1 ? ... : ...` of a package scalar): its value made here, in order.
         # (A FOREACH ALIAS'S GUARDED REFERENCE is never made: its deref is the element.)
-        elsif ($op eq 'TernaryExpr') { $b->value($s) unless _alias_guard($s); push $b->{passed}->@*, $s; $ctl = $s }
+        elsif ($op eq 'TernaryExpr') { $b->value($s) unless $s->is_alias_guard; push $b->{passed}->@*, $s; $ctl = $s }
         # A READ OF $@ ON THE CHAIN is made where it stands: a caught die sets
         # $@ with no store in the graph, so only its place orders it.
         # (B::SoN gives two reads of $@ around a caught die one version, and
@@ -663,7 +663,7 @@ sub _through_ref {
     my ($b, $n) = @_;
     my $op = $n->operation;
     # (a foreach alias read is its element's read)
-    if ( $op eq 'PostfixDeref' && ( my $el = _alias_elem($n) ) ) { return $b->_through_ref($el) }
+    if ( $op eq 'PostfixDeref' && ( my $el = $n->alias_element ) ) { return $b->_through_ref($el) }
     if ($op =~ /\A(?:Subscript|Exists)\z/ && ( $n->can('kind') ? $n->kind // '' : '' ) eq 'hash') {
         return $n->inputs->[0]->is_named_hash || $n->inputs->[0]->operation eq 'FieldAccess' ? 0 : 1;   # a `my %h`, a hash field: never a stop
     }
@@ -2906,58 +2906,6 @@ sub loop_breaks {
     return $R;
 }
 
-# _alias_elem($deref) -> the element a FOREACH ALIAS READ reads -- B::SoN's
-# ${ \ $_[i] } (inside a guard of $_[i]'s existence, its other way undef) --
-# or undef. Not one written through (a store into the caller's variable).
-sub _alias_elem {
-    my ($d) = @_;
-    return undef unless blessed($d) && $d->operation eq 'PostfixDeref' && ( $d->sigil // '' ) eq '$';
-    return undef if grep { blessed($_) && $_->operation =~ /\A(?:Assign|Increment|Decrement)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($d) }
-        ( $d->consumers // [] )->@*;
-    # ONLY THE GUARDED FORM (a bare \$a[i] deref is a reference T2 does not make:
-    # one before the array's start dies), ONLY OVER @_, ONLY WHERE NOTHING
-    # RESHAPES @_ -- a foreach over an array its body shifts reads by index
-    # into the changing array, which this is not.
-    my $t = $d->inputs->[0];
-    return undef unless blessed($t) && $t->operation eq 'TernaryExpr' && blessed( $t->inputs->[2] )
-        && $t->inputs->[2]->operation eq 'Constant' && ( $t->inputs->[2]->const_type // '' ) eq 'undef';
-    my $r = $t->inputs->[1];
-    return undef unless blessed($r) && $r->operation eq 'Ref';
-    my $s = $r->inputs->[0];
-    return undef unless blessed($s) && $s->operation eq 'Subscript' && ( $s->can('kind') ? $s->kind // 'array' : 'array' ) eq 'array';
-    my $a = $s->inputs->[0];
-    return undef unless blessed($a) && $a->operation eq 'ArgsSource';
-    return undef if grep { blessed($_) && $_->operation eq 'Call' && ( $_->name // '' ) =~ /\A(?:shift|pop|push|unshift|splice)\z/
-                           && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($a) } ( $a->consumers // [] )->@*;
-    return $s;
-}
-# _alias_guard($TernaryExpr) -> true for a foreach alias's guard: c ? \$a[i] : undef,
-# its reference read only through derefs (_alias_ref).
-sub _alias_guard {
-    my ($t) = @_;
-    my ($r, $u) = $t->inputs->@[ 1, 2 ];
-    return blessed($r) && $r->operation eq 'Ref' && _alias_ref($r)
-        && blessed($u) && $u->operation eq 'Constant' && ( $u->const_type // '' ) eq 'undef';
-}
-# _alias_ref($Ref) -> true when every use of it is a foreach alias read (it
-# escapes nowhere: the deref of it is the element).
-sub _alias_ref {
-    my ($r) = @_;
-    my @c = grep { blessed($_) } ( $r->consumers // [] )->@*;
-    return 0 unless @c;
-    for my $c (@c) {
-        if ( $c->operation eq 'PostfixDeref' ) { return 0 unless _alias_elem($c); next }
-        if ( $c->operation eq 'TernaryExpr' && blessed( $c->inputs->[1] ) && refaddr( $c->inputs->[1] ) == refaddr($r) ) {
-            my $t = $c;
-            my @d = grep { my $u = $_; blessed($u) && grep { blessed($_) && refaddr($_) == refaddr($t) } $u->inputs->@* } ( $c->consumers // [] )->@*;   # (its values' users, not its control's)
-            return 0 unless @d && !grep { !( $_->operation eq 'PostfixDeref' && _alias_elem($_) ) } @d;
-            next;
-        }
-        return 0;
-    }
-    return 1;
-}
-
 # loop_exit($Loop) -> the Region the program goes on from after it: of the
 # Regions B::SoN heads with it (its exit, and the merge of its ways round,
 # which has no way on), the one with a way on.
@@ -3217,7 +3165,7 @@ sub _value {
     # reference (a string under strict refs; undef too), its eval's to catch.
     # A FOREACH ALIAS READ (B::SoN's ${ \ $_[i] }, a guard of its existence
     # around it): the deref of a reference to an element is that element.
-    if ( $op eq 'PostfixDeref' && ( my $el = _alias_elem($v) ) ) {
+    if ( $op eq 'PostfixDeref' && ( my $el = $v->alias_element ) ) {
         my $arr = do { local $b->{elem_read} = 1; $b->array_of( $el->inputs->[0] ) };
         return $b->as( $b->emit(op => 'AGet', type => '%Slot', inputs => [ $arr, $b->as( $b->value( $el->inputs->[1] ), 'i64' ) ]), $ty );
     }

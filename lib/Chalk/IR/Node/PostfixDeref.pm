@@ -25,6 +25,32 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
     # `${...}` is a scalar's: not this).
     method is_array_deref() { return ( $sigil // '@' ) eq '@' }
 
+    # alias_element -> the element a FOREACH ALIAS READ reads -- B::SoN's
+    # ${ \ $_[i] } (inside a guard of $_[i]'s existence, its other way undef)
+    # -- or undef. Not one written through (a store into the caller's
+    # variable).
+    method alias_element() {
+        return undef unless ( $sigil // '' ) eq '$';
+        return undef if grep { blessed($_) && $_->operation =~ /\A(?:Assign|Increment|Decrement)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($self) }
+            $self->consumers->@*;
+        # ONLY THE GUARDED FORM (a bare \$a[i] deref is a reference to an element
+        # of no known place: one before the array's start dies), ONLY OVER @_,
+        # ONLY WHERE NOTHING RESHAPES @_ -- a foreach over an array its body
+        # shifts reads by index into the changing array, which this is not.
+        my $t = $self->inputs->[0];
+        return undef unless blessed($t) && $t->operation eq 'TernaryExpr' && blessed( $t->inputs->[2] )
+            && $t->inputs->[2]->operation eq 'Constant' && ( $t->inputs->[2]->const_type // '' ) eq 'undef';
+        my $r = $t->inputs->[1];
+        return undef unless blessed($r) && $r->operation eq 'Ref';
+        my $s = $r->inputs->[0];
+        return undef unless blessed($s) && $s->operation eq 'Subscript' && ( $s->can('kind') ? $s->kind // 'array' : 'array' ) eq 'array';
+        my $args = $s->inputs->[0];
+        return undef unless blessed($args) && $args->operation eq 'ArgsSource';
+        return undef if grep { blessed($_) && $_->operation eq 'Call' && ( $_->name // '' ) =~ /\A(?:shift|pop|push|unshift|splice)\z/
+                               && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($args) } $args->consumers->@*;
+        return $s;
+    }
+
     # memory_operand -> it reads at its second input (the first is what it reads).
     method memory_operand() { return $self->inputs->[1] }
     method staleness_kind() { 'transparent' }
