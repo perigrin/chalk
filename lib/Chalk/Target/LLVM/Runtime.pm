@@ -4705,6 +4705,62 @@ out:
   %s = call %Str @t2_str(i8* %ob, i64 %ol)
   ret %Str %s
 }
+; t2_localtime_tm(t, now) -> libc's localtime_r of t (of time(NULL) where
+; now): a struct tm, its first nine ints perl's nine fields in order.
+declare i64 @time(i64*)
+declare i8* @localtime_r(i64*, i8*)
+declare i64 @strftime(i8*, i64, i8*, i8*)
+@fmt_ctime = private unnamed_addr constant [21 x i8] c"%a %b %e %H:%M:%S %Y\00"
+define internal i8* @t2_localtime_tm(i64 %t, i1 %now) {
+entry:
+  %tp = call i8* @malloc(i64 8)
+  %tq = bitcast i8* %tp to i64*
+  br i1 %now, label %clock, label %given
+clock:
+  %c = call i64 @time(i64* null)
+  br label %have
+given:
+  br label %have
+have:
+  %v = phi i64 [ %c, %clock ], [ %t, %given ]
+  store i64 %v, i64* %tq
+  %tm = call i8* @malloc(i64 128)
+  %u = call i8* @localtime_r(i64* %tq, i8* %tm)
+  ret i8* %tm
+}
+; t2_localtime_list(t, now) -> localtime in a list: (sec, min, hour, mday,
+; mon, year, wday, yday, isdst).
+define internal %Array* @t2_localtime_list(i64 %t, i1 %now) {
+entry:
+  %tm = call i8* @t2_localtime_tm(i64 %t, i1 %now)
+  %f = bitcast i8* %tm to i32*
+  %r = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, 9
+  br i1 %more, label %body, label %done
+body:
+  %fp = getelementptr i32, i32* %f, i64 %i
+  %x = load i32, i32* %fp
+  %x64 = sext i32 %x to i64
+  %s = call %Slot @t2_box_i64(i64 %x64)
+  call void @t2_apush(%Array* %r, %Slot %s)
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
+; t2_localtime_str(t, now) -> localtime in scalar context: ctime(3)'s text
+; without its newline, "Thu Sep  9 01:46:40 1999".
+define internal %Str @t2_localtime_str(i64 %t, i1 %now) {
+entry:
+  %tm = call i8* @t2_localtime_tm(i64 %t, i1 %now)
+  %buf = call i8* @malloc(i64 64)
+  %n = call i64 @strftime(i8* %buf, i64 64, i8* getelementptr ([21 x i8], [21 x i8]* @fmt_ctime, i64 0, i64 0), i8* %tm)
+  %s = call %Str @t2_str(i8* %buf, i64 %n)
+  ret %Str %s
+}
 ; t2_range(lo, hi) -> a new list of the integers lo to hi (none when hi < lo):
 ; perl's range of numbers.
 define internal %Array* @t2_range(i64 %lo, i64 %hi) {

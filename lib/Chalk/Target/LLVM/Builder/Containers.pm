@@ -476,7 +476,7 @@ sub array_of {
                          || $n->is_package_aggregate && $n->sigil eq '@'
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
                          || $n->operation eq 'Repeat' && $b->type_of($n) eq '%Array*'
-                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // q{} ) =~ /\A(?:keys|values|sort|reverse|caller|readline|each|unpack|glob)\z/ )) {
+                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // q{} ) =~ /\A(?:keys|values|sort|reverse|caller|readline|each|unpack|glob|localtime)\z/ )) {
         my $a = $b->value($n);
         return $a if $a->type eq '%Array*';
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]

@@ -92,6 +92,10 @@ sub type_of {
     return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:sort|reverse)\z/
         && ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/;   # static type
     return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:unpack|glob)\z/;   # (in a list: array_value)
+    # localtime: its nine fields in a list, its text in scalar context (B::SoN
+    # stamps which: `() = localtime` a List, `my $s = localtime` a Scalar).
+    return ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/ ? '%Array*' : '%Str'   # static type
+        if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'localtime';
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
     return '%Str' if $op eq 'Call' && $v->changes_case;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
@@ -249,6 +253,16 @@ sub _value {
             attr => { strict => ( $v->can('strict') && $v->strict ? 1 : 0 ), %$at });
         $b->after_call;
         return $b->as($r, $ty);
+    }
+    # localtime(TIME) (now where there is none): libc's localtime_r -- its
+    # nine fields in a list, ctime's text in scalar context.
+    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'localtime') {
+        my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
+        out('a localtime of more than one argument') if @a > 1;
+        $b->list_only($v, 'a localtime list') if $ty eq '%Array*';
+        my $t = @a ? $b->as($b->value($a[0]), 'i64') : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
+        my $now = $b->emit(op => 'Const', type => 'i1', attr => { value => @a ? 0 : 1 });
+        return $b->emit(op => 'LocalTime', type => $ty, inputs => [ $t, $now ]);
     }
     # qx`CMD` / readpipe IN SCALAR CONTEXT: all the command printed (t2_qx).
     # In a list (its lines) it is not T2's; nor a program reading $? (its

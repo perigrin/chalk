@@ -118,3 +118,8 @@ same	my $o = `echo hi`; print "[$o]";
 same	print "a\n"; my $o = qx{printf 'x\ny\n'}; print "b\n", $o;
 refused	my @l = `printf 'x\ny\n'`; print scalar(@l), "\n";
 same	my $c = $ENV{NOPE} // "seq 1 3000"; my $o = readpipe $c; print length($o), "\n";
+same	my @t = localtime(0); print scalar(@t), " $t[5]\n";
+same	my $s = localtime(86400 * 365); print length($s) > 20 ? "ok" : "no", " $s\n";
+same	my @t = localtime; print scalar(@t), "\n";
+same	my $n = () = localtime; print "$n\n";
+refused	my $y = (localtime(0))[5]; print "$y\n";

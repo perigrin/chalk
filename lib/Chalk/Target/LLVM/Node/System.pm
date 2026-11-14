@@ -51,4 +51,11 @@ class Chalk::Target::LLVM::Node::Glob :isa(Chalk::Target::LLVM::Node) { method t
 
 class Chalk::Target::LLVM::Node::Qx :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_qx') } }
 
+class Chalk::Target::LLVM::Node::LocalTime :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my $fn = $self->type eq '%Str' ? '%Str @t2_localtime_str' : '%Array* @t2_localtime_list';
+        return $self->name . " = call $fn(" . $self->_args($self->inputs->@*) . ')';
+    }
+}
+
 1;

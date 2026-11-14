@@ -66,21 +66,21 @@ my @CASES = qw(
     embedded-code:3 eval-replacement:1 formats:1 formats:2 handles:1
     handles:2 handles:3 handles:4 hashes:1 hashes:2 hashes:3 hashes:4
     hashes:5 heredocs:1 heredocs:2 heredocs:3 list-operators-in-context:1
-    list-operators-in-context:2 list-operators-in-context:4
-    list-operators-in-context:5 loading:1 loading:6 loops:1 loops:10
-    loops:11 loops:2 loops:3 loops:4 loops:5 loops:6 loops:7 loops:9
-    named-operators:1 named-operators:2 named-operators:3 named-operators:4
-    named-operators:5 named-operators:6 named-operators:7 named-operators:8
-    named-operators:9 names:1 names:3 names:4 names:5 numeric-point:1
-    numeric-point:2 numeric-point:3 numeric-point:4 numeric-point:5
-    numeric-radix:1 numeric-radix:2 numeric-radix:3 numeric-radix:4
-    numeric-radix:5 numeric-radix:6 packages:1 packages:2 packages:3
-    pod-and-data:1 pod-and-data:2 pod-and-data:3 pod-and-data:4
-    quote-like-terms:2 quote-like-terms:3 quote-like-terms:4
-    quote-like-terms:5 quote-like-terms:6 range:1 range:3 read-position:1
-    read-position:2 read-position:3 regex-delimiters:1 regex-delimiters:2
-    regex-delimiters:3 regex-matching:1 regex-matching:2 regex-matching:3
-    regex-matching:4 regex-matching:5 regex-matching:7
+    list-operators-in-context:2 list-operators-in-context:3
+    list-operators-in-context:4 list-operators-in-context:5 loading:1
+    loading:6 loops:1 loops:10 loops:11 loops:2 loops:3 loops:4 loops:5
+    loops:6 loops:7 loops:9 named-operators:1 named-operators:2
+    named-operators:3 named-operators:4 named-operators:5 named-operators:6
+    named-operators:7 named-operators:8 named-operators:9 names:1 names:3
+    names:4 names:5 numeric-point:1 numeric-point:2 numeric-point:3
+    numeric-point:4 numeric-point:5 numeric-radix:1 numeric-radix:2
+    numeric-radix:3 numeric-radix:4 numeric-radix:5 numeric-radix:6
+    packages:1 packages:2 packages:3 pod-and-data:1 pod-and-data:2
+    pod-and-data:3 pod-and-data:4 quote-like-terms:2 quote-like-terms:3
+    quote-like-terms:4 quote-like-terms:5 quote-like-terms:6 range:1 range:3
+    read-position:1 read-position:2 read-position:3 regex-delimiters:1
+    regex-delimiters:2 regex-delimiters:3 regex-matching:1 regex-matching:2
+    regex-matching:3 regex-matching:4 regex-matching:5 regex-matching:7
     regex-pattern-positions:1 regex-pattern-positions:2 regex-quote-likes:1
     regex-quote-likes:2 strings:1 strings:2 strings:3 subroutines:1
     subroutines:10 subroutines:11 subroutines:3 subroutines:6 subroutines:7
