@@ -379,6 +379,24 @@ sub array_value {
             }
             return $b->emit(op => $h ? 'TieHash' : 'TieArray', type => '%Slot', inputs => [ $box, $b->as($b->value($cls), '%Slot'), $r ]);
         }
+        # unpack WITH A CONSTANT C TEMPLATE (`C`, `C3`, `C*`), in a list: the
+        # string's bytes, each a number. Another template, or scalar context
+        # (its first value alone), is not T2's; nor a string past ASCII (perl's
+        # C is of characters, T2's strings are bytes).
+        if ($name eq 'unpack') {
+            $b->list_only($v, 'an unpack');
+            my @a = grep { blessed($_) && !$_->is_memory_version } @in;
+            out('an unpack of other than a template and one string') unless @a == 2;
+            my $t = $a[0];
+            my ($n) = $t->operation eq 'Constant' && defined $t->value ? $t->value =~ /\AC(\d+|\*)?\z/ : ();
+            out('an unpack template other than a constant C, Cn or C*')
+                unless $t->operation eq 'Constant' && ( $t->value // '' ) =~ /\AC(?:\d+|\*)?\z/;
+            $b->{past_ascii} //= scalar grep { $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'string' && ( $_->value // '' ) =~ /[^\x00-\x7f]/ }
+                _all_nodes($b->{mop}, $b->{ret});
+            out('an unpack where a string goes past ASCII') if $b->{past_ascii};
+            $n = !defined $n ? 1 : $n eq '*' ? -1 : $n;
+            return $b->emit(op => 'UnpackC', type => '%Array*', inputs => [ $b->as($b->value($a[1]), '%Str') ], attr => { n => $n });
+        }
         if ($name eq 'shift' || $name eq 'pop') {
             return $b->emit(op => $name eq 'shift' ? 'AShift' : 'APop', type => '%Slot', inputs => [ $b->array_of($in[0]) ]);
         }
@@ -446,7 +464,7 @@ sub array_of {
                          || $n->is_package_aggregate && $n->sigil eq '@'
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
                          || $n->operation eq 'Repeat' && $b->type_of($n) eq '%Array*'
-                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // q{} ) =~ /\A(?:keys|values|sort|reverse|caller|readline|each)\z/ )) {
+                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // q{} ) =~ /\A(?:keys|values|sort|reverse|caller|readline|each|unpack)\z/ )) {
         my $a = $b->value($n);
         return $a if $a->type eq '%Array*';
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]
@@ -568,7 +586,7 @@ sub list_choice {
     $from->{term} = [ 'condbr', $c, $tb, $eb ];
     $tend->{term} = [ 'br', $jb ];
     $eend->{term} = [ 'br', $jb ];
-    return $b->{memo}{$key} = $b->emit(op => 'Phi', type => '%Array*', inputs => [ $tv, $ev ], attr => { from => [ $tend, $eend ] });
+    return $b->{memo}{$key} = $b->emit(op => 'Phi', type => '%Array*', inputs => [ $tv, $ev ], attr => { from => [ $tend, $eend ], list_choice => 1 });
 }
 
 # array_stmt($Call): push or unshift, or a shift or pop whose value is not used, in its

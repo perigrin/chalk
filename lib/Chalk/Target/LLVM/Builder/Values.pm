@@ -91,6 +91,7 @@ sub type_of {
     }
     return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:sort|reverse)\z/
         && ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/;   # static type
+    return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'unpack';   # (in a list: array_value)
     return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
     return '%Str' if $op eq 'Call' && $v->changes_case;
     return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
@@ -789,7 +790,13 @@ sub truth {
 sub as {
     my ($b, $n, $ty) = @_;
     return $n if $n->type eq $ty;
-    # AN ARRAY AS A SCALAR is its count (`if (@a)`, `@a + 3`).
+    # AN ARRAY AS A SCALAR is its count (`if (@a)`, `@a + 3`). A list that is
+    # no array -- a slice, a range, an unpack, a choice of lists -- is not:
+    # perl's scalar of it is its last value, a flip-flop, its first, the
+    # arm's own. Refused (a node's consumers need not list every use, so
+    # list_only cannot be all of the guard).
+    out('a list taken as a scalar (' . $n->op . ')')
+        if $n->type eq '%Array*' && ( $n->op =~ /\A(?:ASlice|HSlice|ARange|UnpackC)\z/ || $n->op eq 'Phi' && $n->attr->{list_choice} );
     $n = $b->emit(op => 'ALen', type => 'i64', inputs => [$n]) if $n->type eq '%Array*';
     return $n if $n->type eq $ty;
     out("a conversion " . $n->type . " -> $ty") unless exists $Chalk::Target::LLVM::Printer::CONVERT{ $n->type . '>' . $ty };

@@ -4540,6 +4540,33 @@ body:
 done:
   ret %Array* %r
 }
+; t2_unpack_c(s, n) -> unpack "C<n>" of s: its first n bytes (every byte
+; where n < 0, "C*"), each a number.
+define internal %Array* @t2_unpack_c(%Str %s, i64 %n) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %len = extractvalue %Str %s, 1
+  %all = icmp slt i64 %n, 0
+  %short = icmp slt i64 %len, %n
+  %uselen = or i1 %all, %short
+  %m = select i1 %uselen, i64 %len, i64 %n
+  %r = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %m
+  br i1 %more, label %body, label %done
+body:
+  %bp = getelementptr i8, i8* %p, i64 %i
+  %byte = load i8, i8* %bp
+  %b = zext i8 %byte to i64
+  %v = call %Slot @t2_box_i64(i64 %b)
+  call void @t2_apush(%Array* %r, %Slot %v)
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
 ; t2_range(lo, hi) -> a new list of the integers lo to hi (none when hi < lo):
 ; perl's range of numbers.
 define internal %Array* @t2_range(i64 %lo, i64 %hi) {

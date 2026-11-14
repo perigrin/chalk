@@ -102,3 +102,9 @@ same	sub f { 5 } my @r = (f() && "y"); print "@r\n";
 same	sub vals { (1, 2, 3) } sub f { my $s = ""; for my $v (vals()) { $s .= $v } $s } print f(), "\n";
 same	sub vals { (1, 2, 3) } my $s = ""; for my $v (vals()) { $s .= $v } print "$s\n";
 same	sub one { 5 } if (one()) { print "y\n" }
+same	my @c = unpack("C*", "hi!"); print "@c\n";
+same	my @c = unpack("C", "AB"); print scalar(@c), " @c\n";
+same	my @c = unpack("C9", "AB"); print scalar(@c), "\n";
+refused	my $x = unpack("C", "AB"); print "$x\n";
+refused	my @c = unpack("A2", "ABC"); print "@c\n";
+same	print join(",", unpack("C2", "xyz")), "\n";

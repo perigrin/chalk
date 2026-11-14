@@ -34,5 +34,8 @@ class Chalk::Target::LLVM::Node::Chomp :isa(Chalk::Target::LLVM::Node) {
 class Chalk::Target::LLVM::Node::ChompN :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { $self->name . ' = call i64 @t2_chomp_n(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{chop} ? 1 : 0 ) . ')' }
 }
+class Chalk::Target::LLVM::Node::UnpackC :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = call %Array* @t2_unpack_c(%Str ' . $self->inputs->[0]->name . ', i64 ' . $self->attr->{n} . ')' }
+}
 
 1;
