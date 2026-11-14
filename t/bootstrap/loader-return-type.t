@@ -116,15 +116,16 @@ SRC
     is $call->stamp, 'Int',
         'the NARROWER of the two wins -- the graph refines the wire';
 
-    # AND THE METAOBJECT CARRIES IT TOO. Target::LLVM reads return_type off the
-    # metaobject when emitting the callee's signature, so a metaobject left at
-    # the wider wire value would emit a wider return than these call sites
-    # expect. set_return_type narrows it in place.
+    # THE METAOBJECT KEEPS THE WIRE'S Scalar: it is the callee's ABI. The
+    # call is made at that type and unboxed to the node's Int at the call site
+    # (d09d286f; ir/call-at-the-abi-unbox-at-the-node.t). Narrowing the callee
+    # to match the node was tried and reverted -- it read 11.0's bits as an
+    # i64. The body has one machine type; the refinement lives at the node.
     my $mop = (values %$graphs)[0]->mop;
     my $cls = $mop && $mop->for_class('Bag') or return fail 'Bag has no metaobject';
     my $m = $cls->find_method('first') or return fail 'Bag::first has no metaobject';
-    is $m->return_type, 'Int',
-        'the metaobject carries the narrowed type, not the wire supertype';
+    is $m->return_type, 'Scalar',
+        'the metaobject keeps the wire Scalar, the ABI the call is made at';
 };
 
 # BILATERAL. The check exists to catch a real contradiction, and widening it to
