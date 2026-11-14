@@ -48,10 +48,11 @@ subtest 'an Int :param field infers Int from the constructor arg' => sub {
 subtest 'a Num-literal :param field is NOT inferred (would mis-lower)' => sub {
     # `new(v => 3.0)` gives the arg a Num repr, but perl treats 3.0 as the
     # integer 3; typing the field Num lowers an i64 value into a double slot
-    # (malformed IR). The inference must skip Num and leave the field untyped
-    # (an honest GAP), matching the constant-default path's Num refusal.
-    is(field_type_for('FNum', 'v', '3.0'), undef,
-        'Num construction does NOT type the field (stays an honest GAP)');
+    # (malformed IR). The inference must skip Num and leave the field untyped,
+    # matching the constant-default path's Num refusal. Untyped is Scalar, the
+    # un-narrowed top the producer sends for such a field (d630c27b).
+    is(field_type_for('FNum', 'v', '3.0'), 'Scalar',
+        'Num construction does NOT narrow the field (stays Scalar)');
 };
 
 done_testing();
