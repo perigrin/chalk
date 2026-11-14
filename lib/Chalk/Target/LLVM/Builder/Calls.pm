@@ -635,4 +635,105 @@ sub func {
     return $fn;
 }
 
+
+# IN-MEMORY HANDLES (perl's open on a reference): open(my $fh, "<", \"...")
+# reads the string, open(my $fh, ">" or ">>", \my $buf) writes into $buf;
+# DATA reads the program's __DATA__ text. A `my $fh` is a cell of this
+# function holding the handle (undef until an open); it is read only as a
+# handle -- any other use of it is refused where it is made. A file on disk
+# is not T2's.
+sub fh_cell {
+    my ($b, $fh) = @_;
+    out('a filehandle that is not a `my $fh` (or DATA)')
+        unless blessed($fh) && $fh->operation eq 'PadAccess' && ( $fh->stamp // '' ) eq 'GlobRef' && ( $fh->sigil // '' ) eq '$';   # static type
+    out('a `my $fh` shared with a sub') if $fh->can('shared') && $fh->shared;
+    my $key = 'fh:' . $fh->symbol . '#' . ( $fh->can('targ') ? $fh->targ // '' : '' );
+    return $b->{locs}{$key} //= $b->emit_entry(op => 'Alloca', type => '%Slot*', attr => { name => '$' . $fh->symbol });
+}
+
+# _opens_it($pad) -> the variable is read only as the target of an open.
+sub _opens_it {
+    my ($pad) = @_;
+    my @u = grep { blessed($_) } ( $pad->consumers // [] )->@*;
+    return @u && !grep { !( $_->operation eq 'Ref' && !grep { !( $_->operation eq 'Call' && ( $_->name // '' ) eq 'open' ) } grep { blessed($_) } ( $_->consumers // [] )->@* ) } @u;
+}
+
+# fh_handle($fh) -> the handle a filehandle operand names, where it is used.
+sub fh_handle {
+    my ($b, $fh) = @_;
+    if ( blessed($fh) && $fh->operation eq 'Constant' && ( $fh->const_type // '' ) eq 'glob' && ( $fh->value // '' ) =~ /\A(?:main::)?DATA\z/ ) {
+        my $text = $Chalk::IR::Serialize::JSON::DATA_SECTION // out('DATA in a program with no __DATA__ or __END__ text');
+        return $b->emit(op => 'FhData', type => '%Slot', inputs => [ $b->const_str($text) ]);
+    }
+    return $b->emit(op => 'Load', type => '%Slot', inputs => [ $b->fh_cell($fh) ]);
+}
+
+# selects() -> the program selects a handle (select of one argument): a
+# print to no handle goes to the one selected.
+sub selects {
+    my ($b) = @_;
+    return $b->{selects} //= scalar grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'select' }
+        _all_nodes($b->{mop}, $b->{ret});
+}
+
+# io_value($Call) -> open, close, eof, readline, select of a handle.
+sub io_value {
+    my ($b, $v) = @_;
+    my $name = $v->name;
+    my @in = grep { blessed($_) } $v->inputs->@*;
+    pop @in if $v->can('memory_input') && $v->memory_input;
+    # (a handle's open, print and close write a variable behind the reads of it)
+    $b->reads_before($_) for $b->{passed}->@*;
+    if ($name eq 'open') {
+        out('an open of other than three arguments') unless @in == 3;
+        my ($fh, $mode, $to) = @in;
+        my $m = $mode->operation eq 'Constant' ? $mode->value // '' : '';
+        my $h;
+        if ($m eq '<') {
+            out('an open of a file (or of what is not a reference to a constant string)')
+                unless $to->operation eq 'Constant' && ( $to->const_type // '' ) eq 'ref' && defined $to->value;
+            $h = $b->emit(op => 'FhROpen', type => '%Slot', inputs => [ $b->const_str( $to->value ) ]);
+        }
+        elsif ($m eq '>' || $m eq '>>') {
+            my $var = $to->operation eq 'Ref' ? $to->inputs->[0] : undef;
+            out('an open for writing of a file (or of what is not a `my` scalar)')
+                unless blessed($var) && $var->operation eq 'PadAccess' && ( $var->sigil // '' ) eq '$' && $var->is_location;
+            # B::SoN versions no memory at a print to a handle: a read of the
+            # variable before the close is one node with any read after the
+            # open (a copy taken between two prints read what the last left).
+            # Read only after a close, it is what the prints wrote.
+            out('a variable a handle writes, read other than after a close')
+                if ( $var->can('shared') && $var->shared )
+                || grep { refaddr($_) != refaddr($var) && ( $_->symbol // '' ) eq $var->symbol && !_opens_it($_)
+                          && !( blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'Call' && ( $_->inputs->[0]->name // '' ) eq 'close' ) }
+                   grep { $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' } +($b->{own_nodes} // [])->@*;
+            $h = $b->emit(op => 'FhWOpen', type => '%Slot', inputs => [ $b->location($var) ], attr => { trunc => $m eq '>' });
+        }
+        else { out('an open in a mode other than <, > or >>') }
+        $b->emit(op => 'Store', type => 'void', inputs => [ $h, $b->fh_cell($fh) ]);
+        return $b->emit(op => 'Const', type => 'i64', attr => { value => 1 });
+    }
+    if ($name eq 'select') {
+        out('a select of other than one argument') unless @in == 1;
+        my $x = $in[0];
+        my $used = $b->_value_read($v);
+        return $b->emit(op => 'FhSelect', type => '%Slot', inputs => [ $b->fh_handle($x) ], attr => { used => $used })
+            if $x->operation eq 'PadAccess' && ( $x->stamp // '' ) eq 'GlobRef';   # static type
+        return $b->emit(op => 'SelectName', type => '%Slot', inputs => [ $b->as( $b->value($x), '%Slot' ) ], attr => { used => $used });
+    }
+    if ($name eq 'sselect') {
+        # select(undef, undef, undef, 0): no handles, no wait -- none ready.
+        out('a four-argument select of handles or a wait') unless @in == 4
+            && ( grep { $_->operation eq 'Constant' && !defined $_->value } @in[0 .. 2] ) == 3
+            && $in[3]->operation eq 'Constant' && ( $in[3]->value // '' ) =~ /\A0+(?:\.0*)?\z/;
+        return $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
+    }
+    out("a $name of no handle (of the last one read)") unless @in == 1;
+    my $h = $b->fh_handle( $in[0] );
+    return $b->emit(op => 'FhClose', type => 'i1', inputs => [$h]) if $name eq 'close';
+    return $b->emit(op => 'FhEof', type => 'i1', inputs => [$h]) if $name eq 'eof';
+    return $b->emit(op => 'FhReadlines', type => '%Array*', inputs => [$h]) if $b->type_of($v) eq '%Array*';
+    return $b->emit(op => 'FhReadline', type => '%Slot', inputs => [$h]);
+}
+
 1;

@@ -28,4 +28,23 @@ class Chalk::Target::LLVM::Node::AtExit :isa(Chalk::Target::LLVM::Node) {
 class Chalk::Target::LLVM::Node::StopUnless :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_stop_unless') } }
 class Chalk::Target::LLVM::Node::RunEnds :isa(Chalk::Target::LLVM::Node) { method to_ll () { 'call void @t2_run_ends()' } }
 
+# IN-MEMORY HANDLES (t2_fh_*): a handle is a %Slot, undef where none is open.
+class Chalk::Target::LLVM::Node::FhROpen :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_fh_ropen') } }
+class Chalk::Target::LLVM::Node::FhWOpen :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = call %Slot @t2_fh_wopen(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{trunc} ? 1 : 0 ) . ')' }
+}
+class Chalk::Target::LLVM::Node::FhData :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_fh_data') } }
+class Chalk::Target::LLVM::Node::FhReadline :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_fh_readline') } }
+class Chalk::Target::LLVM::Node::FhReadlines :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_fh_readlines') } }
+class Chalk::Target::LLVM::Node::FhEof :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_fh_eof') } }
+class Chalk::Target::LLVM::Node::FhClose :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_fh_close') } }
+class Chalk::Target::LLVM::Node::FhPrint :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_fh_print') } }
+class Chalk::Target::LLVM::Node::PrintSel :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_print_sel') } }
+class Chalk::Target::LLVM::Node::FhSelect :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = call %Slot @t2_select(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{used} ? 1 : 0 ) . ')' }
+}
+class Chalk::Target::LLVM::Node::SelectName :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = call %Slot @t2_select_name(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{used} ? 1 : 0 ) . ')' }
+}
+
 1;

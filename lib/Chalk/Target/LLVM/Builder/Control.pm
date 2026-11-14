@@ -44,12 +44,24 @@ sub walk {
             # first): file descriptor 1 or 2. Another filehandle is refused.
             my @args = $s->inputs->@*;
             my $fd = 1;
+            # (to a handle in memory, its scalar appended to; with no handle, in a
+            # program that selects one, to the one selected)
+            my $to;
             if ( $s->can('has_filehandle') && $s->has_filehandle ) {
                 my $fh = shift @args;
                 my $name = blessed($fh) && $fh->operation eq 'Constant' && ( $fh->stamp // '' ) eq 'Glob' ? $fh->value // '' : '';
-                $fd = { STDOUT => 1, STDERR => 2 }->{ $name =~ s/\A(?:main)?:://r }
-                    // out('a print to a filehandle other than STDOUT or STDERR');
+                if ( blessed($fh) && $fh->operation eq 'PadAccess' ) { $b->reads_before($_) for $b->{passed}->@*; $to = $b->fh_handle($fh) }
+                else {
+                    $fd = { STDOUT => 1, STDERR => 2 }->{ $name =~ s/\A(?:main)?:://r }
+                        // out('a print to a filehandle other than STDOUT or STDERR');
+                }
             }
+            elsif ( $b->selects ) { $b->reads_before($_) for $b->{passed}->@*; $fd = 'sel' }
+            my $put = sub ($str) {
+                return $b->emit(op => 'FhPrint', type => 'void', inputs => [ $to, $str ]) if $to;
+                return $b->emit(op => 'PrintSel', type => 'void', inputs => [$str]) if $fd eq 'sel';
+                return $b->emit(op => 'Print', type => 'void', inputs => [$str], attr => { fd => $fd });
+            };
             # One print of each argument, in order (perl prints the list); a
             # list's elements one after another ($, is "" until written).
             for my $in (@args) {
@@ -63,10 +75,10 @@ sub walk {
                         $_->operation =~ /\A(?:EntryWrite|LocalAlias)\z/ && grep { blessed($_) && $_->can('symbol') && ( $_->symbol // '' ) eq ',' } ( $_, $_->inputs->@* )
                     } _all_nodes($b->{mop}, $b->{ret});
                     my $none = $b->const_str('');
-                    $b->emit(op => 'Print', type => 'void', inputs => [ $b->emit(op => 'Join', type => '%Str', inputs => [ $none, $b->array_of($x) ]) ], attr => { fd => $fd });
+                    $put->( $b->emit(op => 'Join', type => '%Str', inputs => [ $none, $b->array_of($x) ]) );
                     next;
                 }
-                $b->emit(op => 'Print', type => 'void', inputs => [ $b->as($b->value($x), '%Str') ], attr => { fd => $fd });
+                $put->( $b->as($b->value($x), '%Str') );
             }
             # ITS VALUE is 1 (perl's print returns true): a block's last
             # statement, a try's catch.
@@ -80,6 +92,12 @@ sub walk {
         elsif ($op eq 'RegexSubst' || $op eq 'Transliterate') { $b->regex_subst_stmt($s); push $b->{passed}->@*, $s; $ctl = $s }
         elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref|RegexMatch|Match|BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/
                || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join|sort|caller|pos)\z/) {
+            $b->value($s);
+            push $b->{passed}->@*, $s;
+            $ctl = $s;
+        }
+        # A HANDLE'S open, close, readline, eof, select where it stands.
+        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:open|close|eof|readline|select|sselect)\z/) {
             $b->value($s);
             push $b->{passed}->@*, $s;
             $ctl = $s;

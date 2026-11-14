@@ -4982,6 +4982,227 @@ entry:
   %s = call %Slot @t2_bit_num(i64 %r, i1 %inner)
   ret %Slot %s
 }
+; ---- IN-MEMORY HANDLES: open(my $fh, "<", \"...") reads the string; open(my
+; $fh, ">", \my $buf) writes into $buf. A handle is { i8* data, i64 len, i64
+; pos, %Slot* target } (malloc'd), held in a %Slot (tag 1, its address);
+; undef where none is open. DATA is one, on the program's __DATA__ text.
+%Fh = type { i8*, i64, i64, %Slot* }
+declare i8* @memchr(i8*, i32, i64)
+@t2_selected = internal global %Slot zeroinitializer
+@t2_data_fh = internal global %Slot zeroinitializer
+@lit_stdout = private unnamed_addr constant [13 x i8] c"main::STDOUT\00"
+@msg_select = private unnamed_addr constant [62 x i8] c"select of a handle T2 holds as no value: stopped (chalk, T2)\0A\00"
+define internal %Fh* @t2_fh_ptr(%Slot %h) {
+  %t = extractvalue %Slot %h, 0
+  %open = icmp eq i8 %t, 1
+  %v = extractvalue %Slot %h, 1
+  %p = inttoptr i64 %v to %Fh*
+  %r = select i1 %open, %Fh* %p, %Fh* null
+  ret %Fh* %r
+}
+define internal %Slot @t2_fh_new(i8* %d, i64 %n, %Slot* %t) {
+  %m = call i8* @malloc(i64 32)
+  %f = bitcast i8* %m to %Fh*
+  %f0 = getelementptr %Fh, %Fh* %f, i32 0, i32 0
+  store i8* %d, i8** %f0
+  %f1 = getelementptr %Fh, %Fh* %f, i32 0, i32 1
+  store i64 %n, i64* %f1
+  %f2 = getelementptr %Fh, %Fh* %f, i32 0, i32 2
+  store i64 0, i64* %f2
+  %f3 = getelementptr %Fh, %Fh* %f, i32 0, i32 3
+  store %Slot* %t, %Slot** %f3
+  %i = ptrtoint i8* %m to i64
+  %s = call %Slot @t2_slot(i8 1, i64 %i)
+  ret %Slot %s
+}
+define internal %Slot @t2_fh_ropen(%Str %s) {
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %h = call %Slot @t2_fh_new(i8* %p, i64 %n, %Slot* null)
+  ret %Slot %h
+}
+; ">" empties the scalar; ">>" appends to what it holds.
+define internal %Slot @t2_fh_wopen(%Slot* %t, i1 %trunc) {
+entry:
+  br i1 %trunc, label %empty, label %go
+empty:
+  %e = call %Str @t2_str(i8* getelementptr ([1 x i8], [1 x i8]* @t2_empty, i64 0, i64 0), i64 0)
+  %es = call %Slot @t2_box_str(%Str %e)
+  store %Slot %es, %Slot* %t
+  br label %go
+go:
+  %h = call %Slot @t2_fh_new(i8* null, i64 0, %Slot* %t)
+  ret %Slot %h
+}
+define internal %Slot @t2_fh_data(%Str %s) {
+entry:
+  %h = load %Slot, %Slot* @t2_data_fh
+  %t = extractvalue %Slot %h, 0
+  %made = icmp eq i8 %t, 1
+  br i1 %made, label %ok, label %mk
+mk:
+  %n = call %Slot @t2_fh_ropen(%Str %s)
+  store %Slot %n, %Slot* @t2_data_fh
+  ret %Slot %n
+ok:
+  ret %Slot %h
+}
+; readline: the next line (its newline kept), undef at the end or unopened.
+define internal %Slot @t2_fh_readline(%Slot %h) {
+entry:
+  %f = call %Fh* @t2_fh_ptr(%Slot %h)
+  %none = icmp eq %Fh* %f, null
+  br i1 %none, label %undef, label %chk
+chk:
+  %f0 = getelementptr %Fh, %Fh* %f, i32 0, i32 0
+  %d = load i8*, i8** %f0
+  %f1 = getelementptr %Fh, %Fh* %f, i32 0, i32 1
+  %n = load i64, i64* %f1
+  %f2 = getelementptr %Fh, %Fh* %f, i32 0, i32 2
+  %pos = load i64, i64* %f2
+  %more = icmp slt i64 %pos, %n
+  br i1 %more, label %read, label %undef
+read:
+  %rest = getelementptr i8, i8* %d, i64 %pos
+  %rl = sub i64 %n, %pos
+  %nl = call i8* @memchr(i8* %rest, i32 10, i64 %rl)
+  %found = icmp ne i8* %nl, null
+  %nli = ptrtoint i8* %nl to i64
+  %ri = ptrtoint i8* %rest to i64
+  %off = sub i64 %nli, %ri
+  %off1 = add i64 %off, 1
+  %ll = select i1 %found, i64 %off1, i64 %rl
+  %np = add i64 %pos, %ll
+  store i64 %np, i64* %f2
+  %ll1 = add i64 %ll, 1
+  %buf = call i8* @malloc(i64 %ll1)
+  call i8* @memcpy(i8* %buf, i8* %rest, i64 %ll)
+  %end = getelementptr i8, i8* %buf, i64 %ll
+  store i8 0, i8* %end
+  %line = call %Str @t2_str(i8* %buf, i64 %ll)
+  %ls = call %Slot @t2_box_str(%Str %line)
+  ret %Slot %ls
+undef:
+  %u = call %Slot @t2_slot(i8 0, i64 0)
+  ret %Slot %u
+}
+define internal %Array* @t2_fh_readlines(%Slot %h) {
+entry:
+  %a = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %l = call %Slot @t2_fh_readline(%Slot %h)
+  %t = extractvalue %Slot %l, 0
+  %end = icmp eq i8 %t, 0
+  br i1 %end, label %done, label %push
+push:
+  call void @t2_apush(%Array* %a, %Slot %l)
+  br label %loop
+done:
+  ret %Array* %a
+}
+define internal i1 @t2_fh_eof(%Slot %h) {
+entry:
+  %f = call %Fh* @t2_fh_ptr(%Slot %h)
+  %none = icmp eq %Fh* %f, null
+  br i1 %none, label %yes, label %chk
+chk:
+  %f1 = getelementptr %Fh, %Fh* %f, i32 0, i32 1
+  %n = load i64, i64* %f1
+  %f2 = getelementptr %Fh, %Fh* %f, i32 0, i32 2
+  %pos = load i64, i64* %f2
+  %at = icmp sge i64 %pos, %n
+  ret i1 %at
+yes:
+  ret i1 1
+}
+; a print to a handle: appended to its scalar; to one not open for writing, nothing.
+define internal void @t2_fh_print(%Slot %h, %Str %s) {
+entry:
+  %f = call %Fh* @t2_fh_ptr(%Slot %h)
+  %none = icmp eq %Fh* %f, null
+  br i1 %none, label %done, label %chk
+chk:
+  %f3 = getelementptr %Fh, %Fh* %f, i32 0, i32 3
+  %t = load %Slot*, %Slot** %f3
+  %not = icmp eq %Slot* %t, null
+  br i1 %not, label %done, label %write
+write:
+  %old = load %Slot, %Slot* %t
+  %os = call %Str @t2_slot_str(%Slot %old)
+  %ns = call %Str @t2_concat(%Str %os, %Str %s)
+  %nv = call %Slot @t2_box_str(%Str %ns)
+  store %Slot %nv, %Slot* %t
+  br label %done
+done:
+  ret void
+}
+; close: the handle itself shut (select may hold it): nothing left to read,
+; nowhere to write. True where it was open.
+define internal i1 @t2_fh_close(%Slot %h) {
+entry:
+  %f = call %Fh* @t2_fh_ptr(%Slot %h)
+  %none = icmp eq %Fh* %f, null
+  br i1 %none, label %no, label %shut
+shut:
+  %f1 = getelementptr %Fh, %Fh* %f, i32 0, i32 1
+  store i64 0, i64* %f1
+  %f3 = getelementptr %Fh, %Fh* %f, i32 0, i32 3
+  store %Slot* null, %Slot** %f3
+  ret i1 1
+no:
+  ret i1 0
+}
+; print with no handle, in a program that selects one: to the one selected.
+define internal void @t2_print_sel(%Str %s) {
+entry:
+  %h = load %Slot, %Slot* @t2_selected
+  %t = extractvalue %Slot %h, 0
+  %std = icmp eq i8 %t, 0
+  br i1 %std, label %out, label %fh
+out:
+  call void @t2_print(%Str %s)
+  ret void
+fh:
+  call void @t2_fh_print(%Slot %h, %Str %s)
+  ret void
+}
+; select(h, used): h the selected handle (undef STDOUT); the one before
+; handed back -- STDOUT's name, or (where it is used) a stop where it was a
+; handle.
+define internal %Slot @t2_select(%Slot %h, i1 %used) {
+entry:
+  %old = load %Slot, %Slot* @t2_selected
+  store %Slot %h, %Slot* @t2_selected
+  %t = extractvalue %Slot %old, 0
+  %std = icmp eq i8 %t, 0
+  %unused = xor i1 %used, 1
+  %ok = or i1 %std, %unused
+  br i1 %ok, label %name, label %stop
+name:
+  %s = call %Str @t2_str(i8* getelementptr ([13 x i8], [13 x i8]* @lit_stdout, i64 0, i64 0), i64 12)
+  %ss = call %Slot @t2_box_str(%Str %s)
+  ret %Slot %ss
+stop:
+  call void @t2_stop(i8* getelementptr ([62 x i8], [62 x i8]* @msg_select, i64 0, i64 0), i64 61)
+  unreachable
+}
+; select(NAME): STDOUT by its name; another, a stop.
+define internal %Slot @t2_select_name(%Slot %v, i1 %used) {
+entry:
+  %s = call %Str @t2_slot_str(%Slot %v)
+  %want = call %Str @t2_str(i8* getelementptr ([13 x i8], [13 x i8]* @lit_stdout, i64 0, i64 0), i64 12)
+  %c = call i64 @t2_strcmp(%Str %s, %Str %want)
+  %is = icmp eq i64 %c, 0
+  br i1 %is, label %std, label %stop
+std:
+  %u = call %Slot @t2_slot(i8 0, i64 0)
+  %r = call %Slot @t2_select(%Slot %u, i1 %used)
+  ret %Slot %r
+stop:
+  call void @t2_stop(i8* getelementptr ([62 x i8], [62 x i8]* @msg_select, i64 0, i64 0), i64 61)
+  unreachable
+}
 LL
 
 1;

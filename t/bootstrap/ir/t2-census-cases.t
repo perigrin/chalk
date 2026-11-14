@@ -51,18 +51,19 @@ my @CASES = qw(
     declarations:3 dereferencing:1 dereferencing:2 dereferencing:3
     dereferencing:4 dereferencing:5 dereferencing:6 dereferencing:7
     dereferencing:8 dynamic-scope:1 dynamic-scope:2 embedded-code:1
-    embedded-code:2 embedded-code:3 eval-replacement:1 hashes:1 hashes:2
-    hashes:3 hashes:4 heredocs:1 heredocs:2 heredocs:3
-    list-operators-in-context:1 list-operators-in-context:2
-    list-operators-in-context:4 list-operators-in-context:5 loading:1
-    loading:6 loops:1 loops:2 loops:3 loops:4 loops:5 loops:6 loops:7
-    loops:9 loops:10 loops:11 named-operators:1 named-operators:2
-    named-operators:3 named-operators:4 named-operators:5 named-operators:6
-    named-operators:7 named-operators:8 named-operators:9 names:1 names:3
-    names:4 names:5 numeric-point:1 numeric-point:2 numeric-point:3
-    numeric-point:4 numeric-point:5 numeric-radix:1 numeric-radix:2
-    numeric-radix:3 numeric-radix:4 numeric-radix:5 numeric-radix:6
-    packages:1 packages:2 packages:3 pod-and-data:1 pod-and-data:2
+    embedded-code:2 embedded-code:3 eval-replacement:1 handles:1 handles:2
+    handles:3 handles:4 hashes:1 hashes:2 hashes:3 hashes:4 heredocs:1
+    heredocs:2 heredocs:3 list-operators-in-context:1
+    list-operators-in-context:2 list-operators-in-context:4
+    list-operators-in-context:5 loading:1 loading:6 loops:1 loops:2 loops:3
+    loops:4 loops:5 loops:6 loops:7 loops:9 loops:10 loops:11
+    named-operators:1 named-operators:2 named-operators:3 named-operators:4
+    named-operators:5 named-operators:6 named-operators:7 named-operators:8
+    named-operators:9 names:1 names:3 names:4 names:5 numeric-point:1
+    numeric-point:2 numeric-point:3 numeric-point:4 numeric-point:5
+    numeric-radix:1 numeric-radix:2 numeric-radix:3 numeric-radix:4
+    numeric-radix:5 numeric-radix:6 packages:1 packages:2 packages:3
+    pod-and-data:1 pod-and-data:2 pod-and-data:3 pod-and-data:4
     quote-like-terms:5 range:3 read-position:1 read-position:2
     read-position:3 regex-delimiters:1 regex-delimiters:2 regex-delimiters:3
     regex-matching:1 regex-matching:2 regex-matching:3 regex-matching:4
@@ -72,7 +73,7 @@ my @CASES = qw(
     subroutines:9 subroutines:10 subroutines:11 symbol-table:4
     taking-references:1 taking-references:3 taking-references:4 unary:1
     unary:2 unary:3 unary:4 unary:5 ungated:1 ungated:2 ungated:4 vstrings:1
-    vstrings:2 writing:2
+    vstrings:2 writing:1 writing:2 writing:3 writing:4
 );
 
 my %case = map { ( $_->{id} => $_ ) } Chalk::CodeGen::Harness::T2Case::cases();

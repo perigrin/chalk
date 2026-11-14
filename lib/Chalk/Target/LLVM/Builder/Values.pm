@@ -115,6 +115,9 @@ sub type_of {
     # ** IS AN INTEGER where perl's is (an integer to a power, small enough),
     # else a number: which, at run time.
     return '%Slot' if $op eq 'Power';
+    # readline IN A LIST: every line left.
+    return ( $v->stamp // '' ) =~ /\A(?:List|Array)\z/ ? '%Array*' : '%Slot'   # static type
+        if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'readline';
     # A BITWISE OP's result is a number, or (perl's choice, on two strings) bytes.
     return '%Slot' if $op =~ /\A(?:BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/;
     # (LIST) x N: a list.
@@ -499,6 +502,9 @@ sub _value {
     if ($op eq 'Xor') {
         my ($x, $y) = map { $b->truth( $b->value($_) ) } $v->inputs->@[0, 1];
         return $b->as( $b->emit(op => 'Cmp', type => 'i1', inputs => [ $x, $y ], attr => { op => 'ne' }), $ty );
+    }
+    if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:open|close|eof|readline|select|sselect)\z/) {
+        return $b->as( $b->io_value($v), $ty );
     }
     if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:chr|ord|time|ftis|reverse|sprintf|lock)\z/) {
         return $b->builtin_value($v, $ty);
