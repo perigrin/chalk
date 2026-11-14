@@ -83,10 +83,12 @@ PROG
 
     # THE STRUCTURAL HALF. Behaviour alone cannot distinguish a real call from
     # a perfect inline -- both print 42 -- so the mechanism is asserted too.
-    like $ll, qr/^define .*\@"?main::twice"?/m,
+    # T2 names a sub's function @f_ and its name, `::` as `_` (its @_
+    # wrapper is @w_, a separate function that calls this one).
+    like $ll, qr/^define .*\@f_main_twice\(/m,
         'the sub has its own define'
         or diag('  no define: the body was substituted, not emitted');
-    like $ll, qr/call .*\@"?main::twice"?/,
+    like $ll, qr/call .*\@f_main_twice\(/,
         'and the call site calls it by name';
 };
 
@@ -104,7 +106,7 @@ PROG
     ok !defined $err, 'it lowers' or do { diag("  $err"); return };
     is $lli, $perl, 'lli agrees -- "xxxx" means each call ran the body twice';
 
-    my @defs = ($ll =~ /^define .*\@"?main::noisy"?/mg);
+    my @defs = ($ll =~ /^define .*\@f_main_noisy\(/mg);
     is scalar(@defs), 1, 'the body is emitted EXACTLY once, not per call site'
         or diag('  emitted ' . scalar(@defs) . ' times');
 };
