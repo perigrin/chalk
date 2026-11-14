@@ -419,7 +419,8 @@ sub array_value {
             pop @args if $v->can('memory_input') && $v->memory_input;
             my ($sep, @list) = @args;
             # ONE ARRAY is joined as it is; scalars (an array literal folded to
-            # its elements, `"@a"`) go into a fresh array first.
+            # its elements, `"@a"`) and lists (a call's) go into a fresh array
+            # first, each list's elements in its place.
             my $arr = ( @list == 1 && _is_list($list[0]) ) ? $b->array_of($list[0]) : do {
                 my $t = $b->emit(op => 'NewArray', type => '%Array*');
                 for my $e (@list) {
