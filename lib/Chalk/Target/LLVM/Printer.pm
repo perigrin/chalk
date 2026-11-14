@@ -66,6 +66,9 @@ sub print_module {
         # ITS WRAPPER (a method's entry) gives a list context a reference to a
         # list: the sub's own (a list return), or one of its one value.
         my @norm = $fn->{listret} ? ('  ret %Slot %r') : ('  %rn = call %Slot @t2_list_of(%Slot %r, i1 %w)', '  ret %Slot %rn');
+        # A NAMED SUB'S CODE VALUE (`\&f`): its entry is its wrapper's, no cells.
+        push @L, "define internal %Slot $fn->{name}_cw(%Array* %args, %Slot** %env) {",
+            "  %r = call %Slot $fn->{name}_w(%Array* %args)", '  ret %Slot %r', '}', '' if $fn->{coderef};
         if ($fn->{list}) {   # @_ already an %Array
             push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {", '  %w = load i1, i1* @t2_want',
                 "  %r = call %Slot $fn->{name}(%Array* %args)", @norm, '}', '';

@@ -418,6 +418,23 @@ sub code_value {
     return $b->emit(op => 'CodeNew', type => '%Slot', inputs => [$env], attr => { fn => $fn->{name} });
 }
 
+# code_ref($Constant) -> `\&name`: a code value (tag 8) of the named sub, its
+# wrapper's entry (`_cw`, as a closure's) and no cells. A sub the program
+# does not define here (XS, perl's own, one never loaded) is refused.
+sub code_ref {
+    my ($b, $c) = @_;
+    my $q = $c->value // out('a code reference of no name');
+    my ($pkg, $short) = $q =~ /\A(.*)::(\w+)\z/ ? ( $1, $2 ) : ( 'main', $q );
+    my $cls = $b->{mop} ? $b->{mop}->for_class($pkg) : undef;
+    my ($sub) = $cls ? grep { $_->name eq $short && $_->graph } $cls->subs : ();
+    out("a reference to a sub not here ($q)") unless $sub;
+    my $fn = $b->func($sub, $q);
+    out("a reference to a closure's sub ($q)") if $fn->{closure};
+    $fn->{coderef} = 1;   # (its `_cw`, the code value's entry, is printed)
+    my $env = $b->emit(op => 'EnvNew', type => '%Slot**', inputs => [ $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }) ]);
+    return $b->emit(op => 'CodeNew', type => '%Slot', inputs => [$env], attr => { fn => $fn->{name} });
+}
+
 # code_call($Call, $code, @args) -> calling a code value: @_ built (lists
 # flattened), its function found (a stop if it is no code), called with its
 # cells, in the call's context.

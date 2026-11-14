@@ -257,6 +257,8 @@ sub array_value {
     if ($op eq 'Ref') {
         # \@a: a reference to the array itself (one array, two names).
         my $t = $in[0];
+        # \&name: a code value of the named sub.
+        return $b->code_ref($t) if blessed($t) && $t->operation eq 'Constant' && ( $t->const_type // '' ) eq 'code';
         # \$x: a reference to the variable itself, kept on the heap (tag 9).
         # (NOT IN A LOOP BODY OR AN ARM: a `my` there is a new variable each time,
         # and the one cell made at entry would be all of them -- `2,2` for perl's `1,2`)
