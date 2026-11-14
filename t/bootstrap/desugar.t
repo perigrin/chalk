@@ -336,7 +336,10 @@ Atom ::= Identifier | InlineRegex ;};
     ];
 
     eval { Chalk::Bootstrap::Desugar::desugar_grammar($grammar) };
-    like($@, qr/unknown quantifier/i, 'unknown quantifier dies with error');
+    # 4fa5c148 reworded the error to "Unknown or non-desugared quantifier"
+    # (X? is no longer desugared, so it names both cases).
+    like($@, qr/unknown or non-desugared quantifier '!' on symbol 'X'/i,
+        'unknown quantifier dies with error naming it');
 }
 
 # Test 15: Quantified terminal symbols are handled correctly
