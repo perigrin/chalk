@@ -672,6 +672,7 @@ sub func {
     local $b->{tail} = $tail ? { call => refaddr($tail), want => $want } : undef;
     $b->make_constant_arrays($g->component);
     local $b->{jumps} = {};   # this function's early exits
+    local $b->{loopx};        # (a loop its caller is walking is not its)
     $b->walk($start);
     out('an early exit to a merge never reached') if $b->{jumps}->%*;
     out('an eval left open at the end') if $b->{evals}->@*;
