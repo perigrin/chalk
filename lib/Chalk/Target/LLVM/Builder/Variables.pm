@@ -47,14 +47,21 @@ sub hash_reads_settled {
 # _through_ref($read) -> true for a read through a reference: a hash element,
 # or an array's element, count or copy where the array is a scalar's.
 sub _through_ref {
-    my ($b, $n) = @_;
+    my ($b, $n, $seen) = @_;
     my $op = $n->operation;
     # (a foreach alias read is its element's read)
-    if ( $op eq 'PostfixDeref' && ( my $el = $n->alias_element ) ) { return $b->_through_ref($el) }
+    if ( $op eq 'PostfixDeref' && ( my $el = $n->alias_element ) ) { return $b->_through_ref($el, $seen) }
     if ($op =~ /\A(?:Subscript|Exists)\z/ && ( $n->can('kind') ? $n->kind // '' : '' ) eq 'hash') {
         return $n->inputs->[0]->is_named_hash || $n->inputs->[0]->operation eq 'FieldAccess' ? 0 : 1;   # a `my %h`, a hash field: never a stop
     }
-    return 0 unless $op =~ /\A(?:Subscript|Count|PostfixDeref)\z/;
+    # A READ OF WHAT IS READ THROUGH A REFERENCE (`join "", sort keys
+    # %{$s->{k}}`) may stop as that one may: made where it stands too.
+    unless ($op =~ /\A(?:Subscript|Count|PostfixDeref)\z/) {
+        return 0 if $op =~ /\A(?:Phi|Constant|PadAccess|Parameter|ArgsSource|MemStart)\z/ || ( $seen //= {} )->{ refaddr($n) }++;
+        my $m = $n->memory_operand;
+        return scalar grep { blessed($_) && !( blessed($m) && refaddr($_) == refaddr($m) ) && !$_->is_memory_version
+                             && $b->_through_ref($_, $seen) } $n->inputs->@*;
+    }
     my $c = $n->inputs->[0];
     $c = $c->inputs->[0] while $c isa Chalk::IR::Node && $c->is_array_deref;
     return 0 unless blessed($c);
