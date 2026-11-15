@@ -10,6 +10,7 @@ use File::Basename qw(dirname);
 use File::Spec;
 use File::Path qw(make_path);
 use JSON::PP ();
+use Scalar::Util ();
 use Chalk::IR::Node::EntryDef;
 
 # docs/plans/2026-11-15-perls-special-hashes-have-mop-metaobjects.md, step 1:
@@ -48,12 +49,60 @@ sub is_built_in ($name) { return $BUILT_IN{ inc_key($name) } ? 1 : 0 }
 # `use warnings`, a `use VERSION` of 5.35 or later, $^W, a module B::SoN
 # followed (its own code may turn them on). Chalk raises none of perl's own
 # warnings, so a __WARN__ handler there would miss calls perl makes.
+#
+# perl's warning switches are B::SoN's `dowarn`: -X turns every warning off
+# (`use warnings` too), -W every one on (`no warnings` too), -w (or a
+# compile-time $^W) those no `use warnings` decides. A wire that does not say
+# them is refused by name.
+#
+# Where warnings may be on but every handler the program can store in
+# $SIG{__WARN__} does nothing (warn_handlers_do_nothing), whether perl calls
+# one changes nothing: undef.
 sub perl_may_warn (@nodes) {
-    return 'use warnings' if $Chalk::IR::Serialize::JSON::USED_MODULES{warnings};
-    return 'a use VERSION of 5.35 or later' if grep { $_ >= 5.035 } keys %Chalk::IR::Serialize::JSON::USED_VERSIONS;
-    return 'a module compiled in' if %Chalk::IR::Serialize::JSON::FOLLOWED;
-    return '$^W' if grep { $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq "\cW" } @nodes;
-    return undef;
+    my $sw = $Chalk::IR::Serialize::JSON::DOWARN
+        // return "the wire does not say perl's warning switches (-w, -W, -X)";
+    return undef if $sw->{all_off};
+    my $why = $sw->{all_on} ? '-W'
+        : $Chalk::IR::Serialize::JSON::USED_MODULES{warnings} ? 'use warnings'
+        : ( grep { $_ >= 5.035 } keys %Chalk::IR::Serialize::JSON::USED_VERSIONS ) ? 'a use VERSION of 5.35 or later'
+        : %Chalk::IR::Serialize::JSON::FOLLOWED ? 'a module compiled in'
+        : $sw->{on} ? '-w or $^W'
+        : ( grep { $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq "\cW" } @nodes ) ? '$^W'
+        : return undef;
+    return undef if warn_handlers_do_nothing(@nodes);
+    return $why;
+}
+
+# warn_handlers_do_nothing(@nodes) -> true where every handler the program
+# (all of whose nodes are given) can put in $SIG{__WARN__} is a sub whose body
+# does nothing (`sub { }`): each use of %SIG is an element of a constant key,
+# and each store into `__WARN__` -- a `local` puts back what was there -- is
+# of such a sub. Anything else (another key's name made at run time, %SIG
+# read or referred to whole, a handler with a body, a module compiled in that
+# may set one where the wire does not show) is no proof: false.
+sub warn_handlers_do_nothing (@nodes) {
+    return 0 if %Chalk::IR::Serialize::JSON::FOLLOWED;
+    my %empty_op = map { ( $_ => 1 ) } qw(Start Return Constant MemStart);
+    my $does_nothing = sub ($v) {
+        return 0 unless Scalar::Util::blessed($v) && $v->operation eq 'AnonSub' && !grep { Scalar::Util::blessed($_) } $v->inputs->@*;
+        my $sub = $v->sub;
+        return 0 unless Scalar::Util::blessed($sub) && $sub->can('graph') && $sub->graph;
+        return !grep { !$empty_op{ $_->operation } } $sub->graph->component;
+    };
+    for my $sig (grep { $_->operation eq 'EntryDef' && ( $_->metaobject_class // '' ) eq 'Chalk::Impl::SIG' } @nodes) {
+        for my $el (grep { Scalar::Util::blessed($_) } ( $sig->consumers // [] )->@*) {
+            my ($h, $k) = $el->inputs->@*;
+            return 0 unless $el->operation eq 'Subscript' && Scalar::Util::refaddr($h) == Scalar::Util::refaddr($sig)
+                && Scalar::Util::blessed($k) && $k->operation eq 'Constant' && defined $k->value;
+            next unless $k->value eq '__WARN__';
+            for my $u (grep { Scalar::Util::blessed($_) } ( $el->consumers // [] )->@*) {
+                my ($t, $v) = $u->inputs->@*;
+                next if $u->operation eq 'Assign' && Scalar::Util::refaddr($t) == Scalar::Util::refaddr($el) && $does_nothing->($v);
+                return 0;
+            }
+        }
+    }
+    return 1;
 }
 
 # file_of($class) -> the file an Impl class is written in.

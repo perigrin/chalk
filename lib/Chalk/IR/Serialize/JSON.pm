@@ -1258,6 +1258,12 @@ sub from_json ($json_string) {
     # The perl versions a `use VERSION` names (5.036): v5.35 and later turn
     # warnings on.
     our %USED_VERSIONS = ();
+    # PERL'S WARNING SWITCHES for the run, B::SoN's `dowarn`: { on => -w or
+    # $^W, all_on => -W, all_off => -X }, each true or false; undef where the
+    # wire does not say (a B::SoN before 2026-11-15).
+    our $DOWARN = ref $data->{dowarn} eq 'HASH'
+        ? { map { ( $_ => ( $data->{dowarn}{$_} ? 1 : 0 ) ) } qw(on all_on all_off) }
+        : undef;
     # BEGIN and END blocks of main with effects: loaded as graphs of their
     # own, [phase, name] in source order; the program lowering runs a BEGIN
     # before its main line and an END after it (pvm 258).

@@ -13,6 +13,7 @@ require Chalk::CodeGen::Harness::T2Case;
 # census case here (docs/plans/2026-11-14-context-only-census.tsv lists the rest).
 my @CASES = qw(
     adjacency-01_literals:1 adjacency-05_scoping:1 adjacency-06_control:2
+    adjacency-07_subroutines:1 argument-extent:3
     adjacency-09_regex:1 aggregate-operators:1 aggregate-operators:2
     aggregate-operators:3 aggregate-operators:4 aggregate-operators:5
     aggregate-operators:6 aggregates-in-context:1 aggregates-in-context:2

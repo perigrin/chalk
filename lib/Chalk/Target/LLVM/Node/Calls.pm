@@ -10,7 +10,7 @@ class Chalk::Target::LLVM::Node::Call :isa(Chalk::Target::LLVM::Node) {
 }
 class Chalk::Target::LLVM::Node::Die :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_die') } }
 class Chalk::Target::LLVM::Node::DieMsg :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_die_msg') } }
-# warn of a message: its __WARN__ handler called with it, else STDERR; 1.
+# warn of a message and its site (" at FILE line N.\n"): its __WARN__ handler called with it, else STDERR; 1.
 class Chalk::Target::LLVM::Node::Warn :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_warn') } }
 # a die's message after its __DIE__ handler: the handler's own where it died.
 class Chalk::Target::LLVM::Node::DieHook :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_die_hook') } }

@@ -78,20 +78,32 @@ for my $case (
     like(Chalk::Impl::link_json( $wire->(q{$SIG{USR1} = "IGNORE";}) ), qr/Chalk::Impl::SIG::FETCH/, 'one with %SIG links Chalk::Impl::SIG');
 }
 
-# A WARN B::SoN PUTS ON NO CONTROL CHAIN (inside an expression: `my $x = warn
-# ...`) runs where nothing says: refused by name, never run out of order.
-{
-    my ($ll, $why) = t2(q{local $SIG{__WARN__} = sub { print "h: $_[0]" }; my $x = warn "a\n"; print "b\n"; print $x, "\n";});
-    ok(!defined $ll, 'a warn on no control chain: not lowered');
-    like($why // '', qr/a warn B::SoN places on no control chain/, '... refused by name');
-}
-
-# A WARN'S MESSAGE NOT ENDING IN A NEWLINE names its file and line, which
-# B::SoN does not give a warn: refused by name, never printed without them.
-{
-    my ($ll, $why) = t2(q{local $SIG{__WARN__} = sub { print "got: $_[0]" }; warn "no newline"; print "x\n";});
-    ok(!defined $ll, 'a warn whose message may lack its file and line: not lowered');
-    like($why // '', qr/a warn whose message may not end in a newline/, '... refused by name');
+# A WARN INSIDE AN EXPRESSION is on the control chain (B::SoN places it as
+# print), and a message not ending in a newline gets the file and line B::SoN
+# gives the warn, as a die's: each runs where perl runs it, says what perl says.
+for my $case (
+    [ q{local $SIG{__WARN__} = sub { print "h: $_[0]" }; my $x = warn "a\n"; print "b\n"; print $x, "\n";},
+      'a warn whose value is stored runs where it stands' ],
+    [ q{my $n = 0; local $SIG{__WARN__} = sub { $n++ }; my @g = (warn "a\n", "b"); my @c = (warn("a\n"), "b"); print scalar(@g), scalar(@c), " $n\n";},
+      'warns inside lists call the handler before the count is read' ],
+    [ q{local $SIG{__WARN__} = sub { print "got: $_[0]" }; warn "no newline"; print "x\n";},
+      'a message without a newline names its file and line' ],
+    [ qq{print "a\\n";\n\nmy \@g = (warn("no", "newline"), 1);\nprint scalar(\@g), "\\n";},
+      'with no handler, file and line on STDERR' ],
+    [ q{sub f { warn "in f" } local $SIG{__WARN__} = sub { print "h: $_[0]" }; my $r = f(); print "r=$r\n";},
+      "a sub's last-statement warn names its own line" ],
+) {
+    my ($src, $name) = $case->@*;
+    my ($ll, $why, $pl) = t2($src);
+    ok(defined $ll, "$name: lowered through T2") or diag $why;
+    next unless defined $ll;
+    my ($lf, $llp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+    print $lf $ll; close $lf;
+    my $got  = run("timeout 20 $LLI $llp");
+    my $want = run("$^X $pl");
+    is($got->[0], $want->[0], "$name: perl's output");
+    is($got->[1], $want->[1], "$name: perl's message");
+    is($got->[2], $want->[2], "$name: perl's exit code");
 }
 
 # PERL'S OWN WARNINGS reach a __WARN__ handler (an argument not numeric under
@@ -105,6 +117,76 @@ for my $src (
     my ($ll, $why) = t2($src);
     ok(!defined $ll, "perl may warn of its own: not lowered: $src");
     like($why // '', qr/%SIG where perl may raise warnings of its own/, '... refused by name');
+}
+
+# THE -w SWITCH (B::SoN's `dowarn`, a fact of the program) turns perl's own
+# warnings on where no `use warnings` is: refused by name. -X turns every one
+# off, `use warnings` too: then perl raises none, and the handler is lowered.
+{
+    my ($ll, $why) = t2(qq{#!perl -w\nmy \$n = 0; \$SIG{__WARN__} = sub { \$n++ }; my \$x = "5"; my \$r = \$x + "3abc"; print "\$r \$n\\n";\n});
+    ok(!defined $ll, '#!perl -w: not lowered');
+    like($why // '', qr/%SIG where perl may raise warnings of its own \(-w or \$\^W\)/, '... refused by name');
+}
+{
+    my ($ll, $why) = t2(qq{#!perl -W\nno warnings; my \$n = 0; \$SIG{__WARN__} = sub { \$n++ }; my \$x = "5"; my \$r = \$x + "3abc"; print "\$r \$n\\n";\n});
+    ok(!defined $ll, '#!perl -W under no warnings: not lowered');
+    like($why // '', qr/%SIG where perl may raise warnings of its own \(-W\)/, '... refused by name');
+}
+{
+    my $src = qq{#!perl -X\nuse warnings; my \$n = 0; \$SIG{__WARN__} = sub { \$n++ }; my \$x = "5"; my \$r = \$x + "3abc"; warn "w\\n"; print "\$r \$n\\n";\n};
+    my ($ll, $why, $pl) = t2($src);
+    ok(defined $ll, '#!perl -X: perl raises none of its own, lowered') or diag $why;
+    if (defined $ll) {
+        my ($lf, $llp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+        print $lf $ll; close $lf;
+        is(run("timeout 20 $LLI $llp")->[0], run("$^X $pl")->[0], "#!perl -X: perl's output");
+    }
+}
+
+# A HANDLER THAT DOES NOTHING (`sub { }`, pvm adjacency-07_subroutines:1)
+# makes perl's own warnings, called or not, no different: lowered where
+# warnings are on. One that does something stays refused (above).
+for my $src (
+    q{use v5.36; local $SIG{__WARN__} = sub { }; my @g = (warn "a", "b"); my $r = "5" + "3abc"; print scalar(@g), " $r\n";},
+    q{use warnings; $SIG{__WARN__} = sub { }; my $r = "5" + "3abc"; print "$r\n";},
+) {
+    my ($ll, $why, $pl) = t2($src);
+    ok(defined $ll, "a handler that does nothing: lowered: $src") or diag $why;
+    next unless defined $ll;
+    my ($lf, $llp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+    print $lf $ll; close $lf;
+    my $got  = run("timeout 20 $LLI $llp");
+    my $want = run("$^X $pl");
+    is($got->[0], $want->[0], "... perl's output");
+    is($got->[2], $want->[2], "... perl's exit code");
+}
+# ...but not where another handler may be stored, or the one stored is code
+# that runs.
+for my $src (
+    q{use warnings; my $n = 0; $SIG{__WARN__} = sub { }; $SIG{__WARN__} = sub { $n++ } if @ARGV == 0; my $r = "5" + "3abc"; print "$r $n\n";},
+    q{use warnings; my $k = "__WARN__"; $SIG{$k} = sub { print "h\n" }; my $r = "5" + "3abc"; print "$r\n";},
+    q{use warnings; $SIG{__WARN__} = sub { }; my $s = \%SIG; $s->{__WARN__} = sub { print "h: $_[0]" }; my $r = "5" + "3abc"; print "$r\n";},
+) {
+    my ($ll, $why) = t2($src);
+    ok(!defined $ll, "a handler that may do something: not lowered: $src");
+    like($why // '', qr/%SIG where perl may raise warnings of its own/, '... refused by name');
+}
+
+# A WIRE THAT DOES NOT SAY perl's warning switches (an older B::SoN): %SIG
+# is refused by name, never guessed.
+{
+    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh q{$SIG{__WARN__} = sub { print "h: $_[0]" }; warn "a\n";}; close $fh;
+    my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null);
+    require JSON::PP;
+    my $d = JSON::PP->new->decode($json);
+    ok(exists $d->{dowarn}, 'B::SoN says the switches');
+    delete $d->{dowarn};
+    my $select = sub ($graphs, $mop) { my $g = $graphs->{'main::__PROGRAM__'} or return (); ([ 'main::__PROGRAM__', $g->returns->[0] ]) };
+    my ($units, undef, undef, $err) = Chalk::CodeGen::Pipeline->new->run_detail(JSON::PP->new->encode($d), $select, program_mode => 1);
+    my $u = ( $units // [] )->[0] // {};
+    ok(!( $u->{ok} && ( $u->{path} // '' ) eq 't2' ), 'a wire without them: not lowered by T2');
+    like($err // $u->{path_why} // $u->{err} // '', qr/does not say perl's warning switches/, '... refused by name');
 }
 
 done_testing;

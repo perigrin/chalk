@@ -2043,7 +2043,7 @@ exit:
 @lit_h_default = private unnamed_addr constant [8 x i8] c"DEFAULT\00"
 @lit_h_ignore = private unnamed_addr constant [7 x i8] c"IGNORE\00"
 @msg_h_named = private unnamed_addr constant [101 x i8] c"chalk: refused at run time: a %SIG handler other than a code value (a sub by its name, a reference)\0A\00"
-@msg_warn_at = private unnamed_addr constant [141 x i8] c"chalk: refused at run time: a warn whose message does not end in a newline (perl adds its file and line, which B::SoN does not give a warn)\0A\00"
+@msg_warn_empty = private unnamed_addr constant [103 x i8] c"chalk: refused at run time: a warn of an empty message (perl warns of $@, or that something is wrong)\0A\00"
 define internal void @t2_sig_set(%Slot %h) {
   store %Slot %h, %Slot* @t2_sig
   ret void
@@ -2099,25 +2099,30 @@ define internal void @t2_call_handler(%Slot %c, %Str %m) {
   store i1 %w, i1* @t2_want
   ret void
 }
-; t2_warn(msg) -> 1: perl's warn -- its __WARN__ handler called with the
-; message, else the message to STDERR. A message not ending in a newline
-; would need its file and line: a stop.
-define internal %Slot @t2_warn(%Str %m) {
+; t2_warn(msg, at) -> 1: perl's warn -- its message (" at FILE line N.\n",
+; the site B::SoN gives the warn, added where it does not end in a newline)
+; to its __WARN__ handler, else to STDERR. An empty message (perl's is $@'s,
+; or "Warning: something's wrong"): a stop.
+define internal %Slot @t2_warn(%Str %m0, %Str %at) {
 entry:
-  %n = extractvalue %Str %m, 1
+  %n = extractvalue %Str %m0, 1
   %empty = icmp eq i64 %n, 0
-  br i1 %empty, label %noat, label %last
+  br i1 %empty, label %none, label %last
+none:
+  call void @t2_stop(i8* getelementptr ([103 x i8], [103 x i8]* @msg_warn_empty, i64 0, i64 0), i64 102)
+  unreachable
 last:
-  %p = extractvalue %Str %m, 0
+  %p = extractvalue %Str %m0, 0
   %li = sub i64 %n, 1
   %lp = getelementptr i8, i8* %p, i64 %li
   %lc = load i8, i8* %lp
   %nl = icmp eq i8 %lc, 10
-  br i1 %nl, label %go, label %noat
-noat:
-  call void @t2_stop(i8* getelementptr ([141 x i8], [141 x i8]* @msg_warn_at, i64 0, i64 0), i64 140)
-  unreachable
+  br i1 %nl, label %go, label %addat
+addat:
+  %ma = call %Str @t2_concat(%Str %m0, %Str %at)
+  br label %go
 go:
+  %m = phi %Str [ %m0, %last ], [ %ma, %addat ]
   %k = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_h_warn, i64 0, i64 0), i64 8)
   %h = call %Slot @t2_sig_handler(%Str %k)
   %t = extractvalue %Slot %h, 0

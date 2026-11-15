@@ -741,27 +741,27 @@ sub _glob_of {
 
 # warn LIST: its message (the list joined) handed to its __WARN__ handler, else
 # to STDERR -- t2_warn asks %SIG (the handler table) -- and true. Where it
-# runs is its place on the control chain; one B::SoN puts on none (a warn
-# inside an expression) runs nowhere it says: refused. A message not ending in
-# a newline names its file and line, which B::SoN does not give a warn:
-# refused where its last part is a constant, a stop at run time otherwise.
+# runs is its place on the control chain; one B::SoN puts on none runs
+# nowhere it says: refused. A message not ending in a newline gets " at FILE
+# line N.\n", the site B::SoN gives the warn (as a die's).
 sub warn_value {
     my ($b, $v, $ty) = @_;
     out('a warn B::SoN places on no control chain (when it runs is not known)')
         unless $v->can('control_in') && blessed( $v->control_in );
+    out('a warn B::SoN gives no file and line (perl names them where its message does not end in a newline)')
+        unless defined $v->line;
     my @a = grep { blessed($_) } $v->inputs->@*;
     pop @a if $v->can('memory_input') && $v->memory_input;
     out('a warn of nothing (perl warns of $@, or that something is wrong)') unless @a;
-    out('a warn whose message may not end in a newline (perl adds its file and line, which B::SoN does not give a warn)')
-        if $a[-1]->operation eq 'Constant' && !_is_list( $a[-1] ) && ( $a[-1]->value // '' ) !~ /\n\z/;
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
     for my $e (@a) {
         if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($e) ]) }
         else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as( $b->value($e), '%Slot' ) ]) }
     }
     my $m = $b->emit(op => 'Join', type => '%Str', inputs => [ $b->const_str(''), $arr ]);
+    my $at = $b->const_str( ' at ' . ( $v->file // '-' ) . ' line ' . $v->line . ".\n" );
     $b->hash_reads_settled('a warn');   # (its handler may store)
-    return $b->as( $b->emit_call(op => 'Warn', type => '%Slot', inputs => [$m]), $ty );
+    return $b->as( $b->emit_call(op => 'Warn', type => '%Slot', inputs => [ $m, $at ]), $ty );
 }
 
 # builtin_value($Call, $ty) -> a builtin of one value: chr, ord, time, -e,
