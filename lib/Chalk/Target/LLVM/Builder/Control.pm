@@ -114,24 +114,21 @@ sub walk {
         # FETCHSIZE or EXISTS call, made here, in order.
         elsif ($op eq 'RegexSubst' || $op eq 'Transliterate') { $b->regex_subst_stmt($s); push $b->{passed}->@*, $s; $ctl = $s }
         elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref|FieldAccess|RegexMatch|Match|BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/
-               || $op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:keys|values|join|sort|caller|pos|each)\z/) {
+               || $op eq 'Call' && ( t2_builtin( $s, 'in_place' ) // '' ) eq 'passed') {
             $b->value($s);
             push $b->{passed}->@*, $s;
             $ctl = $s;
         }
-        # A HANDLE'S open, close, readline, eof, select, a format's formline, where it stands.
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:open|close|eof|readline|select|sselect|formline)\z/) {
+        # A HANDLE'S open, close, readline, eof, select, where it stands. (A
+        # format's formline, a tie OR untie -- every later access of the
+        # container is the new metaobject's -- and a bless: %T2_BUILTIN's in_place.)
+        elsif ($op eq 'Call' && $s->does_handle_io) {
             $b->value($s);
             push $b->{passed}->@*, $s;
             $ctl = $s;
         }
-        # A tie OR untie in place: every later access of the container is the new metaobject's.
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:tie|untie|bless)\z/) {
-            $b->value($s);
-            push $b->{passed}->@*, $s;
-            $ctl = $s;
-        }
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:push|unshift|shift|pop)\z/) {
+        # A CHANGE TO AN ARRAY (push, unshift, shift, pop; a splice is not T2's).
+        elsif ($op eq 'Call' && $s->mutates_array) {
             $b->array_stmt($s);
             push $b->{passed}->@*, $s;
             $ctl = $s;
@@ -321,7 +318,7 @@ sub walk {
         # stores it into its hash, in place.
         elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'Hash') { $ctl = $s }
         # A chdir OR A require is made where it stands (the next -d reads its cwd).
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) =~ /\A(?:chdir|require)\z/) { $b->value($s); $ctl = $s }
+        elsif ($op eq 'Call' && ( t2_builtin( $s, 'in_place' ) // '' ) eq 'value') { $b->value($s); $ctl = $s }
         # A lock is a no-op without threads (its operand the variable, not a value).
         elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'lock') { $ctl = $s }
         # `$#a = N` where it stands: the array resized (t2_aset_len).

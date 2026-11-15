@@ -244,7 +244,7 @@ sub _use_counts {
         if ($op eq 'ArrayLiteral' || $op eq 'Print'
             || $op eq 'Call' && ( $u->dispatch_kind // '' ) eq 'direct'
             || $op eq 'Call' && ( $u->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ && !$at0   # not the invocant, nor the code
-            || $op eq 'Call' && ( $u->name // '' ) =~ /\A(?:push|unshift|join)\z/ && !$at0
+            || $op eq 'Call' && $u->takes_a_list && !$at0   # (push's list, join's: not its array, its separator)
             || $op eq 'ListAppend' && $at1
             || $op eq 'Return' && $u->inputs->@* == 2 && $at0
             || $op eq 'Assign' && $u->can('targets') && defined $u->targets) { $list++ }   # `my ($x, $y) = f()`
@@ -281,14 +281,14 @@ sub list_only {
         next if $op eq 'Count' && $at0;
         # (a hash's: its elements, keys and values are the hash's own)
         next if $o{hash_ok} && $at0 && ( $op =~ /\A(?:Subscript|Exists|Delete)\z/
-                                         || $op eq 'Call' && ( $u->name // '' ) =~ /\A(?:keys|values|each)\z/ );
+                                         || $op eq 'Call' && $u->takes_a_hash );
         next if $op eq 'Subscript' && $at0 && @pos == 1 && ( $u->can('kind') ? $u->kind // 'array' : 'array' ) eq 'array';
         next if $op eq 'Slice' && !grep { $_ == $u->inputs->$#* } @pos;   # its indices
         next if $op eq 'ListAppend' && !$at0;
         next if $op eq 'TernaryExpr' && !$at0;   # an arm: the choice's own use decides
         next if $op eq 'Assign' && $u->can('targets') && defined $u->targets;
         next if $op eq 'Call' && ( $u->is_sub_call && !( $at0 && ( $u->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ )
-                                   || ( $u->takes_a_list || ( $u->name // '' ) =~ /\A(?:push|unshift|join)\z/ ) && !$at0 );
+                                   || $u->takes_a_list && !$at0 );
         out("$what taken as a scalar ($op)");
     }
 }

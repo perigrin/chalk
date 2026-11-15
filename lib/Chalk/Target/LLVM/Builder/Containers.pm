@@ -97,14 +97,14 @@ sub hash_value {
         } ( $v->consumers // [] )->@*;
         return $b->emit(op => 'Caller', type => '%Array*', inputs => [$depth]);
     }
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
+    if ($op eq 'Call' && $v->lists_a_hash) {
         # %$r READ WHOLE: the hash the reference holds; an undefined one is an
         # empty hash here, as in perl (a store through it would autovivify: not this).
         my $h = blessed($in[0]) && $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%'
             ? $b->emit(op => 'HDerefR', type => '%Slot', inputs => [ $b->as($b->value( $in[0]->inputs->[0] ), '%Slot') ])
             : $b->hash_of($in[0]);
-        return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]) if $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar';
-        return $b->emit(op => $v->name eq 'keys' ? 'HKeys' : 'HValues', type => '%Array*', inputs => [$h]);
+        return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]) if $v->lists_a_hash eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar';
+        return $b->emit(op => $v->lists_a_hash eq 'keys' ? 'HKeys' : 'HValues', type => '%Array*', inputs => [$h]);
     }
     # each %h IN A LIST: its next key and value, or none (and it starts over).
     # In scalar context (the key alone) not T2's.
@@ -115,12 +115,12 @@ sub hash_value {
         # (a value made where it is used, or never): where they run against an
         # each is not known. Refused where the program has one.
         out('an each in a program with a keys or values (which reset it, B::SoN places them nowhere)')
-            if grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) =~ /\A(?:keys|values)\z/ } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
+            if grep { $_->operation eq 'Call' && $_->resets_iterator } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
         return $b->emit(op => 'Each', type => '%Array*', inputs => [ $b->hash_of($in[0]) ]);
     }
     # sort (by string or by number, either way) and reverse, of a list: a new
     # list. A sort with its own comparator is not T2's yet.
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:sort|reverse)\z/
+    if ($op eq 'Call' && $v->reorders_list
             && ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/) {   # static type
         # A SORT WITH ITS OWN COMPARATOR (a block, a named sub): a function of
         # no arguments, called for each pair with $a and $b -- the sort
@@ -490,7 +490,7 @@ sub array_of {
                          || $n->is_package_aggregate && $n->sigil eq '@'
                          || $n->operation eq 'FieldAccess' && $b->type_of($n) eq '%Array*'
                          || $n->operation eq 'Repeat' && $b->type_of($n) eq '%Array*'
-                         || $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // q{} ) =~ /\A(?:keys|values|sort|reverse|caller|readline|each|unpack|glob|localtime)\z/ )) {
+                         || $n->operation eq 'Call' && $n->returns_a_list )) {
         my $a = $b->value($n);
         return $a if $a->type eq '%Array*';
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]

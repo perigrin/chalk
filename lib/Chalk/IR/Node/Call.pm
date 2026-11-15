@@ -199,6 +199,34 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
         return ( ( $sig->{arg_types} // [] )->[0] // '' ) eq 'Array' ? 1 : 0;
     }
 
+    # takes_a_hash -> true for a builtin that takes the hash it is given first
+    # whole (keys, values, each): its signature takes the Hash itself there,
+    # not a list of its pairs.
+    method takes_a_hash() {
+        return 0 unless $self->is_builtin;
+        my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin( $name // '' ) or return 0;
+        return ( ( $sig->{arg_types} // [] )->[0] // '' ) eq 'Hash' ? 1 : 0;
+    }
+
+    # returns_a_list -> true for a builtin whose value in list context is a
+    # list: its result type is List (keys, values, each, sort, splice, split,
+    # reverse, caller, readline, unpack, glob, localtime).
+    method returns_a_list() { return ( $self->result_type // '' ) eq 'List' ? 1 : 0 }
+
+    # lists_a_hash -> 'keys' or 'values' for keys and values (a hash's keys or
+    # its values; their count in scalar context), else undef.
+    method lists_a_hash() { return $self->is_builtin ? Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'lists_hash' ) : undef }
+
+    # resets_iterator -> true for keys and values: each starts the hash over.
+    method resets_iterator() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'resets_iterator' ) ? 1 : 0 }
+
+    # reorders_list -> true for sort and reverse: its LIST in another order.
+    method reorders_list() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'reorders' ) ? 1 : 0 }
+
+    # does_handle_io -> true for an operation on a filehandle (open, close,
+    # eof, readline, select, four-argument select).
+    method does_handle_io() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'handle_io' ) ? 1 : 0 }
+
     # changes_case -> true for lc, uc, lcfirst, ucfirst.
     method changes_case() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'changes_case' ) ? 1 : 0 }
 

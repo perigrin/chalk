@@ -557,7 +557,7 @@ sub func {
     # `return values %h` (keys too): one input, B::SoN's, in the caller's
     # context -- the list, or its count. A list return as well.
     my $hkv = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation eq 'Call'
-        && ( $ret->inputs->[0]->dispatch_kind // '' ) eq 'builtin' && ( $ret->inputs->[0]->name // '' ) =~ /\A(?:keys|values)\z/
+        && $ret->inputs->[0]->lists_a_hash
         && ( $ret->inputs->[0]->can('want') ? $ret->inputs->[0]->want // '' : '' ) ne 'scalar'   # `scalar(keys %h)`: a count always
         ? $ret->inputs->[0] : undef;
     # `return @a` (one input, an array): in the caller's context, its
@@ -804,7 +804,7 @@ sub func {
     my $r;
     if ($hkv) {
         my $h = $b->hash_of( $hkv->inputs->[0] );
-        my $l = $b->emit(op => $hkv->name eq 'keys' ? 'HKeys' : 'HValues', type => '%Array*', inputs => [$h]);
+        my $l = $b->emit(op => $hkv->lists_a_hash eq 'keys' ? 'HKeys' : 'HValues', type => '%Array*', inputs => [$h]);
         my $n = $b->as($b->emit(op => 'HCount', type => 'i64', inputs => [$h]), '%Slot');
         $r = $b->emit(op => 'Select', type => '%Slot', inputs => [ $want, $b->emit(op => 'ARef', type => '%Slot', inputs => [$l]), $n ]);
     }
@@ -955,6 +955,7 @@ sub io_value {
     my $h = $b->fh_handle( $in[0] );
     return $b->emit(op => 'FhClose', type => 'i1', inputs => [$h]) if $name eq 'close';
     return $b->emit(op => 'FhEof', type => 'i1', inputs => [$h]) if $name eq 'eof';
+    out("a $name T2 does not have") unless $name eq 'readline';   # (a handle's op the IR names that T2 has no emitter for)
     return $b->emit(op => 'FhReadlines', type => '%Array*', inputs => [$h]) if $b->type_of($v) eq '%Array*';
     return $b->emit(op => 'FhReadline', type => '%Slot', inputs => [$h]);
 }

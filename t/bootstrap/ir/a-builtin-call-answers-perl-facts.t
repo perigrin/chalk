@@ -66,6 +66,48 @@ subtest 'makes_a_string: a builtin returning a string makes one (chr and chop to
     ok( !$f->make('DefinedOr', inputs => [ $s, $q ])->makes_a_string, 'a default of a qr does not' );
 };
 
+subtest 'takes_a_hash: from the signature -- a Hash operand first, taken whole' => sub {
+    ok( builtin($_)->takes_a_hash, "$_ takes its hash" ) for qw(keys values each);
+    ok( !builtin($_)->takes_a_hash, "$_ does not" ) for qw(push join sort delete lc);
+    ok( !sub_call( 'direct', 'keys' )->takes_a_hash, 'a sub named keys is not the builtin' );
+};
+
+subtest 'lists_a_hash: keys and values -- its keys or its values, a count in scalar context' => sub {
+    ok( builtin($_)->lists_a_hash, "$_ lists a hash" ) for qw(keys values);
+    ok( !builtin($_)->lists_a_hash, "$_ does not" ) for qw(each sort join);
+    ok( !sub_call( 'method', 'keys' )->lists_a_hash, 'a method named keys is not the builtin' );
+};
+
+subtest 'resets_iterator: keys and values start a hash\'s each over' => sub {
+    ok( builtin($_)->resets_iterator, "$_ resets it" ) for qw(keys values);
+    ok( !builtin($_)->resets_iterator, "$_ does not" ) for qw(each delete sort);
+};
+
+subtest 'reorders_list: sort and reverse -- its LIST in another order' => sub {
+    ok( builtin($_)->reorders_list, "$_ reorders" ) for qw(sort reverse);
+    ok( !builtin($_)->reorders_list, "$_ does not" ) for qw(keys join map);
+    ok( !sub_call( 'direct', 'sort' )->reorders_list, 'a sub named sort is not the builtin' );
+};
+
+subtest 'returns_a_list: in list context its value is a list (the signature\'s List, else the table\'s)' => sub {
+    ok( builtin($_)->returns_a_list, "$_ returns a list" )
+        for qw(keys values each sort splice split reverse caller readline unpack glob localtime);
+    ok( !builtin($_)->returns_a_list, "$_ does not" ) for qw(join shift lc length push);
+    ok( !sub_call('direct', 'sort')->returns_a_list, 'a sub named sort is not the builtin' );
+};
+
+subtest 'gives_a_list: a builtin returning a list, called in list context' => sub {
+    my $each = sub ($want) { $f->make('Call', dispatch_kind => 'builtin', name => 'each', want => $want, inputs => []) };
+    ok( $each->('list')->gives_a_list, 'each in list context' );
+    ok( !$each->('scalar')->gives_a_list, 'each in scalar context: its key alone' );
+};
+
+subtest 'does_handle_io: an operation on a filehandle' => sub {
+    ok( builtin($_)->does_handle_io, "$_ works a handle" ) for qw(open close eof readline select sselect);
+    ok( !builtin($_)->does_handle_io, "$_ does not" ) for qw(formline join chdir);
+    ok( !sub_call( 'method', 'close' )->does_handle_io, 'a method named close is not the builtin' );
+};
+
 subtest 'is_perls_own: a name perl gives its own meaning, by sigil' => sub {
     my $e = sub ($sigil, $symbol) { $f->make('EntryDef', sigil => $sigil, symbol => $symbol, package => 'main') };
     ok( $e->( '$', $_ )->is_perls_own, "\$$_ is perl's" ) for qw(ENV INC ARGV STDIN STDOUT STDERR 0 AUTOLOAD);

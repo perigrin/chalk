@@ -13,6 +13,50 @@ my %ARITH  = (Add => 'add', Subtract => 'sub', Multiply => 'mul');
 my %SCMP   = (StrEq => 'eq', StrNe => 'ne', StrLt => 'lt', StrGt => 'gt', StrLe => 'le', StrGe => 'ge');
 my %CMP    = (NumLt => 'lt', NumGt => 'gt', NumLe => 'le', NumGe => 'ge', NumEq => 'eq', NumNe => 'ne');
 
+# T2'S BUILTINS: what T2 makes of a builtin, by name -- the functor from a
+# builtin to T2, in one place. Not a fact of perl's about the builtin (those
+# are Chalk::IR::Node::Call's, read from BuiltinTable and TypeLibrary): how T2
+# holds its value and which of T2's emitters makes it.
+#   type      its T2 type, where that is one in every context (one whose type
+#             follows its context -- caller, keys, sort, localtime, readline --
+#             is type_of's own case):
+#               %Slot   may be undef or either kind of number: substr outside
+#                       its string, int and rand, -d, chdir, reftype, a shift or
+#                       pop, an object (bless; blessed's class or undef), -e
+#               i64     require's 1, index's position
+#               %Array* a list always: unpack's, glob's, each's
+#               %Str    join's string
+#   value     the emitter of its value (a builtin made elsewhere -- an array's,
+#             a hash's, a handle's -- is in array_value, hash_value, io_value)
+#   in_place  where B::SoN pins it, T2 makes its value where it stands (walk):
+#             'passed' -- a read it waits on also settled before a later store
+#             -- or 'value'
+our %T2_BUILTIN = (
+    ( map { ( $_ => { type => '%Slot' } ) }   qw(shift pop blessed reftype_of_ref) ),
+    ( map { ( $_ => { type => '%Array*' } ) } qw(unpack glob) ),
+    join     => { type => '%Str', in_place => 'passed' },
+    each     => { type => '%Array*', in_place => 'passed' },
+    ( map { ( $_ => { in_place => 'passed' } ) } qw(keys values sort caller pos tie untie) ),
+    bless    => { type => '%Slot', in_place => 'passed' },
+    formline => { value => 'builtin_value', in_place => 'passed' },
+    ftdir    => { type => '%Slot', value => 'path_value' },
+    chdir    => { type => '%Slot', value => 'path_value', in_place => 'value' },
+    require  => { type => 'i64',   value => 'path_value', in_place => 'value' },
+    ( map { ( $_ => { type => '%Slot', value => 'number_value' } ) } qw(int rand) ),
+    substr   => { type => '%Slot', value => 'substr_value' },
+    index    => { type => 'i64',   value => 'substr_value' },
+    ftis     => { type => '%Slot', value => 'builtin_value' },
+    ( map { ( $_ => { value => 'builtin_value' } ) } qw(chr ord time reverse sprintf lock prototype pack) ),
+);
+
+# t2_builtin($Call, $column) -> what T2's table says of a builtin's call, or undef.
+sub t2_builtin {
+    my ($v, $col) = @_;
+    return undef unless $v->operation eq 'Call' && $v->is_builtin;
+    my $e = $T2_BUILTIN{ $v->name // '' } or return undef;
+    return $e->{$col};
+}
+
 # phi_type($Phi) -> a merge's T2 type: its stamp's, except a Str (a Num may
 # reach it) or a stamp T1 could not give (a recursive sub's result) -- boxed.
 sub phi_type {
@@ -128,24 +172,17 @@ sub type_of {
     return '%Slot' if $op eq 'Delete' && $hk eq 'hash';
     return ( $v->stamp // '' ) eq 'Scalar' ? '%Slot' : '%Array*'   # static type
         if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'caller';
-    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'substr';
-    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:int|rand)\z/;
-    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:ftdir|chdir|reftype_of_ref)\z/;
-    return 'i64' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'require';
-    return 'i64'   if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'index';
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:keys|values)\z/) {
-        return $v->name eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar' ? 'i64' : '%Array*';
+    if ( my $t = t2_builtin( $v, 'type' ) ) { return $t }
+    if ($op eq 'Call' && $v->lists_a_hash) {
+        return $v->lists_a_hash eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar' ? 'i64' : '%Array*';
     }
-    return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:sort|reverse)\z/
+    return '%Array*' if $op eq 'Call' && $v->reorders_list
         && ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/;   # static type
-    return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:unpack|glob)\z/;   # (in a list: array_value)
     # localtime: its nine fields in a list, its text in scalar context (B::SoN
     # stamps which: `() = localtime` a List, `my $s = localtime` a Scalar).
     return ( $v->stamp // '' ) =~ /\A(?:Array|List)\z/ ? '%Array*' : '%Str'   # static type
         if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'localtime';
-    return '%Slot' if $op eq 'Call' && ( $v->name // '' ) =~ /\A(?:shift|pop)\z/;
     return '%Str' if $op eq 'Call' && $v->changes_case;
-    return '%Str' if $op eq 'Call' && ( $v->name // '' ) eq 'join';
     return '%Array*' if $v->is_argv;
     return '%Slot' if $v->is_package_scalar;   # what it holds is what was stored last, anywhere
     return '%Slot*' if $op eq 'MakeCell' || $op eq 'CellParam';   # a captured variable's storage
@@ -159,8 +196,6 @@ sub type_of {
     return '%Slot' if $op eq 'PadAccess' && $v->is_location;
     return '%Slot' if $op eq 'Increment' || $op eq 'Decrement';
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) =~ /\A(?:direct|method|dynamic_method)\z/;
-    # AN OBJECT is its blessed reference; ref() of one its class, or HASH.
-    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless' || $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'blessed';
     return '%Slot' if $op eq 'Call' && $v->is_tie_builtin;
     return '%Str' if $op eq 'RefType';
     return $b->print_to_handle($v) ? '%Slot' : 'i64' if $op eq 'Print';   # (1, or undef where the handle is not open for writing)
@@ -175,7 +210,6 @@ sub type_of {
     # ** IS AN INTEGER where perl's is (an integer to a power, small enough),
     # else a number: which, at run time.
     return '%Slot' if $op eq 'Power';
-    return '%Array*' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'each';
     # readline IN A LIST: every line left.
     return ( $v->stamp // '' ) =~ /\A(?:List|Array)\z/ ? '%Array*' : '%Slot'   # static type
         if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'readline';
@@ -183,7 +217,6 @@ sub type_of {
     return '%Slot' if $op =~ /\A(?:BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/;
     # (LIST) x N: a list.
     return '%Array*' if $op eq 'Repeat' && ( $v->stamp // '' ) eq 'List';   # static type
-    return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'ftis';
     return '%Slot' if ( $v->stamp // '' ) =~ /\A(?:Unknown|None)\z/; # static type
     if ($op eq 'And' || $op eq 'Or') {
         my %t = map { ( $b->type_of($_) => 1 ) } $v->inputs->@[0, 1];
@@ -346,7 +379,7 @@ sub _value {
         out('a qx in list context') if _is_list($v) || grep {
             my $u = $_;
             $u->operation =~ /\A(?:ArrayLiteral|ListAppend|Return)\z/
-                || $u->operation eq 'Call' && ( $u->is_sub_call || $u->takes_a_list || ( $u->name // '' ) =~ /\A(?:push|unshift|join)\z/ )
+                || $u->operation eq 'Call' && ( $u->is_sub_call || $u->takes_a_list )
                 || $u->operation eq 'Assign' && $u->can('targets') && defined $u->targets
         } grep { blessed($_) } ( $v->consumers // [] )->@*;
         out('a qx where the program reads $?') if grep { $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq '?' } _all_nodes($b->{mop}, $b->{ret});
@@ -428,30 +461,7 @@ sub _value {
         $b->{strs}{$c} //= scalar keys $b->{strs}->%*;
         return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => $c, id => $b->{strs}{$c} });
     }
-    # -d PATH: a directory (1), something else there (''), nothing (undef).
-    # chdir PATH: 1, or '' where it could not. A require of a file B::SoN
-    # followed is done -- its subs are compiled in (1); of any other, not T2's.
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:ftdir|chdir|require)\z/) {
-        my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
-        out( 'a ' . $v->name . ' of no argument' ) unless @a;
-        if ( $v->name eq 'require' ) {
-            my $f = $a[0];
-            out('a require of a file named at run time') unless $f->operation eq 'Constant' && defined $f->value;
-            ( my $mod = $f->value ) =~ s{\.pm\z}{}; $mod =~ s{/}{::}g;
-            out( 'a require of ' . $f->value . ', not compiled in' )
-                unless $Chalk::IR::Serialize::JSON::FOLLOWED{ $f->value } || $Chalk::IR::Serialize::JSON::FOLLOWED{$mod};
-            return $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), $ty );
-        }
-        return $b->as( $b->emit(op => $v->name eq 'ftdir' ? 'FtDir' : 'Chdir', type => '%Slot', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty );
-    }
-    # int(X): X's number truncated toward zero. rand(X): a number in [0, X),
-    # X 1 when absent or 0 (perl's), from libc's generator -- not perl's.
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:int|rand)\z/) {
-        my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
-        out('an int of no argument (of $_)') if $v->name eq 'int' && !@a;
-        my $x = @a ? $b->as( $b->value( $a[0] ), '%Slot' ) : $b->emit(op => 'Undef', type => '%Slot');
-        return $b->as( $b->emit(op => $v->name eq 'int' ? 'IntOf' : 'Rand', type => '%Slot', inputs => [$x]), $ty );
-    }
+    if ( my $m = t2_builtin( $v, 'value' ) ) { return $b->$m($v, $ty) }
     if ($op eq 'Coerce') {
         # TO Undef IS NOT A CONVERSION: undef has no value to convert into, and
         # boxing the value would keep it.
@@ -578,27 +588,6 @@ sub _value {
         $eend->{term} = [ 'br', $jb ];
         return $b->emit(op => 'Phi', type => $ty, inputs => [ $tv, $ev ], attr => { from => [ $tend, $eend ] });
     }
-    # substr($s, $off, $len) READ (not an lvalue: B::SoN pins a store): from
-    # either end, the rest or a length (negative leaves that many off the end);
-    # undef outside the string, as perl's. index($s, $t, $pos): -1 for none.
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) =~ /\A(?:substr|index)\z/) {
-        my @a = grep { blessed($_) } $v->inputs->@*;
-        pop @a if $v->can('memory_input') && $v->memory_input;
-        return $b->{memo}{ refaddr($v) } // out('a four-argument substr read before it is made') if $v->name eq 'substr' && @a == 4;
-        out('a ' . $v->name . ' of more than three arguments') if @a > 3;
-        my $str = $b->as( $b->value( $a[0] ), '%Str' );
-        if ($v->name eq 'substr') {
-            out('a substr of fewer than two arguments') if @a < 2;
-            my $off = $b->as( $b->value( $a[1] ), 'i64' );
-            my ( $len, $has ) = @a > 2
-                ? ( $b->as( $b->value( $a[2] ), 'i64' ), $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }) )
-                : ( $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }), $b->emit(op => 'Const', type => 'i1', attr => { value => 0 }) );
-            return $b->emit(op => 'Substr', type => '%Slot', inputs => [ $str, $off, $len, $has ]);
-        }
-        out('an index of fewer than two arguments') if @a < 2;
-        my $pos = @a > 2 ? $b->as( $b->value( $a[2] ), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
-        return $b->emit(op => 'Index', type => 'i64', inputs => [ $str, $b->as( $b->value( $a[1] ), '%Str' ), $pos ]);
-    }
     if ($op eq 'Power') {
         return $b->as( $b->emit(op => 'Pow', type => '%Slot', inputs => [ map { $b->as( $b->value($_), '%Slot' ) } $v->inputs->@[0, 1] ]), $ty );
     }
@@ -639,11 +628,8 @@ sub _value {
         my ($x, $y) = map { $b->truth( $b->value($_) ) } $v->inputs->@[0, 1];
         return $b->as( $b->emit(op => 'Cmp', type => 'i1', inputs => [ $x, $y ], attr => { op => 'ne' }), $ty );
     }
-    if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:open|close|eof|readline|select|sselect)\z/) {
+    if ($op eq 'Call' && $v->does_handle_io) {
         return $b->as( $b->io_value($v), $ty );
-    }
-    if ($op eq 'Call' && $v->is_builtin && ( $v->name // '' ) =~ /\A(?:chr|ord|time|ftis|reverse|sprintf|lock|formline|prototype|pack)\z/) {
-        return $b->builtin_value($v, $ty);
     }
     # A REGEX MATCH OF A CONSTANT PATTERN is a call of its own graph
     # (Chalk::Regex::Graph): [start, end, groups...] or undef; it is true when
@@ -663,6 +649,57 @@ sub _value {
     # A REGEX MATCH, literal or a qr value: no engine in T2 yet (the fallback has one).
     out('a regex match: T2 has no regex engine yet') if $op =~ /\A(?:RegexMatch|Match|RegexSubst|Subst|QrConst|Split)\z/;
     out($op . ( $op eq 'Call' ? ' ' . ( $v->dispatch_kind // '' ) . ' ' . ( $v->name // '' ) : '' ));
+}
+
+# -d PATH: a directory (1), something else there (''), nothing (undef).
+# chdir PATH: 1, or '' where it could not. A require of a file B::SoN
+# followed is done -- its subs are compiled in (1); of any other, not T2's.
+sub path_value {
+    my ($b, $v, $ty) = @_;
+    my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
+    out( 'a ' . $v->name . ' of no argument' ) unless @a;
+    if ( $v->name eq 'require' ) {
+        my $f = $a[0];
+        out('a require of a file named at run time') unless $f->operation eq 'Constant' && defined $f->value;
+        ( my $mod = $f->value ) =~ s{\.pm\z}{}; $mod =~ s{/}{::}g;
+        out( 'a require of ' . $f->value . ', not compiled in' )
+            unless $Chalk::IR::Serialize::JSON::FOLLOWED{ $f->value } || $Chalk::IR::Serialize::JSON::FOLLOWED{$mod};
+        return $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), $ty );
+    }
+    return $b->as( $b->emit(op => $v->name eq 'ftdir' ? 'FtDir' : 'Chdir', type => '%Slot', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty );
+}
+
+# int(X): X's number truncated toward zero. rand(X): a number in [0, X),
+# X 1 when absent or 0 (perl's), from libc's generator -- not perl's.
+sub number_value {
+    my ($b, $v, $ty) = @_;
+    my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
+    out('an int of no argument (of $_)') if $v->name eq 'int' && !@a;
+    my $x = @a ? $b->as( $b->value( $a[0] ), '%Slot' ) : $b->emit(op => 'Undef', type => '%Slot');
+    return $b->as( $b->emit(op => $v->name eq 'int' ? 'IntOf' : 'Rand', type => '%Slot', inputs => [$x]), $ty );
+}
+
+# substr($s, $off, $len) READ (not an lvalue: B::SoN pins a store): from
+# either end, the rest or a length (negative leaves that many off the end);
+# undef outside the string, as perl's. index($s, $t, $pos): -1 for none.
+sub substr_value {
+    my ($b, $v, $ty) = @_;
+    my @a = grep { blessed($_) } $v->inputs->@*;
+    pop @a if $v->can('memory_input') && $v->memory_input;
+    return $b->{memo}{ refaddr($v) } // out('a four-argument substr read before it is made') if $v->name eq 'substr' && @a == 4;
+    out('a ' . $v->name . ' of more than three arguments') if @a > 3;
+    my $str = $b->as( $b->value( $a[0] ), '%Str' );
+    if ($v->name eq 'substr') {
+        out('a substr of fewer than two arguments') if @a < 2;
+        my $off = $b->as( $b->value( $a[1] ), 'i64' );
+        my ( $len, $has ) = @a > 2
+            ? ( $b->as( $b->value( $a[2] ), 'i64' ), $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }) )
+            : ( $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }), $b->emit(op => 'Const', type => 'i1', attr => { value => 0 }) );
+        return $b->emit(op => 'Substr', type => '%Slot', inputs => [ $str, $off, $len, $has ]);
+    }
+    out('an index of fewer than two arguments') if @a < 2;
+    my $pos = @a > 2 ? $b->as( $b->value( $a[2] ), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
+    return $b->emit(op => 'Index', type => 'i64', inputs => [ $str, $b->as( $b->value( $a[1] ), '%Str' ), $pos ]);
 }
 
 # builtin_value($Call, $ty) -> a builtin of one value: chr, ord, time, -e,

@@ -1,5 +1,5 @@
 # ABOUTME: Per-builtin facts the type signatures (TypeLibrary) do not hold: which builtins
-# ABOUTME: change case, work a tie, take a LIST, return a string. Sits beside KeywordTable.
+# ABOUTME: change case, work a tie or a handle, take or return a LIST. Sits beside KeywordTable.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -49,6 +49,41 @@ class Chalk::Grammar::Perl::BuiltinTable {
         # B::SoN's stamp does not say so. Not every list-returning builtin is
         # listed -- the ones a backend asks about are.
         each    => { list_in_list => 1 },
+
+        # A LIST IN LIST CONTEXT, for a builtin TypeLibrary has no signature
+        # for (its signatures say List for keys, values, each, sort, splice,
+        # split): perlfunc's `reverse LIST` ("in list context, returns a list
+        # value consisting of the elements of LIST in the opposite order"),
+        # `caller EXPR`, `readline` ("in list context, reads until end-of-file
+        # ... and returns a list of lines"), `unpack`, `glob`, `localtime` (its
+        # nine fields). Each is a scalar of its own in scalar context.
+        reverse   => { return_type => 'List', reorders => 1 },
+        caller    => { return_type => 'List' },
+        readline  => { return_type => 'List', handle_io => 1 },
+        unpack    => { return_type => 'List' },
+        glob      => { return_type => 'List' },
+        localtime => { return_type => 'List' },
+
+        # ITS LIST IN ANOTHER ORDER (perlfunc: sort, reverse): the elements of
+        # its LIST, none added or taken away.
+        sort    => { reorders => 1 },
+
+        # A HASH'S KEYS OR ITS VALUES (perlfunc: keys, values): every one, a
+        # count in scalar context. Each also RESETS THE HASH'S ITERATOR
+        # ("each ... the iterator ... is reset by calling keys or values").
+        keys    => { lists_hash => 'keys',   resets_iterator => 1 },
+        values  => { lists_hash => 'values', resets_iterator => 1 },
+
+        # AN OPERATION ON A FILEHANDLE (perlfunc's "Input and output
+        # functions"): open, close, eof, readline, select of the default output
+        # handle, and select's four-argument form (`sselect`, B::SoN's name for
+        # it). Not every such builtin is listed -- the ones a backend asks
+        # about are.
+        open    => { handle_io => 1 },
+        close   => { handle_io => 1 },
+        eof     => { handle_io => 1 },
+        select  => { handle_io => 1 },
+        sselect => { handle_io => 1 },
     );
 
     # fact($builtin, $column) -> the builtin's fact in that column, or undef.
