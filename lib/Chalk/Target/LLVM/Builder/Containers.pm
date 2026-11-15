@@ -431,16 +431,16 @@ sub hash_of {
 # a `my $x = "az"` into its constant, so any reader is the variable's -- and
 # an element of a `my` array of such, read only by constant index, so.
 sub _never_numified {
-    my ($n, $reader) = @_;
+    my ($b, $n, $reader) = @_;
     return 0 unless blessed($n);
     # (read by $reader, or so that no number is made: a print, a `.`, a
     # defined -- a numeric Coerce only on the way to $reader)
     my $quiet = sub ($x, $r) {
-        for my $u ( _value_users($x) ) {
+        for my $u ( $b->value_readers($x) ) {
             next if refaddr($u) == refaddr($r);
             my $o = $u->operation;
             next if $o =~ /\A(?:Print|Concat|Defined)\z/;
-            next if $o eq 'Coerce' && !grep { refaddr($_) != refaddr($r) && $_->operation !~ /\A(?:Print|Concat)\z/ } _value_users($u);
+            next if $o eq 'Coerce' && !grep { refaddr($_) != refaddr($r) && $_->operation !~ /\A(?:Print|Concat)\z/ } $b->value_readers($u);
             return 0;
         }
         return 1;
@@ -454,7 +454,7 @@ sub _never_numified {
         # (the array: read only by elements at constant indices -- nothing
         # writes it -- this one's read so; made of constants no numeric read
         # reached)
-        for my $u ( _value_users($a) ) {
+        for my $u ( $b->value_readers($a) ) {
             return 0 unless $u->operation eq 'Subscript' && blessed( $u->inputs->[1] ) && $u->inputs->[1]->operation eq 'Constant';
             # (another element: two indices not both counted from the front may be one)
             my @ix = map { $_->value // '' } $u->inputs->[1], $i;
@@ -583,7 +583,7 @@ sub array_value {
         my ($lo, $hi) = map { my $x = $_; $x = $x->inputs->[0] while blessed($x) && $x->operation eq 'Coerce'; $x } @in;
         return $b->emit(op => 'ARange', type => '%Array*', inputs => [ map { $b->as($b->value($_), 'i64') } $lo, $hi ])
             if grep { $b->type_of($_) =~ /\A(?:i64|double)\z/ } $lo, $hi;
-        out('a range of strings a numeric read may have made numbers') unless _never_numified( $lo, $v ) && _never_numified( $hi, $v );
+        out('a range of strings a numeric read may have made numbers') unless $b->_never_numified( $lo, $v ) && $b->_never_numified( $hi, $v );
         return $b->emit(op => 'ARangeSlots', type => '%Array*', inputs => [ map { $b->as($b->value($_), '%Slot') } $lo, $hi ]);
     }
     if ($op eq 'ListAppend') {

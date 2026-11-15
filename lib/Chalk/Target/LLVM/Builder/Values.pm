@@ -868,7 +868,7 @@ sub bitwise {
     my $inner = _bit_inner($v);
     my @x = map { $b->as( $b->value($_), '%Slot' ) } @leaf;
     # (the operands that may be strings another bitwise op also reads)
-    my @shared = grep { $b->type_of( $leaf[$_] ) =~ /\A%(?:Slot|Str)\z/ && _bit_readers( $leaf[$_] ) > 1 } 0 .. $#leaf;
+    my @shared = grep { $b->type_of( $leaf[$_] ) =~ /\A%(?:Slot|Str)\z/ && $b->_bit_readers( $leaf[$_] ) > 1 } 0 .. $#leaf;
     if ($op =~ /Shift\z/) {
         my $r = $b->emit(op => 'Shift', type => '%Slot', inputs => \@x, attr => { left => $op eq 'LeftShift', inner => $inner });
         $b->bit_numified( $v, $leaf[$_], $x[$_], $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }) ) for @shared;
@@ -880,7 +880,7 @@ sub bitwise {
     if ($mode == 0) {
         out('a bitwise op on what may be strings, in a loop or an arm') if $b->{depth};
         out('a bitwise op on what may be a string read elsewhere (perl reads it as a number after a numeric read)')
-            if grep { _bit_readers($_) < 1 || $b->_bit_source_numified($_) } @leaf;
+            if grep { $b->_bit_readers($_) < 1 || $b->_bit_source_numified($_) } @leaf;
     }
     push @x, $b->emit(op => 'Undef', type => '%Slot') if @x == 1;
     # (one an op before made a number: on numbers, whatever its tag says)
@@ -904,7 +904,7 @@ sub bitwise {
 sub bit_flag {
     my ($b, $v, $leaf) = @_;
     out('a bitwise op on what may be a string another bitwise op reads, not both pinned where perl runs them')
-        if grep { !( $_->can('control_in') && blessed( $_->control_in ) ) } _bit_ops_of($leaf);
+        if grep { !( $_->can('control_in') && blessed( $_->control_in ) ) } $b->_bit_ops_of($leaf);
     my $f = $b->{bitflag}{ refaddr($leaf) };
     out('a bitwise op on what may be a string an op in a loop, an arm or an eval read as a number') if defined $f && !ref $f;
     return $f;
@@ -956,18 +956,18 @@ sub _bit_inner {
 # _bit_readers($leaf) -> how many bitwise ops read it; -1 where something
 # else reads it but as a string (print, a join, a concatenation).
 sub _bit_readers {
-    my ($n) = @_;
+    my ($b, $n) = @_;
     my $k = 0;
-    for my $u (_value_users($n)) {
+    for my $u ($b->value_readers($n)) {
         my $o = $u->operation;
         if ($o =~ $BIT) { $k++; next }
         if ($o eq 'Coerce' && ( $u->stamp // '' ) =~ /\A(?:Int|Num)\z/) {   # static type
-            my $r = _bit_readers($u);
+            my $r = $b->_bit_readers($u);
             return -1 if $r < 0;
             $k += $r;
             next;
         }
-        next if $o eq 'Coerce' && ( $u->stamp // '' ) eq 'Str' && !grep { $_->operation !~ /\A(?:Print|Concat)\z/ } _value_users($u);   # static type
+        next if $o eq 'Coerce' && ( $u->stamp // '' ) eq 'Str' && !grep { $_->operation !~ /\A(?:Print|Concat)\z/ } $b->value_readers($u);   # static type
         next if $o =~ /\A(?:Print|Concat)\z/;
         return -1;
     }
@@ -1003,11 +1003,11 @@ sub _bit_source_numified {
     my $numifies;
     $numifies = sub ($n) {
         return 0 if $seen{ refaddr($n) }++;
-        for my $u (_value_users($n)) {
+        for my $u ($b->value_readers($n)) {
             my $o = $u->operation;
             next if $o =~ /\A(?:Defined|Print|Concat)\z/;
-            next if $o eq 'Coerce' && ( $u->stamp // '' ) eq 'Str' && !grep { $_->operation !~ /\A(?:Print|Concat)\z/ } _value_users($u);   # static type
-            next if refaddr($n) == refaddr($leaf) && ( $o =~ $BIT || $o eq 'Coerce' && ( $u->stamp // '' ) =~ /\A(?:Int|Num)\z/ && !grep { $_->operation !~ $BIT } _value_users($u) );   # static type
+            next if $o eq 'Coerce' && ( $u->stamp // '' ) eq 'Str' && !grep { $_->operation !~ /\A(?:Print|Concat)\z/ } $b->value_readers($u);   # static type
+            next if refaddr($n) == refaddr($leaf) && ( $o =~ $BIT || $o eq 'Coerce' && ( $u->stamp // '' ) =~ /\A(?:Int|Num)\z/ && !grep { $_->operation !~ $BIT } $b->value_readers($u) );   # static type
             if ( $o eq 'DefinedOr' && blessed( $u->inputs->[0] ) && refaddr( $u->inputs->[0] ) == refaddr($n) ) { return 1 if $numifies->($u); next }
             return 1;
         }
@@ -1033,10 +1033,30 @@ sub _argv_may_be {
 # _bit_ops_of($leaf) -> the bitwise ops (a shift too) reading $leaf, directly
 # or through B::SoN's numeric Coerce.
 sub _bit_ops_of {
-    my ($n) = @_;
+    my ($b, $n) = @_;
     return map {
-        $_->operation =~ $BIT ? ($_) : _bit_ops_of($_)
-    } grep { $_->operation =~ $BIT || $_->operation eq 'Coerce' && ( $_->stamp // '' ) =~ /\A(?:Int|Num)\z/ } _value_users($n);   # static type
+        $_->operation =~ $BIT ? ($_) : $b->_bit_ops_of($_)
+    } grep { $_->operation =~ $BIT || $_->operation eq 'Coerce' && ( $_->stamp // '' ) =~ /\A(?:Int|Num)\z/ } $b->value_readers($n);   # static type
+}
+
+# value_readers($n) -> the nodes of the program that take $n's value (not as
+# their memory), found by their inputs: a consumer list may miss a reader
+# (a Coerce Analysis remade lists none -- `$ARGV[2] // 6` read by a bitwise
+# op had no reader).
+sub value_readers {
+    my ($b, $n) = @_;
+    my $ix = $b->{value_readers} //= do {
+        my (%ix, %seen);
+        for my $u (grep { blessed($_) && !$seen{ refaddr($_) }++ } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} )) {
+            my $m = $u->can('memory_operand') ? $u->memory_operand : undef;
+            my %k;
+            $k{ refaddr($_) }++ for grep { blessed($_) } $u->inputs->@*;
+            $k{ refaddr($m) }-- if blessed($m);
+            push $ix{$_}->@*, $u for grep { $k{$_} > 0 } keys %k;
+        }
+        \%ix;
+    };
+    return ( $ix->{ refaddr($n) } // [] )->@*;
 }
 
 # format_write($Call, $ty, $picture, @values) -> a format's formline, in the
