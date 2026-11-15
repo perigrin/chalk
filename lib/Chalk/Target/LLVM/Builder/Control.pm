@@ -526,7 +526,7 @@ sub if_stmt {
     if ( my $lx = $b->{loopx} ) {
         my $meet = defined $end{0} && defined $end{1} && do {
             my ($r) = grep { $_->operation eq 'Region' } ( $end{0}->consumers // [] )->@*;
-            $r && refaddr($r) != refaddr( $lx->{exit} ) && grep { blessed($_) && refaddr($_) == refaddr($end{1}) } $r->inputs->@*;
+            $r && !( $lx->{exit} && refaddr($r) == refaddr( $lx->{exit} ) ) && grep { blessed($_) && refaddr($_) == refaddr($end{1}) } $r->inputs->@*;
         };
         unless ($meet) {
             my %left = map { ( $_ => ( !defined $end{$_} || $b->loop_edge( $lx, $end{$_}, $vals{$_} ) || $b->loop_jump( $end{$_}, $vals{$_} ) ) ) } 0, 1;
@@ -717,7 +717,10 @@ sub loop {
     my ($b, $L) = @_;
     my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } $L->successors_by_input;
     my ($bodyp, $exitp) = @proj{0, 1};
-    return $b->loop_breaks($L) if !$bodyp && !$exitp && $b->loop_exit($L);
+    # (NO WAY OUT BUT THE RETURN: a label a `goto` goes back to -- B::SoN's
+    # Loop at it, the goto's arm its way round -- in a body that runs on to
+    # the program's end: see loop_breaks)
+    return $b->loop_breaks($L) if !$bodyp && !$exitp;
     out('a loop without a body and an exit') unless $bodyp && $exitp;
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($L)
                       && !$_->is_memory } ( $L->consumers // [] )->@*;
@@ -898,17 +901,33 @@ sub loop_breaks {
     push $b->{passed}->@*, @mphis;
     my $lx = { exit => $R, exits => [], latches => [], outer => $b->{loopx} };
     my $outer_memo = $b->{memo};
-    my $head_memo;
+    my ($head_memo, $returns);
     {
         local $b->{memo}  = { $b->{memo}->%* };
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
         local $b->{loopx} = $lx;
         $head_memo = { $b->{memo}->%* };
         my $e = $b->walk($L);
-        $b->loop_edge( $lx, $e, { block => $b->{cur}, memo => $b->{memo} } )
-            || out('a loop body that ends neither going round nor leaving') if defined $e;
+        # A LOOP WITH NO EXIT leaves by the program's Return: its body runs on
+        # to the program's end (the only statement after it), from where the
+        # walk goes on -- the loop never left another way.
+        if ( !$R ) {
+            my @s = defined $e ? $e->successors : ();
+            out('a loop with no exit that does not run on to the Return')
+                unless @s == 1 && refaddr( $s[0] ) == refaddr( $b->{ret} ) && !$b->{cur}{dead}
+                && !$lx->{exits}->@* && !$lx->{outer} && !( $b->{evals} // [] )->@*;
+            $returns = { ctl => $e, block => $b->{cur}, memo => $b->{memo} };
+        }
+        else {
+            $b->loop_edge( $lx, $e, { block => $b->{cur}, memo => $b->{memo} } )
+                || out('a loop body that ends neither going round nor leaving') if defined $e;
+        }
     }
     $b->go_round( $lx, $head, $head_memo, \@phis, \@t2 );
+    if ($returns) {
+        ( $b->{cur}, $b->{memo} ) = $returns->@{qw(block memo)};
+        return $returns->{ctl};
+    }
     # THE EXIT: the ways out merged, with the exit Region's phis.
     my @out = grep { !$_->{block}{dead} } $lx->{exits}->@*;
     out('a loop that never leaves') unless @out;
@@ -992,13 +1011,13 @@ sub loop_edge {
     return 0 unless blessed($e);
     my @r = grep { $_->operation eq 'Region' } ( $e->consumers // [] )->@*;
     for ( my $x = $lx; $x; $x = $x->{outer} ) {
-        if ( @r == 1 && refaddr( $r[0] ) == refaddr( $x->{exit} ) ) { $b->leaves_restore($lx, $x); push $x->{exits}->@*, { %$arm, end => $e }; return 1 }
+        if ( @r == 1 && $x->{exit} && refaddr( $r[0] ) == refaddr( $x->{exit} ) ) { $b->leaves_restore($lx, $x); push $x->{exits}->@*, { %$arm, end => $e }; return 1 }
     }
     return 0 if $e->successors;
     if ( !@r ) { push $lx->{latches}->@*, { %$arm, end => $e }; return 1 }
     if ( @r == 1 && !$r[0]->goes_on ) {
         my $x = $lx;
-        $x = $x->{outer} while $x->{outer} && $r[0]->reached_by( $x->{exit} );
+        $x = $x->{outer} while $x->{outer} && $x->{exit} && $r[0]->reached_by( $x->{exit} );
         $b->leaves_restore($lx, $x);
         push $x->{latches}->@*, { %$arm, end => $e, region => $r[0] };
         return 1;
