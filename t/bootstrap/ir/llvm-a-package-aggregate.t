@@ -45,6 +45,9 @@ for my $src (
     q{package P; our %seen; sub mark { $seen{$_[0]}++ } package main; P::mark("x"); P::mark("x"); print $P::seen{x}, "\n";},
     # @ISA is the run-time MOP's (T2): a package's parents, not perl's own.
     q{package D; our @ISA = ("B"); print "ok\n";},
+    # %INC's metaobject (Chalk::Impl::INC) answers from the module registry:
+    # a program that loads nothing has an %INC chalk knows whole.
+    q{print exists $INC{"strict.pm"} ? "y" : "n", "\n";},
 ) {
     my $want = qx($^X -e '$src' 2>&1);
     my $got = eval { through_llvm($src) };
@@ -54,7 +57,6 @@ for my $src (
 # perl's own aggregates hold what perl put there.
 for my $src (
     q{print scalar(@INC) > 0 ? "y" : "n", "\n";},
-    q{print exists $INC{"strict.pm"} ? "y" : "n", "\n";},
 ) {
     my $got = eval { through_llvm($src) };
     like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';
