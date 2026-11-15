@@ -137,6 +137,10 @@ sub _is_list {
     # A MATCH IN LIST CONTEXT (B::SoN stamps it Boolean): by what takes it.
     return _match_in_list($n) if $n->operation =~ /\A(?:RegexMatch|Match)\z/;
     return 1 if $n->operation eq 'PadAccess' && ( $n->sigil // '' ) =~ /\A[@%]\z/;
+    # (a merge of an array's or a hash's versions, B::SoN's stamp Unknown or
+    # Hash: `@p` after a loop that whole-assigns it -- one it refuses is
+    # refused where it is typed)
+    return 1 if $n->operation eq 'Phi' && !$n->is_memory && eval { Chalk::Target::LLVM::Builder::agg_versions(undef, $n) };
     return 1 if $Chalk::Target::LLVM::Builder::LIST_FIELD{ refaddr($n) };
     return 0;
 }
@@ -293,6 +297,8 @@ sub list_only {
         next if $op eq 'Slice' && !grep { $_ == $u->inputs->$#* } @pos;   # its indices
         next if $op eq 'ListAppend' && !$at0;
         next if $op eq 'TernaryExpr' && !$at0;   # an arm: the choice's own use decides
+        # (a way into a merge of arrays: the merge is an array, its own use decides)
+        next if $op eq 'Phi' && ( ( eval { $b->phi_type($u) } // '' ) eq '%Array*' );
         next if $op eq 'Assign' && $u->can('targets') && defined $u->targets;
         next if $op eq 'Call' && ( $u->is_sub_call && !( $at0 && ( $u->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ )
                                    || $u->takes_a_list && !$at0 );

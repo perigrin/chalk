@@ -375,16 +375,22 @@ sub list_assign {
     # AN ARRAY OR HASH FIELD ASSIGNED WHOLE (`@l = (9)`, `%h = $r->%*`): the
     # list made first (it may read the field), then the field's own
     # aggregate cleared and refilled -- a reference to it sees the new
-    # contents. Its value (a count, or the list, by context) is not T2's.
+    # contents. ITS VALUE, a sub's last (`method reset { @l = (9) }`), is by
+    # the caller's context: the aggregate as it is now in a list, the count
+    # of the list assigned in a scalar (perl's, `%h = ()` 0) -- see func.
+    # Taken elsewhere, not T2's.
     if (@t == 1 && blessed($t[0]) && $t[0]->operation eq 'FieldAccess' && ( $b->field_of($t[0]) )[1] =~ /\A[\@%]\z/) {
         my $h = ( $b->field_of($t[0]) )[1] eq '%';
         # (a read after it takes it as its memory; the next statement as its control)
-        out('the value of a list assignment to an array or hash') if grep {
+        my @used = grep {
             my $u = $_;
             my $m = $u->memory_operand;
             $u->operation !~ /\A(?:Loop|If|Region|Proj)\z/
                 && ( grep { blessed($_) && refaddr($_) == refaddr($s) } $u->inputs->@* ) > ( blessed($m) && refaddr($m) == refaddr($s) ? 1 : 0 )
         } grep { blessed($_) } ( $s->consumers // [] )->@*;
+        out('the value of a list assignment to an array or hash') if grep {
+            !( $_->operation eq 'Return' && $_->inputs->@* == 1 && blessed( $b->{ret} ) && refaddr($_) == refaddr( $b->{ret} ) && $b->{in_func} )
+        } @used;
         my @v = grep { blessed($_) } @in;
         my $list = $b->emit(op => 'NewArray', type => '%Array*');
         for my $e (@v) {
@@ -393,7 +399,11 @@ sub list_assign {
         }
         $b->hash_reads_settled('a whole assign');
         $b->reads_before($_) for $b->{passed}->@*;
-        $b->emit(op => $h ? 'HAssign' : 'AAssign', type => 'void', inputs => [ $h ? $b->hash_of($t[0]) : $b->array_of($t[0]), $list ]);
+        my $agg = $h ? $b->hash_of($t[0]) : $b->array_of($t[0]);
+        $b->emit(op => $h ? 'HAssign' : 'AAssign', type => 'void', inputs => [ $agg, $list ]);
+        # (its value, returned: the count assigned, and the aggregate's list)
+        $b->{list_assigned}{ refaddr($s) } = [ $b->emit(op => 'ALen', type => 'i64', inputs => [$list]),
+            $h ? $b->emit(op => 'HPairs', type => '%Array*', inputs => [$agg]) : $agg ] if @used;
         push $b->{passed}->@*, $s;
         return;
     }

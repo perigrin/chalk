@@ -62,6 +62,7 @@ sub t2_builtin {
 # reach it) or a stamp T1 could not give (a recursive sub's result) -- boxed.
 sub phi_type {
     my ($b, $phi) = @_;
+    return '%Slot' if $b && $b->{ret_phi} && $b->{ret_phi}{ refaddr($phi) };   # (a merge returned: see func)
     my $st = $phi->stamp // ''; # static type
     # THE LIST A SUB RETURNS, merged from its returns (`return` in one arm, a
     # last value in the other): an array, each arm's value a list of it.
@@ -77,6 +78,11 @@ sub phi_type {
         return '%Array*' if $st =~ /\A(?:List|Array)\z/;   # static type
         out('an eval in list context whose value is typed a scalar (a die gives the empty list)');
     }
+    # A MERGE OF VERSIONS OF ONE ARRAY OR HASH (`@p = ()` in an arm or a
+    # loop body; B::SoN's phi of the variable and its new value), or of
+    # arrays of their own: the one the way taken holds, by pointer (an
+    # array's %Array*, a hash's %Slot) -- a push after the join writes it.
+    if ( my $k = $b->agg_versions($phi) ) { return $k eq '@' ? '%Array*' : '%Slot' }
     return '%Slot' if $st =~ /\A(?:Str|Unknown|None|Scalar)\z/ || $st =~ /\AMaybe\[/;   # a Maybe: T or undef
     # A LIST A LOOP BUILDS (map, grep): one array, its back edge a ListAppend
     # to it. Another array phi (`@p = ()` in a loop) is not this.
@@ -115,6 +121,94 @@ sub _eval_want_of {
     return $r->eval_want;
 }
 
+# agg_versions($Phi) -> '@' or '%' where each way into the merge is, through
+# merges and choices, an array (or each a hash) that is a version of one
+# `my` variable of this function -- the variable itself, a new value of it
+# (`@p = ()`) -- or one of its own (a list literal, a copy of a deref, a
+# list a loop builds), or an array through a reference (the merge is that
+# array, as the deref is); else undef. No way in is another variable's: a
+# write after the join writes only what the way taken held. (Not where
+# _fresh_arrays places an array merge in its variable: its join copies.)
+sub agg_versions {
+    my ($b, $phi) = @_;
+    # (a list a loop builds: phi_type's own)
+    return undef if ( $phi->stamp // '' ) =~ /\A(?:Array|List)\z/ && grep { blessed($_) && $_->operation eq 'ListAppend' } $phi->inputs->@*;   # static type
+    my $pad = {};
+    return undef if blessed( $phi->region ) && $phi->region->operation eq 'Region'
+        && _fresh_arrays($phi, {}, $pad) && keys %$pad <= 1 && ( $phi->stamp // '' ) =~ /\A(?:Array|List)\z/;   # static type
+    my (%kind, %var, @phis, $alias);
+    my %seen;
+    my @q = ($phi);
+    while ( defined( my $n = shift @q ) ) {
+        return undef unless blessed($n);
+        next if $seen{ refaddr($n) }++;
+        my $op = $n->operation;
+        my $st = $n->stamp // '';   # static type
+        if ( $op eq 'Phi' ) { return undef if $n->is_memory; push @phis, $n; push @q, $n->inputs->@*; next }
+        if ( $op eq 'TernaryExpr' && $st =~ /\A(?:Array|List)\z/ ) { push @q, $n->inputs->@[1, 2]; next }
+        if ( $op eq 'PadAccess' && !$n->shared && !( $n->can('file') && $n->file ) && ( $n->is_my_array || $n->is_my_hash ) ) {
+            $var{ $n->name . '#' . ( $n->can('targ') ? $n->targ // '' : '' ) } = 1;
+            $kind{ $n->sigil } = 1;
+            next;
+        }
+        if ( $op eq 'ArrayLiteral' && $st eq 'Array' || $op eq 'ListAppend' || $op eq 'PostfixDeref' && $n->is_array_deref ) {
+            $kind{'@'} = 1;
+            $alias = 1 if $op eq 'PostfixDeref' && !$n->copy;
+            next;
+        }
+        if ( $op eq 'HashLiteral' && $st eq 'Hash' || $op eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%' && $n->copy ) { $kind{'%'} = 1; next }
+        # (a builtin's list -- `@r = sort ...` -- a list of its own, as a list literal is)
+        if ( $op eq 'Call' && $n->is_builtin && $n->returns_a_list && $st =~ /\A(?:Array|List)\z/ ) { $kind{'@'} = 1; next }
+        return undef;
+    }
+    return undef unless keys %kind == 1 && keys %var <= 1;
+    # (AN ARRAY THROUGH A REFERENCE, the deref's own array: a merge of it is
+    # read only -- one written after the join would write that array, or a
+    # variable's: not this)
+    return undef if $alias && grep { _written($_) } @phis;
+    # WRITTEN IN PLACE THROUGH A MERGE (`push @p, 1` where @p is the loop's
+    # merge of it): B::SoN puts that push on no memory chain -- a count after
+    # it reads the version before it (`@p > 1` made at the loop's head, before
+    # the push: "2| 1" for "1 3| 5"). Refused by name.
+    out('a write in place to a merge of versions of an array or hash (B::SoN orders no read after it)')
+        if grep { _written_off_memory($_) } @phis;
+    return ( keys %kind )[0];
+}
+
+# _written_off_memory($n) -> some write in place of the aggregate $n is
+# B::SoN puts on no memory chain: a builtin that changes the array it is
+# given first (push, splice, ...) with no memory input -- a read after it
+# is at the version before it. (A store to an element is on the chain: a
+# read after it reads at it.) Or a reference taken to it or an element:
+# written through that, nothing orders a read.
+sub _written_off_memory {
+    my ($n) = @_;
+    my $is = sub ($x) { blessed($x) && refaddr($x) == refaddr($n) };
+    for my $c (grep { blessed($_) } ( $n->consumers // [] )->@*) {
+        my $op = $c->operation;
+        return 1 if $op eq 'Call' && $c->mutates_array && $is->( $c->inputs->[0] ) && !$c->memory_operand;
+        return 1 if $op eq 'Ref' && $is->( $c->inputs->[0] );
+        return 1 if $op eq 'Subscript' && $is->( $c->inputs->[0] )
+            && grep { blessed($_) && $_->operation eq 'Ref' && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($c) } ( $c->consumers // [] )->@*;
+    }
+    return 0;
+}
+
+# _written($n) -> some node writes the aggregate $n in place: a builtin that
+# changes the array it is given first, a store to (or a delete of) an element.
+sub _written {
+    my ($n) = @_;
+    my $is = sub ($x) { blessed($x) && refaddr($x) == refaddr($n) };
+    for my $c (grep { blessed($_) } ( $n->consumers // [] )->@*) {
+        my $op = $c->operation;
+        return 1 if $op eq 'Call' && $c->mutates_array && $is->( $c->inputs->[0] );
+        return 1 if $op =~ /\A(?:Assign|CompoundAssign|Delete)\z/ && $is->( $c->inputs->[0] );
+        return 1 if $op eq 'Subscript' && $is->( $c->inputs->[0] )
+            && grep { blessed($_) && $_->operation =~ /\A(?:Assign|CompoundAssign|Delete|Ref)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($c) } ( $c->consumers // [] )->@*;
+    }
+    return 0;
+}
+
 # _fresh_arrays($Phi, $seen, \%pad) -> true for a merge (not a loop's) each of
 # whose ways in is a fresh array -- a list literal made into one -- or a `my`
 # array (put in %pad by name), or such a merge.
@@ -142,6 +236,8 @@ sub _fresh_arrays {
 # at that way's end: an array's list (a `my` array's merge: copied into it).
 sub phi_input {
     my ($b, $p, $in, $ty) = @_;
+    local $b->{at_way} = 1;   # (a whole aggregate it is: made at its way's end, where it stands)
+    if ( my $want = ( $b->{ret_phi} // {} )->{ refaddr($p) } ) { return $b->ret_way($want, $in) }
     return $b->as($b->value($in), $ty) unless $ty eq '%Array*';
     my $pad = ( $b->{phi_store} // {} )->{ refaddr($p) } or return $b->as_list($in);
     my $var = $b->array_var($pad);

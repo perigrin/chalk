@@ -15,6 +15,8 @@ my @CASES = qw(
     adjacency-01_literals:1 adjacency-12_packages:1 adjacency-05_scoping:1 adjacency-06_control:2
     adjacency-08_references:1 adjacency-06_control:1 adjacency-13_opaque:1
     chalk-found-gaps:134 chalk-found-gaps:141 quote-like-terms:1
+    chalk-found-gaps:94 chalk-found-gaps:146 chalk-found-gaps:150 chalk-found-gaps:76
+    chalk-found-gaps:64 adjacency-02_variables:1
     argument-extent:3
     chalk-found-gaps:86 chalk-found-gaps:130 chalk-found-gaps:4 jumps:2 adjacency-04_operators:1 bitwise:2
     range:2 adjacency-03_context:1 adjacency-11_oo:1 tie:1 tie:2

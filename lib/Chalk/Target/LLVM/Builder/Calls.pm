@@ -382,6 +382,8 @@ sub field_default {
     out('a field default that is not made of itself') unless _self_made($d, {});
     local $b->{memo} = {};
     local $b->{depth} = 0;   # (made here, for this object: an arm's or a body's is its own)
+    local $b->{lscope};
+    local $b->{scope_in};
     local $b->{in_field_default} = 1;   # (a {...} in it is made here, each object its own)
     return $b->as($b->value($d), '%Slot');
 }
@@ -390,6 +392,8 @@ sub field_default_into {
     out('a field default that is not made of itself') unless _self_made($d, {});
     local $b->{memo} = {};
     local $b->{depth} = 0;
+    local $b->{lscope};
+    local $b->{scope_in};
     for my $e ( $d->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( $d->stamp // '' ) =~ /\A(?:Array|Hash)\z/ ? $d->inputs->@* : $d ) {   # static type
         next unless blessed($e);
         if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($e) ]) }
@@ -753,7 +757,7 @@ sub as_list {
 # set_want($Call): the caller's context, for a sub returning a list.
 sub set_want {
     my ($b, $c) = @_;
-    if ($b->{tail} && $b->{tail}{call} == refaddr($c)) {   # handed on from this sub's caller
+    if ($b->{tail} && ( ( $b->{tail}{call} // 0 ) == refaddr($c) || $b->{tail}{calls}{ refaddr($c) } )) {   # handed on from this sub's caller
         return $b->emit(op => 'SetWant', type => 'void', inputs => [ $b->{tail}{want} ]);
     }
     my $fn = blessed( $c->target ) ? $b->{funcs}{ refaddr( $c->target ) } : undef;
@@ -860,7 +864,12 @@ sub func {
     my $ctxlist = ( $sub->can('context') ? $sub->context // '' : '' ) eq 'list'
         && $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && _is_list( $ret->inputs->[0] )
         ? $ret->inputs->[0] : undef;
-    my $listret = $ret->inputs->@* == 2 || $valueless || $hkv || $arrret || $mret || $ctxlist;
+    # `@l = (9)` ITS LAST STATEMENT (a list assign to an array or hash field):
+    # in the caller's context, the aggregate's list or the count assigned.
+    my $laret = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation eq 'Assign'
+        && $ret->inputs->[0]->can('targets') && defined $ret->inputs->[0]->targets
+        ? $ret->inputs->[0] : undef;
+    my $listret = $ret->inputs->@* == 2 || $valueless || $hkv || $arrret || $mret || $laret || $ctxlist;
     out("sub $name returns more than one reading") if $ret->inputs->@* > 2;
     # A METHOD OF THE CLASS FEATURE: $self is its first argument, its signature's
     # parameter i the i+1th (B::SoN's Parameter nodes). One reading @_, or with
@@ -1084,6 +1093,9 @@ sub func {
     local $b->{readers};
     $b->index_readers($g->component);
     local $b->{depth} = 0;
+    local $b->{lscope};   # (its own: 'top')
+    local $b->{scope_in};
+    local $b->{at_way};
     my $start = $ret;
     for (1 .. 100_000) {
         last if $start->operation eq 'Start';
@@ -1137,7 +1149,28 @@ sub func {
              || ( $ret->inputs->[0]->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/
                 && !defined( $ret->inputs->[0]->can('want') ? $ret->inputs->[0]->want : undef ) )
         ? $ret->inputs->[0] : undef;
-    local $b->{tail} = $tail ? { call => refaddr($tail), want => $want } : undef;
+    # A MERGE RETURNED, ONE WAY A CALL (`if ($x) { return g() } return 7`),
+    # B::SoN's stamp a List: each way in the caller's context -- the call's
+    # handed on, another's a list of it or it -- and the merge their list's
+    # reference or scalar. (Stamped other, a merge of scalars: its value.)
+    # (In a sub's list-context copy -- ctxlist -- the same, its caller's
+    # context a list.)
+    my $rphi = ( !$listret || $ctxlist && refaddr($ctxlist) == refaddr( $ret->inputs->[0] ) ) && !$tail && $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation eq 'Phi'
+        && ( $ret->inputs->[0]->stamp // '' ) =~ /\A(?:List|Array)\z/   # static type
+        && !$ret->inputs->[0]->is_memory && blessed( $ret->inputs->[0]->region ) && $ret->inputs->[0]->region->operation eq 'Region'
+        && ( grep { blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'direct' } $ret->inputs->[0]->inputs->@* )
+        ? $ret->inputs->[0] : undef;
+    if ($rphi) {
+        for my $w ($rphi->inputs->@*) {
+            next if blessed($w) && $w->operation eq 'Call' && ( $w->dispatch_kind // '' ) eq 'direct';
+            out('a merge returned whose way is a list or a merge') if !blessed($w) || _is_list($w) || $w->operation eq 'Phi';
+        }
+    }
+    local $b->{ret_phi} = $rphi ? { refaddr($rphi) => $want } : undef;
+    local $b->{ret_fn} = $fn;
+    local $b->{tail} = $tail ? { call => refaddr($tail), want => $want }
+                     : $rphi ? { calls => { map { ( refaddr($_) => 1 ) } grep { blessed($_) && $_->operation eq 'Call' } $rphi->inputs->@* }, want => $want }
+                     : undef;
     $b->make_constant_arrays($g->component);
     local $b->{jumps} = {};   # this function's early exits
     local $b->{loopx};        # (a loop its caller is walking is not its)
@@ -1153,7 +1186,12 @@ sub func {
         return $fn;
     }
     my $r;
-    if ($hkv) {
+    if ($rphi) {
+        # (each way made in the caller's context at its end: ret_way)
+        $fn->{listret} = 1;
+        $r = $b->as($b->value($rphi), '%Slot');
+    }
+    elsif ($hkv) {
         my $h = $b->hash_of( $hkv->inputs->[0] );
         my $l = $b->emit(op => $hkv->lists_a_hash eq 'keys' ? 'HKeys' : 'HValues', type => '%Array*', inputs => [$h]);
         my $n = $b->as($b->emit(op => 'HCount', type => 'i64', inputs => [$h]), '%Slot');
@@ -1168,10 +1206,12 @@ sub func {
         # caller may write the list it is handed (`for (f()) { $_ = 0 }`).
         my $copy = $b->emit(op => 'NewArray', type => '%Array*');
         out("sub $name returns a /g match") if $mret && ( $mret->flags // '' ) =~ /g/;
-        $b->emit(op => 'AAppend', type => 'void', inputs => [ $copy, $mret ? $b->array_of($mret) : $b->as_list($v) ]);
+        my $la = $laret ? $b->{list_assigned}{ refaddr($laret) } // out('the value of a list assignment to scalars') : undef;
+        $b->emit(op => 'AAppend', type => 'void', inputs => [ $copy, $mret ? $b->array_of($mret) : $la ? $la->[1] : $b->as_list($v) ]);
         my $l = $b->emit(op => 'ARef', type => '%Slot', inputs => [$copy]);
         # (a list-context copy has no scalar reading: no call takes one)
         my $sv = $mret ? $b->as( $b->value($mret), '%Slot' )
+               : $la ? $b->as( $la->[0], '%Slot' )
                : $arrret ? $b->as( $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($arrret) ]), '%Slot' )
                : blessed( $ret->inputs->[1] ) ? $b->as($b->value( $ret->inputs->[1] ), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
         $r = $b->emit(op => 'Select', type => '%Slot', inputs => [ $want, $l, $sv ]);
@@ -1201,6 +1241,30 @@ sub func {
     return $fn;
 }
 
+
+# ret_way($want, $way) -> one way into a merge a sub returns (ret_phi), in
+# the caller's context $want: a call handed it on gives its list's
+# reference or its scalar (a sub of one value: a list of it, or it); another
+# value a list of it, or it.
+sub ret_way {
+    my ($b, $want, $w) = @_;
+    my $one = sub ($v) {
+        my $l = $b->emit(op => 'NewArray', type => '%Array*');
+        $b->emit(op => 'APush', type => 'void', inputs => [ $l, $v ]);
+        return $b->emit(op => 'Select', type => '%Slot', inputs => [ $want, $b->emit(op => 'ARef', type => '%Slot', inputs => [$l]), $v ]);
+    };
+    if ( $w->operation eq 'Call' && ( $w->dispatch_kind // '' ) eq 'direct' ) {
+        my $t = $w->target;
+        my $cf = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
+        my $r = $b->as($b->value($w), '%Slot');
+        $cf //= blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
+        out('a merge returned with a call of no sub T2 made') unless $cf;
+        # (of itself: whether it gives a list is known only once it is made)
+        out('a merge returned with a call of the sub itself') if refaddr($cf) == refaddr( $b->{ret_fn} // 0 );
+        return $cf->{listret} ? $r : $one->($r);
+    }
+    return $one->( $b->as($b->value($w), '%Slot') );
+}
 
 # IN-MEMORY HANDLES (perl's open on a reference): open(my $fh, "<", \"...")
 # reads the string, open(my $fh, ">" or ">>", \my $buf) writes into $buf;

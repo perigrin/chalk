@@ -77,14 +77,15 @@ print scalar(K->new->set), "\n";
     is($got, perl_of($src), "perl's answer: " . ( $src =~ s/\n/ /gr )) or diag $@;
 }
 
-# Called in both contexts: one function cannot be both -- refused.
+# Called in both contexts: T2's method gives either by the caller's context
+# (t2-a-list-assign-returned.t) -- perl's answer, where it was refused.
 for my $src (
     $hdr . q{class K { field %h; method set { %h = (a => 1) } }
 my $k = K->new; my $c = $k->set; my @l = $k->set; print "$c ", scalar(@l), "\n";
 },
 ) {
-    my $err = do { local $@; eval { through_llvm($src) }; $@ };
-    like($err, qr/\A(?:load|lower): /, "refused: " . ( $src =~ s/\n/ /gr ));
+    my $got = eval { through_llvm($src) };
+    is($got, perl_of($src), "perl's answer: " . ( $src =~ s/\n/ /gr )) or diag $@;
 }
 
 done_testing;

@@ -501,7 +501,9 @@ sub if_stmt {
     # it again, after the store (`my $x = $i; if ($c) { $i = 5 } print $x`).
     $b->reads_before($_) for $b->{passed}->@*;
     my $cond = $b->truth($b->value($if->inputs->[1]));
+    $b->agg_settle;   # (a whole aggregate first needed in an arm: made before it)
     my $from = $b->{cur};
+    my $outer_memo = $b->{memo};
     my (%end, %blk, %vals);
     for my $i (0, 1) {
         my $blk = $b->new_block($i ? 'else' : 'then');
@@ -513,6 +515,7 @@ sub if_stmt {
         # && @$r` counting through an undef $r)
         local $b->{passed} = [ $b->{passed}->@* ];
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
+        local $b->{scope_in} = [ 'arm', $outer_memo ];   # (see agg_made_here)
         local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $if->inputs->[1], $i );
         $end{$i} = $b->walk($proj{$i});
         # The arm's memo is kept: its phi inputs are read from it (a call made
@@ -688,7 +691,8 @@ sub _head_aggregates {
         next unless blessed($n) && $n->can('operation') && !$seen{ refaddr($n) }++;
         next if $n->operation eq 'Phi' || $n->is_memory_version;
         if ( $n->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( $n->stamp // '' ) =~ /\A(?:Array|Hash)\z/   # static type
-                && !$n->is_pinned && !$b->{memo}{ refaddr($n) } && !$b->_needs_unmade_phi($n, {}) ) {
+                && !$n->is_pinned && !$b->{memo}{ refaddr($n) } && !$b->_needs_unmade_phi($n, {})
+                && $b->agg_home_here($n, $b->{lscope} // 'top') ) {
             push @out, $n;
             next;
         }
@@ -750,15 +754,18 @@ sub loop {
     # A `my` ARRAY OR HASH ITS CONDITION READS (`my @s = ($x); while (@s) {
     # ... pop @s ... }`) was made before the loop, once: made first in the
     # header, it was made again each pass, the pops undone ("runs away").
+    $b->agg_settle;
     # (and one its effect reads: `while (my $n = pop @walk)`)
     $b->value($_) for map { $b->_head_aggregates($_) } $cond[0], map { $_->inputs->@* } @effect;
     my $pre = $b->{cur};
+    my $pre_memo = { $b->{memo}->%* };   # (what is made before the loop, its phis not yet: see agg_made_here)
     # A LIST THE LOOP BUILDS starts empty each time the loop is entered: a
     # fresh array here (the empty literal, made once at entry, was every
     # pass's of an outer loop: "xa c ya c a c" for "xa c ya c").
     my @init = map {
         my $i0 = $_->inputs->[0];
         $b->loop_type($_) eq '%Array*' && blessed($i0) && $i0->operation eq 'ArrayLiteral' && !$i0->inputs->@*
+            && ( grep { blessed($_) && $_->operation eq "ListAppend" } $_->inputs->@* )
             ? $b->emit(op => 'NewArray', type => '%Array*')
             : $b->as($b->value($i0), $b->loop_type($_))
     } @phis;
@@ -792,6 +799,8 @@ sub loop {
         local $b->{memo} = { $b->{memo}->%* };
         local $b->{stood} = { ( $b->{stood} // {} )->%* };   # (as its memo: see _stood_already)
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
+        local $b->{lscope} = scope_key($bodyp);
+        local $b->{scope_in} = [ 'loop', $pre_memo ];
         local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $cond[0], 0 );   # (a body runs where its condition held)
         local $b->{loopx} = $lx;
         my $e = $b->walk($bodyp);
@@ -883,9 +892,12 @@ sub loop_breaks {
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     out('a loop phi with other than two ways in') if grep { scalar( $_->inputs->@* ) != 2 } @phis;
     $b->reads_before($_) for $b->{passed}->@*;
+    $b->agg_settle;
+    my $pre_memo = { $b->{memo}->%* };   # (what is made before the loop, its phis not yet: see agg_made_here)
     my @init = map {
         my $i0 = $_->inputs->[0];
         $b->loop_type($_) eq '%Array*' && blessed($i0) && $i0->operation eq 'ArrayLiteral' && !$i0->inputs->@*
+            && ( grep { blessed($_) && $_->operation eq "ListAppend" } $_->inputs->@* )
             ? $b->emit(op => 'NewArray', type => '%Array*')
             : $b->as($b->value($i0), $b->loop_type($_))
     } @phis;
@@ -905,6 +917,8 @@ sub loop_breaks {
     {
         local $b->{memo}  = { $b->{memo}->%* };
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
+        local $b->{lscope} = scope_key($L);
+        local $b->{scope_in} = [ 'loop', $pre_memo ];
         local $b->{loopx} = $lx;
         $head_memo = { $b->{memo}->%* };
         my $e = $b->walk($L);
@@ -968,6 +982,7 @@ sub go_round {
     {
         local $b->{cur}  = $lblk;
         local $b->{memo} = $lmemo;
+        local $b->{at_way} = 1;   # (each its way's value, made at its end)
         @back = map { $b->as($b->value($phis->[$_]->inputs->[1]), $t2->[$_]->type) } 0 .. $#$phis;
         $lblk = $b->{cur};
     }

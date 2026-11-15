@@ -10,19 +10,163 @@ use Scalar::Util qw(blessed refaddr);
 
 # make_constant_arrays(@nodes): an array whose literal holds only constants
 # (`my @a = (1, 2)`, `my @a`) is made in the entry block -- first made where it
-# was first used, in a loop body it was made again each pass.
+# was first used, in a loop body it was made again each pass. (Not one a merge
+# places in an arm or a loop body -- `@p = ()` there: see agg_home.)
 sub make_constant_arrays {
     my ($b, @nodes) = @_;
     for my $lit (grep { $_->operation eq 'ArrayLiteral' } @nodes) {
         next if $lit->is_pinned;   # a `my @a` pinned where it runs: made there
         next if $lit->stored_whole_into;   # a package array, read where it is read
         next if grep { !( blessed($_) && $_->operation eq 'Constant' ) } $lit->inputs->@*;
+        next unless $b->agg_home_here($lit, 'top');
         $b->value($lit);
     }
     # A `my %h = (...)` of constants, or of @_, is made at entry too.
     for my $lit (grep { $_->operation eq 'HashLiteral' && ( $_->stamp // '' ) eq 'Hash' && !$_->is_pinned && !$_->stored_whole_into } @nodes) { # static type
         next if grep { !( blessed($_) && ( $_->operation =~ /\A(?:Constant|ArgsSource)\z/ || $b->{args}{ refaddr($_) } ) ) } $lit->inputs->@*;
+        next unless $b->agg_home_here($lit, 'top');
         $b->value($lit);
+    }
+}
+
+# WHERE A WHOLE ARRAY OR HASH IS MADE. A `my @a = (...)`, a `%h = ()` -- a new
+# aggregate (B::SoN's ArrayLiteral or HashLiteral) that B::SoN does not pin --
+# is made once each time its statement runs, and written in place after (a
+# push, an element store). Made where it is first needed, it may be made in
+# a loop body its statement is not in (made again each pass: the pushes of
+# the last pass lost), or before a loop its statement is in (one for every
+# pass), or in an arm when it is read after the join too (made again there,
+# without what the arm wrote). So:
+#   - A MERGE IT IS A WAY INTO says which pass makes it (agg_home): a loop
+#     phi's back edge, the loop's body; its entry, outside that loop; an if's
+#     merge, the loop the arm is in.
+#   - AS AN IF OR A LOOP IS ENTERED (agg_settle), each one of the pass the
+#     walk is in -- a merge says so, or none says -- all it holds made (none
+#     computed early: it could be guarded), is made, before what needs it.
+#   - FIRST NEEDED ELSEWHERE (agg_made_here): in the loop body a merge places
+#     it in, or in an arm or a body where what it holds is made (it is that
+#     scope's own: its statement is in it). Else refused by name.
+#   - A LIST OF NO VARIABLE'S (no symbol: `@p[1 .. $#p]` walked by a foreach)
+#     is a value, made where it is needed as any value is.
+
+# scope_key($ctl) -> the key of a loop's body (its Proj, or the Loop of a body
+# walked from it), 'top' for the function's own.
+sub scope_key { my ($n) = @_; return !blessed($n) || $n->operation eq 'Start' ? 'top' : refaddr($n) }
+
+# _loop_scope($ctl) -> the entry of the loop body the control $ctl stands in
+# (a Loop's body Proj, or the Loop whose body hangs off it), or Start: back
+# along the control chain, an if's arm and a finished if or loop passed
+# through. undef where the chain is not one of these.
+sub _loop_scope {
+    my ($ctl) = @_;
+    my $from;
+    for (1 .. 100_000) {
+        return undef unless blessed($ctl);
+        my $op = $ctl->operation;
+        return $ctl if $op eq 'Start';
+        if ($op eq 'Loop') {
+            # (reached from a statement of its body -- a loop walked from the
+            # Loop itself: its body; from its exit: after it)
+            return $ctl if blessed($from) && $from->operation ne 'Proj';
+            ( $from, $ctl ) = ( $ctl, $ctl->control_in );
+            next;
+        }
+        if ($op eq 'Proj') {
+            my $p = $ctl->inputs->[0];
+            return undef unless blessed($p) && $p->operation =~ /\A(?:If|Loop)\z/;
+            return $ctl if $p->operation eq 'Loop' && $ctl->index == 0;
+            ( $from, $ctl ) = ( $ctl, $p );   # (an if's arm: the if's; a loop's exit: the loop's)
+            next;
+        }
+        if ($op eq 'Region') {   # (a merge: after its if or its loop -- from its first way in)
+            ( $from, $ctl ) = ( $ctl, $ctl->inputs->[0] );
+            next;
+        }
+        my $c = $ctl->can('control_in') && blessed( $ctl->control_in ) ? $ctl->control_in : return undef;
+        ( $from, $ctl ) = ( $ctl, $c );
+    }
+    return undef;
+}
+
+# agg_home($lit) -> the key of the loop body (or 'top') whose pass makes a
+# whole aggregate, where a merge it is a way into says (see above); undef
+# where none does, '?' where they disagree or say what is not known.
+sub agg_home {
+    my ($b, $L) = @_;
+    my $k = refaddr($L);
+    return $b->{agg_home}{$k} if exists $b->{agg_home}{$k};
+    my %at;
+    for my $p (grep { blessed($_) && $_->operation eq 'Phi' && !$_->is_memory } ( $L->consumers // [] )->@*) {
+        my $r = $p->region;
+        for my $i (grep { blessed( $p->inputs->[$_] ) && refaddr( $p->inputs->[$_] ) == refaddr($L) } 0 .. $p->inputs->$#*) {
+            my $e;
+            if ( blessed($r) && $r->operation eq 'Loop' ) {
+                $e = $i ? ( ( grep { $_->operation eq 'Proj' && $_->index == 0 } $r->successors_by_input )[0] // $r )
+                        : _loop_scope( $r->control_in );
+            }
+            else {
+                my $pr = $p->predecessors;
+                $e = $pr && blessed( $pr->[$i] ) ? _loop_scope( $pr->[$i] ) : undef;
+            }
+            $at{ blessed($e) ? scope_key($e) : '?' } = 1;
+        }
+    }
+    my @at = keys %at;
+    return $b->{agg_home}{$k} = !@at ? undef : @at == 1 ? $at[0] : '?';
+}
+
+# agg_home_here($lit, $loop) -> a merge places the aggregate in the loop body
+# $loop (a scope_key), or none does.
+sub agg_home_here {
+    my ($b, $L, $loop) = @_;
+    my $h = $b->agg_home($L);
+    return !defined $h || $h eq $loop;
+}
+
+# _made_in_scope($n, $base, $seen) -> the value $n is made in the scope the
+# walk is in, not before it: not in $base (the memo as the scope was entered),
+# and not made of what is (a pinned node, a phi, a read at a memory version,
+# or what holds one of them, made after the scope began).
+sub _made_in_scope {
+    my ($b, $n, $base, $seen) = @_;
+    return 0 unless blessed($n) && $n->can('operation');
+    return 0 if $base->{ refaddr($n) } || $n->operation eq 'Constant';
+    return $seen->{ refaddr($n) } if exists $seen->{ refaddr($n) };
+    $seen->{ refaddr($n) } = 0;
+    my $r = $n->is_pinned || $n->operation eq 'Phi' || blessed( $n->memory_operand ) ? 1
+          : scalar grep { $b->_made_in_scope($_, $base, $seen) } $n->inputs->@*;
+    return $seen->{ refaddr($n) } = $r ? 1 : 0;
+}
+
+# agg_made_here($lit) -> true where a whole aggregate not pinned may be made
+# where the walk is (see above).
+sub agg_made_here {
+    my ($b, $L) = @_;
+    return 1 if $b->{agg_settling} || $b->{at_way};
+    return 1 unless defined $L->symbol;   # (a list of no variable's: a value)
+    my $h = $b->agg_home($L);
+    my $loop = $b->{lscope} // 'top';
+    my $in = $b->{scope_in};   # (the innermost scope: undef the function's own, else [kind, base memo])
+    return !defined $h || $h eq 'top' unless $in;
+    return 1 if $in->[0] eq 'loop' && defined $h && $h eq $loop;
+    return 0 if defined $h && $h ne $loop;
+    return $b->_made_in_scope($L, $in->[1], {});
+}
+
+# agg_settle(): AS AN IF OR A LOOP IS ENTERED, each whole aggregate of this
+# function not pinned and not made yet that is of the pass the walk is in --
+# a merge places it there, or none does -- and all of whose parts are made
+# (nothing computed early: one of them could be guarded) is made here, before
+# what needs it.
+sub agg_settle {
+    my ($b) = @_;
+    my $loop = $b->{lscope} // 'top';
+    for my $L (grep { $_->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( $_->stamp // '' ) =~ /\A(?:Array|Hash)\z/   # static type
+                      && !$_->is_pinned && defined $_->symbol } +($b->{own_nodes} // [])->@*) {
+        next if $b->{memo}{ refaddr($L) } || $L->stored_whole_into || !$b->agg_home_here($L, $loop);
+        next if grep { !( blessed($_) && ( $b->{memo}{ refaddr($_) } || $_->operation eq 'Constant' ) ) } $L->inputs->@*;
+        local $b->{agg_settling} = 1;
+        $b->value($L);
     }
 }
 
@@ -36,9 +180,9 @@ sub hash_value {
         out('a hash that is not a {...} or a `my %h`') unless $st =~ /\A(?:HashRef|Hash)\z/;
         # (one in a field's default is made where the object is: field_default)
         out('a {...} not made where it runs') if $st eq 'HashRef' && !$v->is_pinned && !$b->{in_field_default};
-        # A `my %h` NOT MADE AT ENTRY, needed in an arm or a loop body, would be
-        # made there -- again each pass, and gone after.
-        out('a hash first made in an arm or a loop body') if $st eq 'Hash' && $b->{depth} && !$v->is_pinned;
+        # A `my %h` NOT PINNED is made where agg_made_here says its statement
+        # is: in another loop body or arm it was made again each pass, or gone after.
+        out('a hash first made in an arm or a loop body') if $st eq 'Hash' && !$v->is_pinned && !$b->agg_made_here($v);
         my $h = $b->emit(op => 'HNew', type => '%Slot');
         if (grep { _is_list($_) } @in) {   # `my %o = @_`, `{ %$r, k => 1 }`: pairs of a list
             my $l = $b->emit(op => 'NewArray', type => '%Array*');
@@ -119,9 +263,14 @@ sub hash_value {
         out('an each of what is not a hash') unless $in[0] isa Chalk::IR::Node && $in[0]->is_named_hash;
         # keys AND values START A HASH'S each OVER, but B::SoN places neither
         # (a value made where it is used, or never): where they run against an
-        # each is not known. Refused where the program has one.
+        # each is not known. Refused where the program has one of a hash that
+        # may be this one -- of no name known, or of this hash's name. (A
+        # keys of another named hash resets that one's.)
+        my $mine = _hash_name( $in[0] );
         out('an each in a program with a keys or values (which reset it, B::SoN places them nowhere)')
-            if grep { $_->operation eq 'Call' && $_->resets_iterator } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
+            if grep { $_->operation eq 'Call' && $_->resets_iterator
+                      && !( defined $mine && ( _hash_name( $_->inputs->[0] ) // $mine ) ne $mine ) }
+                _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
         return $b->emit(op => 'Each', type => '%Array*', inputs => [ $b->hash_of($in[0]) ]);
     }
     # sort (by string or by number, either way) and reverse, of a list: a new
@@ -178,6 +327,23 @@ sub hash_value {
         return $b->emit(op => 'ASort', type => '%Array*', inputs => [$arr],
             attr => { num => ( $v->sort_cmp eq 'numeric' ? 1 : 0 ), desc => ( ( $v->can('sort_order') ? $v->sort_order // '' : '' ) eq 'descending' ? 1 : 0 ) });
     }
+    return undef;
+}
+
+# _hash_name($n) -> the name of the hash a node is, where it is one by its
+# name -- a `my %h` ('my:h'; two of one name are one here), a package hash
+# ('pkg:main::h') -- whose iterator none other shares; else undef (a hash
+# through a reference may be any).
+sub _hash_name {
+    my ($n) = @_;
+    return undef unless $n isa Chalk::IR::Node;
+    my $op = $n->operation;
+    if ( $op eq 'HashLiteral' && ( $n->stamp // '' ) eq 'Hash' && defined $n->symbol ) {   # static type
+        ( my $sym = $n->symbol ) =~ s/\A%//;
+        return $sym =~ /::/ ? "pkg:$sym" : "my:$sym";
+    }
+    return 'my:' . $n->symbol if $op eq 'PadAccess' && $n->is_my_hash && defined $n->symbol;
+    return 'pkg:' . $n->qualified_name if $op eq 'EntryDef' && $n->is_package_aggregate && $n->sigil eq '%';
     return undef;
 }
 
@@ -473,9 +639,11 @@ sub array_value {
     my ($b, $v, $op) = @_;
     my @in = $v->inputs->@*;
     if ($op eq 'ArrayLiteral') {
-        # ONE NOT MADE AT ENTRY, needed in an arm or a loop body, would be made
-        # there -- again each pass, and gone after.
-        out('an array first made in an arm or a loop body') if $b->{depth} && !$v->is_pinned;
+        # ONE NOT PINNED is made where agg_made_here says its statement is: in
+        # another loop body or arm it was made again each pass, or gone after.
+        # (a [...] B::SoN does not pin, at the function's own scope only)
+        out('an array first made in an arm or a loop body') if !$v->is_pinned
+            && ( ( $v->stamp // '' ) eq 'ArrayRef' ? $b->{depth} : !$b->agg_made_here($v) );   # static type: a [...] is made where it runs
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
         for my $e (@in) {
             # A LIST IN IT is flattened: its elements appended (`(keys %h)`, `(@a, 4)`).
@@ -821,8 +989,10 @@ sub array_of {
     return $b->list_choice($n) if blessed($n) && $n->operation =~ /\A(?:TernaryExpr|And|Or)\z/ && ( _is_list($n) || $b->type_of($n) eq '%Array*' );
     # A LIST A LOOP BUILDS (a phi of one, map's ListAppend) is its array.
     return $b->value($n) if blessed($n) && $n->operation =~ /\A(?:Phi|ListAppend)\z/ && $b->type_of($n) eq '%Array*';
-    # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`).
+    # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`, a
+    # merge of a hash's versions).
     return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if ( $n isa Chalk::IR::Node && $n->is_named_hash )
+        || blessed($n) && $n->operation eq 'Phi' && !$n->is_memory && ( $b->agg_versions($n) // '' ) eq '%'
         || blessed($n) && $n->operation eq 'FieldAccess' && ( $b->field_of($n) )[1] eq '%';
     if (blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%') {
         return $b->value($n) unless $n->copy;   # (its pairs, read once)
