@@ -779,7 +779,7 @@ sub func {
     }
     # `return g()` IS CALLED IN THE CALLER'S CONTEXT: it is handed on.
     my $tail = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation eq 'Call'
-        && ( $ret->inputs->[0]->dispatch_kind // '' ) eq 'direct' ? $ret->inputs->[0] : undef;
+        && ( $ret->inputs->[0]->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/ ? $ret->inputs->[0] : undef;
     local $b->{tail} = $tail ? { call => refaddr($tail), want => $want } : undef;
     $b->make_constant_arrays($g->component);
     local $b->{jumps} = {};   # this function's early exits
@@ -817,6 +817,14 @@ sub func {
                : $arrret ? $b->as( $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($arrret) ]), '%Slot' )
                : blessed( $ret->inputs->[1] ) ? $b->as($b->value( $ret->inputs->[1] ), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
         $r = $b->emit(op => 'Select', type => '%Slot', inputs => [ $want, $l, $sv ]);
+    }
+    elsif ($tail && ( $tail->dispatch_kind // '' ) ne 'direct') {
+        # A TAIL CALL OF A METHOD OR A CODE VALUE: its wrapper gives, by the
+        # context handed on, a list's reference or its scalar -- as a sub
+        # returning a list does (`return $self->all`: a list of one for
+        # perl's three, before).
+        $fn->{listret} = 1;
+        $r = $b->as($b->value($tail), '%Slot');
     }
     elsif ($tail) {
         # A TAIL CALL OF A SUB RETURNING A LIST: its result as it is (the

@@ -134,3 +134,9 @@ refused	my $r = [1, 2, 3]; my $s = $r; for my $e (@$r) { shift @$s; print "$e\n"
 refused	my @a = (1, 2, 3); for my $e (@a) { $#a = 0; print "$e\n" } print "@a\n";
 refused	our @g = (1, 2, 3); sub h { shift @g } for my $e (@g) { h(); print "$e\n" } print "@g\n";
 same	my @a = (1, 2, 3); my @b; for my $e (@a) { push @b, $e * 2 } print "@b\n";
+same	my $c = { k => [{ k => [] }, { k => [] }] }; my @s = ($c); my $i = 0; my @r; while (@s) { last if ++$i > 10; my $n = pop @s; push @r, $n; push @s, $n->{k}->@*; } print "$i ", scalar(@r), "\n";
+same	my $x = $ENV{NOPE} // 5; my @s = ($x, $x); my $i = 0; while (@s) { my $n = pop @s; $i++; } print "$i\n";
+same	package K; sub new { bless {}, shift } sub all { my @r = (1, 2, 3); return @r } sub via { my $s = shift; return $s->all } package main; my $k = K->new; my @l = $k->via; my $n = $k->via; print scalar(@l), " $n\n";
+same	my $f = sub { return (1, 2, 3) }; sub via { return $f->() } my @l = via(); my $n = via(); print scalar(@l), " $n\n";
+same	package K; sub new { bless {}, shift } sub all { return (4, 5) } sub via { my $s = shift; return $s->all } sub top { my $s = shift; return $s->via } package main; my $k = K->new; my @l = $k->top; my $n = $k->top; print "@l|$n\n";
+same	use v5.42; use experimental 'class'; class C { field $kids :param = []; method children { $kids } method walk_all ($cb) { my @results; my @stack = ($self); while (@stack) { my $node = pop @stack; push @results, $cb->($node); push @stack, $node->children()->@*; } return @results; } method leaves { return $self->walk_all(sub ($n) { return $n }) } } my $c = C->new(kids => [C->new, C->new]); my @l = $c->leaves; my $n = $c->leaves; print scalar(@l), " $n\n";
