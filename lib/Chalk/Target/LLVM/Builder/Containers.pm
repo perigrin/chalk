@@ -381,6 +381,8 @@ sub array_value {
             if blessed($t) && $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$' && $t->is_location;
         # \%h: a named hash IS its reference here (a %Slot of tag 5), one hash, two names.
         return $b->value($t) if blessed($t) && ( $t->is_named_hash || $t->is_package_aggregate && $t->sigil eq '%' ) && ( $v->stamp // '' ) eq 'HashRef';   # static type
+        out('a reference to a glob read other than by ref (its address and slots are the stash\'s)')
+            if blessed($t) && $t->operation eq 'Constant' && ( $t->const_type // '' ) eq 'glob';
         out('a reference to what is not an array') unless blessed($t)
             && ( $t->operation eq 'ArrayLiteral' && ( $t->stamp // '' ) eq 'Array' || $t->is_array_deref || $t->is_my_array || $t->is_argv
                  || $t->operation eq 'Phi' && $b->type_of($t) eq '%Array*'   # a list a loop builds (`my @c = map ...`), a merge of an array's

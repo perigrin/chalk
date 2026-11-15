@@ -228,6 +228,10 @@ sub type_of {
         my %t = map { ( $b->type_of($_) => 1 ) } $v->inputs->@[1, 2];
         return keys %t == 1 ? ( keys %t )[0] : '%Slot';
     }
+    # A GLOB is a value T2 knows only by its name (a string of it, the type of
+    # a reference to it): its slots and its address are the stash's.
+    out('a glob read other than as a string, or a reference to it other than by ref (its slots are the stash\'s)')
+        if _glob_name($v) || _glob_of($v);
     my $st = $v->stamp // ''; # static type
     return '%Slot' if $st =~ /\AMaybe\[/;   # T or undef: a %Slot
     return $SCALAR{$st} // out("a value stamped $st ($op)");
@@ -393,6 +397,8 @@ sub _value {
         return $b->as($b->emit(op => 'Qx', type => '%Str', inputs => [ $b->as($b->value($cmd), '%Str') ]), $ty);
     }
     if ($op eq 'RefType') {
+        # A REFERENCE TO A GLOB is of type GLOB (its address is the stash's: not made).
+        return $b->const_str('GLOB') if _glob_of( $v->inputs->[0] );
         return $b->emit(op => 'RefType', type => '%Str', inputs => [ $b->as($b->value($v->inputs->[0]), '%Slot') ]);
     }
     # A READ OF A VARIABLE KEPT IN MEMORY: a load, where it is first used (or
@@ -473,6 +479,11 @@ sub _value {
         out('a coercion to Undef') if ( $v->stamp // '' ) eq 'Undef'; # static type
         return $b->emit(op => 'Numify', type => '%Slot', inputs => [ $b->as($b->value($v->inputs->[0]), '%Slot') ])
             if $ty eq '%Slot' && ( $v->stamp // '' ) eq 'Num'; # static type
+        # A GLOB READ AS A STRING is its name: *main::x.
+        if ( my $g = _glob_name( $v->inputs->[0] ) ) {
+            out('a glob read as other than a string') unless ( $v->stamp // '' ) eq 'Str';   # static type
+            return $b->as( $b->const_str("*$g"), $ty );
+        }
         return $b->as($b->value($v->inputs->[0]), $ty);
     }
     if ($op eq 'Divide') {
@@ -711,6 +722,21 @@ sub substr_value {
     out('an index of fewer than two arguments') if @a < 2;
     my $pos = @a > 2 ? $b->as( $b->value( $a[2] ), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
     return $b->emit(op => 'Index', type => 'i64', inputs => [ $str, $b->as( $b->value( $a[1] ), '%Str' ), $pos ]);
+}
+
+# _glob_name($n) -> the qualified name of the glob a constant `*name` is
+# (B::SoN leaves main's unqualified), or undef for what is no glob.
+sub _glob_name {
+    my ($n) = @_;
+    return undef unless blessed($n) && $n->operation eq 'Constant' && ( $n->const_type // '' ) eq 'glob' && defined $n->value;
+    return $n->value =~ /::/ ? $n->value : 'main::' . $n->value;
+}
+
+# _glob_of($n) -> the glob's name where $n is a reference to a glob (`\*name`).
+sub _glob_of {
+    my ($n) = @_;
+    return undef unless blessed($n) && $n->operation eq 'Ref';
+    return _glob_name( $n->inputs->[0] );
 }
 
 # warn LIST: its message (the list joined) handed to its __WARN__ handler, else
