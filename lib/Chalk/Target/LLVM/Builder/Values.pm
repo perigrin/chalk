@@ -163,7 +163,7 @@ sub type_of {
     return '%Slot' if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'bless' || $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'blessed';
     return '%Slot' if $op eq 'Call' && $v->is_tie_builtin;
     return '%Str' if $op eq 'RefType';
-    return 'i64' if $op eq 'Print';
+    return $b->print_to_handle($v) ? '%Slot' : 'i64' if $op eq 'Print';   # (1, or undef where the handle is not open for writing)
     # ARITHMETIC ON A %Slot is perl's: Ints stay Ints until they overflow. Done
     # as doubles (T1 may say Num), fact(20) lost its digits.
     return '%Slot' if $ARITH{$op} && grep { $b->type_of($_) eq '%Slot' } $v->inputs->@[0, 1];
@@ -227,8 +227,10 @@ sub _value {
     # A PRINT THAT RAN AS A STATEMENT (in an arm of && or ||) read as a value
     # after the join: perl's print returns 1, and the merge reads it only on
     # the path where it ran.
-    return $b->emit(op => 'Const', type => 'i64', attr => { value => 1 })
-        if $v->operation eq 'Print' && $v->can('control_in') && blessed($v->control_in);
+    if ($v->operation eq 'Print' && $v->can('control_in') && blessed($v->control_in)) {
+        out('a print to a handle read as a value past where it ran') if $b->print_to_handle($v);
+        return $b->emit(op => 'Const', type => 'i64', attr => { value => 1 });
+    }
     # AN ARGUMENT READ (a shift, $_[N], a signature parameter) is the argument.
     if (my $arg = $b->{args}{ refaddr($v) }) { return $arg }
     # (a read after the Assign takes it as input; a target read is its input)
@@ -376,7 +378,7 @@ sub _value {
     if ($op eq 'Call' && $v->changes_case) {
         # ASCII CASE: past ASCII perl's case is a character's (refused there).
         $b->{past_ascii} //= scalar grep { $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'string' && ( $_->value // '' ) =~ /[^\x00-\x7f]/ }
-            _all_nodes($b->{mop}, $b->{ret});
+            _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
         out('a case change where a string goes past ASCII') if $b->{past_ascii};
         my @a = grep { blessed($_) } $v->inputs->@*;
         pop @a if $v->can('memory_input') && $v->memory_input;
@@ -389,7 +391,7 @@ sub _value {
         # perl's length counts characters; T2's strings are bytes -- the same
         # only while no string constant goes past ASCII.
         $b->{past_ascii} //= scalar grep { $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'string' && ( $_->value // '' ) =~ /[^\x00-\x7f]/ }
-            _all_nodes($b->{mop}, $b->{ret});
+            _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
         out('a length where a string goes past ASCII') if $b->{past_ascii};
         my $in0 = $v->inputs->[0];
         # LENGTH OF AN ARRAY is its count (the IR's Length of an Array/ArrayRef).
@@ -617,7 +619,7 @@ sub _value {
         my $kind = $v->can('kind') ? $v->kind // 'chomp' : 'chomp';
         out("a $kind of a list") if _is_list( $v->inputs->[0] );
         out('a chomp in a program that writes $/') if $kind eq 'chomp' && grep { $_->operation =~ /\A(?:EntryWrite|LocalAlias)\z/
-            && grep { blessed($_) && $_->can('symbol') && ( $_->symbol // '' ) eq '/' } ( $_, $_->inputs->@* ) } _all_nodes($b->{mop}, $b->{ret});
+            && grep { blessed($_) && $_->can('symbol') && ( $_->symbol // '' ) eq '/' } ( $_, $_->inputs->@* ) } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
         out('a chop where a string goes past ASCII') if $kind eq 'chop' && $b->past_ascii;
         out("a $kind T2 does not have") unless $kind =~ /\A(?:chomp|chop)\z/;
         my $s = $b->as( $b->value( $v->inputs->[0] ), '%Str' );
@@ -626,6 +628,10 @@ sub _value {
     # `$o isa C`: through the run-time MOP's @ISA.
     if ($op eq 'IsaOp') {
         my ($o, $c) = $v->inputs->@[0, 1];
+        # INHERITANCE `use parent` / `use base` SETS UP is in a use the loader
+        # drops: the run-time MOP has no such parent ("n" for perl's "y").
+        out('an isa in a program that uses parent or base (inheritance the loader drops)')
+            if $Chalk::IR::Serialize::JSON::USED_MODULES{parent} || $Chalk::IR::Serialize::JSON::USED_MODULES{base};
         return $b->as( $b->emit(op => 'IsaOp', type => 'i1', inputs => [ $b->as( $b->value($o), '%Slot' ), $b->as( $b->value($c), '%Str' ) ]), $ty );
     }
     # `A xor B`: their truths differ.
@@ -691,7 +697,7 @@ sub builtin_value {
         return $b->as( defined $p ? $b->as( $b->const_str($p), '%Slot' ) : $b->emit(op => 'Undef', type => '%Slot'), $ty );
     }
     if ($name eq 'pack') {
-        # pack of C (a byte each) only: each value's byte, as chr's.
+        # pack of C (a byte each) only: each value's byte, wrapped as pack wraps it.
         my ($t, @vals) = @a;
         out('a pack of a template made at run time') unless blessed($t) && $t->operation eq 'Constant' && defined $t->value;
         out('a pack of a list') if grep { _is_list($_) } @vals;
@@ -704,7 +710,7 @@ sub builtin_value {
         out('a pack of other than one value a byte') unless $want == @vals;
         out('a pack where a string goes past ASCII') if $b->past_ascii;
         my $r = $b->const_str('');
-        $r = $b->emit(op => 'Concat', type => '%Str', inputs => [ $r, $b->emit(op => 'Chr', type => '%Str', inputs => [ $b->as( $b->value($_), '%Slot' ) ]) ]) for @vals;
+        $r = $b->emit(op => 'Concat', type => '%Str', inputs => [ $r, $b->emit(op => 'PackC', type => '%Str', inputs => [ $b->as( $b->value($_), '%Slot' ) ]) ]) for @vals;
         return $b->as( $r, $ty );
     }
     out("a $name of other than one argument (of \$_)") unless @a == 1;
@@ -836,12 +842,22 @@ sub format_write {
     return $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), $ty );
 }
 
+# print_to_handle($Print) -> it prints to an in-memory handle (a `my $fh`,
+# or with none in a program that selects one): its value 1 or undef.
+sub print_to_handle {
+    my ($b, $p) = @_;
+    return 1 if !( $p->can('has_filehandle') && $p->has_filehandle ) && $b->selects;
+    return 0 unless $p->can('has_filehandle') && $p->has_filehandle;
+    my $fh = $p->inputs->[0];
+    return blessed($fh) && $fh->operation eq 'PadAccess' ? 1 : 0;
+}
+
 # past_ascii -> a string constant of the program goes past ASCII (T2's
 # strings are bytes; perl's past ASCII are characters).
 sub past_ascii {
     my ($b) = @_;
     return $b->{past_ascii} //= scalar grep { $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'string' && ( $_->value // '' ) =~ /[^\x00-\x7f]/ }
-        _all_nodes($b->{mop}, $b->{ret});
+        _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
 }
 
 # sprintf_value($Call, $ty, $format, @args) -> sprintf of a constant format:

@@ -115,7 +115,7 @@ sub hash_value {
         # (a value made where it is used, or never): where they run against an
         # each is not known. Refused where the program has one.
         out('an each in a program with a keys or values (which reset it, B::SoN places them nowhere)')
-            if grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) =~ /\A(?:keys|values)\z/ } _all_nodes($b->{mop}, $b->{ret});
+            if grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) =~ /\A(?:keys|values)\z/ } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
         return $b->emit(op => 'Each', type => '%Array*', inputs => [ $b->hash_of($in[0]) ]);
     }
     # sort (by string or by number, either way) and reverse, of a list: a new
@@ -199,7 +199,7 @@ sub _pkg_agg_name {
 sub swapped {
     my ($b) = @_;
     return $b->{swapped} //= { map { ( _pkg_agg_name( $_->inputs->[0] ) => 1 ) }
-        grep { $_->operation eq 'EntryWrite' && $_->binds && ( $_->inputs->[0] isa Chalk::IR::Node && $_->inputs->[0]->is_package_aggregate ) } _all_nodes( $b->{mop}, $b->{ret} ) };
+        grep { $_->operation eq 'EntryWrite' && $_->binds && ( $_->inputs->[0] isa Chalk::IR::Node && $_->inputs->[0]->is_package_aggregate ) } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) };
 }
 
 sub hash_var {

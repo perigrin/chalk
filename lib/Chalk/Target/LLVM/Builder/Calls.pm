@@ -396,6 +396,8 @@ sub method_call {
     # `$o->$m(...)`: the method's name is a value, the input after the invocant.
     my $dyn = ( $c->dispatch_kind // '' ) eq 'dynamic_method' ? ( splice @args, 1, 1 ) : undef;
     out('a method named at run time by a list') if $dyn && _is_list($dyn);
+    out('a method named at run time in a program that uses parent or base (inheritance the loader drops)')
+        if $dyn && ( $Chalk::IR::Serialize::JSON::USED_MODULES{parent} || $Chalk::IR::Serialize::JSON::USED_MODULES{base} );
     out('a method call with no invocant') unless @args && blessed($args[0]);
     out('a method call on a list') if _is_list($args[0]);
     # @_, each argument pushed, a list's elements appended.
@@ -871,7 +873,7 @@ sub fh_handle {
 sub selects {
     my ($b) = @_;
     return $b->{selects} //= scalar grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'select' }
-        _all_nodes($b->{mop}, $b->{ret});
+        _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
 }
 
 # io_value($Call) -> open, close, eof, readline, select of a handle.
@@ -880,6 +882,9 @@ sub io_value {
     my $name = $v->name;
     my @in = grep { blessed($_) } $v->inputs->@*;
     pop @in if $v->can('memory_input') && $v->memory_input;
+    # AN OP ON A HANDLE B::SoN DOES NOT PLACE (a close whose value is read, not
+    # on the chain): where it runs against the others is not known.
+    out("a $name B::SoN does not place on the chain") if $name ne 'sselect' && !$v->is_pinned;
     # (a handle's open, print and close write a variable behind the reads of it)
     $b->reads_before($_) for $b->{passed}->@*;
     if ($name eq 'open') {
@@ -908,12 +913,18 @@ sub io_value {
             $h = $b->emit(op => 'FhWOpen', type => '%Slot', inputs => [ $b->location($var) ], attr => { trunc => $m eq '>' });
         }
         else { out('an open in a mode other than <, > or >>') }
+        # A HANDLE REOPENED WHILE SELECTED: perl's select holds the glob (the
+        # new handle), T2's the handle it was given (the old one).
+        out('a handle opened again in a program that selects one')
+            if $b->selects && 1 < grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'open'
+                && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->symbol // '' ) eq ( $fh->symbol // '' ) } +($b->{own_nodes} // [])->@*;
         $b->emit(op => 'Store', type => 'void', inputs => [ $h, $b->fh_cell($fh) ]);
         return $b->emit(op => 'Const', type => 'i64', attr => { value => 1 });
     }
     if ($name eq 'select') {
         out('a select of other than one argument') unless @in == 1;
         my $x = $in[0];
+        out('a select of undef (a `my $fh` never opened)') if $x->operation eq 'Constant' && !defined $x->value;
         my $used = $b->_value_read($v);
         return $b->emit(op => 'FhSelect', type => '%Slot', inputs => [ $b->fh_handle($x) ], attr => { used => $used })
             if $x->operation eq 'PadAccess' && ( $x->stamp // '' ) eq 'GlobRef';   # static type

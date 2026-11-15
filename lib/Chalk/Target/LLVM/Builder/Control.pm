@@ -50,12 +50,17 @@ sub walk {
             if ( $s->can('has_filehandle') && $s->has_filehandle ) {
                 my $fh = shift @args;
                 my $name = blessed($fh) && $fh->operation eq 'Constant' && ( $fh->stamp // '' ) eq 'Glob' ? $fh->value // '' : '';
-                if ( blessed($fh) && $fh->operation eq 'PadAccess' ) { $b->reads_before($_) for $b->{passed}->@*; $to = $b->fh_handle($fh) }
+                if ( blessed($fh) && $fh->operation eq 'PadAccess' ) {
+                    # (to a handle never opened perl dies -- a stop here, which an eval would not catch)
+                    out('a print to a `my $fh` in a program with an eval') if $b->{has_eval};
+                    $b->reads_before($_) for $b->{passed}->@*;
+                    $to = $b->fh_handle($fh);
+                }
                 # A HANDLE THE PROGRAM OPENS NOWHERE (`print __CLASS__;` is a
                 # print to one): perl prints nothing to it. Its value (false) unread.
                 elsif ( length $name && $name !~ /\A(?:main)?::(?:STDOUT|STDERR)\z|\A(?:STDOUT|STDERR|STDIN|DATA)\z/
                         && !grep { $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'glob' && ( $_->value // '' ) eq $name
-                                   && grep { blessed($_) && $_->operation ne 'Print' } ( $_->consumers // [] )->@* } _all_nodes($b->{mop}, $b->{ret}) ) {
+                                   && grep { blessed($_) && $_->operation ne 'Print' } ( $_->consumers // [] )->@* } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) ) {
                     out('a print to a handle opened nowhere, its value read') if $b->_value_read($s);
                     $ctl = $s;
                     next;
@@ -66,9 +71,12 @@ sub walk {
                 }
             }
             elsif ( $b->selects ) { $b->reads_before($_) for $b->{passed}->@*; $fd = 'sel' }
+            # (ITS VALUE, to a handle, is 1 where it was open for writing, else
+            # undef: the last part's -- each says the same; to STDOUT or STDERR, 1)
+            my $ok;
             my $put = sub ($str) {
-                return $b->emit(op => 'FhPrint', type => 'void', inputs => [ $to, $str ]) if $to;
-                return $b->emit(op => 'PrintSel', type => 'void', inputs => [$str]) if $fd eq 'sel';
+                return $ok = $b->emit(op => 'FhPrint', type => 'i1', inputs => [ $to, $str ]) if $to;
+                return $ok = $b->emit(op => 'PrintSel', type => 'i1', inputs => [$str]) if $fd eq 'sel';
                 return $b->emit(op => 'Print', type => 'void', inputs => [$str], attr => { fd => $fd });
             };
             # One print of each argument, in order (perl prints the list); a
@@ -82,7 +90,7 @@ sub walk {
                 if (_is_list($x)) {
                     out('$, written') if $b->{writes_out_sep} //= scalar grep {
                         $_->operation =~ /\A(?:EntryWrite|LocalAlias)\z/ && grep { blessed($_) && $_->can('symbol') && ( $_->symbol // '' ) eq ',' } ( $_, $_->inputs->@* )
-                    } _all_nodes($b->{mop}, $b->{ret});
+                    } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
                     my $none = $b->const_str('');
                     $put->( $b->emit(op => 'Join', type => '%Str', inputs => [ $none, $b->array_of($x) ]) );
                     next;
@@ -91,7 +99,11 @@ sub walk {
             }
             # ITS VALUE is 1 (perl's print returns true): a block's last
             # statement, a try's catch.
-            $b->{memo}{ refaddr($s) } = $b->emit(op => 'Const', type => 'i64', attr => { value => 1 });
+            out('a print of nothing to a handle, its value read') if ( $to || $fd eq 'sel' ) && !$ok && $b->_value_read($s);
+            # (perl's print to a handle not open for writing is undef)
+            $b->{memo}{ refaddr($s) } = $ok
+                ? $b->emit(op => 'Select', type => '%Slot', inputs => [ $ok, $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), '%Slot' ), $b->emit(op => 'Undef', type => '%Slot') ])
+                : $b->emit(op => 'Const', type => 'i64', attr => { value => 1 });
             $ctl = $s;
         }
         elsif ($op eq 'Loop') { $ctl = $b->loop($s) }
@@ -262,7 +274,7 @@ sub walk {
             my $slot;
             if (blessed($v) && $v->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && !$v->inputs->@* && !$v->stored_whole_into) {
                 # the save: a Ref over a read of this name at this store's memory version
-                for my $r ( grep { blessed($_) && $_->operation eq 'Ref' } _all_nodes( $b->{mop}, $b->{ret} ) ) {
+                for my $r ( grep { blessed($_) && $_->operation eq 'Ref' } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) ) {
                     my $in = $r->inputs->[0];
                     next unless ( $in isa Chalk::IR::Node && $in->is_package_aggregate ) && _pkg_agg_name($in) eq _pkg_agg_name($t)
                         && blessed( $in->inputs->[-1] ) && refaddr( $in->inputs->[-1] ) == refaddr($mem);
@@ -709,7 +721,7 @@ sub loop {
 sub reads_topic {
     my ($b) = @_;
     return $b->{reads_topic} //= do {
-        my @all = _all_nodes($b->{mop}, $b->{ret});
+        my @all = _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
         my @top = grep { $_->is_package_scalar && ( $_->symbol // '' ) eq '_' } @all;
         my $reads = grep { my $t = $_; grep { blessed($_) && $_->operation ne 'EntryWrite' } ( $t->consumers // [] )->@* } @top;
         out('a $_ aliased where the program writes $_ (perl writes the element)')

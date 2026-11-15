@@ -1,5 +1,5 @@
-# ABOUTME: a method named by a value (`$o->$m`) whose name is a constant: a
-# ABOUTME: run-time dispatch of that method; a name not known is refused.
+# ABOUTME: a method named by a value (`$o->$m`): a run-time dispatch of the method
+# ABOUTME: its value names; a name read at run time, or one no package declares, as perl.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -54,13 +54,16 @@ for my $src (
     is($got, $want, "perl's answer: " . ( $src =~ s/\n/ /gr ));
 }
 
-# A name read at run time, or one no package declares: refused.
+# A name read at run time, or one no package declares (perl dies: exit 255,
+# nothing printed): perl's answer -- once refused, now looked up at run time.
 for my $src (
     $pkg . qq{my \$o = bless {}, "Foo";\nmy \$m = \$ENV{M} // "hi";\nprint \$o->\$m, "\\n";\n},
     $pkg . qq{my \$o = bless {}, "Foo";\nmy \$m = "nope";\nprint \$o->\$m, "\\n";\n},
 ) {
-    my $got = eval { through_llvm_file(file_of($src)) } // "REFUSED $@";
-    like($got, qr/\AREFUSED (?:lower|load): GAP: /, "refused by name: " . ( $src =~ s/\n/ /gr ));
+    my $pl = file_of($src);
+    my $want = qx($^X $pl 2>/dev/null) . "exit " . ($? >> 8);
+    my $got = eval { through_llvm_file($pl) } // "REFUSED $@";
+    is($got, $want, "perl's answer: " . ( $src =~ s/\n/ /gr ));
 }
 
 done_testing;

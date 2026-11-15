@@ -18,6 +18,7 @@ class Chalk::Target::LLVM::Node::SubstrRep :isa(Chalk::Target::LLVM::Node) { met
 class Chalk::Target::LLVM::Node::Index :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i64 @t2_index') } }
 
 class Chalk::Target::LLVM::Node::Chr :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_chr') } }
+class Chalk::Target::LLVM::Node::PackC :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_pack_c') } }
 class Chalk::Target::LLVM::Node::Ord :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i64 @t2_ord') } }
 class Chalk::Target::LLVM::Node::StrRev :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_strrev') } }
 class Chalk::Target::LLVM::Node::Repeat :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_repeat') } }

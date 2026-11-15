@@ -42,6 +42,8 @@ for my $src (
     q{sub answer { 42 } print &answer, " ", &answer(), "\n";},
     q{sub f { return "[@_]" } sub outer { return &f } print outer("x", "y"), "\n";},
     q{sub f { return $_[1] } sub outer { return &f . "|" . f(7) } print outer(3, 4), "\n";},
+    # a shift in the caller first: the callee sees what is left (once refused)
+    q{sub f { return "[@_]" } sub outer { my $a = shift; return &f } print outer(1, 2), "\n";},
 ) {
     my $want = qx($^X -e '$src' 2>&1);
     my $got = eval { through_llvm($src) };
@@ -50,7 +52,6 @@ for my $src (
 
 # A shift on either side changes the @_ the other sees.
 for my $src (
-    q{sub f { return "[@_]" } sub outer { my $a = shift; return &f } print outer(1, 2), "\n";},
     q{sub f { return shift } sub outer { return &f . "@_" } print outer(1, 2), "\n";},
 ) {
     my $got = eval { through_llvm($src) };

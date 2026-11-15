@@ -4879,6 +4879,14 @@ ok:
   %r = call %Str @t2_str(i8* %buf, i64 1)
   ret %Str %r
 }
+; pack's C of v: its byte, wrapped to 0..255 as pack wraps it (-1 is 255).
+define internal %Str @t2_pack_c(%Slot %v) {
+  %n = call i64 @t2_bit_uv(%Slot %v)
+  %b = and i64 %n, 255
+  %bs = call %Slot @t2_box_i64(i64 %b)
+  %r = call %Str @t2_chr(%Slot %bs)
+  ret %Str %r
+}
 ; ord(s): its first byte, 0 for "".
 define internal i64 @t2_ord(%Str %s) {
 entry:
@@ -5131,8 +5139,11 @@ float:
 ; t2_bit_uv(v): a value's bits as perl's UV reads them: an integer's own, a
 ; number's (or a string's number) truncated -- past what an i64 holds, stopped.
 @msg_bit_big = private unnamed_addr constant [73 x i8] c"a bitwise operand or result past what an i64 holds: stopped (chalk, T2)\0A\00"
-define internal i64 @t2_bit_uv(%Slot %v) {
+define internal i64 @t2_bit_uv(%Slot %v0) {
 entry:
+  ; (a string numified as perl does: an integer string read whole, not
+  ; through a double -- 9007199254740993 kept its 3)
+  %v = call %Slot @t2_slot_numify(%Slot %v0)
   %t = extractvalue %Slot %v, 0
   %isint = icmp eq i8 %t, 1
   br i1 %isint, label %int, label %num
@@ -5410,26 +5421,37 @@ chk:
 yes:
   ret i1 1
 }
-; a print to a handle: appended to its scalar; to one not open for writing, nothing.
-define internal void @t2_fh_print(%Slot %h, %Str %s) {
+; a print to a handle: appended to its scalar -- true; to one not open for
+; writing (closed, never opened, open for reading), nothing -- false, as perl's.
+@msg_fh_undef = private unnamed_addr constant [65 x i8] c"a print to an undefined handle (perl dies): stopped (chalk, T2)\0A\00"
+define internal i1 @t2_fh_print(%Slot %h, %Str %s) {
 entry:
+  ; (to a `my $fh` never opened -- undef -- perl dies: "Can't use an
+  ; undefined value as a symbol reference")
+  %ht = extractvalue %Slot %h, 0
+  %undef = icmp eq i8 %ht, 0
+  br i1 %undef, label %die, label %go
+die:
+  call void @t2_stop(i8* getelementptr ([65 x i8], [65 x i8]* @msg_fh_undef, i64 0, i64 0), i64 64)
+  unreachable
+go:
   %f = call %Fh* @t2_fh_ptr(%Slot %h)
   %none = icmp eq %Fh* %f, null
-  br i1 %none, label %done, label %chk
+  br i1 %none, label %no, label %chk
 chk:
   %f3 = getelementptr %Fh, %Fh* %f, i32 0, i32 3
   %t = load %Slot*, %Slot** %f3
   %not = icmp eq %Slot* %t, null
-  br i1 %not, label %done, label %write
+  br i1 %not, label %no, label %write
 write:
   %old = load %Slot, %Slot* %t
   %os = call %Str @t2_slot_str(%Slot %old)
   %ns = call %Str @t2_concat(%Str %os, %Str %s)
   %nv = call %Slot @t2_box_str(%Str %ns)
   store %Slot %nv, %Slot* %t
-  br label %done
-done:
-  ret void
+  ret i1 1
+no:
+  ret i1 0
 }
 ; close: the handle itself shut (select may hold it): nothing left to read,
 ; nowhere to write. True where it was open.
@@ -5448,7 +5470,7 @@ no:
   ret i1 0
 }
 ; print with no handle, in a program that selects one: to the one selected.
-define internal void @t2_print_sel(%Str %s) {
+define internal i1 @t2_print_sel(%Str %s) {
 entry:
   %h = load %Slot, %Slot* @t2_selected
   %t = extractvalue %Slot %h, 0
@@ -5456,10 +5478,10 @@ entry:
   br i1 %std, label %out, label %fh
 out:
   call void @t2_print(%Str %s)
-  ret void
+  ret i1 1
 fh:
-  call void @t2_fh_print(%Slot %h, %Str %s)
-  ret void
+  %ok = call i1 @t2_fh_print(%Slot %h, %Str %s)
+  ret i1 %ok
 }
 ; select(h, used): h the selected handle (undef STDOUT); the one before
 ; handed back -- STDOUT's name, or (where it is used) a stop where it was a
@@ -5480,6 +5502,17 @@ name:
 stop:
   call void @t2_stop(i8* getelementptr ([62 x i8], [62 x i8]* @msg_select, i64 0, i64 0), i64 61)
   unreachable
+}
+; select($fh): a `my $fh` never opened (undef) is no handle -- what is printed
+; then goes nowhere (a handle of address 0), not to STDOUT.
+define internal %Slot @t2_select_fh(%Slot %h, i1 %used) {
+entry:
+  %t = extractvalue %Slot %h, 0
+  %undef = icmp eq i8 %t, 0
+  %none = call %Slot @t2_slot(i8 1, i64 0)
+  %hh = select i1 %undef, %Slot %none, %Slot %h
+  %r = call %Slot @t2_select(%Slot %hh, i1 %used)
+  ret %Slot %r
 }
 ; select(NAME): STDOUT by its name; another, a stop.
 define internal %Slot @t2_select_name(%Slot %v, i1 %used) {

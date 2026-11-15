@@ -38,10 +38,10 @@ class Chalk::Target::LLVM::Node::FhReadline :isa(Chalk::Target::LLVM::Node) { me
 class Chalk::Target::LLVM::Node::FhReadlines :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_fh_readlines') } }
 class Chalk::Target::LLVM::Node::FhEof :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_fh_eof') } }
 class Chalk::Target::LLVM::Node::FhClose :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_fh_close') } }
-class Chalk::Target::LLVM::Node::FhPrint :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_fh_print') } }
-class Chalk::Target::LLVM::Node::PrintSel :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_print_sel') } }
+class Chalk::Target::LLVM::Node::FhPrint :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_fh_print') } }
+class Chalk::Target::LLVM::Node::PrintSel :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_print_sel') } }
 class Chalk::Target::LLVM::Node::FhSelect :isa(Chalk::Target::LLVM::Node) {
-    method to_ll () { $self->name . ' = call %Slot @t2_select(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{used} ? 1 : 0 ) . ')' }
+    method to_ll () { $self->name . ' = call %Slot @t2_select_fh(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{used} ? 1 : 0 ) . ')' }
 }
 class Chalk::Target::LLVM::Node::SelectName :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { $self->name . ' = call %Slot @t2_select_name(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $self->attr->{used} ? 1 : 0 ) . ')' }

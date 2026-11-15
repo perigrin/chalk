@@ -61,6 +61,9 @@ sub build {
                : out('no way back to Start from ' . $start->operation);
     }
     $b->{ret} = $ret;
+    # (THE PROGRAM'S Return, for what asks of the whole program: in a sub,
+    # {ret} is the sub's -- a question asked there first saw only the sub)
+    $b->{root_ret} = $ret;
     $b->{own_nodes} = [ Chalk::IR::Graph::own_nodes($ret) ];
     $b->{eval_at} = { map { ( refaddr( $_->eval_entry ) => $_ ) } grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed( $_->eval_entry ) } $b->{own_nodes}->@* };
     $b->{evals} = [];
