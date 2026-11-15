@@ -779,7 +779,13 @@ sub func {
     }
     # `return g()` IS CALLED IN THE CALLER'S CONTEXT: it is handed on.
     my $tail = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation eq 'Call'
-        && ( $ret->inputs->[0]->dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/ ? $ret->inputs->[0] : undef;
+        && ( ( $ret->inputs->[0]->dispatch_kind // '' ) eq 'direct'
+             # (a method's or a code value's in the caller's context: B::SoN
+             # gives it no want. One folded from `my $c = $o->m; return $c`
+             # has want=scalar: called so, its scalar returned)
+             || ( $ret->inputs->[0]->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/
+                && !defined( $ret->inputs->[0]->can('want') ? $ret->inputs->[0]->want : undef ) )
+        ? $ret->inputs->[0] : undef;
     local $b->{tail} = $tail ? { call => refaddr($tail), want => $want } : undef;
     $b->make_constant_arrays($g->component);
     local $b->{jumps} = {};   # this function's early exits
