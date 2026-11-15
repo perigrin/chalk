@@ -425,6 +425,48 @@ sub hash_of {
     return $b->as($b->value($n), '%Slot');
 }
 
+# _never_numified($n, $reader) -> true where no numeric read can have reached
+# what $n holds when $reader reads it (perl caches a string's number, and the
+# string is a number after). Known for a constant read only so -- B::SoN folds
+# a `my $x = "az"` into its constant, so any reader is the variable's -- and
+# an element of a `my` array of such, read only by constant index, so.
+sub _never_numified {
+    my ($n, $reader) = @_;
+    return 0 unless blessed($n);
+    # (read by $reader, or so that no number is made: a print, a `.`, a
+    # defined -- a numeric Coerce only on the way to $reader)
+    my $quiet = sub ($x, $r) {
+        for my $u ( _value_users($x) ) {
+            next if refaddr($u) == refaddr($r);
+            my $o = $u->operation;
+            next if $o =~ /\A(?:Print|Concat|Defined)\z/;
+            next if $o eq 'Coerce' && !grep { refaddr($_) != refaddr($r) && $_->operation !~ /\A(?:Print|Concat)\z/ } _value_users($u);
+            return 0;
+        }
+        return 1;
+    };
+    return $quiet->( $n, $reader ) if $n->operation eq 'Constant';
+    if ( $n->operation eq 'Subscript' && ( $n->can('kind') ? $n->kind // 'array' : 'array' ) eq 'array' ) {
+        my ($a, $i) = $n->inputs->@*;
+        return 0 unless blessed($a) && $a->operation eq 'ArrayLiteral' && ( $a->stamp // '' ) eq 'Array'   # static type
+            && blessed($i) && $i->operation eq 'Constant';
+        return 0 unless $quiet->( $n, $reader );
+        # (the array: read only by elements at constant indices -- nothing
+        # writes it -- this one's read so; made of constants no numeric read
+        # reached)
+        for my $u ( _value_users($a) ) {
+            return 0 unless $u->operation eq 'Subscript' && blessed( $u->inputs->[1] ) && $u->inputs->[1]->operation eq 'Constant';
+            # (another element: two indices not both counted from the front may be one)
+            my @ix = map { $_->value // '' } $u->inputs->[1], $i;
+            next if refaddr($u) == refaddr($n);
+            next if !( grep { !/\A\d+\z/ } @ix ) && $ix[0] != $ix[1];
+            return 0 unless $quiet->( $u, $reader );
+        }
+        return !grep { !( blessed($_) && $_->operation eq 'Constant' && $quiet->( $_, $a ) ) } $a->inputs->@*;
+    }
+    return 0;
+}
+
 # array_value($v, $op) -> the T2 node of an array, or of a read of one; undef
 # for what is not.
 sub array_value {
@@ -529,15 +571,20 @@ sub array_value {
         return $b->emit(op => 'ASlice', type => '%Array*', inputs => [ $arr, $list ]);
     }
     # A RANGE OF NUMBERS (`1 .. $n`: a bound is a number): a new list of the
-    # integers from one bound to the other. A range of strings (perl's magic
-    # increment, where neither bound is a number) is not T2's yet.
+    # integers from one bound to the other. ONE WHERE NEITHER IS (`"az" ..
+    # "bb"`) is perl's choice at run time (t2_range_slots): on numbers where
+    # the strings look like them, else the left magic-incremented up to the
+    # right. A string a numeric read made a number is one to it: each bound
+    # must be one no numeric read reached (_never_numified).
     if ($op eq 'Range') {
         $b->list_only($v, 'a range');
         # (a bound as it is, not as B::SoN coerced it: it numifies both, the
         # strings of `"az" .. "bb"` too)
         my ($lo, $hi) = map { my $x = $_; $x = $x->inputs->[0] while blessed($x) && $x->operation eq 'Coerce'; $x } @in;
-        out('a range of strings') unless grep { $b->type_of($_) =~ /\A(?:i64|double)\z/ } $lo, $hi;
-        return $b->emit(op => 'ARange', type => '%Array*', inputs => [ map { $b->as($b->value($_), 'i64') } $lo, $hi ]);
+        return $b->emit(op => 'ARange', type => '%Array*', inputs => [ map { $b->as($b->value($_), 'i64') } $lo, $hi ])
+            if grep { $b->type_of($_) =~ /\A(?:i64|double)\z/ } $lo, $hi;
+        out('a range of strings a numeric read may have made numbers') unless _never_numified( $lo, $v ) && _never_numified( $hi, $v );
+        return $b->emit(op => 'ARangeSlots', type => '%Array*', inputs => [ map { $b->as($b->value($_), '%Slot') } $lo, $hi ]);
     }
     if ($op eq 'ListAppend') {
         # map's and grep's list, built a pass at a time: the value (a list,

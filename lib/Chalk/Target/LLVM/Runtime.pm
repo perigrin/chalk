@@ -5686,6 +5686,255 @@ body:
 done:
   ret %Array* %r
 }
+; ---- PERL'S RANGE OF TWO SCALARS (pp_flop). On numbers where a bound
+; holds one, is defined and no string, or where the left looks like a number
+; (not starting "0") or is undef while the right is defined -- and the right
+; is undef or looks like one; else on strings: the left, magic-incremented,
+; while no longer than the right, up to the right.
+@msg_range_unsure = private unnamed_addr constant [74 x i8] c"a range whose bound may be Inf, NaN or \220 but true\22: stopped (chalk, T2)\0A\00"
+@msg_range_big = private unnamed_addr constant [59 x i8] c"Range iterator outside integer range: stopped (chalk, T2)\0A\00"
+define internal i8 @t2_byte_at(i8* %p, i64 %n, i64 %i) {
+entry:
+  %in = icmp slt i64 %i, %n
+  br i1 %in, label %rd, label %out
+rd:
+  %q = getelementptr i8, i8* %p, i64 %i
+  %c = load i8, i8* %q
+  ret i8 %c
+out:
+  ret i8 0
+}
+define internal i1 @t2_is_space_c(i8 %c) {
+  %sp = icmp eq i8 %c, 32
+  %g = icmp uge i8 %c, 9
+  %l = icmp ule i8 %c, 13
+  %ws = and i1 %g, %l
+  %r = or i1 %sp, %ws
+  ret i1 %r
+}
+define internal i1 @t2_is_digit_c(i8 %c) {
+  %g = icmp uge i8 %c, 48
+  %l = icmp ule i8 %c, 57
+  %r = and i1 %g, %l
+  ret i1 %r
+}
+; (the first index at or after i whose byte is not a space; not a digit)
+define internal i64 @t2_skip_space(i8* %p, i64 %n, i64 %i0) {
+entry:
+  br label %loop
+loop:
+  %i = phi i64 [ %i0, %entry ], [ %i1, %next ]
+  %in = icmp slt i64 %i, %n
+  br i1 %in, label %test, label %done
+test:
+  %c = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %i)
+  %y = call i1 @t2_is_space_c(i8 %c)
+  br i1 %y, label %next, label %done
+next:
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  ret i64 %i
+}
+define internal i64 @t2_skip_digits(i8* %p, i64 %n, i64 %i0) {
+entry:
+  br label %loop
+loop:
+  %i = phi i64 [ %i0, %entry ], [ %i1, %next ]
+  %in = icmp slt i64 %i, %n
+  br i1 %in, label %test, label %done
+test:
+  %c = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %i)
+  %y = call i1 @t2_is_digit_c(i8 %c)
+  br i1 %y, label %next, label %done
+next:
+  %i1 = add i64 %i, 1
+  br label %loop
+done:
+  ret i64 %i
+}
+; t2_lln(s) -> 1 where perl's looks_like_number says s is a number (spaces,
+; a sign, digits with a point or a point and digits, an exponent, spaces),
+; 0 where it is not -- 2 where T2 does not tell: an Inf or a NaN, "0 but true".
+@lit_0bt = private unnamed_addr constant [11 x i8] c"0 but true\00"
+define internal i8 @t2_lln(%Str %s) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %ten = icmp eq i64 %n, 10
+  br i1 %ten, label %cmp0bt, label %go
+cmp0bt:
+  %mc = call i32 @memcmp(i8* %p, i8* getelementptr ([11 x i8], [11 x i8]* @lit_0bt, i64 0, i64 0), i64 10)
+  %is0bt = icmp eq i32 %mc, 0
+  br i1 %is0bt, label %unsure, label %go
+go:
+  %i0 = call i64 @t2_skip_space(i8* %p, i64 %n, i64 0)
+  %c0 = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %i0)
+  %plus = icmp eq i8 %c0, 43
+  %minus = icmp eq i8 %c0, 45
+  %sg = or i1 %plus, %minus
+  %i0s = add i64 %i0, 1
+  %i1 = select i1 %sg, i64 %i0s, i64 %i0
+  %c1 = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %i1)
+  %lc = or i8 %c1, 32
+  %isi = icmp eq i8 %lc, 105
+  %isn = icmp eq i8 %lc, 110
+  %inan = or i1 %isi, %isn
+  br i1 %inan, label %unsure, label %mant
+mant:
+  %i2 = call i64 @t2_skip_digits(i8* %p, i64 %n, i64 %i1)
+  %nd1 = sub i64 %i2, %i1
+  %c2 = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %i2)
+  %dot = icmp eq i8 %c2, 46
+  %i2d = add i64 %i2, 1
+  %i3 = call i64 @t2_skip_digits(i8* %p, i64 %n, i64 %i2d)
+  %nd2 = sub i64 %i3, %i2d
+  %i3f = select i1 %dot, i64 %i3, i64 %i2
+  %nd2f = select i1 %dot, i64 %nd2, i64 0
+  %tot = add i64 %nd1, %nd2f
+  %hasd = icmp sgt i64 %tot, 0
+  br i1 %hasd, label %exp, label %no
+exp:
+  %c3 = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %i3f)
+  %le = or i8 %c3, 32
+  %ise = icmp eq i8 %le, 101
+  %j0 = add i64 %i3f, 1
+  %c4 = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %j0)
+  %ep = icmp eq i8 %c4, 43
+  %em = icmp eq i8 %c4, 45
+  %esg = or i1 %ep, %em
+  %j0s = add i64 %j0, 1
+  %j1 = select i1 %esg, i64 %j0s, i64 %j0
+  %j2 = call i64 @t2_skip_digits(i8* %p, i64 %n, i64 %j1)
+  %ed = icmp sgt i64 %j2, %j1
+  %expok = and i1 %ise, %ed
+  %i4 = select i1 %expok, i64 %j2, i64 %i3f
+  %i5 = call i64 @t2_skip_space(i8* %p, i64 %n, i64 %i4)
+  %end = icmp eq i64 %i5, %n
+  %r = select i1 %end, i8 1, i8 0
+  ret i8 %r
+no:
+  ret i8 0
+unsure:
+  ret i8 2
+}
+; t2_streq_c(a, b) -> C's strcmp(a, b) == 0: equal up to a NUL in both (perl's
+; strEQ, as pp_flop asks it).
+define internal i1 @t2_streq_c(%Str %a, %Str %b) {
+entry:
+  %ap = extractvalue %Str %a, 0
+  %an = extractvalue %Str %a, 1
+  %bp = extractvalue %Str %b, 0
+  %bn = extractvalue %Str %b, 1
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i1, %next ]
+  %ca = call i8 @t2_byte_at(i8* %ap, i64 %an, i64 %i)
+  %cb = call i8 @t2_byte_at(i8* %bp, i64 %bn, i64 %i)
+  %same = icmp eq i8 %ca, %cb
+  br i1 %same, label %more, label %ne
+more:
+  %nul = icmp eq i8 %ca, 0
+  br i1 %nul, label %eq, label %next
+next:
+  %i1 = add i64 %i, 1
+  br label %loop
+eq:
+  ret i1 1
+ne:
+  ret i1 0
+}
+define internal %Array* @t2_range_slots(%Slot %l, %Slot %r) {
+entry:
+  %tl = extractvalue %Slot %l, 0
+  %tr = extractvalue %Slot %r, 0
+  %okl = icmp ne i8 %tl, 0
+  %okr = icmp ne i8 %tr, 0
+  %pokl = icmp eq i8 %tl, 3
+  %pokr = icmp eq i8 %tr, 3
+  %npl = xor i1 %pokl, true
+  %npr = xor i1 %pokr, true
+  ; (a number, or defined and no string: a reference too)
+  %onl = and i1 %okl, %npl
+  %onr = and i1 %okr, %npr
+  %c1 = or i1 %onl, %onr
+  br i1 %c1, label %num, label %strs
+strs:
+  %ls = call %Str @t2_slot_str(%Slot %l)
+  %rs = call %Str @t2_slot_str(%Slot %r)
+  %lnl0 = call i8 @t2_lln(%Str %ls)
+  %lnr0 = call i8 @t2_lln(%Str %rs)
+  %lnl = select i1 %pokl, i8 %lnl0, i8 0
+  %lnr = select i1 %pokr, i8 %lnr0, i8 0
+  %ul = icmp eq i8 %lnl, 2
+  %ur = icmp eq i8 %lnr, 2
+  %un = or i1 %ul, %ur
+  br i1 %un, label %unsure, label %decide
+unsure:
+  call void @t2_stop(i8* getelementptr ([74 x i8], [74 x i8]* @msg_range_unsure, i64 0, i64 0), i64 73)
+  unreachable
+decide:
+  %lp = extractvalue %Str %ls, 0
+  %ln = extractvalue %Str %ls, 1
+  %f = call i8 @t2_byte_at(i8* %lp, i64 %ln, i64 0)
+  %f0 = icmp eq i8 %f, 48
+  %nf0 = xor i1 %f0, true
+  %nokl = xor i1 %okl, true
+  %a = and i1 %nokl, %okr
+  %lyes = icmp eq i8 %lnl, 1
+  %b0 = and i1 %lyes, %pokl
+  %b = and i1 %b0, %nf0
+  %ab = or i1 %a, %b
+  %nokr = xor i1 %okr, true
+  %ryes = icmp eq i8 %lnr, 1
+  %c = or i1 %nokr, %ryes
+  %n3 = and i1 %ab, %c
+  br i1 %n3, label %num, label %str
+num:
+  ; (perl dies where a bound is past what an IV holds)
+  %dl = call double @t2_slot_num(%Slot %l)
+  %dr = call double @t2_slot_num(%Slot %r)
+  %lo = fcmp olt double %dl, 0xC3E0000000000000
+  %hi = fcmp ogt double %dr, 0x43E0000000000000
+  %lo2 = and i1 %lo, %okl
+  %hi2 = and i1 %hi, %okr
+  %big = or i1 %lo2, %hi2
+  br i1 %big, label %toobig, label %ints
+toobig:
+  call void @t2_stop(i8* getelementptr ([59 x i8], [59 x i8]* @msg_range_big, i64 0, i64 0), i64 58)
+  unreachable
+ints:
+  %il = call i64 @t2_slot_i64(%Slot %l)
+  %ir = call i64 @t2_slot_i64(%Slot %r)
+  %ra = call %Array* @t2_range(i64 %il, i64 %ir)
+  ret %Array* %ra
+str:
+  %out = call %Array* @t2_new_array()
+  %len = extractvalue %Str %rs, 1
+  br label %sloop
+sloop:
+  %s = phi %Str [ %ls, %str ], [ %s2, %inc ]
+  %sn = extractvalue %Str %s, 1
+  %fits = icmp sle i64 %sn, %len
+  br i1 %fits, label %spush, label %sdone
+spush:
+  %sv = call %Slot @t2_box_str(%Str %s)
+  call void @t2_apush(%Array* %out, %Slot %sv)
+  %at = call i1 @t2_streq_c(%Str %s, %Str %rs)
+  br i1 %at, label %sdone, label %smagic
+smagic:
+  ; (an empty string, or one no magic increment takes, goes to a number: the end)
+  %empty = icmp eq i64 %sn, 0
+  %ism = call i1 @t2_is_magic(%Str %s)
+  %nm = xor i1 %ism, true
+  %stop = or i1 %empty, %nm
+  br i1 %stop, label %sdone, label %inc
+inc:
+  %s2 = call %Str @t2_str_magic_inc(%Str %s)
+  br label %sloop
+sdone:
+  ret %Array* %out
+}
 ; t2_hslice(h, keys) -> a new list of h's values at the keys, in their order,
 ; undef for a missing one -- perl's hslice read.
 define internal %Array* @t2_hslice(%Slot %h, %Array* %keys) {
