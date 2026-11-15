@@ -102,6 +102,19 @@ half).
 
 ## 4. One MOP, at compile time and at run time; a stash is a Class, tied
 
+**The principle** (perigrin): "the idea of the MOP is that it's the object
+oriented version of metacircularity." The language describes itself with its
+own objects, and the description runs: a class is an object; its class is a
+metaclass; and the metaclass is itself an instance of a class -- `Class` is
+an instance of `Class` (Smalltalk, CLOS, Moose's `Class::MOP::Class->meta`).
+For chalk: `Chalk::MOP::Class` is written in chalk-Perl and compiled by
+chalk; every package's description is one of its instances, **its own
+included** (the knot is tied once, at start-up); the compiler and the
+running program use the same objects. The special hashes are this one MOP
+seen through the container protocol. A test of step 3 that means something:
+`Chalk::MOP::Class`'s own description is a `Chalk::MOP::Class` that
+describes `Chalk::MOP::Class` -- at compile time and at run time.
+
 perigrin: "I'm not convinced there is a distinction between a runtime and
 compile time MOP ... there is just a MOP that exists at both run time and
 compile time." As in perl: one symbol table, built by `use` and BEGIN,
