@@ -119,15 +119,16 @@ does, `superclasses`, `can`, `isa`, the symbol questions below).
 Today's bare-hash stashes in `@t2_stashes` (`Builder/Calls.pm`, `make_mop`)
 are a stand-in for these instances and go.
 
-**The phase boundary** is the real design work, and it gets its own short
-section in this plan's first PR before code: which of a `Chalk::MOP::Class`'s
-state persists into the program (name, parents, methods and subs by name,
-fields, the package's variables) and which belongs only to the compiler
-(graphs, the node factory, bindings); and how a method is represented once
-compiled -- a code value, not a graph. The class says this itself (e.g.
-which fields are carried), rather than a second class mirroring it. This is
-a behaviour-preserving move first: the ratchet and the census are
-unchanged.
+**The phase boundary** is the real design work: which of a
+`Chalk::MOP::Class`'s state the program carries into its run, and how a
+method is held once compiled (a code value, alongside or instead of its
+graph). Start with the smallest set the cases need -- name, parents, methods
+and subs by name (as code values), fields, the package's variables -- and
+see. The rest (graphs, the node factory, bindings) is **not** ruled out of
+the run (perigrin: "I don't know that those things need to go away"): a
+string eval or recompiling a method at run time may want them, and adding
+them later is the class saying so, not a second class. This is a
+behaviour-preserving move first: the ratchet and the census are unchanged.
 
 The stash is then **that instance, seen as a hash**: `%Foo::` is a hash
 tied to Foo's `Chalk::MOP::Class` (the class implements the tie interface).
