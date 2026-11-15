@@ -60,6 +60,33 @@ class Chalk::MOP::Class {
         return;
     }
 
+    # ITS SYMBOLS: what the package's stash holds, by name -- each a record of
+    # the slots its glob fills (code, scalar, array, hash, io; code_from for
+    # a sub imported from another package; package for a nested `Foo::`).
+    # Names whose presence is not known (the toolchain made them before the
+    # program compiled) are answered neither way; with no table given at all
+    # (undef), nothing is claimed.
+    field $symbols;
+    field %symbols_unknown;
+
+    method knows_symbols() { return defined $symbols ? true : false }
+
+    method declare_symbols($table, $unknown) {
+        $self->_assert_unsealed('declare_symbols');
+        $symbols = { $table->%* };
+        %symbols_unknown = map { ( $_ => 1 ) } $unknown->@*;
+        return;
+    }
+
+    # has_symbol($name) -> 1 there, 0 not there, undef not known.
+    method has_symbol($n) {
+        return undef unless defined $symbols && !$symbols_unknown{$n};
+        return exists $symbols->{$n} ? 1 : 0;
+    }
+
+    method symbol($n)     { return defined $symbols ? $symbols->{$n} : undef }
+    method symbol_names() { return defined $symbols ? sort keys $symbols->%* : () }
+
     method declare_field($field_name, %opts) {
         $self->_assert_unsealed('declare_field');
         my $field = Chalk::MOP::Field->new(

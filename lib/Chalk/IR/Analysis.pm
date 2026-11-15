@@ -2356,6 +2356,10 @@ sub _replay_classes ($classes, $graphs) {
         # Recorded so a post-seal pass can tell a DECLARED class from the
         # `main` Chalk::MOP seeds unconditionally.
         $mop->mark_declared($name);
+        # ITS SYMBOLS (main's, from B::SoN's package record): what its stash
+        # holds; none claimed where the record gives none.
+        $cls->declare_symbols( $cd->{symbols}, $cd->{symbols_unknown} // [] )
+            if ref $cd->{symbols} eq 'HASH';
 
         for my $f (($cd->{fields} // [])->@*) {
             my $vname = $f->{name} // '$?';
