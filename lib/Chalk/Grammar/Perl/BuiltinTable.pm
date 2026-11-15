@@ -79,6 +79,11 @@ class Chalk::Grammar::Perl::BuiltinTable {
         # handle, and select's four-argument form (`sselect`, B::SoN's name for
         # it). Not every such builtin is listed -- the ones a backend asks
         # about are.
+        # WRITES THE SCALAR IT IS GIVEN FIRST, given this many operands
+        # (perlfunc: "substr EXPR,OFFSET,LENGTH,REPLACEMENT ... replaces
+        # parts of the EXPR"): an alias there writes through.
+        substr  => { writes_first_with => 4 },
+
         open    => { handle_io => 1 },
         close   => { handle_io => 1 },
         eof     => { handle_io => 1 },

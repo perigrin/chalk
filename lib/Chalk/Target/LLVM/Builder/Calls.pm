@@ -177,6 +177,14 @@ sub call {
     # `&f;` IS CALLED WITH THE CALLER'S OWN @_ (the same array: a shift there
     # is seen here): both must take @_ as an array.
     if ($c->can('shares_args') && $c->shares_args) {
+        # (ONE THAT READS NO @_ sees none of it: called with nothing. At the
+        # program's top @_ is empty: a new one.)
+        if (!$fn->{list} && !$fn->{nargs} && !$fn->{signature}) {
+            $b->hash_reads_settled('a call');
+            $b->set_want($c) if $fn->{listret};
+            return $b->emit_call(op => 'Call', type => '%Slot', inputs => [], attr => { fn => $fn->{name} }, site => $c);
+        }
+        local $b->{argsarr} = $b->{argsarr} // ( $b->{in_func} ? undef : $b->emit(op => 'NewArgs', type => '%Array*') );
         out('an & call sharing @_ of a sub not taking it as a list') unless $fn->{list} && $b->{argsarr};
         $b->hash_reads_settled('a call');
         $b->set_want($c) if $fn->{listret};
@@ -194,12 +202,8 @@ sub call {
         out('an odd count into a signature\'s slurpy hash (perl dies)') if ( $fn->{slurpy_sigil} // '' ) eq '%' && ( @args - $fn->{minargs} ) % 2;
     }
     if ($fn->{list}) {
-        # @_ BUILT HERE: each scalar pushed, an array's elements appended.
-        my $arr = $b->emit(op => 'NewArray', type => '%Array*');
-        for my $a (@args) {
-            if (_is_list($a)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($a) ]) }
-            else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($a), '%Slot') ]) }
-        }
+        # @_ BUILT HERE: the caller's arguments, aliased.
+        my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); $b->args_array(@args) };
         $b->hash_reads_settled('a call');
         $b->set_want($c) if $fn->{listret};
         return $b->emit_call(op => 'Call', type => '%Slot', inputs => [$arr], attr => { fn => $fn->{name} }, site => $c);
@@ -251,7 +255,7 @@ sub make_mop {
         my %sub = map { ( $_->name => $_ ) } grep { ( $called{can} || $dynamic || $called{ $_->name } ) && $_->graph } ( $cls->subs, $cls->methods );
         for my $sub (@sub{ sort keys %sub }) {
             my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
-            out('a sub of a signature T2 checks at its calls, called other than directly') if $fn->{direct_only};
+            out('a sub of a signature T2 checks at its calls, called other than directly') if $fn->{direct_only} && !$fn->{arity};
             $b->emit(op => 'MopDef', type => 'void', inputs => [ $cs, $b->const_str($sub->name) ], attr => { fn => $fn->{name} });
         }
         # AN UNLOADED SUB (a module's, never reached) is in its stash by name,
@@ -400,14 +404,9 @@ sub method_call {
         if $dyn && ( $Chalk::IR::Serialize::JSON::USED_MODULES{parent} || $Chalk::IR::Serialize::JSON::USED_MODULES{base} );
     out('a method call with no invocant') unless @args && blessed($args[0]);
     out('a method call on a list') if _is_list($args[0]);
-    # @_, each argument pushed, a list's elements appended.
-    my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+    # @_, the invocant and the arguments, aliased.
+    my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); $b->args_array(@args) };
     my $inv = $b->as($b->value($args[0]), '%Slot');
-    $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $inv ]);
-    for my $a (@args[ 1 .. $#args ]) {
-        if (_is_list($a)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($a) ]) }
-        else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($a), '%Slot') ]) }
-    }
     $b->hash_reads_settled('a method call');
     $b->set_want($c);   # whichever sub it finds may return a list
     # (where perl dies -- no class, no method -- a die, an eval's to catch)
@@ -423,6 +422,206 @@ sub method_call {
     my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => $mode },
         inputs => [ $inv, $mn, $b->const_str($at), $b->const_str($start) ]);
     return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ], site => $c);
+}
+
+# @_ ALIASES THE CALLER'S ARGUMENTS (perigrin): a call taking @_ as one
+# array is handed an array of aliases (the runtime's t2_new_args) -- each
+# argument the caller's own container: its variable, its element, a fresh
+# cell for a temporary, a literal as it is (read-only: perl dies on a store).
+# A list's elements are each aliased. Reads of @_ go through the alias;
+# stores reach the caller.
+sub args_array {
+    my ($b, @args) = @_;
+    # (WHERE THE CALL MAY WRITE @_ -- alias_writes, its caller's -- an
+    # argument perl aliases and T2 cannot reach is refused)
+    my $arr = $b->emit(op => 'NewArgs', type => '%Array*');
+    for my $a (@args) {
+        if (_is_list($a)) { $b->emit(op => 'AAppendAlias', type => 'void', inputs => [ $arr, $b->alias_list($a) ]) }
+        else { $b->emit(op => 'APushAlias', type => 'void', inputs => [ $arr, $b->arg_alias($a) ]) }
+    }
+    return $arr;
+}
+
+# _of_args($n) -> @_, or an element of it.
+sub _of_args {
+    my ($n) = @_;
+    return blessed($n) && ( $n->operation eq 'ArgsSource'
+        || $n->operation eq 'Subscript' && blessed( $n->inputs->[0] ) && $n->inputs->[0]->operation eq 'ArgsSource' );
+}
+sub _writes_args_in {
+    return scalar grep {
+        my $n = $_;
+        my $op = $n->operation;
+        $op eq 'Assign' && _of_args( $n->inputs->[0] )
+            || $op =~ /\A(?:Ref|RegexSubst|Transliterate|Chomp|Chop)\z/ && _of_args( $n->inputs->[0] )
+            # (a 4-argument substr replaces part of its string in place)
+            || $op eq 'Call' && $n->writes_first_argument
+               && do { my $t = $n->inputs->[0]; $t = $t->inputs->[0] while blessed($t) && $t->operation eq 'Coerce'; _of_args($t) }
+    } @_;   # (a shift, a push: @_ itself changes, no caller's variable)
+}
+# writes_args -> some sub of the program stores into @_ (`$_[N] = ...`, an
+# op-assign, a substitution on it) or takes a reference into it: an
+# argument perl aliases and T2 would copy is then refused.
+sub writes_args {
+    my ($b) = @_;
+    return $b->{writes_args} //= _writes_args_in( _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} ),
+        map { $_->graph ? $_->graph->component : () } map { $_->methods } $b->{mop} ? $b->{mop}->classes : () );
+}
+
+# may_write_args -> the call whose @_ is being built may write it (or the
+# list's aliases are stored through: alias_strict).
+sub may_write_args {
+    my ($b) = @_;
+    return $b->{alias_strict} || ( $b->{alias_writes} // $b->writes_args );
+}
+
+# call_writes_args($Call) -> what it calls may write its @_: a direct call's
+# sub writes it, or hands it on (`&g`, `g(@_)`, `g($_[0])`) where any sub
+# writes; another call's, where any sub writes.
+sub call_writes_args {
+    my ($b, $c) = @_;
+    return $b->writes_args unless ( $c->dispatch_kind // '' ) eq 'direct';
+    my $t = $c->can('target') ? $c->target : undef;
+    return $b->writes_args unless blessed($t) && $t->can('graph') && $t->graph;
+    my @gn = $t->graph->component;
+    return 1 if _writes_args_in(@gn);
+    my $hands_on = grep {
+        $_->operation eq 'Call' && ( $_->is_sub_call || ( $_->dispatch_kind // '' ) eq 'dynamic_method' )
+            && ( $_->can('shares_args') && $_->shares_args || grep { _of_args($_) } $_->inputs->@* )
+    } @gn;
+    return $hands_on ? $b->writes_args : 0;
+}
+
+# arg_alias($n) -> what @_ holds for a scalar argument: an alias of the
+# caller's container (a scalar reference to a variable, an element alias),
+# a literal as it is (read-only), else a fresh cell of the value (a
+# temporary). One perl aliases and T2 cannot reach is refused where a sub
+# may write @_.
+sub arg_alias {
+    my ($b, $n) = @_;
+    my $op = $n->operation;
+    if ($op eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:integer|number|string|boolean|undef)\z/) {
+        return $b->as($b->value($n), '%Slot');
+    }
+    if ($op eq 'PadAccess' && ( $n->sigil // '' ) eq '$' && $n->is_location) {
+        return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->location($n) ]);
+    }
+    if ($n->is_package_scalar) {
+        out('a package scalar of no one version passed as an argument') if $b->{unversioned}{ refaddr($n) };
+        return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_of($n) }) ]);
+    }
+    # (a foreach alias read, B::SoN's ${ \ $a[i] }: the element)
+    $n = $n->alias_element if $op eq 'PostfixDeref' && $n->alias_element;
+    if ($n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) }) {
+        my ($c, $k) = $n->inputs->@[0, 1];
+        # (ITS READ THROUGH A REFERENCE, if it is one, made here, before the
+        # call -- where perl's argument was -- not left waiting across it)
+        $b->value($n) if $b->_through_ref($n);
+        out('an element of an array B::SoN reads at no version, aliased where it may be written')
+            if $b->may_write_args && _folded($c);
+        if (( $n->can('kind') ? $n->kind // 'array' : 'array' ) eq 'hash') {
+            my $key = $b->as($b->value($k), '%Str');
+            return $b->emit(op => 'ElvH', type => '%Slot', inputs => [ $b->hash_of($c), $key ]);
+        }
+        my $ix = $b->as($b->value($k), 'i64');
+        # (an element of a list written out -- a foreach's over `($x, @a[1, 2])`
+        # -- is its item's own: an element of the list's aliases)
+        # (through an element: where @_ may be written, the array it holds --
+        # one undef there stops, perl's call makes one; else read as an
+        # element is, through undef undef)
+        my $arr = blessed($c) && $c->operation eq 'ArrayLiteral' && !defined $c->symbol && ( $c->stamp // '' ) eq 'Array' ? $b->alias_list($c)   # static type
+            : do { local $b->{ $b->may_write_args ? 'writing' : 'elem_read' } = 1; $b->array_of($c) };
+        return $b->emit(op => 'ElvA', type => '%Slot', inputs => [ $arr, $ix ]);
+    }
+    if ($n->operation eq 'FieldAccess' && ( $b->field_of($n) )[1] eq '$') {
+        my $self = $b->{self} // out('a field outside a method');
+        return $b->emit(op => 'ElvH', type => '%Slot', inputs => [ $self, $b->const_str( ( $b->field_of($n) )[0] ) ]);
+    }
+    # A VALUE MADE HERE: a temporary, a fresh cell the callee may write.
+    # (one perl would alias -- a `my` T2 holds as a value, an argument this
+    # sub took by value, a choice of variables, a deref -- refused where a
+    # sub writes @_)
+    out('an argument perl aliases (' . $n->operation . ') passed where a sub writes @_')
+        if $b->may_write_args && ( $n->operation =~ /\A(?:PadAccess|TernaryExpr|PostfixDeref|Assign|Subscript|And|Or|DefinedOr|Phi)\z/ );
+    return $b->emit(op => 'Fresh', type => '%Slot', inputs => [ $b->as($b->value($n), '%Slot') ]);
+}
+
+# _folded($aggregate) -> a named array or hash B::SoN reads at no memory
+# version anywhere: one it takes for never written, every read of it folded
+# to what it was made with -- a store through an alias of its elements (a
+# slice handed to a call, a foreach over a list of it) never seen after.
+sub _folded {
+    my ($n) = @_;
+    return 0 unless blessed($n) && $n->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && defined $n->symbol;
+    return !grep { my $u = $_; blessed($u) && grep { blessed($_) && $_->is_memory_version } $u->inputs->@* } ( $n->consumers // [] )->@*;
+}
+
+# alias_list($n) -> an array whose elements an @_ aliases (AAppendAlias): an
+# array itself (each element aliased), or an @_ of the list's own aliases --
+# a list written out, a choice of lists, a slice. A list made here (a map's,
+# a sort's, a call's) is copied: perl's own may be aliases (grep, sort), so
+# it is refused where a sub writes @_.
+sub alias_list {
+    my ($b, $n) = @_;
+    my $op = $n->operation;
+    out('an array B::SoN reads at no version, aliased where it may be written')
+        if $b->may_write_args && _folded($n);
+    # (an array through an element -- `f(@$_)`, `f(@{$h{l}})` -- is the one
+    # it holds: perl's call makes it one, T2's stops where it is none)
+    return do { local $b->{writing} = 1; $b->array_of($n) } if $op eq 'ArgsSource' || $op eq 'ArrayLiteral' && defined $n->symbol
+        || $n->is_my_array || $n->is_array_deref || $n->is_argv || $n->is_package_aggregate && $n->sigil eq '@';
+    if ($op eq 'ArrayLiteral' && ( $n->stamp // '' ) eq 'Array') {   # static type
+        return $b->args_array( grep { blessed($_) } $n->inputs->@* );
+    }
+    if ($op eq 'TernaryExpr') {
+        my ($cond, $then, $else) = $n->inputs->@*;
+        my $c = $b->truth($b->value($cond));
+        my $from = $b->{cur};
+        my $arm = sub ($x) { _is_list($x) ? $b->alias_list($x) : $b->args_array($x) };
+        # (A READ THROUGH A REFERENCE an arm makes -- `$c ? @$x : ()` -- is
+        # made there, before the call: settled, not waiting across it. Read
+        # again past what settles it, it would be of the later state: refused.)
+        my %made;
+        my $in_arm = sub ($x) {
+            local $b->{memo} = { $b->{memo}->%* };
+            my %had = map { ( $_ => 1 ) } keys $b->{memo}->%*;
+            my $r = $arm->($x);
+            $made{$_} = 1 for grep { !$had{$_} } keys $b->{memo}->%*;
+            return $r;
+        };
+        my $tb = $b->new_block('then');
+        my $tv = $in_arm->($then);
+        my $tend = $b->{cur};
+        my $eb = $b->new_block('else');
+        my $ev = $in_arm->($else);
+        my $eend = $b->{cur};
+        $b->{arm_made}{$_} = 1 for keys %made;
+        my $jb = $b->new_block('join');
+        $from->{term} = [ 'condbr', $c, $tb, $eb ];
+        $tend->{term} = [ 'br', $jb ];
+        $eend->{term} = [ 'br', $jb ];
+        return $b->emit(op => 'Phi', type => '%Array*', inputs => [ $tv, $ev ], attr => { from => [ $tend, $eend ] });
+    }
+    # A SLICE: an alias of each element it names (`g($_) for @n[1 .. 2]`).
+    if ($op eq 'Slice') {
+        $b->list_only($n, 'a slice');
+        my @ix = grep { blessed($_) } $n->inputs->@*;
+        my $src = pop @ix;
+        out('a slice of an array B::SoN reads at no version, aliased where it may be written')
+            if $b->may_write_args && _folded($src);
+        my $list = $b->emit(op => 'NewArray', type => '%Array*');
+        for my $e (@ix) {
+            if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $list, $b->array_of($e) ]) }
+            else { $b->emit(op => 'APush', type => 'void', inputs => [ $list, $b->as($b->value($e), '%Slot') ]) }
+        }
+        my $kind = $n->kind // '';
+        return $b->emit(op => 'HSliceAlias', type => '%Array*', inputs => [ $b->hash_of($src), $list ]) if $kind eq 'hash';
+        out("a slice of kind $kind") unless $kind eq 'array';
+        my $arr = do { local $b->{ $b->may_write_args ? 'writing' : 'elem_read' } = 1; $b->array_of($src) };
+        return $b->emit(op => 'ASliceAlias', type => '%Array*', inputs => [ $arr, $list ]);
+    }
+    out('a list perl may alias (' . $op . ') passed where a sub writes @_') if $b->may_write_args;
+    return $b->array_of($n);
 }
 
 # scalar_arg($n) -> a positional argument's %Slot. A call in list context
@@ -529,11 +728,7 @@ sub code_call {
         $b->set_want($c);
         return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $b->{argsarr} ], site => $c);
     }
-    my $arr = $b->emit(op => 'NewArray', type => '%Array*');
-    for my $a (@args) {
-        if (_is_list($a)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($a) ]) }
-        else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($a), '%Slot') ]) }
-    }
+    my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); $b->args_array(@args) };
     $b->hash_reads_settled('a call of a code value');
     $b->set_want($c);
     return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $arr ], site => $c);
@@ -583,11 +778,17 @@ sub func {
         my $np = $sub->can('params') ? scalar +($sub->params // [])->@* : 0;
         out("method $name has a parameter past its declared ones")
             if grep { $_->operation eq 'Parameter' && ( $_->index // 0 ) >= $np } @gn;
-        out("method $name has a slurpy parameter")
-            if grep { $_->operation eq 'Parameter' && ( $_->can('sigil') ? $_->sigil // '$' : '$' ) ne '$' } @gn
-            or grep { ( ref($_) ? $_->{name} // $_->{sigil} // '' : $_ // '' ) =~ /\A[@%]/ } +($sub->can('params') ? $sub->params // [] : [])->@*;
+        # A SLURPY PARAMETER (`method f ($x, @rest)`, its last): the method
+        # takes @_ as one array (its invocant first), the slurpy one a copy of
+        # what is past the others; its arity checked by its wrapper.
+        my @pnames = map { ref($_) ? $_->{name} // $_->{sigil} // '' : $_ // '' } +($sub->can('params') ? $sub->params // [] : [])->@*;
+        my ($sl) = grep { $pnames[$_] =~ /\A[@%]/ } 0 .. $#pnames;
+        out("method $name has a slurpy parameter not its last") if defined $sl && $sl != $#pnames;
+        out("method $name has a slurpy parameter B::SoN gives not as declared")
+            if grep { $_->operation eq 'Parameter' && ( $_->can('sigil') ? $_->sigil // '$' : '$' ) ne '$' && !( defined $sl && ( $_->index // -1 ) == $sl ) } @gn;
+        $margs{slurpy} = $sl;
         $margs{ refaddr($_) } = 0 for grep { $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' && ( $_->symbol // '' ) eq 'self' } @gn;
-        $margs{ refaddr($_) } = $_->index + 1 for grep { $_->operation eq 'Parameter' } @gn;
+        $margs{ refaddr($_) } = $_->index + 1 for grep { $_->operation eq 'Parameter' && ( $_->can('sigil') ? $_->sigil // '$' : '$' ) eq '$' } @gn;
         $margs{np} = $np;
     }
     my $an = bless {}, 'Chalk::Target::LLVM::Context';
@@ -600,6 +801,24 @@ sub func {
     # A SUB THAT HANDS ITS @_ ON (`&f;`, `&$code;`) takes it as one array too.
     my $hands_on = grep { $_->operation eq 'Call' && $_->can('shares_args') && $_->shares_args } $g->component;
     my $list = !$is_method && !$@ && ( $an->{_args_read_as_a_list} || $closure || $hands_on ) && !$an->{_args_written} && !$an->{_args_slurpy} && !$an->{_args_signature};
+    # @_ WRITTEN, OR READ OTHER THAN BY ONE POSITIONAL STYLE (shifts and
+    # $_[N] mixed, a pop, @_ handed to an op): the sub takes @_ as the array
+    # of aliases its caller builds -- a store into it reaches the caller's
+    # variable, a read sees it as it is now. (Not a signature's: its
+    # parameters are its own.)
+    # (One that SHIFTS @_ as well, its other reads where the graph orders
+    # none -- `my %a = @_` after a shift -- is not: they would read it whole.)
+    my $declared = grep { $_->operation eq 'Parameter' } $g->component;
+    my $shifted = grep { $_->operation eq 'Call' && $_->mutates_array && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'ArgsSource' } $g->component;
+    $list ||= !$is_method && !$declared && !$shifted && ( $@ || $an->{_args_written} );
+    # A SUB A CALL PASSES A LIST (`f(@$r)`): its count is the list's, known at
+    # run time only -- @_ as that one array too.
+    $list ||= !$is_method && !$declared && grep {
+        my $k = $_;
+        $k->operation eq 'Call' && ( $k->dispatch_kind // '' ) eq 'direct' && blessed( $k->target ) && refaddr( $k->target ) == refaddr($sub)
+            && !( $k->can('shares_args') && $k->shares_args )
+            && grep { blessed($_) && !$_->is_memory_version && _is_list($_) } $k->inputs->@*
+    } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} );
     # A SLURPY TAIL (`my ($c, @x) = @_`, `sub f ($c, @x)` -- perigrin: the same)
     # takes @_ as one array: the positional targets its elements 0..k-1, the
     # slurpy one a copy of the rest.
@@ -614,10 +833,14 @@ sub func {
     # (B::SoN's `mandatory` counts every positional parameter, optional ones too)
     my $decl = !$is_method && $sub->can('signature') ? $sub->signature // {} : {};
     my @defaulted = grep { $_->operation eq 'Parameter' && blessed( $_->inputs->[0] ) } $g->component;
+    # (A DEFAULT THE BODY COMPUTES -- `($x = g())`: B::SoN tests @_'s count
+    # and calls g where none was passed -- reads @_ only by counting it.)
+    my $counted = grep { $_->operation eq 'ArgsSource' } $g->component;
+    $counted &&= !grep { my $s = $_; $s->operation eq 'ArgsSource' && grep { blessed($_) && $_->operation ne 'Count' } ( $s->consumers // [] )->@* } $g->component;
     my $optional = !$is_method && !$closure && !$@ && $an->{_args_signature} && ( $decl->{optional} // 0 ) > 0
-        && !$an->{_args_written} && !$an->{_args_read_as_a_list};
+        && !$an->{_args_written} && ( !$an->{_args_read_as_a_list} || $counted );
     if ($optional) {
-        out("sub $name has an optional parameter of no default") if @defaulted != $decl->{optional};
+        out("sub $name has an optional parameter of no default") if @defaulted != $decl->{optional} && !$counted;
         out("sub $name has a default that is not made the same anywhere") if grep { !$_->inputs->[0]->all_made_the_same } @defaulted;
         @positional = grep { defined } @reads unless $slurpy;
         $list = 1;
@@ -708,12 +931,25 @@ sub func {
     ( my $id = $name ) =~ s/\W+/_/g;
     # Two subs one name (a method call's bare name): the second numbered.
     $id .= '_' . scalar keys $b->{funcs}->%* if grep { $_->{name} eq "\@f_$id" } values +($b->{funcs} // {})->%*;
+    $list = 1 if $is_method && defined $margs{slurpy};
     my $nargs = $is_method ? 1 + $margs{np} : $list ? 1 : scalar @reads;
     my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $nargs,
         signature => $sig, list => $list, listret => $listret, closure => $closure, blocks => [] , minargs => ( $optional ? ( $decl->{mandatory} // 0 ) - $decl->{optional} : $slurpy && $sig ? scalar @positional : undef ),
         maxargs => ( $optional && !$slurpy ? $decl->{mandatory} // 0 : undef ),
         direct_only => ( $optional || $padded ? 1 : 0 ), sig_min => $cmin, sig_max => $cmax,
         slurpy_sigil => ( $slurpy && $sig ? ( $slurpy->can('sigil') ? $slurpy->sigil // '@' : '@' ) : undef ) };
+    # A SIGNATURE'S ARITY, checked by its wrapper (a method call's entry):
+    # perl's die naming the sub where another count is passed.
+    if (!$is_method && !$closure && $sig) {
+        $fn->{arity} = $list ? [ $fn->{minargs} // scalar @positional, $fn->{maxargs} // -1 ] : [ $nargs, $nargs ];
+        $fn->{pname} = $name;
+        $b->{strs}{$name} //= scalar keys $b->{strs}->%*;
+    }
+    if ($is_method && $list) {   # (a slurpy method: at least its others, past its invocant)
+        $fn->{arity} = [ $margs{slurpy}, -1, 1 ];
+        $fn->{pname} = $name;
+        $b->{strs}{$name} //= scalar keys $b->{strs}->%*;
+    }
     my @argn = map { Chalk::Target::LLVM::Node::_n(op => 'Arg', type => '%Slot', attr => { index => $_ }) } 0 .. ( $is_method ? $nargs : scalar @reads ) - 1;
     $argn[$_]->set_name("%a$_") for 0 .. $#argn;
     my $argsarr = $list ? Chalk::Target::LLVM::Node::_n(op => 'Arg', type => '%Array*', attr => { index => 0 }) : undef;
@@ -729,7 +965,7 @@ sub func {
     local $b->{seq} = 0;   # (its own statements' turns: its entry is turn 0)
     local $b->{locs} = {};
     local $b->{memo} = {};
-    local $b->{args} = $is_method ? { map { ( $_ => $argn[ $margs{$_} ] ) } grep { $_ ne 'np' } keys %margs }
+    local $b->{args} = $is_method ? { map { ( $_ => $argn[ $margs{$_} ] ) } grep { $_ ne 'np' && $_ ne 'slurpy' } keys %margs }
                                   : { ( map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads ), ( map { ( refaddr( $_->[0] ) => $argn[ $_->[1] ] ) } @also ) };
     local $b->{self} = $is_method ? $argn[0] : undef;   # a field's object
     local $b->{cells} = $closure ? $o{cells} : undef;
@@ -739,6 +975,8 @@ sub func {
     local $b->{evals} = [];
     local $b->{eval_opened} = {};
     local $b->{in_func} = 1;
+    local $b->{alias_strict};   # (the @_ a caller is building is not this sub's)
+    local $b->{alias_writes};
     # A FORMAT's sub (B::SoN's __FORMAT__:<handle>), which `write` calls.
     local $b->{format_of} = $name =~ /__FORMAT__:(.+)\z/ ? $1 : undef;
     local $b->{ret} = $ret;
@@ -756,6 +994,19 @@ sub func {
     $b->new_block('entry');
     # THE CALLER'S CONTEXT, read first (a call in the body sets it).
     my $want = $b->emit(op => 'GetWant', type => 'i1');
+    if ($is_method && $list) {
+        # A SLURPY METHOD'S ARGUMENTS, from @_: $self its first, each other
+        # parameter its place, the slurpy one a copy of the rest.
+        my %at;
+        for my $k (grep { !/\A(?:np|slurpy)\z/ } keys %margs) {
+            $b->{args}{$k} = $at{ $margs{$k} } //= $b->emit(op => 'AGet', type => '%Slot',
+                inputs => [ $argsarr, $b->emit(op => 'Const', type => 'i64', attr => { value => $margs{$k} }) ]);
+        }
+        $b->{self} = $at{0} //= $b->emit(op => 'AGet', type => '%Slot', inputs => [ $argsarr, $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }) ]);
+        for my $p (grep { $_->operation eq 'Parameter' && ( $_->index // -1 ) == $margs{slurpy} } $g->component) {
+            $b->{memo}{ refaddr($p) } = $b->args_rest($argsarr, $p->index + 1, $p->can('sigil') ? $p->sigil // '@' : '@');
+        }
+    }
     if ($slurpy || $optional || $sigclosure) {
         # A SIGNATURE'S ARITY: at least its positional parameters (perl dies
         # with fewer -- a run-time stop here, as a signature's wrapper's is).

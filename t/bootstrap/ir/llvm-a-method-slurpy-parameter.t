@@ -67,11 +67,13 @@ for my $case (
     is($got, perl_says($pl // write_pl($src), {}), "$name: perl's answer") or diag $@;
 }
 
-# Perl's answer, or refused by name: perl dies on too few for the scalars.
+# Perl's answer, or refused by name: perl dies on too few for the scalars
+# (and so does the program, with perl's message).
 {
     my $src = q{use v5.42; use experimental "class"; class K { method f($x, $y, @r) { "$x$y" } } print K->new->f(1), "\n";};
     my ($got, $pl) = eval { through_llvm($src, {}) };
     if (!defined $got && $@ =~ /GAP/) { pass('too few for the scalars: refused by name') }
+    elsif (!defined $got && $@ =~ /\Alli exited 255: Too few arguments for subroutine 'K::f' \(got 1; expected at least 2\) at /) { pass("too few for the scalars: perl's die") }
     else { is($got, perl_says($pl // write_pl($src), {}), "too few for the scalars: perl's answer") or diag $@ }
 }
 

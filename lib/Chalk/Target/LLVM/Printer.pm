@@ -69,15 +69,27 @@ sub print_module {
         # A NAMED SUB'S CODE VALUE (`\&f`): its entry is its wrapper's, no cells.
         push @L, "define internal %Slot $fn->{name}_cw(%Array* %args, %Slot** %env) {",
             "  %r = call %Slot $fn->{name}_w(%Array* %args)", '  ret %Slot %r', '}', '' if $fn->{coderef};
+        # A SIGNATURE'S ARITY, at a method call's entry: perl's die (the
+        # call's site its last), the function not called. (Reached through a
+        # code value `\&f`, whose site is not kept, a stop as before.)
+        my @arity;
+        if ($fn->{arity} && !$fn->{coderef}) {
+            my ($mn, $mx, $off) = $fn->{arity}->@*;
+            my $nm = $fn->{pname};
+            my $len = do { use bytes; length $nm };
+            push @arity, sprintf('  %%aok = call i1 @t2_arity(%%Array* %%args, i64 %d, i64 %d, i64 %d, i8* getelementptr ([%d x i8], [%d x i8]* @s%d, i64 0, i64 0), i64 %d)',
+                    $off // 0, $mn, $mx, $len + 1, $len + 1, $strs->{$nm}, $len),
+                '  br i1 %aok, label %call, label %bad', 'bad:', '  ret %Slot zeroinitializer', 'call:';
+        }
         if ($fn->{list}) {   # @_ already an %Array
-            push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {", '  %w = load i1, i1* @t2_want',
+            push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {", '  %w = load i1, i1* @t2_want', @arity,
                 "  %r = call %Slot $fn->{name}(%Array* %args)", @norm, '}', '';
             next;
         }
         # ITS WRAPPER, a method's entry: @_ as an %Array, each argument its
         # element (undef past the end). A signature's arity perl checks.
-        push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {", '  %w = load i1, i1* @t2_want';
-        if ($fn->{signature}) {
+        push @L, "define internal %Slot $fn->{name}_w(%Array* %args) {", '  %w = load i1, i1* @t2_want', @arity;
+        if ($fn->{signature} && !@arity) {
             push @L, '  %n = call i64 @t2_alen(%Array* %args)', "  %ok = icmp eq i64 %n, $fn->{nargs}",
                 '  br i1 %ok, label %call, label %bad', 'bad:',
                 '  call void @t2_stop(i8* getelementptr ([68 x i8], [68 x i8]* @msg_arity, i64 0, i64 0), i64 67)',

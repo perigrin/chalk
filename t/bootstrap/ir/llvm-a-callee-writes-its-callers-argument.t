@@ -41,7 +41,7 @@ sub through_llvm ($src) {
 # each written element is stored back to what it aliases -- a variable kept
 # in memory, or an element (pvm subroutines.md and chalk-found-gaps.md,
 # refused as "callee writes $_[N]"). A temporary keeps no store; a literal
-# is read-only in perl, which dies, and is refused.
+# is read-only in perl, which dies.
 for my $case (
     [ q{sub g { $_[0] = 5 } my $c = 1; g($c); print "$c\n"; my %h = (a => 1); g($h{a}); print "$h{a}\n";}, "5\n5\n", 'a variable and a hash element' ],
     [ q{sub bump_alias { $_[0]++ } sub bump_copy { my ($n) = @_; $n++ } my ($aliased, $untouched) = (1, 1); bump_alias($aliased); bump_copy($untouched); print "$aliased $untouched\n";}, "2 1\n", 'an alias and a copy' ],
@@ -54,7 +54,9 @@ for my $case (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
+# A literal is read-only: perl dies, and so does the program (@_ aliases
+# it, read-only), before the print -- or it is refused by name.
 my $err = do { local $@; eval { through_llvm(q{sub g { $_[0] = 5 } g(3); print "x\n";}) }; $@ };
-like($err, qr/GAP: .*a literal/, 'a write to a literal is refused by name');
+like($err, qr/GAP: .*a literal|\Alli exited 255: Modification of a read-only value attempted/, 'a write to a literal: perl\'s die, or refused by name');
 
 done_testing;

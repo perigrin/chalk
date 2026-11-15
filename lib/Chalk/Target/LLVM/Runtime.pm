@@ -2738,6 +2738,298 @@ die:
   i8* bitcast (void (%Array*, i64)* @t2_aset_len_d to i8*)
 ]
 @t2_meta_default = internal global %Meta { i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_default, i64 0, i64 0), %Slot zeroinitializer }
+; @_ IS AN ARRAY OF ALIASES (perigrin): each element the call puts there is
+; the caller's own -- a SCALAR REFERENCE (tag 9) to its variable, or to a
+; fresh cell (a temporary, or what the callee pushes); an ELEMENT ALIAS (tag
+; 10) of an array's or a hash's element, found where it is read or written,
+; as perl's deferred element is; or a value as it is, READ-ONLY (a literal:
+; perl dies on a store). Its metaobject reads through the alias and stores
+; there; what moves an element (shift, pop, splice) moves the alias.
+%Elv = type { i8, %Slot, %Slot }
+@t2_vt_alias = internal global [20 x i8*] [
+  i8* bitcast (%Slot (%Array*, i64)* @t2_alias_aget to i8*),
+  i8* bitcast (void (%Array*, i64, %Slot, i8*, i64)* @t2_alias_aset to i8*),
+  i8* bitcast (i64 (%Array*)* @t2_alen_d to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_alias_apush to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_apop_d to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_ashift_d to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_alias_aunshift to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_aappend_d to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_alias_aunshiftl to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_hget_d to i8*),
+  i8* bitcast (void (%Slot, %Str, %Slot)* @t2_hset_d to i8*),
+  i8* bitcast (i1 (%Slot, %Str)* @t2_hexists_d to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_hdelete_d to i8*),
+  i8* bitcast (i64 (%Slot)* @t2_hcount_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hkeys_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hvalues_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hpairs_d to i8*),
+  i8* bitcast (void (%Slot, %Array*)* @t2_hfroma_d to i8*),
+  i8* bitcast (i1 (%Array*, i64)* @t2_aexists_d to i8*),
+  i8* bitcast (void (%Array*, i64)* @t2_aset_len_d to i8*)
+]
+@t2_meta_alias = internal global %Meta { i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_alias, i64 0, i64 0), %Slot zeroinitializer }
+; t2_new_args() -> an empty @_, its elements aliases
+define internal %Array* @t2_new_args() {
+  %a = call %Array* @t2_new_array()
+  %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
+  store %Meta* @t2_meta_alias, %Meta** %mp
+  ret %Array* %a
+}
+; t2_is_args(a) -> a is an @_ (its elements aliases)
+define internal i1 @t2_is_args(%Array* %a) {
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %y = icmp eq %Meta* %m, @t2_meta_alias
+  ret i1 %y
+}
+; t2_elv(kind, container, key) -> an element alias: kind 0 an array's (the
+; container's payload the %Array*, the key its index -- one from the end
+; fixed now, as perl's is the element there at the call), 1 a hash's.
+define internal %Slot @t2_elv(i8 %k, %Slot %c, %Slot %key) {
+  %m = call i8* @malloc(i64 48)
+  %e = bitcast i8* %m to %Elv*
+  %kp = getelementptr %Elv, %Elv* %e, i32 0, i32 0
+  store i8 %k, i8* %kp
+  %cp = getelementptr %Elv, %Elv* %e, i32 0, i32 1
+  store %Slot %c, %Slot* %cp
+  %xp = getelementptr %Elv, %Elv* %e, i32 0, i32 2
+  store %Slot %key, %Slot* %xp
+  %i = ptrtoint i8* %m to i64
+  %s = call %Slot @t2_slot(i8 10, i64 %i)
+  ret %Slot %s
+}
+define internal %Slot @t2_elv_a(%Array* %a, i64 %i) {
+  %n = call i64 @t2_alen(%Array* %a)
+  %neg = icmp slt i64 %i, 0
+  %fe = add i64 %i, %n
+  %j = select i1 %neg, i64 %fe, i64 %i
+  %ai = ptrtoint %Array* %a to i64
+  %c = call %Slot @t2_slot(i8 1, i64 %ai)
+  %x = call %Slot @t2_slot(i8 1, i64 %j)
+  %s = call %Slot @t2_elv(i8 0, %Slot %c, %Slot %x)
+  ret %Slot %s
+}
+define internal %Slot @t2_elv_h(%Slot %h, %Str %k) {
+  %x = call %Slot @t2_box_str(%Str %k)
+  %s = call %Slot @t2_elv(i8 1, %Slot %h, %Slot %x)
+  ret %Slot %s
+}
+; t2_alias_val(raw) -> the value an element of @_ stands for now
+define internal %Slot @t2_alias_val(%Slot %r) {
+entry:
+  %t = extractvalue %Slot %r, 0
+  %p = extractvalue %Slot %r, 1
+  switch i8 %t, label %own [ i8 9, label %cell
+                             i8 10, label %elv ]
+cell:
+  %c = inttoptr i64 %p to %Slot*
+  %v = load %Slot, %Slot* %c
+  ret %Slot %v
+elv:
+  %e = inttoptr i64 %p to %Elv*
+  %kp = getelementptr %Elv, %Elv* %e, i32 0, i32 0
+  %k = load i8, i8* %kp
+  %cp = getelementptr %Elv, %Elv* %e, i32 0, i32 1
+  %cs = load %Slot, %Slot* %cp
+  %xp = getelementptr %Elv, %Elv* %e, i32 0, i32 2
+  %xs = load %Slot, %Slot* %xp
+  %ish = icmp eq i8 %k, 1
+  br i1 %ish, label %hash, label %arr
+arr:
+  %ai = extractvalue %Slot %cs, 1
+  %a = inttoptr i64 %ai to %Array*
+  %i = extractvalue %Slot %xs, 1
+  %av = call %Slot @t2_aget(%Array* %a, i64 %i)
+  ret %Slot %av
+hash:
+  %ks = call %Str @t2_slot_str(%Slot %xs)
+  %hv = call %Slot @t2_hget(%Slot %cs, %Str %ks)
+  ret %Slot %hv
+own:
+  ret %Slot %r
+}
+@lit_ro = private unnamed_addr constant [44 x i8] c"Modification of a read-only value attempted\00"
+; t2_alias_store(raw, v, at) -> stored where the alias points (true); false
+; where raw is no alias -- an absent element (made a fresh cell by the
+; caller); perl's die on a read-only value.
+define internal i1 @t2_alias_store(%Slot %r, %Slot %v, i8* %at, i64 %atn) {
+entry:
+  %t = extractvalue %Slot %r, 0
+  %p = extractvalue %Slot %r, 1
+  switch i8 %t, label %ro [ i8 9, label %cell
+                            i8 10, label %elv
+                            i8 0, label %undef ]
+cell:
+  %c = inttoptr i64 %p to %Slot*
+  store %Slot %v, %Slot* %c
+  ret i1 1
+elv:
+  %e = inttoptr i64 %p to %Elv*
+  %kp = getelementptr %Elv, %Elv* %e, i32 0, i32 0
+  %k = load i8, i8* %kp
+  %cp = getelementptr %Elv, %Elv* %e, i32 0, i32 1
+  %cs = load %Slot, %Slot* %cp
+  %xp = getelementptr %Elv, %Elv* %e, i32 0, i32 2
+  %xs = load %Slot, %Slot* %xp
+  %ish = icmp eq i8 %k, 1
+  br i1 %ish, label %hash, label %arr
+arr:
+  %ai = extractvalue %Slot %cs, 1
+  %a = inttoptr i64 %ai to %Array*
+  %i = extractvalue %Slot %xs, 1
+  call void @t2_aset(%Array* %a, i64 %i, %Slot %v, i8* %at, i64 %atn)
+  ret i1 1
+hash:
+  %ks = call %Str @t2_slot_str(%Slot %xs)
+  call void @t2_hset(%Slot %cs, %Str %ks, %Slot %v)
+  ret i1 1
+undef:
+  %absent = icmp eq i64 %p, 1
+  br i1 %absent, label %none, label %ro
+none:
+  ret i1 0
+ro:
+  %m0 = call %Str @t2_str(i8* getelementptr ([44 x i8], [44 x i8]* @lit_ro, i64 0, i64 0), i64 43)
+  %as = call %Str @t2_str(i8* %at, i64 %atn)
+  %m = call %Str @t2_concat(%Str %m0, %Str %as)
+  call void @t2_die_unwind(%Str %m)
+  ret i1 1
+}
+; t2_fresh(v) -> a scalar reference to a new cell holding v
+define internal %Slot @t2_fresh(%Slot %v) {
+  %c = call %Slot* @t2_cell_new()
+  store %Slot %v, %Slot* %c
+  %s = call %Slot @t2_sref(%Slot* %c)
+  ret %Slot %s
+}
+define internal %Slot @t2_alias_aget(%Array* %a, i64 %i) {
+  %r = call %Slot @t2_aget_d(%Array* %a, i64 %i)
+  %v = call %Slot @t2_alias_val(%Slot %r)
+  ret %Slot %v
+}
+define internal void @t2_alias_aset(%Array* %a, i64 %i, %Slot %v, i8* %at, i64 %atn) {
+entry:
+  %n = call i64 @t2_alen_d(%Array* %a)
+  %neg = icmp slt i64 %i, 0
+  %fe = add i64 %i, %n
+  %j = select i1 %neg, i64 %fe, i64 %i
+  %lo = icmp slt i64 %j, 0
+  %hi = icmp sge i64 %j, %n
+  %out = or i1 %lo, %hi
+  br i1 %out, label %fresh, label %have
+have:
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  %p = getelementptr %Slot, %Slot* %els, i64 %j
+  %r = load %Slot, %Slot* %p
+  %done = call i1 @t2_alias_store(%Slot %r, %Slot %v, i8* %at, i64 %atn)
+  br i1 %done, label %ok, label %fresh
+fresh:
+  %f = call %Slot @t2_fresh(%Slot %v)
+  call void @t2_aset_d(%Array* %a, i64 %i, %Slot %f, i8* %at, i64 %atn)
+  br label %ok
+ok:
+  ret void
+}
+define internal void @t2_alias_apush(%Array* %a, %Slot %v) {
+  %f = call %Slot @t2_fresh(%Slot %v)
+  call void @t2_apush_d(%Array* %a, %Slot %f)
+  ret void
+}
+define internal void @t2_alias_aunshift(%Array* %a, %Slot %v) {
+  %f = call %Slot @t2_fresh(%Slot %v)
+  call void @t2_aunshift_d(%Array* %a, %Slot %f)
+  ret void
+}
+define internal void @t2_alias_aunshiftl(%Array* %a, %Array* %l) {
+entry:
+  %n = call i64 @t2_alen(%Array* %l)
+  br label %loop
+loop:
+  %i = phi i64 [ %n, %entry ], [ %im, %body ]
+  %more = icmp sgt i64 %i, 0
+  br i1 %more, label %body, label %done
+body:
+  %im = sub i64 %i, 1
+  %v = call %Slot @t2_aget(%Array* %l, i64 %im)
+  call void @t2_alias_aunshift(%Array* %a, %Slot %v)
+  br label %loop
+done:
+  ret void
+}
+; t2_aslice_alias(a, ix) / t2_hslice_alias(h, keys) -> an @_ of an alias of
+; each element a slice names, in its order
+define internal %Array* @t2_aslice_alias(%Array* %a, %Array* %ix) {
+entry:
+  %n = call i64 @t2_alen(%Array* %ix)
+  %r = call %Array* @t2_new_args()
+  br label %loop
+loop:
+  %k = phi i64 [ 0, %entry ], [ %k2, %body ]
+  %more = icmp slt i64 %k, %n
+  br i1 %more, label %body, label %done
+body:
+  %is = call %Slot @t2_aget(%Array* %ix, i64 %k)
+  %i = call i64 @t2_slot_i64(%Slot %is)
+  %e = call %Slot @t2_elv_a(%Array* %a, i64 %i)
+  call void @t2_apush_d(%Array* %r, %Slot %e)
+  %k2 = add i64 %k, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
+define internal %Array* @t2_hslice_alias(%Slot %h, %Array* %ks) {
+entry:
+  %n = call i64 @t2_alen(%Array* %ks)
+  %r = call %Array* @t2_new_args()
+  br label %loop
+loop:
+  %k = phi i64 [ 0, %entry ], [ %k2, %body ]
+  %more = icmp slt i64 %k, %n
+  br i1 %more, label %body, label %done
+body:
+  %ksl = call %Slot @t2_aget(%Array* %ks, i64 %k)
+  %key = call %Str @t2_slot_str(%Slot %ksl)
+  %e = call %Slot @t2_elv_h(%Slot %h, %Str %key)
+  call void @t2_apush_d(%Array* %r, %Slot %e)
+  %k2 = add i64 %k, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
+; t2_apush_alias(args, raw): an alias (or a read-only value) put on @_ as it is
+define internal void @t2_apush_alias(%Array* %a, %Slot %r) {
+  call void @t2_apush_d(%Array* %a, %Slot %r)
+  ret void
+}
+; t2_aappend_alias(args, s): each element of s aliased on @_ -- an @_'s own
+; aliases handed on as they are (`f(@_)`), another array's elements each
+; an element alias.
+define internal void @t2_aappend_alias(%Array* %d, %Array* %s) {
+entry:
+  %n = call i64 @t2_alen(%Array* %s)
+  %own = call i1 @t2_is_args(%Array* %s)
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %next ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  br i1 %own, label %raw, label %el
+raw:
+  %r = call %Slot @t2_aget_d(%Array* %s, i64 %i)
+  call void @t2_apush_d(%Array* %d, %Slot %r)
+  br label %next
+el:
+  %e = call %Slot @t2_elv_a(%Array* %s, i64 %i)
+  call void @t2_apush_d(%Array* %d, %Slot %e)
+  br label %next
+next:
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  ret void
+}
 ; t2_meta(a) -> the metaobject a container points at
 define internal %Meta* @t2_meta(%Array* %a) {
   %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
@@ -3224,7 +3516,9 @@ define internal %Slot @t2_tie_hash(%Slot %h, %Slot %cls, %Array* %rest) {
 define internal %Slot @t2_tied(%Array* %a) {
 entry:
   %m = call %Meta* @t2_meta(%Array* %a)
-  %d = icmp eq %Meta* %m, @t2_meta_default
+  %d0 = icmp eq %Meta* %m, @t2_meta_default
+  %da = icmp eq %Meta* %m, @t2_meta_alias   ; (@_ is no tie)
+  %d = or i1 %d0, %da
   br i1 %d, label %no, label %yes
 no:
   ret %Slot zeroinitializer
@@ -3296,6 +3590,58 @@ stop:
   unreachable
 fine:
   ret void
+}
+; t2_arity(a, off, min, max, name) -> true where a signature takes a's count
+; past its first off (a method's invocant) -- max -1: no most; else perl's
+; die, naming the sub and where it was called (@t2_call_at: a method call's
+; site), false.
+@lit_ar_few = private unnamed_addr constant [35 x i8] c"Too few arguments for subroutine '\00"
+@lit_ar_many = private unnamed_addr constant [36 x i8] c"Too many arguments for subroutine '\00"
+@lit_ar_got = private unnamed_addr constant [8 x i8] c"' (got \00"
+@lit_ar_exp = private unnamed_addr constant [12 x i8] c"; expected \00"
+@lit_ar_least = private unnamed_addr constant [10 x i8] c"at least \00"
+@lit_ar_most = private unnamed_addr constant [9 x i8] c"at most \00"
+@lit_ar_end = private unnamed_addr constant [2 x i8] c")\00"
+define internal i1 @t2_arity(%Array* %a, i64 %off, i64 %min, i64 %max, i8* %nm, i64 %nn) {
+entry:
+  %all = call i64 @t2_alen(%Array* %a)
+  %got = sub i64 %all, %off
+  %few = icmp slt i64 %got, %min
+  %hasmax = icmp sge i64 %max, 0
+  %over = icmp sgt i64 %got, %max
+  %many = and i1 %hasmax, %over
+  %bad = or i1 %few, %many
+  br i1 %bad, label %die, label %ok
+ok:
+  ret i1 1
+die:
+  %hf = call %Str @t2_str(i8* getelementptr ([35 x i8], [35 x i8]* @lit_ar_few, i64 0, i64 0), i64 34)
+  %hm = call %Str @t2_str(i8* getelementptr ([36 x i8], [36 x i8]* @lit_ar_many, i64 0, i64 0), i64 35)
+  %h = select i1 %few, %Str %hf, %Str %hm
+  %name = call %Str @t2_str(i8* %nm, i64 %nn)
+  %m1 = call %Str @t2_concat(%Str %h, %Str %name)
+  %gs0 = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_ar_got, i64 0, i64 0), i64 7)
+  %m2 = call %Str @t2_concat(%Str %m1, %Str %gs0)
+  %gn = call %Str @t2_i64_str(i64 %got)
+  %m3 = call %Str @t2_concat(%Str %m2, %Str %gn)
+  %es = call %Str @t2_str(i8* getelementptr ([12 x i8], [12 x i8]* @lit_ar_exp, i64 0, i64 0), i64 11)
+  %m4 = call %Str @t2_concat(%Str %m3, %Str %es)
+  %exact = icmp eq i64 %min, %max
+  %ql = call %Str @t2_str(i8* getelementptr ([10 x i8], [10 x i8]* @lit_ar_least, i64 0, i64 0), i64 9)
+  %qm = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_ar_most, i64 0, i64 0), i64 8)
+  %qn = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_ar_most, i64 0, i64 0), i64 0)
+  %q0 = select i1 %few, %Str %ql, %Str %qm
+  %q = select i1 %exact, %Str %qn, %Str %q0
+  %m5 = call %Str @t2_concat(%Str %m4, %Str %q)
+  %want = select i1 %few, i64 %min, i64 %max
+  %wn = call %Str @t2_i64_str(i64 %want)
+  %m6 = call %Str @t2_concat(%Str %m5, %Str %wn)
+  %en = call %Str @t2_str(i8* getelementptr ([2 x i8], [2 x i8]* @lit_ar_end, i64 0, i64 0), i64 1)
+  %m7 = call %Str @t2_concat(%Str %m6, %Str %en)
+  %at = load %Str, %Str* @t2_call_at
+  %m = call %Str @t2_concat(%Str %m7, %Str %at)
+  call void @t2_die_unwind(%Str %m)
+  ret i1 0
 }
 ; t2_args_min(a, n): a signature's arity -- at least n arguments, else a stop.
 define internal void @t2_args_min(%Array* %a, i64 %n) {
@@ -4297,7 +4643,9 @@ entry:
   call void @t2_aappend(%Array* %c, %Array* %l)
   %n = call i64 @t2_alen(%Array* %c)
   %m = call %Meta* @t2_meta(%Array* %a)
-  %d = icmp eq %Meta* %m, @t2_meta_default
+  %d0 = icmp eq %Meta* %m, @t2_meta_default
+  %da = icmp eq %Meta* %m, @t2_meta_alias   ; (`@_ = LIST`: new cells, no tie)
+  %d = or i1 %d0, %da
   br i1 %d, label %plain, label %tied
 plain:
   %lp = getelementptr %Array, %Array* %a, i32 0, i32 0

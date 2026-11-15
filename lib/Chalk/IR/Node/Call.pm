@@ -245,6 +245,16 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
             && ( $self->can('want') ? $self->want // '' : '' ) eq 'list' ? 1 : 0;
     }
 
+    # writes_first_argument -> true for a builtin that writes the scalar it
+    # is given first, in place (substr with a replacement).
+    method writes_first_argument() {
+        return 0 unless $self->is_builtin;
+        my $n = Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'writes_first_with' ) or return 0;
+        my @ops = $self->inputs->@*;
+        pop @ops if $memory_input;
+        return @ops >= $n ? 1 : 0;
+    }
+
     # makes_a_string -> a builtin that returns a string makes one.
     method makes_a_string() { return $self->returns_string }
 }

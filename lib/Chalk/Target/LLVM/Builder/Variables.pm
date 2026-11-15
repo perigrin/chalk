@@ -30,6 +30,10 @@ sub hash_reads_settled {
     local $b->{settling} = 1;
     for my $ver ($b->{passed}->@*) {
         my @waiting = grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) } } +($b->{readers}{ refaddr($ver) } // [])->@*;
+        # (one an arm of @_'s aliases made, before this: settled -- read
+        # again after, refused where it is: value)
+        $b->{arm_settled}{$_} = 1 for grep { $b->{arm_made}{$_} } map { refaddr($_) } @waiting;
+        @waiting = grep { !$b->{arm_made}{ refaddr($_) } } @waiting;
         next unless @waiting;
         # MADE HERE WHERE NOTHING RAN BETWEEN: the read's version is the
         # statement just before this one, in this block, and the read is under

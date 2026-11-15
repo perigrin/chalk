@@ -691,22 +691,30 @@ sub element_store {
         return;
     }
     my ($arr, $idx) = $target->inputs->@[0, 1];
-    # A FLATTENED LIST (`for (@a, @b) { $_ *= 10 }`) is a copy here; perl's
-    # elements are the arrays' own.
-    out('a store into a flattened list') if blessed($arr) && $arr->operation eq 'ArrayLiteral' && grep { _is_list($_) } $arr->inputs->@*;
+    # A LIST WRITTEN OUT (`for ($x, @a[1, 2]) { $_ *= 10 }`, no array of its
+    # own): perl's elements are its items' own -- stored through their
+    # aliases (an array of them, as @_ is). A named array's (`my @n = sort
+    # ...`) are its own.
+    my $anon = blessed($arr) && $arr->operation eq 'ArrayLiteral' && !defined $arr->symbol && ( $arr->stamp // '' ) eq 'Array';   # static type
     my $val = $b->as($b->value($v), '%Slot');
     my $ix  = $b->as($b->value($idx), 'i64');
-    my $a   = $b->array_of($arr);
+    my $a   = $anon ? do { local $b->{alias_strict} = 1; $b->alias_list($arr) } : $b->array_of($arr);
     $b->hash_reads_settled('an element store');   # it may be an array read through another name
+    my ($at) = grep { $_->can('line') && defined $_->line } $s, $target;
+    # A STORE INTO @_ (or a list's aliases) is the caller's: a literal there is read-only, and
+    # perl dies -- its message, caught, names where (no site from B::SoN for
+    # this store: refused where an eval may catch it).
+    my $into_args = blessed($arr) && $arr->operation eq 'ArgsSource' || $anon;
+    out('a store into @_ of no site, in a program with an eval') if $into_args && !$at && $b->{has_eval};
     $b->emit(op => 'ASet', type => 'void',
         inputs => [ $a, $ix, $val ],
         attr => do {
             # PERL DIES on a store before the start, naming the subscript and where.
-            my ($at) = grep { $_->can('line') && defined $_->line } $s, $target;
             my $msg = $at ? " at " . ( $at->file // '-' ) . " line " . $at->line . ".\n" : ".\n";   # no site from B::SoN yet
             $b->{strs}{$msg} //= scalar keys $b->{strs}->%*;
             +{ msg => $msg, id => $b->{strs}{$msg} };
         });
+    $b->after_call if $into_args;
 }
 
 1;

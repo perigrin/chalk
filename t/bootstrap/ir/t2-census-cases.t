@@ -17,12 +17,12 @@ my @CASES = qw(
     aggregate-operators:3 aggregate-operators:4 aggregate-operators:5
     aggregate-operators:6 aggregates-in-context:1 aggregates-in-context:2
     aggregates-in-context:3 argument-extent:1 argument-extent:2
-    argument-extent:4 arguments:1 arguments:2 arguments:4 arguments:5
-    arguments:6 arguments:7 arguments:9 arithmetic:1 arithmetic:2
+    argument-extent:4 arguments:1 arguments:2 arguments:3 arguments:4 arguments:5
+    arguments:6 arguments:7 arguments:8 arguments:9 arithmetic:1 arithmetic:2
     arithmetic:3 arithmetic:4 arrays:1 arrays:2 arrays:3 arrays:4 bitwise:1
     bitwise:3 bitwise:4 bitwise:5 bitwise:6 bless-dispatch:1
     bless-dispatch:2 bless-dispatch:3 bless-dispatch:4 bless-dispatch:5
-    bless-dispatch:6 bless-dispatch:7 bless-dispatch:8
+    bless-dispatch:6 bless-dispatch:7 bless-dispatch:8 bless-dispatch:9
     blocks-and-terminations:1 blocks-and-terminations:2
     blocks-and-terminations:3 blocks-and-terminations:4
     blocks-and-terminations:5 chalk-found-gaps:1 chalk-found-gaps:2
@@ -30,12 +30,12 @@ my @CASES = qw(
     chalk-found-gaps:8 chalk-found-gaps:9 chalk-found-gaps:10
     chalk-found-gaps:11 chalk-found-gaps:12 chalk-found-gaps:13
     chalk-found-gaps:14 chalk-found-gaps:15 chalk-found-gaps:16
-    chalk-found-gaps:17 chalk-found-gaps:18 chalk-found-gaps:19
+    chalk-found-gaps:17 chalk-found-gaps:18 chalk-found-gaps:19 chalk-found-gaps:20
     chalk-found-gaps:21 chalk-found-gaps:23 chalk-found-gaps:24
     chalk-found-gaps:25 chalk-found-gaps:28 chalk-found-gaps:29
     chalk-found-gaps:30 chalk-found-gaps:31 chalk-found-gaps:32
     chalk-found-gaps:33 chalk-found-gaps:34 chalk-found-gaps:35
-    chalk-found-gaps:36 chalk-found-gaps:38 chalk-found-gaps:39
+    chalk-found-gaps:36 chalk-found-gaps:37 chalk-found-gaps:38 chalk-found-gaps:39
     chalk-found-gaps:40 chalk-found-gaps:41 chalk-found-gaps:42
     chalk-found-gaps:44 chalk-found-gaps:45 chalk-found-gaps:46
     chalk-found-gaps:47 chalk-found-gaps:48 chalk-found-gaps:49
@@ -45,22 +45,22 @@ my @CASES = qw(
     chalk-found-gaps:62 chalk-found-gaps:63 chalk-found-gaps:65
     chalk-found-gaps:66 chalk-found-gaps:68 chalk-found-gaps:69
     chalk-found-gaps:72 chalk-found-gaps:74 chalk-found-gaps:77
-    chalk-found-gaps:79 chalk-found-gaps:82 chalk-found-gaps:83
+    chalk-found-gaps:79 chalk-found-gaps:80 chalk-found-gaps:81 chalk-found-gaps:82 chalk-found-gaps:83
     chalk-found-gaps:84 chalk-found-gaps:85 chalk-found-gaps:87
     chalk-found-gaps:89 chalk-found-gaps:90 chalk-found-gaps:91
-    chalk-found-gaps:92 chalk-found-gaps:95 chalk-found-gaps:96
+    chalk-found-gaps:92 chalk-found-gaps:93 chalk-found-gaps:95 chalk-found-gaps:96
     chalk-found-gaps:97 chalk-found-gaps:98 chalk-found-gaps:99
     chalk-found-gaps:100 chalk-found-gaps:102 chalk-found-gaps:103
     chalk-found-gaps:105 chalk-found-gaps:111 chalk-found-gaps:112
     chalk-found-gaps:113 chalk-found-gaps:114 chalk-found-gaps:115
     chalk-found-gaps:117 chalk-found-gaps:118 chalk-found-gaps:119
-    chalk-found-gaps:122 chalk-found-gaps:125 chalk-found-gaps:126
+    chalk-found-gaps:122 chalk-found-gaps:125 chalk-found-gaps:126 chalk-found-gaps:127 chalk-found-gaps:128
     chalk-found-gaps:131 chalk-found-gaps:133 chalk-found-gaps:135
     chalk-found-gaps:136 chalk-found-gaps:139 chalk-found-gaps:140
     chalk-found-gaps:142 chalk-found-gaps:143 chalk-found-gaps:148
     chalk-found-gaps:149 chalk-found-gaps:151 chalk-found-gaps:155
     chalk-found-gaps:157 chalk-found-gaps:158 chalk-found-gaps:161
-    chalk-found-gaps:162 chalk-found-gaps:165 chalk-found-gaps:169
+    chalk-found-gaps:162 chalk-found-gaps:165 chalk-found-gaps:166 chalk-found-gaps:169
     chalk-found-gaps:170 chalk-found-gaps:171 chalk-found-gaps:172
     class-feature:1 class-feature:2 class-feature:3 class-feature:4
     class-feature:5 class-feature:6 class-feature:7 class-feature:8

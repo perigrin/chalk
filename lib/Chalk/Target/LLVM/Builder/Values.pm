@@ -237,6 +237,8 @@ sub value {
     # (one made the same anywhere is made again here: a constant, `$ENV{X} // "a"`)
     out('a value an eval made, read past its end')
         if delete $b->{past_eval}{ refaddr($v) } and !$v->all_made_the_same;
+    out('a read through a reference an arm made, read again past a call or a store')
+        if $b->{arm_settled} && $b->{arm_settled}{ refaddr($v) } && !$b->{memo}{ refaddr($v) };
     return $b->{memo}{ refaddr($v) } //= $b->_value($v);
 }
 

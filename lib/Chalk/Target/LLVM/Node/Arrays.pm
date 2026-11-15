@@ -57,6 +57,18 @@ class Chalk::Target::LLVM::Node::ASlice :isa(Chalk::Target::LLVM::Node) { method
 class Chalk::Target::LLVM::Node::ARange :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_range') } }
 class Chalk::Target::LLVM::Node::ASetLen :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_aset_len') } }
 
-class Chalk::Target::LLVM::Node::ARepeat :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_arepeat') } }
+# @_, AN ARRAY OF ALIASES (the runtime's t2_new_args): an alias put there as
+# it is, an array's elements each aliased, an element alias of an array's or
+# a hash's element, a fresh cell holding a temporary.
+class Chalk::Target::LLVM::Node::NewArgs :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->name . ' = call %Array* @t2_new_args()' } }
+class Chalk::Target::LLVM::Node::APushAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_apush_alias') } }
+class Chalk::Target::LLVM::Node::AAppendAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_aappend_alias') } }
+class Chalk::Target::LLVM::Node::ElvA :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_a') } }
+class Chalk::Target::LLVM::Node::ElvH :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_h') } }
+class Chalk::Target::LLVM::Node::ASliceAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_aslice_alias') } }
+class Chalk::Target::LLVM::Node::HSliceAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_hslice_alias') } }
+class Chalk::Target::LLVM::Node::Fresh :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_fresh') } }
+
+class Chalk::Target::LLVM::Node::ARepeat:isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_arepeat') } }
 
 1;
