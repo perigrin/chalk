@@ -66,10 +66,43 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
                                    && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($arr) } $arr->consumers->@*;
             return $s;
         }
-        return $s if $arr->is_my_array || $arr->is_array_deref || $arr->is_argv
+        return undef unless $arr->is_my_array || $arr->is_array_deref || $arr->is_argv
             || $arr->is_package_aggregate && ( $arr->sigil // '' ) eq '@'
             || $arr->operation eq 'ArrayLiteral' && ( $arr->stamp // '' ) eq 'Array';   # static type
+        # ONLY WHERE NOTHING CAN RESHAPE THE ARRAY: perl's alias holds the
+        # element itself, an index read into an array a shift has moved does
+        # not (`for my $e (@a) { shift @a; print $e }`: "2" for perl's "1").
+        return undef if _may_reshape($arr);
+        return $s;
+    }
+
+    # _may_reshape($array) -> true when something in the program may move or
+    # drop the array's elements (shift, pop, unshift, splice, `$#a =`, an
+    # element deleted): one naming it, or -- where it is no `my` array, or
+    # one a reference to escapes -- one of any array not a `my` array, or a
+    # call T2 cannot see into (a method's, a code value's). A push only
+    # appends: an element's index stands.
+    sub _my_symbol($n) {
+        return undef unless blessed($n);
+        return $n->symbol if $n->operation eq 'PadAccess' && $n->is_my_array;
+        return $n->symbol if $n->operation eq 'ArrayLiteral' && defined $n->symbol && ( $n->stamp // '' ) eq 'Array' && !$n->stored_whole_into;   # static type
         return undef;
+    }
+    sub _may_reshape($arr) {
+        require Chalk::IR::Graph;
+        my @all = Chalk::IR::Graph::program_nodes($arr);
+        my $sym = _my_symbol($arr);
+        my @hits = map { $_->inputs->[0] } grep {
+            $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin'
+                && ( ( $_->mutates_array && ( $_->name // '' ) ne 'push' ) || ( $_->name // '' ) eq 'set_arylen' )
+            || $_->operation eq 'Delete' && ( $_->can('kind') ? $_->kind // '' : '' ) eq 'array'
+        } @all;
+        my $escapes = defined $sym && grep { $_->operation eq 'Ref' && grep { ( _my_symbol($_) // "\0" ) eq $sym } $_->inputs->@* } @all;
+        if ( defined $sym && !$escapes ) {
+            return scalar grep { ( _my_symbol($_) // "\0" ) eq $sym } @hits;
+        }
+        return 1 if grep { !defined _my_symbol($_) || defined $sym && _my_symbol($_) eq $sym } @hits;
+        return scalar grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ } @all;
     }
 
     # memory_operand -> it reads at its second input (the first is what it reads).
