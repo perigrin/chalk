@@ -1971,6 +1971,22 @@ sub lower_with_elaboration {
         return $ir if defined $ir;
     }
 
+    # A REFERENCE TO AN ELEMENT TAKEN WHERE IT STANDS (B::SoN's Ref [location,
+    # memory], on the control chain: the element at its index or key then,
+    # dying before an array's start) is T2's alone. The fallback has no rule
+    # for it: it made the reference as `\$x` of the element read, at no place,
+    # and never died -- `my @a = (1, 2); my $p = \$a[-5]; print "x\n"` printed
+    # "x" where perl dies. Where T2 refused, refused here too, by name.
+    {
+        require Chalk::Target::LLVM::Builder;
+        my @taken = grep { $_->operation eq 'Ref' && $_->can('memory_operand') && defined $_->memory_operand }
+            Chalk::Target::LLVM::Builder::_all_nodes( $opts{mop}, $return_node ),
+            map { $_->graph ? $_->graph->component : () } map { $_->can('methods') ? $_->methods : () } $opts{mop} ? $opts{mop}->classes : ();
+        die "GAP: a reference to an element taken where it stands is T2's alone -- the fallback has no rule for"
+          . " B::SoN's Ref [location, memory] (T2: " . ( ( $Chalk::Target::LLVM::Lower::PATH // {} )->{why} // 'refused' ) . ")\n"
+            if @taken;
+    }
+
     # Context sees a Maybe[T] as Scalar, as it did before Maybe[T] was a type.
     my $maybe_view = _context_sees_maybe_as_scalar($return_node, $opts{mop});
 
