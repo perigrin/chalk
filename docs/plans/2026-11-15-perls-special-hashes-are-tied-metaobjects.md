@@ -37,7 +37,7 @@ answer from the metaobject behind it:
 
 | Hash | Tied to | Its methods ask |
 |---|---|---|
-| `%Foo::` (a stash) | `Chalk::Impl::Stash` over package Foo | Foo's Package metaobject: which symbols exist, a glob view of one |
+| `%Foo::` (a stash) | Foo's `Chalk::Impl::Class` instance itself | the Class metaobject: which symbols exist, a glob view of one |
 | `%INC` | `Chalk::Impl::INC` | the module registry: the built-ins and what was compiled in |
 | `%SIG` | `Chalk::Impl::SIG` | the runtime's handler table: `__WARN__`, `__DIE__` |
 
@@ -100,13 +100,31 @@ refused by name.
 *Test first:* c318, c319, adjacency-12_packages:1, c316, c317 (their `%INC`
 half).
 
-## 4. Stashes over the Package/Class metaobject
+## 4. The run-time MOP is Class instances; a stash is one, tied
 
-T2 already keeps a run-time MOP: each package is a hash in `@t2_stashes`
-holding its subs (code slots) and `@ISA` (`Builder/Calls.pm`, `make_mop`).
-`Chalk::Impl::Stash`, one per package, is a view over it and over the
-package's variables (known at compile time: T2's package arrays, hashes and
-scalars are globals named for them):
+T2 already keeps a run-time MOP, but as bare hashes: each package is a hash
+in `@t2_stashes` holding its subs (code slots) and `@ISA`
+(`Builder/Calls.pm`, `make_mop`), and method dispatch, `can` and the `isa`
+walk read those hashes directly. perigrin: **that stash should be an
+instance of the Class metaclass.**
+
+So the run-time MOP becomes objects: `Chalk::Impl::Class` (Perl, in the
+implementation layer, compiled by T2) -- one instance per package or class,
+built at start-up from what `make_mop` writes today (the compile-time
+`Chalk::MOP::Class` is the source). It answers what the runtime asks today
+of the hashes: `find_method($name)` (depth first through its parents, as
+perl does), `superclasses` (`@ISA`), `can`, `isa`, and the symbol questions
+below. `t2_class_of` + method lookup, `can`, `isa` and the `isa` walk call
+the instance instead of reading hash keys. This is a behaviour-preserving
+move first (the ratchet and the census are unchanged), before the stash
+view is added.
+
+The stash is then **that same instance, seen as a hash**: `%Foo::` is a hash
+tied to Foo's Class instance (the Class metaclass implements the tie
+interface, or a thin `Chalk::Impl::Stash` delegates to it -- whichever the
+code shows is simpler). Its symbols are the package's subs and its variables
+(known at compile time: T2's package arrays, hashes and scalars are globals
+named for them):
 
 - EXISTS `name` -> the package has a sub or a variable `name` (and nested
   packages, `Bar::`).
@@ -130,7 +148,11 @@ imported subs), so c316/c317's `$main::{floor}` needs no wire change.
    (c027).
 2. strict/warnings built in and `Chalk::Impl::INC` (c318, c319,
    adjacency-12, the %INC half of c316/c317).
-3. Globs, then `Chalk::Impl::Stash` (c408, c346, c316, c317).
+3. The run-time MOP as `Chalk::Impl::Class` instances (dispatch, `can`,
+   `isa`, `@ISA` through them; behaviour-preserving -- ratchet and census
+   unchanged).
+4. Globs, then the stash as a Class instance tied as a hash (c408, c346,
+   c316, c317).
 
 Each step: its cases added to `t/bootstrap/ir/t2-census-cases.t` first (red),
 then green; full verify; never a silent wrong answer.
