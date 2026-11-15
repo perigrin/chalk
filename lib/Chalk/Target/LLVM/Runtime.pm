@@ -4893,7 +4893,7 @@ some:
   %r = zext i8 %c to i64
   ret i64 %r
 }
-declare i64 @time(i64*)
+; (time(3) is declared with t2_localtime_tm's)
 define internal i64 @t2_time() {
   %t = call i64 @time(i64* null)
   ret i64 %t
