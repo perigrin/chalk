@@ -50,11 +50,21 @@ for my $c (
     is($got, $want, "perl's answer for $src") or diag $@;
 }
 
-# A CLASS THE PROGRAM BLESSES INTO THAT LACKS THE METHOD is refused: perl
-# dies there naming the file and line, which nothing here knows.
-{
-    eval { through_llvm(q{package A { sub new { bless {}, $_[0] } sub hi { "a" } } package C { sub new { bless {}, $_[0] } } package main; my @o = (A->new, C->new); print join(",", map { $_->hi } @o), "\n";}) };
-    like($@, qr/GAP: .*does not have/, 'a blessed class without the method is refused');
+# A CLASS THE PROGRAM BLESSES INTO THAT LACKS THE METHOD: perl dies there,
+# naming the method, the package, the file and the line -- and so does the
+# lowered program (T2 lowers it; it was refused only while a map's loop
+# made its list's call look used as a scalar). Out, err and exit, both
+# orders, and with a print before the death.
+require Chalk::CodeGen::Harness::TapDiff;
+for my $src (
+    q{package A { sub new { bless {}, $_[0] } sub hi { "a" } } package C { sub new { bless {}, $_[0] } } package main; my @o = (A->new, C->new); print join(",", map { $_->hi } @o), "\n";},
+    q{package A { sub new { bless {}, $_[0] } sub hi { "a" } } package C { sub new { bless {}, $_[0] } } package main; my @o = (C->new, A->new); print "x\n"; print join(",", map { $_->hi } @o), "\n";},
+) {
+    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh "$src\n";
+    close $fh;
+    my $r = Chalk::CodeGen::Harness::TapDiff->compare($pl);
+    is($r->{verdict}, 'SAME', "a blessed class without the method dies as perl's: $src") or diag explain $r;
 }
 
 done_testing;
