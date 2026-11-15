@@ -41,6 +41,16 @@ answer from the metaobject behind it:
 | `%INC` | `Chalk::Impl::INC` | the module registry: the built-ins and what was compiled in |
 | `%SIG` | `Chalk::Impl::SIG` | the runtime's handler table: `__WARN__`, `__DIE__` |
 
+**Tie is not the protocol; it is perl's way to supply an implementation of
+it.** The container protocol is the operations every container supports
+(fetch, store, exists, delete, length, push/pop/shift/unshift, keys...: T2's
+20-slot vtable). Tie swaps a container's metaobject for one whose entries
+call an object's methods (FETCH, STORE, ... are perl's names for those
+operations). The special hashes reuse that mechanism -- a MOP object
+implements the protocol -- but they are not "tied" to the program: perl's
+`tied %SIG` is false, so `tied` must report false for these too (a test in
+each step).
+
 Nothing about `warn`, `die`, `require` or `exists` is special-cased in the
 builder. `warn` asks `%SIG` for `__WARN__`; `exists $::{x}` is an EXISTS on
 a tied hash; `local $SIG{__WARN__}` is a `local` on a tied hash's element,
