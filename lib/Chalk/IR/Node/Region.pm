@@ -71,7 +71,9 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node) {
     }
 
     # reached_by($ctl) -> true when control $ctl reaches this merge by the
-    # control it goes on to: through the Regions it feeds, and what they head.
+    # control it goes on to: through the Regions it feeds, what they head, and
+    # the arms of an If or a Loop it comes to (each a Proj of it: a merge after
+    # a loop is reached by what comes before the loop).
     method reached_by($ctl) {
         my (%seen, @q);
         @q = ($ctl);
@@ -79,7 +81,8 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node) {
             next if $seen{ refaddr($n) }++;
             return 1 if refaddr($n) == refaddr($self);
             push @q, grep { blessed($_) && ( $_->operation eq 'Region'
-                            || ( $_->can('control_in') && blessed($_->control_in) && refaddr($_->control_in) == refaddr($n) ) ) }
+                            || ( $_->can('control_in') && blessed($_->control_in) && refaddr($_->control_in) == refaddr($n) )
+                            || $_->operation eq 'Proj' && $n->operation =~ /\A(?:If|Loop)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($n) ) }
                 ( $n->consumers // [] )->@*;
         }
         return 0;
