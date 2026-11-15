@@ -161,8 +161,12 @@ for my $src (
     is($got->[2], $want->[2], "... perl's exit code");
 }
 # ...but not where another handler may be stored, or the one stored is code
-# that runs.
+# that runs, or something runs before the store: perl's own warning there
+# goes to STDERR (no handler yet), and chalk raises none.
 for my $src (
+    q{use v5.36; my $x; print "$x"; $SIG{__WARN__} = sub { }; print "\n";},
+    q{use warnings; my $r = "5" + "3abc"; print "$r\n"; $SIG{__WARN__} = sub { }; print "x\n";},
+    q{use warnings; sub f { $SIG{__WARN__} = sub { } } f(); my $r = "5" + "3abc"; print "$r\n";},
     q{use warnings; my $n = 0; $SIG{__WARN__} = sub { }; $SIG{__WARN__} = sub { $n++ } if @ARGV == 0; my $r = "5" + "3abc"; print "$r $n\n";},
     q{use warnings; my $k = "__WARN__"; $SIG{$k} = sub { print "h\n" }; my $r = "5" + "3abc"; print "$r\n";},
     q{use warnings; $SIG{__WARN__} = sub { }; my $s = \%SIG; $s->{__WARN__} = sub { print "h: $_[0]" }; my $r = "5" + "3abc"; print "$r\n";},

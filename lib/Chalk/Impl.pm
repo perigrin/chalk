@@ -56,9 +56,10 @@ sub is_built_in ($name) { return $BUILT_IN{ inc_key($name) } ? 1 : 0 }
 # them is refused by name.
 #
 # Where warnings may be on but every handler the program can store in
-# $SIG{__WARN__} does nothing (warn_handlers_do_nothing), whether perl calls
-# one changes nothing: undef.
-sub perl_may_warn (@nodes) {
+# $SIG{__WARN__} does nothing, stored before anything else runs
+# (warn_handlers_do_nothing), whether perl calls one changes nothing: undef.
+# $root is the main program's Return.
+sub perl_may_warn ($root, @nodes) {
     my $sw = $Chalk::IR::Serialize::JSON::DOWARN
         // return "the wire does not say perl's warning switches (-w, -W, -X)";
     return undef if $sw->{all_off};
@@ -69,19 +70,28 @@ sub perl_may_warn (@nodes) {
         : $sw->{on} ? '-w or $^W'
         : ( grep { $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq "\cW" } @nodes ) ? '$^W'
         : return undef;
-    return undef if warn_handlers_do_nothing(@nodes);
+    return undef if warn_handlers_do_nothing($root, @nodes);
     return $why;
 }
 
-# warn_handlers_do_nothing(@nodes) -> true where every handler the program
-# (all of whose nodes are given) can put in $SIG{__WARN__} is a sub whose body
-# does nothing (`sub { }`): each use of %SIG is an element of a constant key,
-# and each store into `__WARN__` -- a `local` puts back what was there -- is
-# of such a sub. Anything else (another key's name made at run time, %SIG
-# read or referred to whole, a handler with a body, a module compiled in that
-# may set one where the wire does not show) is no proof: false.
-sub warn_handlers_do_nothing (@nodes) {
+# warn_handlers_do_nothing($root, @nodes) -> true where every handler the
+# program (main's Return, and all of its nodes) can put in $SIG{__WARN__} is a
+# sub whose body does nothing (`sub { }`): each use of %SIG is an element of a
+# constant key, and each store into `__WARN__` -- a `local` puts back what was
+# there -- is of such a sub, AND IS THE FIRST THING THE PROGRAM DOES (main's
+# control chain starts with it; no BEGIN or END block runs code): perl's own
+# warning before the store goes to STDERR, where chalk writes none. Anything
+# else (a store after another effect or in a sub, another key's name made at
+# run time, %SIG read or referred to whole, a handler with a body, a module
+# compiled in that may set one where the wire does not show) is no proof:
+# false.
+sub warn_handlers_do_nothing ($root, @nodes) {
     return 0 if %Chalk::IR::Serialize::JSON::FOLLOWED;
+    return 0 if @Chalk::IR::Serialize::JSON::PHASE_GRAPHS;
+    require Chalk::IR::Graph;
+    my @start = grep { $_->operation eq 'Start' } Chalk::IR::Graph::own_nodes($root);
+    return 0 unless @start == 1;
+    my $start = $start[0];
     my %empty_op = map { ( $_ => 1 ) } qw(Start Return Constant MemStart);
     my $does_nothing = sub ($v) {
         return 0 unless Scalar::Util::blessed($v) && $v->operation eq 'AnonSub' && !grep { Scalar::Util::blessed($_) } $v->inputs->@*;
@@ -97,7 +107,8 @@ sub warn_handlers_do_nothing (@nodes) {
             next unless $k->value eq '__WARN__';
             for my $u (grep { Scalar::Util::blessed($_) } ( $el->consumers // [] )->@*) {
                 my ($t, $v) = $u->inputs->@*;
-                next if $u->operation eq 'Assign' && Scalar::Util::refaddr($t) == Scalar::Util::refaddr($el) && $does_nothing->($v);
+                next if $u->operation eq 'Assign' && Scalar::Util::refaddr($t) == Scalar::Util::refaddr($el) && $does_nothing->($v)
+                    && Scalar::Util::blessed( $u->control_in ) && Scalar::Util::refaddr( $u->control_in ) == Scalar::Util::refaddr($start);
                 return 0;
             }
         }
