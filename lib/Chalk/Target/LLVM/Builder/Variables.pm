@@ -60,6 +60,16 @@ sub _through_ref {
     my $op = $n->operation;
     # (a foreach alias read is its element's read)
     if ( $op eq 'PostfixDeref' && ( my $el = $n->alias_element ) ) { return $b->_through_ref($el, $seen) }
+    # (A DEREF OF AN ELEMENT REFERENCE MADE THERE -- `${\ $a[0]}`, a
+    # foreach alias's guarded one without strict refs -- reads a cell, or
+    # undef: it never stops)
+    if ( $op eq 'PostfixDeref' && ( $n->sigil // '' ) eq '$' ) {
+        my $r = $n->inputs->[0];
+        return 0 if blessed($r) && $r->operation eq 'Ref' && $r->element_subscript;
+        return 0 if blessed($r) && $r->operation eq 'TernaryExpr' && !$n->strict
+            && blessed( $r->inputs->[1] ) && $r->inputs->[1]->operation eq 'Ref' && $r->inputs->[1]->element_subscript
+            && Chalk::IR::Node::Ref::_guards( $r, $r->inputs->[1] );
+    }
     if ($op =~ /\A(?:Subscript|Exists)\z/ && ( $n->can('kind') ? $n->kind // '' : '' ) eq 'hash') {
         return $n->inputs->[0]->is_named_hash || $n->inputs->[0]->operation eq 'FieldAccess' ? 0 : 1;   # a `my %h`, a hash field: never a stop
     }

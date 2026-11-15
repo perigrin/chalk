@@ -29,6 +29,8 @@ for my $case (
     [ q{use strict; my $r; eval { my $t = $$r; 1 } or print "d: $@"; print "a\n";}, 'a deref of undef under strict refs dies, caught' ],
     [ q{my $r; my $v = $$r; print defined $v ? "d" : "u", "\n";}, 'a deref of undef without strict is undef' ],
     [ q{sub inc { my $r = shift; $$r++ } my $n = 1; inc(\$n); inc(\$n); print "$n\n";}, 'a sub increments through a reference' ],
+    [ q{sub f { 7 } my $c = \&f; my $x = 5; my $r = \$x; print $$r, " ", ref($c), " ", $c->(), "\n";}, 'a code reference beside a scalar deref' ],
+    [ q{use strict; sub f { 7 } my $c = \&f; eval { my $t = $$c; 1 } or print "d: $@"; print "after\n";}, 'a deref of a code reference dies, caught' ],
 ) {
     my ($src, $name) = @$case;
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);

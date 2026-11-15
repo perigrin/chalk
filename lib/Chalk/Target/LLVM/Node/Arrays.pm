@@ -68,6 +68,18 @@ class Chalk::Target::LLVM::Node::ElvH :isa(Chalk::Target::LLVM::Node) { method t
 class Chalk::Target::LLVM::Node::ASliceAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_aslice_alias') } }
 class Chalk::Target::LLVM::Node::HSliceAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_hslice_alias') } }
 class Chalk::Target::LLVM::Node::Fresh :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_fresh') } }
+# AN ELEMENT REFERENCE (`\$a[i]`): the element's cell, the array made one of
+# aliases (t2_aelem_ref); perl's die before the start names where. `\(@a)`:
+# a list of one to each element.
+class Chalk::Target::LLVM::Node::AElemRef :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call %Slot @t2_aelem_ref(' . $self->_args($self->inputs->@*) . ', ' . $self->_cstr($a{msg}, $a{id}) . ')';
+    }
+}
+class Chalk::Target::LLVM::Node::AElemRefs :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_aelem_refs') } }
+# A READ THROUGH AN ELEMENT REFERENCE, passed to a sub: @_ holds the cell (t2_alias_of).
+class Chalk::Target::LLVM::Node::AliasOf :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_alias_of') } }
 
 class Chalk::Target::LLVM::Node::ARepeat:isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_arepeat') } }
 

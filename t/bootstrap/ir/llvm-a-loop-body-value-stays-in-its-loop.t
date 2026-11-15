@@ -53,11 +53,11 @@ for my $case (
 # RE-READ of it after such a call is refused: perl's `$x` aliases the
 # element, which a shift in the call moves out from under the index (pvm
 # 185 printed "bb;dd;" for perl's "aa;cc;" once a reference could be stored
-# in a shared lexical). Only a callee that can move an element -- a
-# shift, unshift, splice, pop or reassignment -- is refused.
+# in a shared lexical). The re-read is now through the element's own cell.
 {
-    eval { through_llvm(q{sub g { shift @{$_[0]} } sub f { my $l = [qw(a b c d)]; my $s = ""; for my $x (@$l) { $s .= $x; g($l); $s .= $x . ";" } "$s|@$l" } print f(), "\n";}) };
-    like($@, qr/GAP: a loop whose body calls a sub that can reach the array it walks/, 'a re-read after a call that changes the array is refused');
+    # (an alias is now its element's own cell, which the shift does not move)
+    my $re = eval { through_llvm(q{sub g { shift @{$_[0]} } sub f { my $l = [qw(a b c d)]; my $s = ""; for my $x (@$l) { $s .= $x; g($l); $s .= $x . ";" } "$s|@$l" } print f(), "\n";}) };
+    is($re, "aa;cc;|c d\n", 'a re-read after a call that changes the array: perl\'s answer') or diag $@;
     my $got = eval { through_llvm(q{sub h { 1 } my @a = (1, 2); my $s = ""; for my $x (@a) { $s .= $x; h(); $s .= "-" } print "$s\n";}) };
     is($got, "1-2-\n", 'an element read before a call: perl\'s answer') or diag $@;
     # a push moves no element: the loop sees what it adds (pvm 132)

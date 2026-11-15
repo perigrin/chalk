@@ -31,12 +31,12 @@ my @CASES = qw(
     chalk-found-gaps:103 chalk-found-gaps:105 chalk-found-gaps:11
     chalk-found-gaps:111 chalk-found-gaps:112 chalk-found-gaps:113
     chalk-found-gaps:114 chalk-found-gaps:115 chalk-found-gaps:116
-    chalk-found-gaps:117 chalk-found-gaps:118 chalk-found-gaps:119
+    chalk-found-gaps:117 chalk-found-gaps:118 chalk-found-gaps:119 chalk-found-gaps:120 chalk-found-gaps:121
     chalk-found-gaps:12 chalk-found-gaps:122 chalk-found-gaps:124
     chalk-found-gaps:125 chalk-found-gaps:126 chalk-found-gaps:127
     chalk-found-gaps:128 chalk-found-gaps:13 chalk-found-gaps:131
     chalk-found-gaps:133 chalk-found-gaps:135 chalk-found-gaps:136
-    chalk-found-gaps:137 chalk-found-gaps:139 chalk-found-gaps:14
+    chalk-found-gaps:137 chalk-found-gaps:138 chalk-found-gaps:139 chalk-found-gaps:14
     chalk-found-gaps:140 chalk-found-gaps:142 chalk-found-gaps:143
     chalk-found-gaps:148 chalk-found-gaps:149 chalk-found-gaps:15
     chalk-found-gaps:151 chalk-found-gaps:152 chalk-found-gaps:153
@@ -105,7 +105,7 @@ my @CASES = qw(
     regex-quote-likes:2 strings:1 strings:2 strings:3 subroutines:1
     subroutines:10 subroutines:11 subroutines:2 subroutines:3 subroutines:4
     subroutines:6 subroutines:7 subroutines:8 subroutines:9 symbol-table:2 symbol-table:4
-    taking-references:1 taking-references:3 taking-references:4 unary:1
+    taking-references:1 taking-references:2 taking-references:3 taking-references:4 unary:1
     unary:2 unary:3 unary:4 unary:5 ungated:1 ungated:2 ungated:3 ungated:4
     vstrings:1 vstrings:2 writing:1 writing:2 writing:3 writing:4
 );

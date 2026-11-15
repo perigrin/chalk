@@ -83,9 +83,16 @@ for my $case (
     else { is($got, $want, "$name: perl's answer") or diag $@ }
 }
 
-# What grows the array while an alias into it lives moves the alias.
+# WHAT GROWS THE ARRAY while an alias into it lives moved the alias (its
+# element's slot): an alias is now the element's own cell (t2_aelem_ref),
+# which a grow does not move.
+{
+    my $src = q{my @a = (1, 2); my $s = ""; for my $x (@a) { push @a, 3 if @a < 4; $s .= $x } print "$s\n"};
+    my $want = qx($^X -e '$src');
+    my $got = eval { through_llvm($src) };
+    is($got, $want, "a push in the loop: perl's answer") or diag $@;
+}
 for my $case (
-    [ q{my @a = (1, 2); my $s = ""; for my $x (@a) { push @a, 3 if @a < 4; $s .= $x } print "$s\n"}, qr/GAP: a reference to an element of an array that may grow/, 'a push in the loop' ],
     # B::SoN refuses this one today; chalk refuses it too, should it arrive.
     [ q{my @a = (1); my @r; for my $x (@a) { push @r, \$x } push @a, 2 .. 9; ${$r[0]} = 7; print "$a[0]\n"}, qr/\A(?:load|lower):/, 'an alias that escapes its pass' ],
 ) {

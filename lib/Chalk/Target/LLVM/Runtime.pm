@@ -3191,6 +3191,159 @@ next:
 done:
   ret void
 }
+; ELEMENT REFERENCES (`\$a[i]`, `\(@a)`): perl's element is a scalar of its
+; own, which a reference keeps past a grow, a shift, a refill. An array one is
+; taken of becomes AN ARRAY OF ALIASES, as @_ is (its metaobject
+; t2_meta_alias): each element boxed in a heap cell (t2_acells), read and
+; stored through it; what moves an element (shift, unshift) moves its cell, a
+; refill makes new ones. The reference is the cell's (tag 9), as `\$x` is.
+@msg_eref_tied = private unnamed_addr constant [71 x i8] c"chalk: refused at run time: a reference to an element of a tied array\0A\00"
+@msg_eref_ro = private unnamed_addr constant [65 x i8] c"chalk: refused at run time: a reference to a read-only argument\0A\00"
+@msg_eref_hash = private unnamed_addr constant [79 x i8] c"chalk: refused at run time: a reference to an argument that is a hash element\0A\00"
+; t2_acells(a): a's elements each boxed in a cell (once; an @_ is already).
+; A tied array's elements are its class's: stopped.
+define internal void @t2_acells(%Array* %a) {
+entry:
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %al = icmp eq %Meta* %m, @t2_meta_alias
+  br i1 %al, label %done, label %plain
+plain:
+  %d = icmp eq %Meta* %m, @t2_meta_default
+  br i1 %d, label %box, label %tied
+tied:
+  call void @t2_stop(i8* getelementptr ([71 x i8], [71 x i8]* @msg_eref_tied, i64 0, i64 0), i64 70)
+  unreachable
+box:
+  %n = call i64 @t2_alen_d(%Array* %a)
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %box ], [ %i2, %next ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %mark
+body:
+  %p = getelementptr %Slot, %Slot* %els, i64 %i
+  %v = load %Slot, %Slot* %p
+  %t = extractvalue %Slot %v, 0
+  %w = extractvalue %Slot %v, 1
+  %ut = icmp eq i8 %t, 0
+  %uw = icmp eq i64 %w, 1
+  %absent = and i1 %ut, %uw   ; (a hole stays one: a reference to it makes it)
+  br i1 %absent, label %next, label %wrap
+wrap:
+  %f = call %Slot @t2_fresh(%Slot %v)
+  store %Slot %f, %Slot* %p
+  br label %next
+next:
+  %i2 = add i64 %i, 1
+  br label %loop
+mark:
+  %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
+  store %Meta* @t2_meta_alias, %Meta** %mp
+  br label %done
+done:
+  ret void
+}
+; t2_aelem_ref(a, i, at) -> a reference to a's element i (one from the end
+; for i < 0; perl's die before the start, naming at; past the end the array
+; grown to it). Of an @_, the caller's own: its variable's cell, its element's
+; (an element alias resolved, and kept so); a literal there is read-only
+; (stopped: a store through it would die in perl).
+define internal %Slot @t2_aelem_ref(%Array* %a, i64 %i, i8* %at, i64 %atn) {
+entry:
+  call void @t2_acells(%Array* %a)
+  %n = call i64 @t2_alen_d(%Array* %a)
+  %neg = icmp slt i64 %i, 0
+  %fe = add i64 %i, %n
+  %j = select i1 %neg, i64 %fe, i64 %i
+  %lo = icmp slt i64 %j, 0
+  br i1 %lo, label %die, label %grow
+die:
+  call void @t2_aset_d(%Array* %a, i64 %i, %Slot zeroinitializer, i8* %at, i64 %atn)
+  unreachable
+grow:
+  %j1 = add i64 %j, 1
+  call void @t2_agrow(%Array* %a, i64 %j1)
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  %p = getelementptr %Slot, %Slot* %els, i64 %j
+  %r = load %Slot, %Slot* %p
+  %t = extractvalue %Slot %r, 0
+  %w = extractvalue %Slot %r, 1
+  switch i8 %t, label %ro [ i8 9, label %cell
+                            i8 10, label %elv
+                            i8 0, label %undef ]
+cell:
+  ret %Slot %r
+undef:
+  %absent = icmp eq i64 %w, 1
+  br i1 %absent, label %fresh, label %ro
+fresh:
+  %f = call %Slot @t2_fresh(%Slot zeroinitializer)
+  store %Slot %f, %Slot* %p
+  ret %Slot %f
+elv:
+  %e = inttoptr i64 %w to %Elv*
+  %kp = getelementptr %Elv, %Elv* %e, i32 0, i32 0
+  %k = load i8, i8* %kp
+  %ish = icmp eq i8 %k, 1
+  br i1 %ish, label %hash, label %arr
+arr:
+  %cp = getelementptr %Elv, %Elv* %e, i32 0, i32 1
+  %cs = load %Slot, %Slot* %cp
+  %xp = getelementptr %Elv, %Elv* %e, i32 0, i32 2
+  %xs = load %Slot, %Slot* %xp
+  %ai = extractvalue %Slot %cs, 1
+  %inner = inttoptr i64 %ai to %Array*
+  %ix = extractvalue %Slot %xs, 1
+  %ir = call %Slot @t2_aelem_ref(%Array* %inner, i64 %ix, i8* %at, i64 %atn)
+  %ep2 = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els2 = load %Slot*, %Slot** %ep2
+  %p2 = getelementptr %Slot, %Slot* %els2, i64 %j
+  store %Slot %ir, %Slot* %p2
+  ret %Slot %ir
+hash:
+  call void @t2_stop(i8* getelementptr ([79 x i8], [79 x i8]* @msg_eref_hash, i64 0, i64 0), i64 78)
+  unreachable
+ro:
+  call void @t2_stop(i8* getelementptr ([65 x i8], [65 x i8]* @msg_eref_ro, i64 0, i64 0), i64 64)
+  unreachable
+}
+; t2_alias_of(r) -> what @_ holds for a read through an element reference r:
+; the reference itself, the element's cell. One of no element (a foreach
+; alias's guard over a hole is undef) is stopped: perl's would make it.
+@msg_alias_none = private unnamed_addr constant [68 x i8] c"chalk: refused at run time: an alias of an array element not there\0A\00"
+define internal %Slot @t2_alias_of(%Slot %r) {
+entry:
+  %t = extractvalue %Slot %r, 0
+  %c = icmp eq i8 %t, 9
+  br i1 %c, label %ok, label %none
+ok:
+  ret %Slot %r
+none:
+  call void @t2_stop(i8* getelementptr ([68 x i8], [68 x i8]* @msg_alias_none, i64 0, i64 0), i64 67)
+  unreachable
+}
+; t2_aelem_refs(a) -> `\(@a)`: a new list of a reference to each element
+define internal %Array* @t2_aelem_refs(%Array* %a) {
+entry:
+  call void @t2_acells(%Array* %a)
+  %n = call i64 @t2_alen_d(%Array* %a)
+  %r = call %Array* @t2_new_array()
+  br label %loop
+loop:
+  %i = phi i64 [ 0, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %e = call %Slot @t2_aelem_ref(%Array* %a, i64 %i, i8* null, i64 0)
+  call void @t2_apush_d(%Array* %r, %Slot %e)
+  %i2 = add i64 %i, 1
+  br label %loop
+done:
+  ret %Array* %r
+}
 ; t2_meta(a) -> the metaobject a container points at
 define internal %Meta* @t2_meta(%Array* %a) {
   %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
@@ -3652,15 +3805,45 @@ define internal %Slot @t2_tie(%Array* %a, i8** %vt, %Slot %cls, %Array* %rest, %
   call void @t2_apush(%Array* %args, %Slot %cls)
   call void @t2_aappend(%Array* %args, %Array* %rest)
   %o = call %Slot @t2_tie_call(%Array* %args, %Str %ctor)
-  %mm = call i8* @malloc(i64 32)
+  %own = call %Meta* @t2_own_meta(%Array* %a)
+  %mm = call i8* @malloc(i64 40)
   %m = bitcast i8* %mm to %Meta*
   %vp = getelementptr %Meta, %Meta* %m, i32 0, i32 0
   store i8** %vt, i8*** %vp
   %dp = getelementptr %Meta, %Meta* %m, i32 0, i32 1
   store %Slot %o, %Slot* %dp
+  %sp8 = getelementptr i8, i8* %mm, i64 32
+  %sp = bitcast i8* %sp8 to %Meta**
+  store %Meta* %own, %Meta** %sp
   %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
   store %Meta* %m, %Meta** %mp
   ret %Slot %o
+}
+; t2_own_meta(a) -> the metaobject a's own elements are read by: the default,
+; or an array of aliases' (one an element reference was taken of) -- a tie's
+; keeps it after its own (bytes 32..39), for untie to put back.
+define internal %Meta* @t2_own_meta(%Array* %a) {
+entry:
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %d = icmp eq %Meta* %m, @t2_meta_default
+  %al = icmp eq %Meta* %m, @t2_meta_alias
+  %own = or i1 %d, %al
+  br i1 %own, label %is, label %other
+is:
+  ret %Meta* %m
+other:
+  %vp = getelementptr %Meta, %Meta* %m, i32 0, i32 0
+  %vt = load i8**, i8*** %vp
+  %mop = icmp eq i8** %vt, getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_mophash, i64 0, i64 0)
+  br i1 %mop, label %dflt, label %tied
+dflt:
+  ret %Meta* @t2_meta_default
+tied:
+  %m8 = bitcast %Meta* %m to i8*
+  %sp8 = getelementptr i8, i8* %m8, i64 32
+  %sp = bitcast i8* %sp8 to %Meta**
+  %s = load %Meta*, %Meta** %sp
+  ret %Meta* %s
 }
 define internal %Slot @t2_tie_array(%Array* %a, %Slot %cls, %Array* %rest) {
   %c = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_tm_tiearray, i64 0, i64 0), i64 8)
@@ -3706,7 +3889,8 @@ define internal void @t2_mop_hash(%Slot %h, %Slot %o) {
   store %Meta* %m, %Meta** %mp
   ret void
 }
-; t2_untie(a): a back to the default metaobject (its own elements, untouched by the tie)
+; t2_untie(a): a back to its own metaobject (its own elements, untouched by
+; the tie: the default's, or an array of aliases' -- t2_own_meta)
 ; (a MOP object's container -- %SIG -- is no tie: untie leaves it as it is, as perl's)
 define internal void @t2_untie(%Array* %a) {
 entry:
@@ -3716,8 +3900,9 @@ entry:
   %mop = icmp eq i8** %vt, getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_mophash, i64 0, i64 0)
   br i1 %mop, label %done, label %reset
 reset:
+  %own = call %Meta* @t2_own_meta(%Array* %a)
   %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
-  store %Meta* @t2_meta_default, %Meta** %mp
+  store %Meta* %own, %Meta** %mp
   br label %done
 done:
   ret void

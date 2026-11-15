@@ -447,6 +447,26 @@ sub array_value {
         my $t = $in[0];
         # \&name: a code value of the named sub.
         return $b->code_ref($t) if blessed($t) && $t->operation eq 'Constant' && ( $t->const_type // '' ) eq 'code';
+        # \$a[i]: A REFERENCE TO AN ELEMENT is the element's own cell (tag 9),
+        # the array made one of aliases (t2_aelem_ref): written through either
+        # name, kept past a grow, a shift, a refill -- where it is the element
+        # perl's is wherever it is made (Ref's element_ref_unsound).
+        if ( $v->is_element_ref ) {
+            if ( my $why = $v->element_ref_unsound ) { out($why) }
+            out('a reference to each element taken as a scalar') unless $v->element_subscript;
+            my ($c, $k) = $v->element_subscript->inputs->@[0, 1];
+            out('a reference to an element through an element not made an array first')
+                if blessed($c) && $c->operation eq 'Subscript' && !$b->{args}{ refaddr($c) };
+            my $ix = $b->as($b->value($k), 'i64');
+            # (an element of a list written out is its item's own: of the list's aliases)
+            my $arr = blessed($c) && $c->operation eq 'ArrayLiteral' && !defined $c->symbol && ( $c->stamp // '' ) eq 'Array'   # static type
+                ? do { local $b->{alias_strict} = 1; $b->alias_list($c) }
+                : do { local $b->{writing} = 1; $b->array_of($c) };
+            # (one T2 makes cannot die: its index is in the array or a constant
+            # past its start -- the message is never printed)
+            $b->{strs}{".\n"} //= scalar keys $b->{strs}->%*;
+            return $b->emit(op => 'AElemRef', type => '%Slot', inputs => [ $arr, $ix ], attr => { msg => ".\n", id => $b->{strs}{".\n"} });
+        }
         # \$x: a reference to the variable itself, kept on the heap (tag 9).
         # (NOT IN A LOOP BODY OR AN ARM: a `my` there is a new variable each time,
         # and the one cell made at entry would be all of them -- `2,2` for perl's `1,2`)
@@ -670,6 +690,12 @@ sub array_of {
         if blessed($n) && $n->operation =~ /\A(?:RegexMatch|Match)\z/;
     # A SLURPY ARRAY PARAMETER: its copy, made at the sub's entry (args_rest).
     return $b->{memo}{ refaddr($n) } if blessed($n) && $n->operation eq 'Parameter' && $b->{memo}{ refaddr($n) };
+    # `\(@a)`: a list of a reference to each element (t2_aelem_refs).
+    if (blessed($n) && $n->operation eq 'Ref' && $n->each && $n->is_element_ref) {
+        if ( my $why = $n->element_ref_unsound ) { out($why) }
+        $b->list_only($n, 'a reference to each element');
+        return $b->{memo}{ 'each:' . refaddr($n) } //= $b->emit(op => 'AElemRefs', type => '%Array*', inputs => [ do { local $b->{writing} = 1; $b->array_of( $n->inputs->[0] ) } ]);
+    }
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
     if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource|Slice|Range)\z/ || $n->is_array_deref || $n->is_my_array || $n->is_argv
                          || $n->is_package_aggregate && $n->sigil eq '@'

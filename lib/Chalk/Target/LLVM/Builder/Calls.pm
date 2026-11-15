@@ -203,7 +203,7 @@ sub call {
     }
     if ($fn->{list}) {
         # @_ BUILT HERE: the caller's arguments, aliased.
-        my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); $b->args_array(@args) };
+        my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
         $b->hash_reads_settled('a call');
         $b->set_want($c) if $fn->{listret};
         return $b->emit_call(op => 'Call', type => '%Slot', inputs => [$arr], attr => { fn => $fn->{name} }, site => $c);
@@ -419,7 +419,7 @@ sub method_call {
     out('a method call with no invocant') unless @args && blessed($args[0]);
     out('a method call on a list') if _is_list($args[0]);
     # @_, the invocant and the arguments, aliased.
-    my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); $b->args_array(@args) };
+    my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
     my $inv = $b->as($b->value($args[0]), '%Slot');
     $b->hash_reads_settled('a method call');
     $b->set_want($c);   # whichever sub it finds may return a list
@@ -482,6 +482,38 @@ sub writes_args {
         map { $_->graph ? $_->graph->component : () } map { $_->methods } $b->{mop} ? $b->{mop}->classes : () );
 }
 
+# refs_into_args -> some sub of the program takes a reference to an element of
+# its @_ (`\$_[0]`): the caller's own container. (A foreach alias's never made -- its
+# deref read as the element -- is none.)
+sub _refs_args_in {
+    return scalar grep {
+        $_->operation eq 'Ref' && $_->element_subscript && !$_->is_alias_ref && blessed( $_->element_subscript->inputs->[0] )
+            && $_->element_subscript->inputs->[0]->operation eq 'ArgsSource'
+    } @_;
+}
+sub refs_into_args {
+    my ($b) = @_;
+    return $b->{refs_into_args} //= _refs_args_in( _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} ),
+        map { $_->graph ? $_->graph->component : () } map { $_->methods } $b->{mop} ? $b->{mop}->classes : () );
+}
+
+# call_refs_args($Call) -> what it calls may take a reference into its @_: a
+# direct call's sub does, or hands its @_ on where any sub does; another
+# call's, where any sub does (as call_writes_args).
+sub call_refs_args {
+    my ($b, $c) = @_;
+    return $b->refs_into_args unless ( $c->dispatch_kind // '' ) eq 'direct';
+    my $t = $c->can('target') ? $c->target : undef;
+    return $b->refs_into_args unless blessed($t) && $t->can('graph') && $t->graph;
+    my @gn = $t->graph->component;
+    return 1 if _refs_args_in(@gn);
+    my $hands_on = grep {
+        $_->operation eq 'Call' && ( $_->is_sub_call || ( $_->dispatch_kind // '' ) eq 'dynamic_method' )
+            && ( $_->can('shares_args') && $_->shares_args || grep { _of_args($_) } $_->inputs->@* )
+    } @gn;
+    return $hands_on ? $b->refs_into_args : 0;
+}
+
 # may_write_args -> the call whose @_ is being built may write it (or the
 # list's aliases are stored through: alias_strict).
 sub may_write_args {
@@ -515,6 +547,15 @@ sub arg_alias {
     my ($b, $n) = @_;
     my $op = $n->operation;
     if ($op eq 'Constant' && ( $n->const_type // '' ) =~ /\A(?:integer|number|string|boolean|undef)\z/) {
+        # (WHERE A SUB TAKES A REFERENCE INTO @_ -- `\$_[0]` -- perl's is to the
+        # literal itself, read-only: a fresh cell of it is told apart only by
+        # a store, so it is one where nothing may store through a reference or
+        # into @_; else refused)
+        if ( $b->{alias_refs} // $b->refs_into_args ) {
+            out('a literal passed where a sub takes a reference into @_ and a store may go through one (perl\'s literal is read-only)')
+                if $b->{stores_through} //= Chalk::IR::Node::Ref::stores_through( _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} ) );
+            return $b->emit(op => 'Fresh', type => '%Slot', inputs => [ $b->as($b->value($n), '%Slot') ]);
+        }
         return $b->as($b->value($n), '%Slot');
     }
     if ($op eq 'PadAccess' && ( $n->sigil // '' ) eq '$' && $n->is_location) {
@@ -526,6 +567,12 @@ sub arg_alias {
     }
     # (a foreach alias read, B::SoN's ${ \ $a[i] }: the element)
     $n = $n->alias_element if $op eq 'PostfixDeref' && $n->alias_element;
+    # A READ THROUGH AN ELEMENT REFERENCE T2 MAKES -- a foreach alias's,
+    # `${ exists $a[i] ? \$a[i] : undef }`, or B::SoN's guard of it again
+    # around the read -- is the element: its cell, the reference itself.
+    if ( my $r = _element_ref_read($n) ) {
+        return $b->emit(op => 'AliasOf', type => '%Slot', inputs => [ $b->as( $b->value($r), '%Slot' ) ]);
+    }
     if ($n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) }) {
         my ($c, $k) = $n->inputs->@[0, 1];
         # (ITS READ THROUGH A REFERENCE, if it is one, made here, before the
@@ -558,6 +605,31 @@ sub arg_alias {
     out('an argument perl aliases (' . $n->operation . ') passed where a sub writes @_')
         if $b->may_write_args && ( $n->operation =~ /\A(?:PadAccess|TernaryExpr|PostfixDeref|Assign|Subscript|And|Or|DefinedOr|Phi)\z/ );
     return $b->emit(op => 'Fresh', type => '%Slot', inputs => [ $b->as($b->value($n), '%Slot') ]);
+}
+
+# _element_ref_read($n) -> the element reference $n reads through (a Ref, or
+# the foreach alias's guard of one), or undef: $n is `${ R }` of it, or
+# `c ? ${ R } : undef` where R is guarded by that same c.
+sub _element_ref_read {
+    my ($n) = @_;
+    return undef unless blessed($n);
+    if ( $n->operation eq 'TernaryExpr' ) {
+        my ( $c, $d, $u ) = $n->inputs->@*;
+        my $r = _element_ref_read($d) or return undef;
+        return undef unless $r->operation eq 'TernaryExpr' && blessed( $r->inputs->[0] ) && blessed($c) && refaddr( $r->inputs->[0] ) == refaddr($c);
+        # (its other arm: undef, or the element read -- none there)
+        my $s = $r->inputs->[1]->element_subscript;
+        return $r if blessed($u) && ( $u->operation eq 'Constant' && ( $u->const_type // '' ) eq 'undef'
+            || $u->operation eq 'Subscript' && ( $u->kind // '' ) eq 'array'
+               && refaddr( $u->inputs->[0] ) == refaddr( $s->inputs->[0] ) && refaddr( $u->inputs->[1] ) == refaddr( $s->inputs->[1] ) );
+        return undef;
+    }
+    return undef unless $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '$';
+    my $r = $n->inputs->[0];
+    return $r if blessed($r) && $r->operation eq 'Ref' && $r->element_subscript;
+    return $r if blessed($r) && $r->operation eq 'TernaryExpr' && blessed( $r->inputs->[1] ) && $r->inputs->[1]->operation eq 'Ref'
+        && $r->inputs->[1]->element_subscript && Chalk::IR::Node::Ref::_guards( $r, $r->inputs->[1] );
+    return undef;
 }
 
 # _folded($aggregate) -> a named array or hash B::SoN reads at no memory
@@ -742,7 +814,7 @@ sub code_call {
         $b->set_want($c);
         return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $b->{argsarr} ], site => $c);
     }
-    my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); $b->args_array(@args) };
+    my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
     $b->hash_reads_settled('a call of a code value');
     $b->set_want($c);
     return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $arr ], site => $c);
@@ -827,6 +899,10 @@ sub func {
     my $declared = grep { $_->operation eq 'Parameter' } $g->component;
     my $shifted = grep { $_->operation eq 'Call' && $_->mutates_array && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'ArgsSource' } $g->component;
     $list ||= !$is_method && !$declared && !$shifted && ( $@ || $an->{_args_written} );
+    # (A REFERENCE TO AN ELEMENT OF @_ -- `\$_[0]` -- is to the caller's own
+    # container: @_ taken as that array of aliases too.)
+    $list ||= !$is_method && !$declared && !$shifted
+        && grep { $_->operation eq 'Ref' && $_->element_subscript && !$_->is_alias_ref && blessed( $_->element_subscript->inputs->[0] ) && $_->element_subscript->inputs->[0]->operation eq 'ArgsSource' } $g->component;
     # A SUB A CALL PASSES A LIST (`f(@$r)`): its count is the list's, known at
     # run time only -- @_ as that one array too.
     $list ||= !$is_method && !$declared && grep {
