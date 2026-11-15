@@ -40,7 +40,7 @@ my @CASES = qw(
     chalk-found-gaps:148 chalk-found-gaps:149 chalk-found-gaps:15
     chalk-found-gaps:151 chalk-found-gaps:152 chalk-found-gaps:153
     chalk-found-gaps:155 chalk-found-gaps:157 chalk-found-gaps:158
-    chalk-found-gaps:16 chalk-found-gaps:161 chalk-found-gaps:162
+    chalk-found-gaps:16 chalk-found-gaps:161 chalk-found-gaps:162 chalk-found-gaps:163
     chalk-found-gaps:165 chalk-found-gaps:166 chalk-found-gaps:167
     chalk-found-gaps:168 chalk-found-gaps:169 chalk-found-gaps:17
     chalk-found-gaps:170 chalk-found-gaps:171 chalk-found-gaps:172

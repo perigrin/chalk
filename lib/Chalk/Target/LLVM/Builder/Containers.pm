@@ -326,9 +326,13 @@ sub array_value {
         if ($c eq 'grep') {
             $b->emit(op => 'APushIf', type => 'void', inputs => [ $arr, $b->as($b->value($x), '%Slot'), $b->truth($b->value($cond)) ]);
         }
-        elsif ($c eq 'map' && !blessed($cond)) {
-            if (_is_list($x)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($x) ]) }
-            else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($x), '%Slot') ]) }
+        # (map's: each value its block yields, in order -- `map { $k => $v }`
+        # is [list so far, $k, $v])
+        elsif ($c eq 'map') {
+            for my $y (grep { blessed($_) } @in[ 1 .. $#in ]) {
+                if (_is_list($y)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($y) ]) }
+                else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($y), '%Slot') ]) }
+            }
         }
         else { out("a list collector $c") }
         return $arr;
