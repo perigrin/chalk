@@ -1,4 +1,4 @@
-# Perl's special hashes are tied containers over chalk's metaobjects
+# Perl's special hashes are containers whose metaobject is a MOP object
 
 **Origin:** perigrin, 2026-11-15, while retiring Context.pm (step 2 of
 `2026-11-14-step-1-ir-methods-printer-ops-split.md`):
@@ -7,8 +7,11 @@
 - "Stashes totally feel like tied metaobjects ... a tied container to the
   Package/Class metaobjects that represent the given package/class."
 - "Strict and warnings should be built into the system."
-- Part of the current goal. It is the first piece of task #50: tie
-  metaclasses belong to "Chalk's implementation of the language" -- compiled
+- On the model below: "the special hashes aren't 'tie' as a separate
+  feature. They're containers whose metaobject is implemented by a MOP
+  object" -- that made sense; tie does not come into it.
+- Part of the current goal. It is the first piece of task #50: container
+  metaobjects belong to "Chalk's implementation of the language" -- compiled
   Perl, not hand-written LLVM.
 
 **Cases it closes** (census ids; `script/t2-case` runs one):
@@ -23,38 +26,31 @@
 
 ## The idea
 
-A special hash is an ordinary T2 hash whose **container metaobject** is not
-the default one. T2 already works this way for `tie`
-(`lib/Chalk/Target/LLVM/Runtime.pm`, "THE CONTAINER PROTOCOL"): every
-`%Array` -- an array, or a hash's pairs -- points at a `%Meta`, a 20-slot
-vtable plus a datum. The default vtable's entries are the runtime's own
-functions. A tie's entries call the datum object's methods by name
-(`t2_tie_call`: FETCH, STORE, EXISTS, ...).
+**Every container has a metaobject; the container protocol is what a
+metaobject implements.** The protocol is the operations every array and
+hash supports -- fetch, store, exists, delete, length, push/pop/shift/
+unshift, keys, ... In T2 (`lib/Chalk/Target/LLVM/Runtime.pm`, "THE
+CONTAINER PROTOCOL") every `%Array` -- an array, or a hash's pairs -- points
+at a `%Meta`: a 20-slot vtable of those operations plus a datum.
 
-So each special hash is a hash **tied, before the program runs, to an object
-of a class written in Perl** -- the implementation layer -- whose methods
-answer from the metaobject behind it:
+- A plain `%h`'s metaobject is the **default**: its entries are the
+  runtime's own functions.
+- **`tie`** is one way to install a different metaobject: its entries call a
+  user object's methods by name (`t2_tie_call`; FETCH, STORE, ... are perl's
+  user-level names for the operations).
+- A **special hash's** metaobject is **a MOP object**. Not a tie: there is no
+  tie object, so `tied %SIG` is false, as in perl (a test in each step).
 
-| Hash | Tied to | Its methods ask |
+| Hash | Its metaobject | Which answers from |
 |---|---|---|
-| `%Foo::` (a stash) | Foo's `Chalk::MOP::Class` instance itself | the Class metaobject: which symbols exist, a glob view of one |
-| `%INC` | `Chalk::Impl::INC` | the module registry: the built-ins and what was compiled in |
-| `%SIG` | `Chalk::Impl::SIG` | the runtime's handler table: `__WARN__`, `__DIE__` |
-
-**Tie is not the protocol; it is perl's way to supply an implementation of
-it.** The container protocol is the operations every container supports
-(fetch, store, exists, delete, length, push/pop/shift/unshift, keys...: T2's
-20-slot vtable). Tie swaps a container's metaobject for one whose entries
-call an object's methods (FETCH, STORE, ... are perl's names for those
-operations). The special hashes reuse that mechanism -- a MOP object
-implements the protocol -- but they are not "tied" to the program: perl's
-`tied %SIG` is false, so `tied` must report false for these too (a test in
-each step).
+| `%Foo::` (a stash) | Foo's `Chalk::MOP::Class` | the class: which symbols exist, a glob view of one |
+| `%INC` | the module registry's metaobject | the built-ins and what was compiled in |
+| `%SIG` | the handler table's metaobject | `__WARN__`, `__DIE__` |
 
 Nothing about `warn`, `die`, `require` or `exists` is special-cased in the
-builder. `warn` asks `%SIG` for `__WARN__`; `exists $::{x}` is an EXISTS on
-a tied hash; `local $SIG{__WARN__}` is a `local` on a tied hash's element,
-which T2 already restores through STORE.
+builder. `warn` asks `%SIG` for `__WARN__`; `exists $::{x}` is an exists on
+the stash's metaobject; `local $SIG{__WARN__}` is a `local` on a hash
+element, which T2 already restores through the container's store.
 
 ## 1. The implementation layer: Perl classes T2 compiles in
 
@@ -68,8 +64,7 @@ loader, T2. Chalk -- not the program's wire -- owns them:
 - The pipeline links an Impl class's graphs into a program that uses the
   hash it backs (a program that never touches `%SIG` gets no `Chalk::Impl::SIG`).
 - Start-up: before the program's first statement, each special hash it uses
-  is tied to its Impl object (the same TIEHASH path a program's own `tie`
-  takes).
+  gets its MOP object as its container metaobject.
 - An Impl class is held to the same gates as a program: what T2 cannot lower
   in it is refused by name, at build time.
 
@@ -110,7 +105,7 @@ refused by name.
 *Test first:* c318, c319, adjacency-12_packages:1, c316, c317 (their `%INC`
 half).
 
-## 4. One MOP, at compile time and at run time; a stash is a Class, tied
+## 4. One MOP, at compile time and at run time; a stash's metaobject is its Class
 
 **The principle** (perigrin): "the idea of the MOP is that it's the object
 oriented version of metacircularity." The language describes itself with its
@@ -154,7 +149,8 @@ them later is the class saying so, not a second class. This is a
 behaviour-preserving move first: the ratchet and the census are unchanged.
 
 The stash is then **that instance, seen as a hash**: `%Foo::` is a hash
-tied to Foo's `Chalk::MOP::Class` (the class implements the tie interface).
+whose container metaobject is Foo's `Chalk::MOP::Class` (the class implements
+the container protocol).
 Its symbols are the package's subs and its variables (known at compile
 time: T2's package arrays, hashes and scalars are globals named for them):
 
@@ -184,7 +180,7 @@ imported subs), so c316/c317's `$main::{floor}` needs no wire change.
    the phase boundary; dispatch, `can`, `isa`, `@ISA` through them; the
    bare-hash stashes go (behaviour-preserving -- ratchet and census
    unchanged).
-4. Globs, then the stash as that Class instance tied as a hash (c408, c346,
+4. Globs, then the stash as a hash whose metaobject is that Class instance (c408, c346,
    c316, c317).
 
 Each step: its cases added to `t/bootstrap/ir/t2-census-cases.t` first (red),
