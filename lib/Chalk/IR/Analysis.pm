@@ -2135,6 +2135,12 @@ sub _insert_str_coercions ($graphs) {
 # then reports it as an inference failure naming the operand, which is the
 # whole point of distinguishing Unknown from Scalar. A Scalar GAP means "this
 # scalar type is not lowered"; an Unknown GAP means "nothing ever typed this".
+# _list_consumer($n, $reader): $reader in $n's consumers, once.
+sub _list_consumer ($n, $reader) {
+    return unless $n->can('add_consumer') && $n->can('consumers');
+    $n->add_consumer($reader) unless grep { blessed($_) && refaddr($_) == refaddr($reader) } ( $n->consumers // [] )->@*;
+}
+
 sub _narrow_unknown_coercions ($graphs) {
     my $narrowed = 0;
     my @stale;      # consumers whose stamp was derived from a retired coercion
@@ -2242,6 +2248,9 @@ sub _narrow_unknown_coercions ($graphs) {
                     $inputs->[$i] = $operand;
                     $c->remove_consumer($node) if $c->can('remove_consumer');
                     $operand->remove_consumer($c) if $operand->can('remove_consumer');
+                    # (and the operand lists its new reader: a reader its
+                    # consumers miss is one no use-def walk finds)
+                    _list_consumer($operand, $node);
 
                     # A VACUOUS WIDENING'S CONSUMER IS NOW STALE. The producer
                     # computed Multiply's `Num` by joining ITS OPERANDS -- one
@@ -2273,8 +2282,13 @@ sub _narrow_unknown_coercions ($graphs) {
                 $new->set_stamp($c->to_repr);
 
                 $inputs->[$i] = $new;
-                # The old Coerce no longer reads the operand.
+                # The old Coerce no longer reads the operand, nor is it read
+                # here: the new one is (listed, as the factory lists it a
+                # reader of the operand -- unlisted, a bitwise op reading
+                # `$ARGV[2] // 6` was no reader of it).
                 $operand->remove_consumer($c) if $operand->can('remove_consumer');
+                $c->remove_consumer($node) if $c->can('remove_consumer');
+                _list_consumer($new, $node);
                 $narrowed++;
             }
         }

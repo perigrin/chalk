@@ -6163,6 +6163,39 @@ done:
   %rb = call %Slot @t2_box_str(%Str %rs)
   ret %Slot %rb
 }
+; t2_bit_numeric(a, b, fa, fb, op) -> perl's choice (t2_bitop's mode 0)
+; is on numbers: an operand is not a string (tag 3), or is one an op before
+; made a number (fa, fb) -- ~ (op 3) reads a alone.
+define internal i1 @t2_bit_numeric(%Slot %a, %Slot %b, i1 %fa, i1 %fb, i64 %op) {
+  %ta = extractvalue %Slot %a, 0
+  %tb = extractvalue %Slot %b, 0
+  %sa = icmp eq i8 %ta, 3
+  %sb0 = icmp eq i8 %tb, 3
+  %isnot = icmp eq i64 %op, 3
+  %sb = or i1 %sb0, %isnot
+  %both = and i1 %sa, %sb
+  %num0 = xor i1 %both, true
+  %f = or i1 %fa, %fb
+  %num = or i1 %num0, %f
+  ret i1 %num
+}
+; t2_bit_numified(was, num, x) -> x, a string, made a number by an op done
+; on numbers (num) -- or by one before (was).
+define internal i1 @t2_bit_numified(i1 %was, i1 %num, %Slot %x) {
+  %t = extractvalue %Slot %x, 0
+  %s = icmp eq i8 %t, 3
+  %now = and i1 %num, %s
+  %r = or i1 %was, %now
+  ret i1 %r
+}
+; t2_bitop_made(a, b, fa, fb, op, inner): t2_bitop's perl's choice, where
+; an operand a string an op before made a number (fa, fb) is a number.
+define internal %Slot @t2_bitop_made(%Slot %a, %Slot %b, i1 %fa, i1 %fb, i64 %op, i1 %inner) {
+  %f = or i1 %fa, %fb
+  %mode = select i1 %f, i64 1, i64 0
+  %r = call %Slot @t2_bitop(%Slot %a, %Slot %b, i64 %op, i64 %mode, i1 %inner)
+  ret %Slot %r
+}
 ; t2_shift(a, n, left, inner): perl's << and >> on a UV: a negative count
 ; shifts the other way, one of 64 or more gives 0.
 define internal %Slot @t2_shift(%Slot %a, %Slot %b, i1 %left, i1 %inner) {

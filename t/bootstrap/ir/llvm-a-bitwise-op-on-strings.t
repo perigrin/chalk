@@ -112,7 +112,8 @@ for my $case (
 {
     my $src = q{my $a = $ENV{X} // "ab"; my $u = ~$a; my $v = $a & 3; my $w = ~$a; print length($u), " $v ", length($w), "\n";};
     my $got = eval { through_llvm($src, {}) };
-    like($@, qr/chalk: refused at run time: /, 'a run-time stop names itself') if !defined $got;
+    # (the fallback's words, or T2's)
+    like($@, qr/chalk: refused at run time: |: stopped \(chalk, T2\)/, 'a run-time stop names itself') if !defined $got;
     pass("perl's answer") if defined $got;
 }
 

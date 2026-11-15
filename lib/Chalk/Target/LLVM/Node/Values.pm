@@ -67,6 +67,16 @@ class Chalk::Target::LLVM::Node::BitOp :isa(Chalk::Target::LLVM::Node) {
         return "$nm = call %Slot \@t2_bitop(" . $self->_args(@in) . ", i64 $a{op}, i64 $a{mode}, i1 " . ( $a{inner} ? 1 : 0 ) . ')';
     }
 }
+class Chalk::Target::LLVM::Node::BitNumeric :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = call i1 @t2_bit_numeric(' . $self->_args( $self->inputs->@* ) . ', i64 ' . $self->attr->{op} . ')' }
+}
+class Chalk::Target::LLVM::Node::BitNumified :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_bit_numified') } }
+class Chalk::Target::LLVM::Node::BitOpMade :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call %Slot @t2_bitop_made(' . $self->_args( $self->inputs->@* ) . ", i64 $a{op}, i1 " . ( $a{inner} ? 1 : 0 ) . ')';
+    }
+}
 class Chalk::Target::LLVM::Node::Shift :isa(Chalk::Target::LLVM::Node) {
     method to_ll () {
         my %a = $self->attr->%*;

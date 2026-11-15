@@ -847,10 +847,17 @@ sub builtin_value {
 # ~ on two strings' bytes where no operand holds a number, on numbers
 # otherwise (and under feature "bitwise" as the op says: its flavor). An
 # operand T2 holds as a number decides it here; else at run time, by what
-# the operands hold -- sound only where nothing else could have made one a
-# number first (a numeric read of a string leaves it one): each such
-# operand read by this op alone, outside a loop or an arm. A result past
-# what an i64 holds (a UV) stops, unless only another bitwise op reads it.
+# the operands hold -- outside a loop or an arm. A result past what an i64
+# holds (a UV) stops, unless only another bitwise op reads it.
+#
+# A NUMERIC READ OF A STRING LEAVES IT A NUMBER to the op after (perl caches
+# the number): an operand read by bitwise ops alone (a shift's too) carries
+# what those before did -- an i1, the string made a number (bit_numified) --
+# and an op over one so made is on numbers. Sound where each reader is
+# pinned: B::SoN pins a bitwise op on what may be a string only where each
+# operand is one variable, assigned once (a node a copy or a second `my`
+# shares stands for two: its op floats, and is refused here). Anything else
+# reading the operand as a number is refused.
 my %BITOP = (BitAnd => 0, BitOr => 1, BitXor => 2, Complement => 3);
 sub bitwise {
     my ($b, $v) = @_;
@@ -860,8 +867,12 @@ sub bitwise {
     my @leaf = map { _bit_leaf($_) } @in;
     my $inner = _bit_inner($v);
     my @x = map { $b->as( $b->value($_), '%Slot' ) } @leaf;
+    # (the operands that may be strings another bitwise op also reads)
+    my @shared = grep { $b->type_of( $leaf[$_] ) =~ /\A%(?:Slot|Str)\z/ && _bit_readers( $leaf[$_] ) > 1 } 0 .. $#leaf;
     if ($op =~ /Shift\z/) {
-        return $b->emit(op => 'Shift', type => '%Slot', inputs => \@x, attr => { left => $op eq 'LeftShift', inner => $inner });
+        my $r = $b->emit(op => 'Shift', type => '%Slot', inputs => \@x, attr => { left => $op eq 'LeftShift', inner => $inner });
+        $b->bit_numified( $v, $leaf[$_], $x[$_], $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }) ) for @shared;
+        return $r;
     }
     my $flavor = $v->can('flavor') ? $v->flavor // '' : '';
     my $mode = $flavor eq 'numeric' ? 1 : $flavor eq 'string' ? 2
@@ -869,10 +880,46 @@ sub bitwise {
     if ($mode == 0) {
         out('a bitwise op on what may be strings, in a loop or an arm') if $b->{depth};
         out('a bitwise op on what may be a string read elsewhere (perl reads it as a number after a numeric read)')
-            if grep { _bit_readers($_) != 1 } @leaf;
+            if grep { _bit_readers($_) < 1 || $b->_bit_source_numified($_) } @leaf;
     }
     push @x, $b->emit(op => 'Undef', type => '%Slot') if @x == 1;
-    return $b->emit(op => 'BitOp', type => '%Slot', inputs => \@x, attr => { op => $BITOP{$op}, mode => $mode, inner => $inner });
+    # (one an op before made a number: on numbers, whatever its tag says)
+    my %flag = $mode == 0 ? map { my $f = $b->bit_flag( $v, $leaf[$_] ); defined $f ? ( $_ => $f ) : () } @shared : ();
+    my @f = map { $flag{$_} // $b->emit(op => 'Const', type => 'i1', attr => { value => 0 }) } 0, 1;
+    my $r = %flag
+        ? $b->emit(op => 'BitOpMade', type => '%Slot', inputs => [ @x, @f ], attr => { op => $BITOP{$op}, inner => $inner })
+        : $b->emit(op => 'BitOp', type => '%Slot', inputs => \@x, attr => { op => $BITOP{$op}, mode => $mode, inner => $inner });
+    if (@shared && $mode != 2) {
+        my $num = $mode == 1 ? $b->emit(op => 'Const', type => 'i1', attr => { value => 1 })
+                             : $b->emit(op => 'BitNumeric', type => 'i1', inputs => [ @x, @f ], attr => { op => $BITOP{$op} });
+        $b->bit_numified( $v, $leaf[$_], $x[$_], $num ) for @shared;
+    }
+    return $r;
+}
+
+# bit_flag($op, $leaf) -> the i1 that says an earlier bitwise op made $leaf (a
+# string) a number, where bitwise op $op reads it; undef where none has. Each
+# reader of $leaf must be pinned (made in the order perl runs them), and none
+# before made where its i1 is not seen here (a loop, an arm, an eval).
+sub bit_flag {
+    my ($b, $v, $leaf) = @_;
+    out('a bitwise op on what may be a string another bitwise op reads, not both pinned where perl runs them')
+        if grep { !( $_->can('control_in') && blessed( $_->control_in ) ) } _bit_ops_of($leaf);
+    my $f = $b->{bitflag}{ refaddr($leaf) };
+    out('a bitwise op on what may be a string an op in a loop, an arm or an eval read as a number') if defined $f && !ref $f;
+    return $f;
+}
+
+# bit_numified($op, $leaf, $x, $num): bitwise op $op, done on numbers where
+# i1 $num, made $leaf (its value $x) a number if it was a string.
+sub bit_numified {
+    my ($b, $v, $leaf, $x, $num) = @_;
+    my $k = refaddr($leaf);
+    return if defined $b->{bitflag}{$k} && !ref $b->{bitflag}{$k};
+    # (where its i1 would not be seen after: lost)
+    if ( $b->{depth} || ( $b->{evals} // [] )->@* ) { $b->{bitflag}{$k} = 'lost'; return }
+    my $was = $b->{bitflag}{$k} // $b->emit(op => 'Const', type => 'i1', attr => { value => 0 });
+    $b->{bitflag}{$k} = $b->emit(op => 'BitNumified', type => 'i1', inputs => [ $was, $num, $x ]);
 }
 
 my $BIT = qr/\A(?:BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/;
@@ -925,6 +972,71 @@ sub _bit_readers {
         return -1;
     }
     return $k;
+}
+
+# _bit_source_numified($leaf) -> true where what $leaf holds is an %ENV value
+# or an @ARGV element (itself, or through a `//`'s left side) that the
+# program may read as a number elsewhere: perl's numeric read numifies the
+# element itself, and a `//` copies it with its number. B::SoN makes one node
+# of each `$ENV{K}`; an @ARGV element read counts for each it may be (the
+# same index, or one not a constant).
+sub _bit_source_numified {
+    my ($b, $leaf) = @_;
+    my (@src, %chain);
+    my @todo = ($leaf);
+    while (defined( my $n = shift @todo )) {
+        next unless blessed($n);
+        $chain{ refaddr($n) } = 1;
+        if ( $n->operation eq 'DefinedOr' ) { push @todo, $n->inputs->[0]; next }
+        push @src, $n if $n->operation eq 'EnvRead' || _argv_element($n);
+    }
+    return 0 unless @src;
+    my @all = _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} );
+    my @same = map {
+        my $s = $_;
+        $s->operation eq 'EnvRead' ? grep { $_->operation eq 'EnvRead' && $_->key eq $s->key } @all
+                                   : grep { _argv_element($_) && _argv_may_be( $_, $s ) } @all
+    } @src;
+    # (what reads it as no number: a test of definedness, a print, a `.`, a
+    # `//` whose value is read so too; the bitwise ops of $leaf itself)
+    my %seen;
+    my $numifies;
+    $numifies = sub ($n) {
+        return 0 if $seen{ refaddr($n) }++;
+        for my $u (_value_users($n)) {
+            my $o = $u->operation;
+            next if $o =~ /\A(?:Defined|Print|Concat)\z/;
+            next if $o eq 'Coerce' && ( $u->stamp // '' ) eq 'Str' && !grep { $_->operation !~ /\A(?:Print|Concat)\z/ } _value_users($u);   # static type
+            next if refaddr($n) == refaddr($leaf) && ( $o =~ $BIT || $o eq 'Coerce' && ( $u->stamp // '' ) =~ /\A(?:Int|Num)\z/ && !grep { $_->operation !~ $BIT } _value_users($u) );   # static type
+            if ( $o eq 'DefinedOr' && blessed( $u->inputs->[0] ) && refaddr( $u->inputs->[0] ) == refaddr($n) ) { return 1 if $numifies->($u); next }
+            return 1;
+        }
+        return 0;
+    };
+    return scalar grep { $numifies->($_) } @same;
+}
+
+# _argv_element($n) -> an element of @ARGV read by index.
+sub _argv_element {
+    my ($n) = @_;
+    return blessed($n) && $n->operation eq 'Subscript' && blessed( $n->inputs->[0] ) && $n->inputs->[0]->is_argv;
+}
+
+# _argv_may_be($x, $y) -> @ARGV elements $x and $y may be one: their indices
+# are not two different constants.
+sub _argv_may_be {
+    my ($x, $y) = @_;
+    my @i = map { my $i = $_->inputs->[1]; blessed($i) && $i->operation eq 'Constant' && defined $i->value && $i->value =~ /\A-?\d+\z/ ? $i->value : undef } $x, $y;
+    return !( defined $i[0] && defined $i[1] && $i[0] != $i[1] );
+}
+
+# _bit_ops_of($leaf) -> the bitwise ops (a shift too) reading $leaf, directly
+# or through B::SoN's numeric Coerce.
+sub _bit_ops_of {
+    my ($n) = @_;
+    return map {
+        $_->operation =~ $BIT ? ($_) : _bit_ops_of($_)
+    } grep { $_->operation =~ $BIT || $_->operation eq 'Coerce' && ( $_->stamp // '' ) =~ /\A(?:Int|Num)\z/ } _value_users($n);   # static type
 }
 
 # format_write($Call, $ty, $picture, @values) -> a format's formline, in the
