@@ -19,6 +19,17 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
     # reference is to that pass's variable.
     field $fresh_each_pass :param :reader = 0;
 
+    # memory_operand -> the memory version a reference to an element reads the
+    # array at (B::SoN: the element at its index THERE -- which scalar sits at
+    # which index is the array's layout, which a shift or push changes); undef
+    # for one that reads none.
+    method memory_operand() { return $self->inputs->@* > 1 ? $self->inputs->[1] : undef }
+    # taken_where_it_stands -> B::SoN takes it where its statement runs: it
+    # reads memory, on the control chain, the memory version after it (taking
+    # it may make the element).
+    method taken_where_it_stands() { return $self->is_pinned && defined $self->memory_operand ? 1 : 0 }
+    method is_memory_version() { return $self->taken_where_it_stands }
+
     method content_hash() {
         return join('|', 'Ref', ($each ? 'each' : ()), ($fresh_each_pass ? 'fresh' : ()), $self->_serialize_inputs());
     }
@@ -49,6 +60,11 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
     #  - UNDER A FOREACH ALIAS'S GUARD (c ? \$a[i] : undef, the guard on the
     #    control chain): made where the guard stands; its existence test keeps
     #    the index in the array;
+    #  - TAKEN WHERE IT STANDS (taken_where_it_stands: B::SoN orders it on
+    #    the array's memory) -- made there, in order, it is the element at its
+    #    index then, whatever reshapes the array before or after; its index a
+    #    constant not before the start (perl's die there names a site B::SoN
+    #    does not give the reference);
     #  - else its index a constant not before the start (perl's die before it
     #    would have no place either), its array one nothing reshapes: no shift,
     #    pop, unshift, splice, `$#a =`, delete, store of the whole array, nor a
@@ -62,12 +78,19 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
         my $ix  = $s ? $s->inputs->[1] : undef;
         if ( $s && @c && !grep { !_guards($_, $self) } @c ) { return undef }
         if ($s) {
+            return 'a reference to an element at an index not a constant (perl dies before the start, naming a site B::SoN does not give it)'
+                if $self->taken_where_it_stands && !_nonnegative_constant($ix);
             return 'a reference to an element at an index not a constant (perl takes it where its statement runs; B::SoN gives it no place)'
-                unless blessed($ix) && $ix->operation eq 'Constant' && ( $ix->const_type // '' ) eq 'integer' && ( $ix->value // -1 ) =~ /\A\+?\d+\z/;
+                unless _nonnegative_constant($ix);
         }
+        return undef if $self->taken_where_it_stands;
         return 'a reference to an element of an array that may be reshaped (perl takes it where its statement runs; B::SoN gives it no place)'
             if _reshaped( $arr, $s ? $ix->value : undef );
         return undef;
+    }
+
+    sub _nonnegative_constant($ix) {
+        return blessed($ix) && $ix->operation eq 'Constant' && ( $ix->const_type // '' ) eq 'integer' && ( $ix->value // -1 ) =~ /\A\+?\d+\z/ ? 1 : 0;
     }
 
     # element_ref_unseen -> why a store through this reference to an element

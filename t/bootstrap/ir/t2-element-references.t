@@ -64,6 +64,21 @@ for my $case (
       'a reference to a literal argument, read' ],
     [ q{sub k { return \$_[0] } my $v = 1; my $r = k($v); $$r = 9; print "$v\n";},
       'a reference to an argument that is a variable' ],
+    # B::SoN TAKES ONE WHERE IT STANDS, reading the array at that memory
+    # version: the element at its index then, whatever reshapes the array
+    # before or after; a store through it is a store the array's reads see.
+    [ q{my @a = (1, 2, 3); my $r = \$a[0]; shift @a; $$r = 9; print "@a $$r\n";}, 'a shift after it' ],
+    [ q{my @a = (1, 2, 3); shift @a; my $r = \$a[0]; $$r = 9; print "@a $$r\n";}, 'a shift before it' ],
+    [ q{my @a = (1, 2, 3); my $r = \$a[0]; shift @a; print "$$r\n";}, 'a shift after it, read' ],
+    [ q{my @a = (1, 2, 3); shift @a; my $r = \$a[0]; print "$$r\n";}, 'a shift before it, read' ],
+    [ q{my @b = (1, 2, 3); my $q = \$b[1]; unshift @b, 0; $$q = 9; print "@b\n";}, 'an unshift' ],
+    [ q{my @c = (1, 2); my $p = \$c[0]; @c = (7, 8); push @c, 9; print "$$p @c\n";}, 'the array stored whole' ],
+    [ q{my @a = (1, 2); my $r = \$a[0]; $$r = 5; print "@a\n";}, 'a store through it' ],
+    [ q{my @a = (1, 2); my $r = \$a[0]; $$r++; print "@a\n";}, 'an increment through it' ],
+    [ q{my @a = (1, 2); my $r = \$a[1]; my $x = "x"; $$r .= $x; print "@a\n";}, 'an append through it' ],
+    [ q{my @d = (1); my $s = \$d[3]; push @d, 5; $$s = 4; print scalar(@d), " @d[0, 3, 4]\n";}, 'a push, the element not made with the array' ],
+    [ q{my @a = (1); my $r = \$a[3]; print scalar(@a), "\n";}, 'taking it makes the element' ],
+    [ q{my @a = (10, 20); shift @a; my @r = \(@a); ${$r[0]} = 5; print "@a\n";}, 'a reference to each element, after a shift' ],
 ) {
     my ($src, $name) = @$case;
     my ($ll, $pl, $why) = lower($src);
@@ -78,17 +93,11 @@ for my $case (
     is($got->[2], $want->[2], "$name: perl's exit code");
 }
 
-# A REFERENCE B::SoN GIVES NO PLACE (`my $r = \$a[0]; shift @a` is the graph
-# of `shift @a; my $r = \$a[0]`) where the element at its index may change:
-# refused by name, never the other element. (And a literal a sub takes a
-# reference to, where a store may go through it: perl's is read-only.)
+# AN INDEX NOT A CONSTANT may be before the start, where perl dies naming
+# the site B::SoN does not give the reference: refused by name. (And a literal
+# a sub takes a reference to, where a store may go through it: perl's is
+# read-only.)
 for my $case (
-    [ q{my @a = (1, 2, 3); my $r = \$a[0]; shift @a; $$r = 9; print "@a $$r\n";}, 'a shift after it' ],
-    [ q{my @a = (1, 2, 3); shift @a; my $r = \$a[0]; $$r = 9; print "@a $$r\n";}, 'a shift before it' ],
-    [ q{my @b = (1, 2, 3); my $q = \$b[1]; unshift @b, 0; $$q = 9; print "@b\n";}, 'an unshift' ],
-    [ q{my @c = (1, 2); my $p = \$c[0]; @c = (7, 8); push @c, 9; print "$$p @c\n";}, 'the array stored whole' ],
-    [ q{my @a = (1, 2); my $r = \$a[0]; $$r = 5; print "@a\n";}, 'a store through it where B::SoN folds the array' ],
-    [ q{my @d = (1); my $s = \$d[3]; push @d, 5; $$s = 4; print scalar(@d), "\n";}, 'a push, the element not made with the array' ],
     [ q{sub k { \$_[0] } my $r = k(3); $$r = 4; print "$$r\n";}, 'a literal argument (read-only) stored through' ],
     [ q{my @e = (1, 2); $e[0] = 0; my $i = 1; $i++ if @ARGV; my $t = \$e[$i]; $$t = 3; print "@e\n";}, 'an index not a constant' ],
 ) {
@@ -99,10 +108,12 @@ for my $case (
 }
 
 # A REFERENCE TO A HASH ELEMENT is not T2's yet: refused by name.
-{
-    my ($ll, undef, $why) = lower(q{my %h = (k => 1); my $r = \$h{k}; $$r = 2; print "$h{k}\n";});
+for my $src (q{my %h = (k => 1); my $r = \$h{k}; $$r = 2; print "$h{k}\n";},
+             q{my %h = (k => 1); my $r = \$h{k}; $$r++; print "$h{k}\n";},
+             q{my %h = (k => 1); my $r = \$h{k}; my $x = "x"; $$r .= $x; print "$h{k}\n";}) {
+    my ($ll, undef, $why) = lower($src);
     ok(!defined $ll, 'a reference to a hash element: refused');
-    like($why // '', qr/T2: out of its slices/, 'refused by name');
+    like($why // '', qr/T2: out of its slices \((?:a reference to a hash element|a scalar deref where a reference T2 does not make)/, 'refused by name') or diag $why;
 }
 
 done_testing;

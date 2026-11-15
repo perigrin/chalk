@@ -154,6 +154,16 @@ sub walk {
             $ctl = $s;
         }
         elsif ($op eq 'Assign') { $b->assign($s); push $b->{passed}->@*, $s; $ctl = $s }
+        # A REFERENCE TO AN ELEMENT, taken where it stands (B::SoN orders it on
+        # the array's memory: Ref's taken_where_it_stands): made here, in order
+        # -- the element at its index now, made if it is not there.
+        elsif ($op eq 'Ref' && $s->taken_where_it_stands) {
+            out('a reference to a hash element') if blessed( $s->inputs->[0] ) && $s->inputs->[0]->operation eq 'Subscript' && ( $s->inputs->[0]->can('kind') ? $s->inputs->[0]->kind // '' : '' ) eq 'hash';
+            out('a reference to what is no array element') unless $s->is_element_ref;
+            $s->each ? $b->array_of($s) : $b->value($s);
+            push $b->{passed}->@*, $s;
+            $ctl = $s;
+        }
         # AN UNCAUGHT DIE: its message (a list joined) to STDERR, " at FILE
         # line N.\n" added where it does not end in a newline, and exit 255.
         # The block ends there: nothing after it in its arm runs.
