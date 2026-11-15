@@ -148,6 +148,24 @@ string eval or recompiling a method at run time may want them, and adding
 them later is the class saying so, not a second class. This is a
 behaviour-preserving move first: the ratchet and the census are unchanged.
 
+**The MOP is the bottom layer** (perigrin, 2026-11-15: "We need to invert
+those dependencies"). Measured first: a program that makes one
+`Chalk::MOP::Class` at run time pulled in 157 graphs -- `Chalk::IR::Graph`,
+the node factory, every IR node class, the parser's Bindings -- and T2 refused
+it at the first (Graph's ADJUST). The MOP had constructed and inspected
+them. Now Graph, the IR, the parser and the targets depend on the MOP, never
+the reverse (guard: `t/bootstrap/mop-depends-on-nothing.t`):
+
+- A Method's, Sub's or Phaser's body is opaque: the compiler hands it the
+  graph it built (`graph =>`); the MOP makes none, has no `$factory`, and no
+  `merge`/`next_cfg_id` delegators -- callers merge into the graph.
+- Return-type narrowing (only ever narrow, by the type lattice) is
+  whole-program analysis's: `Chalk::IR::Analysis::narrow_return_type`; the
+  metaobject's `set_return_type` holds what it is given.
+- A class's own lexicals' bindings are the parser's, kept by class
+  (`Chalk::Bootstrap::Perl::Actions::class_bindings`); the class records the
+  declarations, in order.
+
 The stash is then **that instance, seen as a hash**: `%Foo::` is a hash
 whose container metaobject is Foo's `Chalk::MOP::Class` (the class implements
 the container protocol).
@@ -164,8 +182,11 @@ time: T2's package arrays, hashes and scalars are globals named for them):
   at run time: refused by name until chalk has a mutable run-time MOP. That
   is the next piece of #50, not this goal.
 
-What `use POSIX` imported is already in main's Package metaobject (the
-imported subs), so c316/c317's `$main::{floor}` needs no wire change.
+main is a package like any other (perigrin, 2026-11-15: "Create a
+Class/Package for main"). Measured: the wire had no record for main -- no
+class, no imported subs -- only a per-read `stash_has`. So B::SoN emits a
+package record for main with its symbols, `use POSIX`'s imports among them,
+as it does for any package, and the loader builds main's Class from it.
 
 *Test first:* c346, c316, c317 (their stash half), c408.
 

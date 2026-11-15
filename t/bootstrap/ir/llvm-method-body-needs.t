@@ -6,6 +6,7 @@ use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
@@ -132,7 +133,7 @@ subtest 'method body Coerce(Boolean->Str) emits no undeclared globals' => sub {
     # Method: coerce_str($self) -> Num { "3" -> Num = 3.0 }
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('StrNumClass');
-    my $mi = $cls->declare_method('coerce_str', return_type => 'Num');
+    my $mi = $cls->declare_method('coerce_str', graph => Chalk::IR::Graph->new, return_type => 'Num');
     $mi->graph->merge($f->make_cfg('Return', inputs => [$coerce_sn]));
     $mop->seal;
 
@@ -197,7 +198,7 @@ subtest 'method body _need_memcmp propagated to prologue' => sub {
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('StrClass');
     $cls->declare_field('val', sigil => '$', type => 'Str', attributes => [':param']);
-    my $mi = $cls->declare_method('get_val', return_type => 'Str');
+    my $mi = $cls->declare_method('get_val', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $mi->graph->merge($f->make_cfg('Return', inputs => [$field_read]));
     $mop->seal;
 
@@ -271,7 +272,7 @@ subtest 'method body HashRead (sets _need_memcmp): declare i32 @memcmp present' 
     # Wrap in a class method body — the outer Return is Int.
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('HashBodyClass');
-    my $mi = $cls->declare_method('read_hash', return_type => 'Int');
+    my $mi = $cls->declare_method('read_hash', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $mi->graph->merge($f->make_cfg('Return', inputs => [$val]));
     $mop->seal;
 

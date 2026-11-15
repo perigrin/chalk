@@ -6,6 +6,7 @@ use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
@@ -40,13 +41,13 @@ sub build_dual_str_graph {
     # Method A: Constant("first" :Str)
     my $str_a = $f->make('Constant', value => 'first', const_type => 'string');
     $str_a->set_stamp('Str');
-    my $m_a = $cls->declare_method('get_first', return_type => 'Str');
+    my $m_a = $cls->declare_method('get_first', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m_a->graph->merge($f->make_cfg('Return', inputs => [$str_a]));
 
     # Method B: Constant("second" :Str) — same index (0) in a fresh body_ctx
     my $str_b = $f->make('Constant', value => 'second', const_type => 'string');
     $str_b->set_stamp('Str');
-    my $m_b = $cls->declare_method('get_second', return_type => 'Str');
+    my $m_b = $cls->declare_method('get_second', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m_b->graph->merge($f->make_cfg('Return', inputs => [$str_b]));
 
     $mop->seal;
@@ -80,17 +81,17 @@ sub build_triple_str_graph {
 
     my $str_a = $f->make('Constant', value => 'alpha', const_type => 'string');
     $str_a->set_stamp('Str');
-    my $m_a = $cls->declare_method('get_alpha', return_type => 'Str');
+    my $m_a = $cls->declare_method('get_alpha', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m_a->graph->merge($f->make_cfg('Return', inputs => [$str_a]));
 
     my $str_b = $f->make('Constant', value => 'beta', const_type => 'string');
     $str_b->set_stamp('Str');
-    my $m_b = $cls->declare_method('get_beta', return_type => 'Str');
+    my $m_b = $cls->declare_method('get_beta', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m_b->graph->merge($f->make_cfg('Return', inputs => [$str_b]));
 
     my $str_c = $f->make('Constant', value => 'gamma', const_type => 'string');
     $str_c->set_stamp('Str');
-    my $m_c = $cls->declare_method('get_gamma', return_type => 'Str');
+    my $m_c = $cls->declare_method('get_gamma', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m_c->graph->merge($f->make_cfg('Return', inputs => [$str_c]));
 
     $mop->seal;

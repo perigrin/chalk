@@ -677,6 +677,7 @@ sub _build_node_from_rhs {
             my $repr = $attrs->{return_repr};
             my $m = $cls->declare_method(
                 ($attrs->{name} // croak "MOP::Method missing name at $name"),
+                graph => Chalk::IR::Graph->new,   # (its body: the harness's -- the MOP makes none)
                 (defined $repr ? (return_type => $repr) : ()),
             );
             # The method's lowering root is its graph's Return value.
@@ -691,7 +692,7 @@ sub _build_node_from_rhs {
         # backend recovers statement order from the control chain.
         my $body = $attrs->{body} // [];
         $body = [$body] unless ref $body eq 'ARRAY';
-        my $adj = $cls->declare_adjust();
+        my $adj = $cls->declare_adjust(graph => Chalk::IR::Graph->new);
         my $prev;
         for my $st (@$body) {
             $st->set_control_in($prev) if defined $prev;

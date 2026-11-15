@@ -6,6 +6,7 @@ use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
@@ -103,7 +104,7 @@ subtest 'method-simple: $g->greet => 42 (Int)' => sub {
     # MOP: class Greeter { method greet { return 42 } }
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Greeter');
-    my $m   = $cls->declare_method('greet', return_type => 'Int');
+    my $m   = $cls->declare_method('greet', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
     $mop->seal;
 
@@ -210,7 +211,7 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
     my $cls = $mop->declare_class('Animal');
     $cls->declare_field('name', sigil => '$', type => 'Str',
         attributes => [':param']);
-    my $m = $cls->declare_method('name', return_type => 'Str');
+    my $m = $cls->declare_method('name', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m->graph->merge($f->make_cfg('Return', inputs => [$field_read]));
     $mop->seal;
 
@@ -286,9 +287,9 @@ subtest 'Str field store in method body: $t->set; $t->get => "hi" (Str)' => sub 
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Tag');
     $cls->declare_field('s', sigil => '$', type => 'Str', attributes => []);
-    my $m_set = $cls->declare_method('set', return_type => 'Str');
+    my $m_set = $cls->declare_method('set', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m_set->graph->merge($f->make_cfg('Return', inputs => [$store]));
-    my $m_get = $cls->declare_method('get', return_type => 'Str');
+    my $m_get = $cls->declare_method('get', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m_get->graph->merge($f->make_cfg('Return', inputs => [$fa_rd]));
     $mop->seal;
 
@@ -337,7 +338,7 @@ subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => 
     $body42->set_stamp('Int');
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Greeter');
-    my $m   = $cls->declare_method('greet', return_type => 'Int');
+    my $m   = $cls->declare_method('greet', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
     $mop->seal;
 
@@ -387,7 +388,7 @@ subtest 'adversarial: Call(method) on undeclared class dies loudly at lowering' 
     $body->set_stamp('Int');
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('KnownClass');
-    my $m   = $cls->declare_method('foo', return_type => 'Int');
+    my $m   = $cls->declare_method('foo', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body]));
     $mop->seal;
 

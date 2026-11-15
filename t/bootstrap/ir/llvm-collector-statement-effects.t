@@ -6,6 +6,7 @@ use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::MOP;
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
@@ -100,13 +101,13 @@ subtest 'a method Call in an if-branch is collected and lowered' => sub {
     $fa_lv->set_stamp('Int');
     my $store = $f->make('Assign', inputs => [$fa_lv, $sum]);
     $store->set_stamp('Int');
-    my $bump = $cls->declare_method('bump', return_type => 'Int');
+    my $bump = $cls->declare_method('bump', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $bump->graph->merge($f->make_cfg('Return', inputs => [$store]));
 
     # method val { $n }
     my $fa_val = $f->make('FieldAccess', field_index => 0, field_stash => 'C', inputs => []);
     $fa_val->set_stamp('Int');
-    my $val = $cls->declare_method('val', return_type => 'Int');
+    my $val = $cls->declare_method('val', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $val->graph->merge($f->make_cfg('Return', inputs => [$fa_val]));
 
     $mop->seal;

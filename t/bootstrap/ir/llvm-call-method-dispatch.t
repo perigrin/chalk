@@ -6,6 +6,7 @@ use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
@@ -94,7 +95,7 @@ subtest 'Call(dispatch_kind=method, name=greet): $g->greet => 42 (Int)' => sub {
 
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Greeter');
-    my $m   = $cls->declare_method('greet', return_type => 'Int');
+    my $m   = $cls->declare_method('greet', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
     $mop->seal;
 
@@ -144,7 +145,7 @@ subtest 'Call(dispatch_kind=method) on absent method dies loudly' => sub {
 
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Greeter');
-    my $m   = $cls->declare_method('greet', return_type => 'Int');
+    my $m   = $cls->declare_method('greet', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body]));
     $mop->seal;
 
@@ -202,7 +203,7 @@ subtest 'guard: Call(method) node repr disagreeing with the vtable ABI dies' => 
     $body->set_stamp('Int');
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Mismatch');
-    my $m   = $cls->declare_method('answer', return_type => 'Int');
+    my $m   = $cls->declare_method('answer', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body]));
     $mop->seal;
 

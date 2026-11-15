@@ -188,7 +188,7 @@ class Chalk::IR::Transform::T2 {
     # DERIVED HERE, on demand. That makes a runtime MOP correct by
     # construction: nothing ever writes a compile-time type into it, so nothing
     # can leak. It also explains why MOP::Field has no `set_type` and why
-    # `set_return_type` refuses this rewrite -- it enforces narrowing WITHIN
+    # `narrow_return_type` (Analysis) refuses this rewrite -- it enforces narrowing WITHIN
     # the Chalk lattice, and crossing to LLVM vocabulary is a different
     # operation that should not borrow that door.
     #

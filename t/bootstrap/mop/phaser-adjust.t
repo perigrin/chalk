@@ -31,13 +31,17 @@ use Chalk::MOP;
     is($a2->source_position, 2, 'third adjust at position 2');
 }
 
-# graph defaults to a fresh Chalk::IR::Graph instance
+# ITS BODY IS THE COMPILER'S: none unless one is handed in (the MOP makes
+# none), and the one handed in is the one it holds, untouched.
 {
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Stub');
     my $adjust = $cls->declare_adjust();
 
-    isa_ok($adjust->graph, 'Chalk::IR::Graph', 'graph is a Chalk::IR::Graph');
+    ok(!defined $adjust->graph, 'no body unless the compiler hands one in');
+    my $body = bless {}, 'An::Opaque::Body';
+    my $given = $cls->declare_adjust(graph => $body);
+    is($given->graph, $body, 'the body handed in is the one held');
 }
 
 # adjust_blocks enumeration

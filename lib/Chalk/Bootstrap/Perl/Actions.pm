@@ -35,6 +35,13 @@ use Chalk::Scheduler::EagerPinning::Loop;
 use Chalk::Scheduler::EagerPinning::If;
 use Chalk::Scheduler::EagerPinning::TryCatch;
 
+use Chalk::Bootstrap::Bindings;
+
+# A CLASS'S OWN LEXICALS (`my` at class level), by name: the parser's to keep,
+# by class -- the MOP records the declarations, opaque to it, and depends on
+# nothing above it (t/bootstrap/mop-depends-on-nothing.t).
+my %CLASS_BINDINGS;
+
 # Builtin keyword sets used by StatementItem
 my %LIST_BUILTINS = map { $_ => 1 } qw(push unshift pop shift splice print say warn sort reverse chomp chop);
 
@@ -80,6 +87,17 @@ my %UNOP_MAP = (
 );
 
 class Chalk::Bootstrap::Perl::Actions {
+    # class_bindings($mop_class) -> the bindings of a class's own lexicals.
+    sub class_bindings ($cls) { return $CLASS_BINDINGS{ refaddr($cls) } // Chalk::Bootstrap::Bindings->new }
+
+    # declare_class_lexical($mop_class, $vardecl): a class-level `my` --
+    # recorded on the class (in order, opaque to it), its name bound here.
+    sub declare_class_lexical ($cls, $vardecl) {
+        $cls->declare_class_scope_var($vardecl);
+        $CLASS_BINDINGS{ refaddr($cls) } = class_bindings($cls)->define( $vardecl->name->value, $vardecl );
+        return $vardecl;
+    }
+
     field $factory;
     field $typed;
 
@@ -313,6 +331,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 for my $sub (@top_level_subs) {
                     $main->declare_sub($sub->name(),
                         params => $sub->params(),
+                        graph  => Chalk::IR::Graph->new,   # (its body: the MOP makes none)
                     );
                 }
             }
@@ -776,18 +795,16 @@ class Chalk::Bootstrap::Perl::Actions {
                         params      => $item->params(),
                         return_type => $item->return_type(),
                         body        => $item->body(),
-                        (defined $item->graph()
-                            ? (graph => $item->graph())
-                            : ()),
+                        # (its body: the parser's graph, else an empty one -- the MOP makes none)
+                        graph => $item->graph() // Chalk::IR::Graph->new,
                         lexical_bindings => \@bindings,
                     );
                 } elsif ($item isa Chalk::IR::SubInfo) {
                     $mop_class->declare_sub($item->name(),
                         params => $item->params(),
                         body   => $item->body(),
-                        (defined $item->graph()
-                            ? (graph => $item->graph())
-                            : ()),
+                        # (its body: the parser's graph, else an empty one -- the MOP makes none)
+                        graph => $item->graph() // Chalk::IR::Graph->new,
                     );
                 } elsif ($item isa Chalk::IR::UseInfo) {
                     if ($item->name eq 'constant') {
@@ -820,9 +837,9 @@ class Chalk::Bootstrap::Perl::Actions {
                         );
                     }
                 } elsif ($item isa Chalk::IR::Node::VarDecl) {
-                    $mop_class->declare_class_scope_var($item);
+                    Chalk::Bootstrap::Perl::Actions::declare_class_lexical( $mop_class, $item );
                 } elsif (ref($item) eq 'HASH' && exists $item->{__adjust_body}) {
-                    $mop_class->declare_adjust();
+                    $mop_class->declare_adjust( graph => Chalk::IR::Graph->new );   # (the MOP makes no body)
                 }
                 # __phaser_block markers in class body intentionally ignored —
                 # full phaser MOP integration deferred. The PhaserBlock is

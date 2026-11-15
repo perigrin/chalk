@@ -28,21 +28,14 @@ use Chalk::MOP;
     ok(!defined $sub->return_type, 'return_type defaults to undef');
 }
 
-# THE RETURN TYPE MAY BE NARROWED AFTER DECLARATION, and only narrowed. Same
-# contract as Chalk::MOP::Method::set_return_type -- see t/bootstrap/mop/method.t
-# for the reasoning. A sub carries it for the same consumer: Target::LLVM reads
-# return_type directly when emitting the callee's signature.
+# THE METAOBJECT HOLDS THE RETURN TYPE it is given: which answer wins (only
+# narrowing) is whole-program analysis's (t/bootstrap/ir/analysis-narrow-return-type.t).
 {
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('NarrowableSub');
+    my $cls = $mop->declare_class('HoldsSub');
     my $sub = $cls->declare_sub('s', return_type => 'Scalar');
-
     $sub->set_return_type('Int');
-    is($sub->return_type, 'Int', 'a subtype narrows the declared type');
-
-    my $ok = eval { $sub->set_return_type('Scalar'); 1 };
-    ok(!$ok, 'widening a determined type is refused');
-    is($sub->return_type, 'Int', 'the determined type survives the refusal');
+    is($sub->return_type, 'Int', 'set_return_type holds the type it is given');
 }
 
 # params default to empty
@@ -54,13 +47,17 @@ use Chalk::MOP;
     is_deeply($sub->params, [], 'params default to empty');
 }
 
-# graph defaults to a fresh Chalk::IR::Graph instance
+# ITS BODY IS THE COMPILER'S: none unless one is handed in (the MOP makes
+# none), and the one handed in is the one it holds, untouched.
 {
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Graphless');
     my $sub = $cls->declare_sub('stub');
 
-    isa_ok($sub->graph, 'Chalk::IR::Graph', 'graph is a Chalk::IR::Graph');
+    ok(!defined $sub->graph, 'no body unless the compiler hands one in');
+    my $body = bless {}, 'An::Opaque::Body';
+    my $given = $cls->declare_sub('stub', graph => $body);
+    is($given->graph, $body, 'the body handed in is the one held');
 }
 
 # top-level subs belong to main

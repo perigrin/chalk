@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
@@ -149,9 +150,9 @@ subtest 's/// in two method bodies: no duplicate @rxs_lit symbols' => sub {
 
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Subby');
-    my $m_a = $cls->declare_method('meth_a', return_type => 'Str');
+    my $m_a = $cls->declare_method('meth_a', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m_a->graph->merge($f->make_cfg('Return', inputs => [$mk_body->('foo')]));
-    my $m_b = $cls->declare_method('meth_b', return_type => 'Str');
+    my $m_b = $cls->declare_method('meth_b', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m_b->graph->merge($f->make_cfg('Return', inputs => [$mk_body->('boo')]));
     $mop->seal;
 

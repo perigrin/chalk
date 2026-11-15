@@ -4,9 +4,6 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Chalk::IR::Graph;
-use Chalk::IR::NodeFactory;
-use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: the lattice
 
 class Chalk::MOP::Sub {
     field $name        :param :reader;
@@ -29,47 +26,22 @@ class Chalk::MOP::Sub {
     # The calling context this metaobject's graph is a copy for ('list'), or
     # undef for the sub's own graph (Serialize::JSON's CONTEXT_COPY).
     field $context     :param :reader = undef;
-    field $graph       :param :reader = Chalk::IR::Graph->new;
-    field $factory     :param :reader = Chalk::IR::NodeFactory->new;
+    # ITS BODY, opaque to the MOP: the compiler hands it the graph it built
+    # (the MOP is the bottom layer -- it never makes or reads one).
+    field $graph       :param :reader = undef;
     field $body        :param :reader = [];
 
-    # Delegate graph operations to this sub's $graph. See MOP::Method
-    # for rationale: $graph is per-sub (honest); $factory is currently
-    # unused scaffolding so there are no make/make_cfg delegators.
-    method merge($node)  { $graph->merge($node) }
-    method next_cfg_id() { $graph->next_cfg_id }
-
-    # set_return_type($type) -- NARROW the return type, never weaken it.
-    #
-    # declare_sub populates return_type from the WIRE, the producer's answer.
-    # This loader then walks the graph and can often do better: it has the whole
-    # program where the producer works one CV at a time. When the two are ORDERED
-    # -- the graph derives a subtype of what the wire declared -- the narrower one
-    # is the answer, and it has to land HERE, because Target::LLVM reads
-    # return_type directly for the callee's signature. A metaobject left holding
-    # the wider type emits a wider return than its call sites expect.
-    #
-    # NARROWING ONLY. Accepting anything would let a later pass weaken a
-    # determined type, which is exactly what t/bootstrap/loader-return-type.t
-    # forbids: "may only NARROW it, never weaken it." `Unknown` and undef are not
-    # determined types, so any answer replaces them.
     # The Maybe shim only (LLVM.pm _context_sees_maybe_as_scalar): it shows
     # Context Scalar for a Maybe[T] and puts it back -- not a narrowing, so
     # it does not go through set_return_type. Delete it with Context.
     method shim_return_type($type) { $return_type = $type; return }
 
+    # set_return_type($type): the return type the compiler settled on. Which
+    # answer wins -- the wire's or a narrower one whole-program analysis
+    # derives -- is analysis's to decide (Chalk::IR::Analysis::
+    # narrow_return_type: a return type only narrows); the metaobject holds it.
     method set_return_type($type) {
         die "MOP: return type must be defined\n" unless defined $type;
-
-        if ( defined $return_type && $return_type ne 'Unknown' ) {
-            return $return_type if $type eq $return_type;
-            unless ( Chalk::Grammar::Perl::TypeLibrary::is_subtype( $type, $return_type ) ) {
-                my $where = $class->name . "::" . $name;
-                die "MOP: refusing to widen $where return type from "
-                  . "'$return_type' to '$type' -- a return type may only narrow.\n";
-            }
-        }
-
         $return_type = $type;
         return $return_type;
     }

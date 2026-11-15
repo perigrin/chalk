@@ -6,6 +6,7 @@ use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
@@ -102,7 +103,7 @@ subtest 'method-simple via MOP registry: $g->greet => 42 (Int)' => sub {
     # MOP: class Greeter { method greet { return 42 } }
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Greeter');
-    my $m   = $cls->declare_method('greet', return_type => 'Int');
+    my $m   = $cls->declare_method('greet', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
     $mop->seal;
 
@@ -203,7 +204,7 @@ subtest 'field-basic via MOP registry: $a->name => "cat" (Str)' => sub {
     my $cls = $mop->declare_class('Animal');
     $cls->declare_field('name', sigil => '$', type => 'Str',
         attributes => [':param']);
-    my $m = $cls->declare_method('name', return_type => 'Str');
+    my $m = $cls->declare_method('name', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m->graph->merge($f->make_cfg('Return', inputs => [$field_read]));
     $mop->seal;
 

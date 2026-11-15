@@ -6,6 +6,7 @@ use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
@@ -304,16 +305,16 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     # Thread the ADJUST body order: st_p -> st_x -> st_q.
     $st_x->set_control_in($st_p);
     $st_q->set_control_in($st_x);
-    my $adj = $cls->declare_adjust();
+    my $adj = $cls->declare_adjust(graph => Chalk::IR::Graph->new);
     $adj->graph->merge($_) for ($st_p, $st_x, $st_q);
 
     my $fa_p_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
     $fa_p_rd->set_stamp('Int');
-    my $getp = $cls->declare_method('getp', return_type => 'Int');
+    my $getp = $cls->declare_method('getp', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $getp->graph->merge($f->make_cfg('Return', inputs => [$fa_p_rd]));
     my $fa_q_rd = $f->make('FieldAccess', field_index => 2, field_stash => 'Pt', inputs => []);
     $fa_q_rd->set_stamp('Int');
-    my $getq = $cls->declare_method('getq', return_type => 'Int');
+    my $getq = $cls->declare_method('getq', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $getq->graph->merge($f->make_cfg('Return', inputs => [$fa_q_rd]));
 
     $mop->seal;

@@ -6,6 +6,7 @@ use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
@@ -92,12 +93,12 @@ sub build_pt_mop {
     $fa_y_lv->set_stamp('Int');
     my $asg = $f->make('Assign', inputs => [$fa_y_lv, $add]);
     $asg->set_stamp('Int');
-    my $adj = $cls->declare_adjust();
+    my $adj = $cls->declare_adjust(graph => Chalk::IR::Graph->new);
     $adj->graph->merge($asg);
 
     my $fa_y_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
     $fa_y_rd->set_stamp('Int');
-    my $mi = $cls->declare_method('gety', return_type => 'Int');
+    my $mi = $cls->declare_method('gety', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $mi->graph->merge($f->make_cfg('Return', inputs => [$fa_y_rd]));
 
     $mop->seal;

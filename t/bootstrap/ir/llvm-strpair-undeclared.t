@@ -6,6 +6,7 @@ use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
@@ -45,7 +46,7 @@ sub build_str_param_int_return_graph {
     # Method returns Int (not Str) — line 372 scan gets $need_strpair=0
     my $int_body = $f->make('Constant', value => 42, const_type => 'integer');
     $int_body->set_stamp('Int');
-    my $m = $cls->declare_method('get_int', return_type => 'Int');
+    my $m = $cls->declare_method('get_int', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$int_body]));
 
     $mop->seal;
@@ -128,7 +129,7 @@ subtest 'Str-returning method: exactly one %StrPair (I3 no double-declare)' => s
     my $str_val = $f->make('Constant', value => 'world', const_type => 'string');
     $str_val->set_stamp('Str');
 
-    my $m = $cls->declare_method('get_str', return_type => 'Str');
+    my $m = $cls->declare_method('get_str', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m->graph->merge($f->make_cfg('Return', inputs => [$str_val]));
 
     $mop->seal;

@@ -6,6 +6,7 @@ use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::MOP;
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
@@ -92,7 +93,7 @@ subtest 'field + reader + ADJUST + method via the sealed MOP' => sub {
     # method val { $y }
     my $fa_y = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
     $fa_y->set_stamp('Int');
-    my $m = $cls->declare_method('val', return_type => 'Int');
+    my $m = $cls->declare_method('val', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$fa_y]));
 
     # ADJUST { $y = $x + 1 }
@@ -104,7 +105,7 @@ subtest 'field + reader + ADJUST + method via the sealed MOP' => sub {
     $fa_y_lv->set_stamp('Int');
     my $st = $f->make('Assign', inputs => [$fa_y_lv, $add]);
     $st->set_stamp('Int');
-    my $adj = $cls->declare_adjust();
+    my $adj = $cls->declare_adjust(graph => Chalk::IR::Graph->new);
     $adj->graph->merge($st);
 
     $mop->seal;
@@ -136,7 +137,7 @@ subtest ':isa inheritance through the MOP registry' => sub {
     my $mop = Chalk::MOP->new;
 
     my $base = $mop->declare_class('Base');
-    my $bm = $base->declare_method('seven', return_type => 'Int');
+    my $bm = $base->declare_method('seven', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $bm->graph->merge($f->make_cfg('Return', inputs => [int_const($f, 7)]));
 
     $mop->declare_class('Kid', parent_name => 'Base');
@@ -186,7 +187,7 @@ subtest 'multi-statement ADJUST body in control-chain order' => sub {
     $st_x->set_control_in($st_p);
     $st_q->set_control_in($st_x);
 
-    my $adj = $cls->declare_adjust();
+    my $adj = $cls->declare_adjust(graph => Chalk::IR::Graph->new);
     $adj->graph->merge($_) for ($st_p, $st_x, $st_q);
 
     my $fa_p = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
@@ -195,7 +196,7 @@ subtest 'multi-statement ADJUST body in control-chain order' => sub {
     $fa_q->set_stamp('Int');
     my $body = $f->make('Add', inputs => [$fa_p, $fa_q]);
     $body->set_stamp('Int');
-    my $m = $cls->declare_method('val', return_type => 'Int');
+    my $m = $cls->declare_method('val', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body]));
 
     $mop->seal;
@@ -222,7 +223,7 @@ subtest 'grandparent inheritance, child sorts before parent (review)' => sub {
     my $mop = Chalk::MOP->new;
 
     my $top = $mop->declare_class('Top');
-    my $tm = $top->declare_method('seven', return_type => 'Int');
+    my $tm = $top->declare_method('seven', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $tm->graph->merge($f->make_cfg('Return', inputs => [int_const($f, 7)]));
 
     $mop->declare_class('Mid', parent_name => 'Top');
@@ -256,7 +257,7 @@ subtest 'field default value lowers through the MOP registry (review)' => sub {
 
     my $fa_y = $f->make('FieldAccess', field_index => 0, field_stash => 'Dft', inputs => []);
     $fa_y->set_stamp('Int');
-    my $m = $cls->declare_method('val', return_type => 'Int');
+    my $m = $cls->declare_method('val', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$fa_y]));
 
     $mop->seal;
@@ -290,7 +291,7 @@ subtest 'phaser body collection ignores statement-effect sub-expressions' => sub
     my $st = $f->make('Assign', inputs => [$fa_lv, $rhs_call]);
     $st->set_stamp('Int');
 
-    my $adj = $cls->declare_adjust();
+    my $adj = $cls->declare_adjust(graph => Chalk::IR::Graph->new);
     $adj->graph->merge($st);   # ONE statement; the Call rides as its input
     $mop->seal;
 
@@ -311,7 +312,7 @@ subtest 'guards: unsealed MOP and Return-less method die loudly' => sub {
 
     my $mop2 = Chalk::MOP->new;
     my $cls2 = $mop2->declare_class('Pt');
-    $cls2->declare_method('val', return_type => 'Int');   # graph has no Return
+    $cls2->declare_method('val', graph => Chalk::IR::Graph->new, return_type => 'Int');   # graph has no Return
     $mop2->seal;
     my $err2;
     eval { Chalk::Target::LLVM->lower($ret, mop => $mop2); 1 } or $err2 = $@;
@@ -322,7 +323,7 @@ subtest 'guards: unsealed MOP and Return-less method die loudly' => sub {
     my $f3   = Chalk::IR::NodeFactory->new;
     my $mop3 = Chalk::MOP->new;
     my $cls3 = $mop3->declare_class('Pt');
-    my $m3 = $cls3->declare_method('val', return_type => 'Int');
+    my $m3 = $cls3->declare_method('val', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m3->graph->merge($f3->make_cfg('Return', inputs => [int_const($f3, 1)]));
     $m3->graph->merge($f3->make_cfg('Return', inputs => [int_const($f3, 2)]));
     $mop3->seal;

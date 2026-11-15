@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
@@ -170,9 +171,9 @@ subtest 'EnvRead in two method bodies: declared getenv, no duplicate globals' =>
 
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Envy');
-    my $mi_a = $cls->declare_method('env_a', return_type => 'Str');
+    my $mi_a = $cls->declare_method('env_a', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $mi_a->graph->merge($f->make_cfg('Return', inputs => [$mk_body->('CHALK_G7_TEST')]));
-    my $mi_b = $cls->declare_method('env_b', return_type => 'Str');
+    my $mi_b = $cls->declare_method('env_b', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $mi_b->graph->merge($f->make_cfg('Return', inputs => [$mk_body->('CHALK_G7_OTHER')]));
     $mop->seal;
 

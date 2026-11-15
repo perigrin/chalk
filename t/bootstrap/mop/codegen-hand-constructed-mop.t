@@ -7,12 +7,14 @@ use Scalar::Util qw(reftype);
 use lib 'lib';
 
 use Chalk::MOP;
+use Chalk::IR::Graph;
 use Chalk::Bootstrap::Perl::Target::Perl;
 
 # Build a MOP without invoking the parser.
 my $mop = Chalk::MOP->new;
 my $cls = $mop->declare_class('Tiny');
 $cls->declare_method('noop',
+    graph       => Chalk::IR::Graph->new,   # (its body: the compiler's -- the MOP makes none)
     params      => [],
     return_type => 'Void',
 );

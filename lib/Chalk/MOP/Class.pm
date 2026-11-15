@@ -9,7 +9,6 @@ use Chalk::MOP::Method;
 use Chalk::MOP::Sub;
 use Chalk::MOP::Import;
 use Chalk::MOP::Phaser::Adjust;
-use Chalk::Bootstrap::Bindings;
 
 class Chalk::MOP::Class {
     field $name        :param :reader;
@@ -25,7 +24,6 @@ class Chalk::MOP::Class {
     field @subs;
     field @imports;
     field @adjust_blocks;
-    field $bindings :reader = Chalk::Bootstrap::Bindings->new;
     field @class_scope_vars;
     field @use_constants;
 
@@ -128,17 +126,12 @@ class Chalk::MOP::Class {
         return $adjust;
     }
 
+    # declare_class_scope_var($decl): a class-level `my`, in order. The
+    # declaration is the parser's node, opaque here; its name's binding is the
+    # parser's to keep (Chalk::Bootstrap::Perl::Actions::class_bindings).
     method declare_class_scope_var($vardecl_node) {
         $self->_assert_unsealed('declare_class_scope_var');
-        # $vardecl_node is a Chalk::IR::Node::VarDecl already merged
-        # into its upstream graph by Actions.pm. We do NOT merge it
-        # into a class-side graph here — no class graph exists in this
-        # commit (see Phase 7c-prep design Risk #2). Record in the
-        # insertion-ordered list (for codegen iteration) and bind the
-        # name in $bindings (for lookup-by-name semantics).
         push @class_scope_vars, $vardecl_node;
-        my $name = $vardecl_node->name->value;
-        $bindings = $bindings->define($name, $vardecl_node);
         return $vardecl_node;
     }
 

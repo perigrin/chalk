@@ -298,6 +298,27 @@ my %_COERCIBLE_TO = (
 # a structural reason: field types must land on the records while they are
 # still mutable, because MOP::Field has no type setter. They infer ONTO THE
 # RECORDS -- construction, not inference over graphs.
+# narrow_return_type($meta, $type) -- WHOLE-PROGRAM ANALYSIS's answer for a
+# sub's or a method's return type, onto its metaobject: it may NARROW what is
+# there (the wire's, or an earlier pass's), never weaken it (t/bootstrap/
+# loader-return-type.t). `Unknown` and undef are not determined types, so any
+# answer replaces them. The lattice is the compiler's (TypeLibrary), so the
+# rule is analysis's, not the metaobject's: the MOP depends on nothing above
+# it (t/bootstrap/mop-depends-on-nothing.t); the loader only loads.
+sub narrow_return_type ($meta, $type) {
+    die "MOP: return type must be defined\n" unless defined $type;
+    my $have = $meta->return_type;
+    if ( defined $have && $have ne 'Unknown' ) {
+        return $have if $type eq $have;
+        unless ( Chalk::Grammar::Perl::TypeLibrary::is_subtype( $type, $have ) ) {
+            my $where = $meta->class->name . "::" . $meta->name;
+            die "MOP: refusing to widen $where return type from "
+              . "'$have' to '$type' -- a return type may only narrow.\n";
+        }
+    }
+    return $meta->set_return_type($type);
+}
+
 sub hydrate ($class, $graphs, $classes = undef) {
     my %graphs = %$graphs;
 
@@ -481,7 +502,7 @@ sub infer ($class, $graphs) {
         # expected 'double'". The two halves of one function disagreed.
         #
         # _stamp_method_call_reprs already reconciles wire against graph and
-        # calls set_return_type with the narrower; set_return_type itself only
+        # calls narrow_return_type with the narrower, which itself only
         # ever narrows and dies on a widening. So re-running it here cannot
         # weaken a type -- it only lets the metaobject catch up to a body this
         # loop just refined.
@@ -554,7 +575,7 @@ sub infer ($class, $graphs) {
     # is how 11.0's bits get read as an i64, which is precisely what
     # ir/call-at-the-abi-unbox-at-the-node.t was written to catch.
     #
-    # set_return_type only ever narrows and dies on a widening, so this cannot
+    # narrow_return_type only ever narrows and dies on a widening, so this cannot
     # weaken a type another pass established; it lets the metaobject catch up.
     _stamp_method_call_reprs(\%graphs, $mop);
 
@@ -1264,7 +1285,7 @@ sub _type_calls_returning_self ($graphs) {
             $n->set_stamp('Object');
             # ...and the method's own signature: a class method is emitted as a
             # function whose return type is its metaobject's.
-            $t->set_return_type('Object')
+            narrow_return_type( $t, 'Object' )
                 if $t->can('set_return_type') && ( $t->return_type // 'Unknown' ) eq 'Unknown';
         }
     }
@@ -2481,7 +2502,9 @@ sub _replay_classes ($classes, $graphs) {
             }
 
             $cls->declare_method($mname,
-                (defined $graph ? (graph => $graph) : ()),
+                # (its body: the loaded graph, else an empty one -- the MOP
+                # makes none)
+                graph => $graph // Chalk::IR::Graph->new,
                 return_type => ($wire_rts->{$mname} // 'Unknown'),
                 params      => \@params,
             );
@@ -2500,7 +2523,7 @@ sub _replay_classes ($classes, $graphs) {
             my $sd  = $subs->{$sname};
             my $key = $sd->{graph} // '';
             # REFUSE a record whose graph is missing rather than declaring a
-            # graph-less MOP::Sub. MOP::Sub's `graph` field defaults to a fresh
+            # graph-less MOP::Sub. (MOP::Sub's `graph` once defaulted to a fresh
             # EMPTY Chalk::IR::Graph, not undef, so a consumer's `defined`
             # check cannot tell "no body" from "a body" -- it would inline
             # nothing and silently produce a wrong answer. The producer records
@@ -3485,9 +3508,9 @@ sub _stamp_method_call_reprs ($graphs, $mop) {
                 # Target::LLVM reads return_type off the metaobject when it
                 # emits the callee's signature, so leaving it at the wider wire
                 # value emits a wider return than the call sites stamped below
-                # expect. set_return_type only ever narrows, so this cannot
+                # expect. narrow_return_type only ever narrows, so this cannot
                 # weaken a type some other pass determined.
-                $meta->set_return_type($repr) if $meta;
+                narrow_return_type( $meta, $repr ) if $meta;
             }
             $ret_repr{"$cname\::$mname"} = $repr;
         }

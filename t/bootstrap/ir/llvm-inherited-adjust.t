@@ -6,6 +6,7 @@ use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
 
+use Chalk::IR::Graph;
 use Chalk::MOP;
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
@@ -96,7 +97,7 @@ subtest "parent ADJUST runs on a child constructor" => sub {
     $d_lv->set_stamp('Int');
     my $d_st = $f->make('Assign', inputs => [$d_lv, $d_val]);
     $d_st->set_stamp('Int');
-    $base->declare_adjust()->graph->merge($d_st);
+    $base->declare_adjust(graph => Chalk::IR::Graph->new)->graph->merge($d_st);
 
     my $kid = $mop->declare_class('Kid', parent_name => 'Base');
     $kid->declare_field('k', sigil => '$', type => 'Int', attributes => []);
@@ -109,7 +110,7 @@ subtest "parent ADJUST runs on a child constructor" => sub {
     $k_lv->set_stamp('Int');
     my $k_st = $f->make('Assign', inputs => [$k_lv, $k_val]);
     $k_st->set_stamp('Int');
-    $kid->declare_adjust()->graph->merge($k_st);
+    $kid->declare_adjust(graph => Chalk::IR::Graph->new)->graph->merge($k_st);
 
     # method sum { $d + $k }  (Kid struct: b=0, d=1, k=2)
     my $d_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Kid', inputs => []);
@@ -118,7 +119,7 @@ subtest "parent ADJUST runs on a child constructor" => sub {
     $k_rd->set_stamp('Int');
     my $sum = $f->make('Add', inputs => [$d_rd, $k_rd]);
     $sum->set_stamp('Int');
-    my $sum_m = $kid->declare_method('sum', return_type => 'Int');
+    my $sum_m = $kid->declare_method('sum', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $sum_m->graph->merge($f->make_cfg('Return', inputs => [$sum]));
 
     $mop->seal;
@@ -157,13 +158,13 @@ subtest "inherited ADJUST when child sorts before parent" => sub {
     $d_lv->set_stamp('Int');
     my $d_st = $f->make('Assign', inputs => [$d_lv, $d_val]);
     $d_st->set_stamp('Int');
-    $zoo->declare_adjust()->graph->merge($d_st);
+    $zoo->declare_adjust(graph => Chalk::IR::Graph->new)->graph->merge($d_st);
 
     my $apple = $mop->declare_class('Apple', parent_name => 'Zoo');
     # method val { $d }  (Apple struct: z=0, d=1)
     my $d_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Apple', inputs => []);
     $d_rd->set_stamp('Int');
-    my $val_m = $apple->declare_method('val', return_type => 'Int');
+    my $val_m = $apple->declare_method('val', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $val_m->graph->merge($f->make_cfg('Return', inputs => [$d_rd]));
 
     $mop->seal;
@@ -203,7 +204,7 @@ subtest "three-level field + ADJUST inheritance" => sub {
     $m_lv->set_stamp('Int');
     my $m_st = $f->make('Assign', inputs => [$m_lv, $m_val]);
     $m_st->set_stamp('Int');
-    $mid->declare_adjust()->graph->merge($m_st);
+    $mid->declare_adjust(graph => Chalk::IR::Graph->new)->graph->merge($m_st);
 
     my $kid = $mop->declare_class('Kid', parent_name => 'Mid');
     $kid->declare_field('k', sigil => '$', type => 'Int', attributes => []);
@@ -216,12 +217,12 @@ subtest "three-level field + ADJUST inheritance" => sub {
     $k_lv->set_stamp('Int');
     my $k_st = $f->make('Assign', inputs => [$k_lv, $k_val]);
     $k_st->set_stamp('Int');
-    $kid->declare_adjust()->graph->merge($k_st);
+    $kid->declare_adjust(graph => Chalk::IR::Graph->new)->graph->merge($k_st);
 
     # method val { $k }  (Kid struct: g=0, m=1, k=2)
     my $k_rd = $f->make('FieldAccess', field_index => 2, field_stash => 'Kid', inputs => []);
     $k_rd->set_stamp('Int');
-    my $val_m = $kid->declare_method('val', return_type => 'Int');
+    my $val_m = $kid->declare_method('val', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $val_m->graph->merge($f->make_cfg('Return', inputs => [$k_rd]));
 
     $mop->seal;
@@ -249,7 +250,7 @@ subtest "inherited :reader and field-inheriting override" => sub {
     $base->declare_field('v', sigil => '$', type => 'Int', attributes => [':param', ':reader']);
     # method tag { 1 }
     my $one_b = int_const($f, 1);
-    my $tag_b = $base->declare_method('tag', return_type => 'Int');
+    my $tag_b = $base->declare_method('tag', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $tag_b->graph->merge($f->make_cfg('Return', inputs => [$one_b]));
 
     my $kid = $mop->declare_class('K', parent_name => 'B');
@@ -258,7 +259,7 @@ subtest "inherited :reader and field-inheriting override" => sub {
     $v_rd->set_stamp('Int');
     my $ov = $f->make('Add', inputs => [$v_rd, int_const($f, 100)]);
     $ov->set_stamp('Int');
-    my $tag_k = $kid->declare_method('tag', return_type => 'Int');
+    my $tag_k = $kid->declare_method('tag', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $tag_k->graph->merge($f->make_cfg('Return', inputs => [$ov]));
 
     $mop->seal;
