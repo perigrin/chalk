@@ -43,6 +43,19 @@ sub inc_key ($name) { return $name =~ m{[./]} ? $name : join( '/', split /::/, $
 # is_built_in($name) -> true for a module built into chalk.
 sub is_built_in ($name) { return $BUILT_IN{ inc_key($name) } ? 1 : 0 }
 
+# perl_may_warn($nodes) -> why perl may raise warnings of its own in the
+# program loaded last (whose nodes, all of them, are given), or undef: a
+# `use warnings`, a `use VERSION` of 5.35 or later, $^W, a module B::SoN
+# followed (its own code may turn them on). Chalk raises none of perl's own
+# warnings, so a __WARN__ handler there would miss calls perl makes.
+sub perl_may_warn (@nodes) {
+    return 'use warnings' if $Chalk::IR::Serialize::JSON::USED_MODULES{warnings};
+    return 'a use VERSION of 5.35 or later' if grep { $_ >= 5.035 } keys %Chalk::IR::Serialize::JSON::USED_VERSIONS;
+    return 'a module compiled in' if %Chalk::IR::Serialize::JSON::FOLLOWED;
+    return '$^W' if grep { $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq "\cW" } @nodes;
+    return undef;
+}
+
 # file_of($class) -> the file an Impl class is written in.
 sub file_of ($class) {
     my ($leaf) = $class =~ /\AChalk::Impl::(\w+)\z/ or die "Chalk::Impl: no Impl class $class\n";

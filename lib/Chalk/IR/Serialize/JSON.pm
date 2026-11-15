@@ -1255,6 +1255,9 @@ sub from_json ($json_string) {
     # of a file by path were dropped with whatever they printed.
     # The modules a `use` names -- parent and base set up inheritance there.
     our %USED_MODULES = ();
+    # The perl versions a `use VERSION` names (5.036): v5.35 and later turn
+    # warnings on.
+    our %USED_VERSIONS = ();
     # BEGIN and END blocks of main with effects: loaded as graphs of their
     # own, [phase, name] in source order; the program lowering runs a BEGIN
     # before its main line and an END after it (pvm 258).
@@ -1310,6 +1313,7 @@ sub from_json ($json_string) {
         die "GAP: a $p->{phase} block with effects of its own is not lowered "
           . "(a BEGIN or END block runs outside the main program)\n" if @effects;
         $USED_MODULES{$module} = 1 if $is_use && defined $module;
+        $USED_VERSIONS{$file} = 1 if $is_version;
     }
     # A FOLLOWED MODULE'S SUB the program never reaches is not loaded.
     my %run = map { $_ => 1 } _reachable_methods( $data->{methods} // {}, $data->{classes} // {}, $data->{refused} // {} );

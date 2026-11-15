@@ -218,6 +218,10 @@ sub special_containers {
 sub special_startup {
     my ($b) = @_;
     my $sp = $b->special_containers;
+    # (perl's own warnings reach a __WARN__ handler; chalk raises none)
+    if ( $sp->{'Chalk::Impl::SIG'} and my $why = Chalk::Impl::perl_may_warn( _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) ) ) {
+        out("%SIG where perl may raise warnings of its own ($why), which chalk does not raise");
+    }
     for my $class (sort keys %$sp) {
         my $h = $b->special_hash( $sp->{$class} );
         my $cls = $b->as( $b->const_str($class), '%Slot' );

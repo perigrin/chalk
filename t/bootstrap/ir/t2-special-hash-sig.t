@@ -94,4 +94,17 @@ for my $case (
     like($why // '', qr/a warn whose message may not end in a newline/, '... refused by name');
 }
 
+# PERL'S OWN WARNINGS reach a __WARN__ handler (an argument not numeric under
+# `use warnings`), and chalk raises none of them: where warnings may be on,
+# %SIG is refused by name -- never a handler left uncalled.
+for my $src (
+    q{use warnings; my $n = 0; $SIG{__WARN__} = sub { $n++ }; my $x = "5"; my $r = $x + "3abc"; print "$r $n\n";},
+    q{use v5.36; my $n = 0; $SIG{__WARN__} = sub { $n++ }; my $x = "5"; my $r = $x + "3abc"; print "$r $n\n";},
+    q{$^W = 1; my $n = 0; $SIG{__WARN__} = sub { $n++ }; my $x = "5"; my $r = $x + "3abc"; print "$r $n\n";},
+) {
+    my ($ll, $why) = t2($src);
+    ok(!defined $ll, "perl may warn of its own: not lowered: $src");
+    like($why // '', qr/%SIG where perl may raise warnings of its own/, '... refused by name');
+}
+
 done_testing;
