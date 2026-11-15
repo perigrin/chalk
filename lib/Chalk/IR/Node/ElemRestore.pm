@@ -12,4 +12,7 @@ class Chalk::IR::Node::ElemRestore :isa(Chalk::IR::Value) {
     method is_fixed() { return true }
     # A MEMORY VERSION: a store (a read after it reads at it).
     method is_memory_version() { return 1 }
+    # memory_operand -> the version it restores at: its last input (after the
+    # container, the key, the saved value and whether it existed).
+    method memory_operand() { return $self->inputs->[4] }
 }

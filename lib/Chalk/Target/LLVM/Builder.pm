@@ -273,8 +273,14 @@ sub list_only {
     my ($b, $n, $what, %o) = @_;
     for my $u (grep { blessed($_) } ( $n->consumers // [] )->@*) {
         my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
+        # (A READ PINNED where it stands is a memory version and a control: a
+        # later read's memory, a loop's or a merge's way in, takes no value)
+        my $mem = $u->memory_operand;
+        pop @pos if @pos && blessed($mem) && refaddr($mem) == refaddr($n);
         next unless @pos;
         my $op = $u->operation;
+        next if $op =~ /\A(?:Loop|Region|If|Proj)\z/;
+        next if $op eq 'Phi' && $u->is_memory;   # (a merge of memory versions)
         my $at0 = grep { $_ == 0 } @pos;
         next if $op eq 'Coerce' && !grep { blessed($_) && $_->operation ne 'Print' } ( $u->consumers // [] )->@*;
         next if $op =~ /\A(?:ArrayLiteral|HashLiteral|Print)\z/;

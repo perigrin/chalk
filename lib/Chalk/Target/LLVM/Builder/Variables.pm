@@ -52,6 +52,11 @@ sub hash_reads_settled {
 # or an array's element, count or copy where the array is a scalar's.
 sub _through_ref {
     my ($b, $n, $seen) = @_;
+    # (A READ MADE ALREADY -- B::SoN pins one that may die where it stands,
+    # and the walk makes it there -- stopped, if it was to, there: what reads
+    # what it read cannot)
+    return 0 if $b->{memo}{ refaddr($n) };
+    return 0 if $b->_stood_already($n);
     my $op = $n->operation;
     # (a foreach alias read is its element's read)
     if ( $op eq 'PostfixDeref' && ( my $el = $n->alias_element ) ) { return $b->_through_ref($el, $seen) }
@@ -67,11 +72,61 @@ sub _through_ref {
                              && $b->_through_ref($_, $seen) } $n->inputs->@*;
     }
     my $c = $n->inputs->[0];
-    $c = $c->inputs->[0] while $c isa Chalk::IR::Node && $c->is_array_deref;
+    my $derefs = 0;
+    while ( $c isa Chalk::IR::Node && $c->is_array_deref ) {
+        return 0 if $b->{memo}{ refaddr($c) };   # (made where it stands: see above)
+        $c = $c->inputs->[0]; $derefs++;
+    }
     return 0 unless blessed($c);
-    # (a \@a, a [...], @_, a `my @a`, @ARGV: an array it has, never a stop)
-    return 0 if $c->operation =~ /\A(?:Ref|ArrayLiteral|ArgsSource)\z/ || $c->is_my_array || $c->is_argv;
-    return 1;
+    # (A LIST'S ELEMENT OR COUNT -- foreach over `sort keys %m` -- reads no reference)
+    return 0 if !$derefs && $op ne 'PostfixDeref' && _is_list($c) && $c->operation ne 'Phi';
+    # (A FRESH {...} is a hash reference: its keys, values, a copy of it never stop)
+    return 0 if $op eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%' && $c->operation eq 'HashLiteral' && ( $c->stamp // '' ) eq 'HashRef';   # static type
+    return !_own_array($c, {});
+}
+
+# _deref_kind($read) -> what a read through a reference needs there: '%' a
+# hash, '@' an array, '$' a scalar; undef for what is no such read.
+sub _deref_kind {
+    my ($n) = @_;
+    my $op = $n->operation;
+    return $n->sigil // '' if $op eq 'PostfixDeref';
+    return ( $n->kind // '' ) eq 'hash' ? '%' : '@' if $op =~ /\A(?:Subscript|Exists)\z/;
+    return undef;
+}
+# _stood_already($read) -> true where a read through the same reference, of
+# the same kind, at the same memory -- or the memory this read is at -- was
+# pinned where it stands and passed: made, it did not stop, and through that
+# same reference, nothing stored between, this cannot; passed unmade (nothing
+# took its value), this one is that read -- `my %p = %$h` is B::SoN's copy of
+# the deref it pinned -- and stops, if it is to, as T2's read of it does.
+sub _stood_already {
+    my ($b, $n) = @_;
+    my $kind = _deref_kind($n) // return 0;
+    my ($c, $m) = ( $n->inputs->[0], $n->memory_operand );
+    return 0 unless blessed($c) && blessed($m);
+    for my $o (grep { blessed($_) && refaddr($_) != refaddr($n) } ( $c->consumers // [] )->@*) {
+        next unless $o->is_pinned && ( $b->{memo}{ refaddr($o) } || $b->{stood}{ refaddr($o) } ) && ( _deref_kind($o) // '' ) eq $kind
+            && blessed( $o->inputs->[0] ) && refaddr( $o->inputs->[0] ) == refaddr($c);
+        my $om = $o->memory_operand;
+        return 1 if refaddr($o) == refaddr($m) || blessed($om) && refaddr($om) == refaddr($m);
+    }
+    return 0;
+}
+
+# _own_array($n) -> true for an array the function has, never a stop: a \@a,
+# a [...], @_, a `my @a`, @ARGV -- or a merge (Phi) of only such, a `my @a`
+# as a loop or an arm leaves it.
+sub _own_array {
+    my ($c, $seen) = @_;
+    return 0 unless blessed($c);
+    return 1 if $c->operation =~ /\A(?:Ref|ArrayLiteral|ArgsSource)\z/ || $c->is_my_array || $c->is_argv;
+    # (the list a map or grep builds, a pass at a time: the array it appends to)
+    return _own_array($c->inputs->[0], $seen) if $c->operation eq 'ListAppend';
+    return 0 unless $c->operation eq 'Phi';
+    return 1 if $seen->{ refaddr($c) }++;   # (the loop's own back edge: what the rest says)
+    my @in = grep { blessed($_) } $c->inputs->@*;
+    return @in && !grep { !_own_array($_, $seen) } @in;
 }
 
 # A `my` VARIABLE KEPT IN MEMORY (B::SoN's location: passed to a sub, written

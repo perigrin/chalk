@@ -545,9 +545,13 @@ sub array_of {
     # (an ELEMENT read through an undef one is undef, as perl's; read WHOLE --
     # a count, a list -- perl dies under strict and reads undef without: refused)
     if (blessed($n) && $n->operation eq 'Subscript' && !$b->{args}{ refaddr($n) }) {
-        out('an array through an element read whole') unless $b->{writing} || $b->{elem_read};
-        my $w = $b->{writing};
+        # (READ WHOLE WHERE B::SoN PINNED IT -- `scalar @{ $h->{l} }` -- an undef
+        # there stops, loudly, where perl dies under strict refs or reads
+        # nothing without: never a stand-in)
+        out('an array through an element read whole') unless $b->{writing} || $b->{elem_read} || $b->{whole_stop};
+        my $w = $b->{writing} || $b->{whole_stop};
         local $b->{elem_read} = 0;
+        local $b->{whole_stop} = 0;
         return $b->emit(op => $w ? 'ADeref' : 'ADerefR', type => '%Array*', inputs => [ $b->as($b->value($n), '%Slot') ]);
     }
     # @Pkg::ISA IS THE RUN-TIME MOP'S OWN PARENT LIST: the array method lookup
@@ -676,6 +680,10 @@ sub element_store {
     # reference from elsewhere: refused, not stopped at run time where it is undef)
     out('a store through an element not made a hash or array first')
         if blessed( $target->inputs->[0] ) && $target->inputs->[0]->operation eq 'Subscript' && !$b->{args}{ refaddr( $target->inputs->[0] ) };
+    # (AN ELEMENT OF A SLICE -- grep's or map's $_ over `@a[0, 1]` -- is the
+    # array's own element in perl; the slice here is a copy: refused)
+    out("a store into a slice's element (perl aliases the array's element)")
+        if blessed( $target->inputs->[0] ) && $target->inputs->[0]->operation eq 'Slice';
     if (( $target->can('kind') ? $target->kind // 'array' : 'array' ) eq 'hash') {
         my ($h, $k) = $target->inputs->@[0, 1];
         # perl evaluates what it stores, then where, then stores.

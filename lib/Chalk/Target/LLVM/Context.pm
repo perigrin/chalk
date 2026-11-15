@@ -1647,6 +1647,9 @@ sub _is_memory_version {
     my ($node) = @_;
     my $op = $node->operation;
     return 1 if $op =~ /\A(?:MemStart|Assign|Call|RegexSubst|Transliterate|EntryWrite|CellWrite|Delete|ElemRestore)\z/;
+    # a read B::SoN pinned where it stands (through a reference it may die; a
+    # tied one is a call) is the version after it
+    return 1 if $op =~ /\A(?:Subscript|Exists|PostfixDeref|Count)\z/ && $node->is_pinned;
     # an m//g writes pos(), so B::SoN versions memory at it
     return 1 if $op eq 'RegexMatch' && ( $node->flags // '' ) =~ /g/;
     # a match whose `(?{ ... })` blocks run writes what they write
@@ -7577,6 +7580,12 @@ sub process_control_node {
         # is made before the put-back. Left to its use, it read the restored value.
         if ($op eq 'ElemRestore' || $op eq 'EntryWrite') {
             my $m = $node->inputs->[-1];
+            # (A READ B::SoN PINNED where it stands is the version after it:
+            # what reads at it, and at the merge before it, is made here too.)
+            while ( blessed($m) && $m->operation =~ /\A(?:Subscript|Exists|PostfixDeref|Count)\z/ && $m->is_pinned ) {
+                $self->_freeze_memory_reads($m);
+                $m = $m->inputs->[-1];
+            }
             $self->_freeze_memory_reads($m)
                 if blessed($m) && $m->operation eq 'Phi' && $m->can('memory') && $m->memory;
         }

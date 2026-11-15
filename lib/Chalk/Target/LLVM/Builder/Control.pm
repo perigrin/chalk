@@ -115,7 +115,21 @@ sub walk {
         elsif ($op eq 'RegexSubst' || $op eq 'Transliterate') { $b->regex_subst_stmt($s); push $b->{passed}->@*, $s; $ctl = $s }
         elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref|FieldAccess|RegexMatch|Match|BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/
                || $op eq 'Call' && ( t2_builtin( $s, 'in_place' ) // '' ) eq 'passed') {
-            $b->value($s);
+            # (A WHOLE ARRAY THROUGH AN ELEMENT, COUNTED, read where B::SoN pinned
+            # it -- `scalar @{ $h->{l} }`: one that is no array there stops, see
+            # array_of. Read as a list it stays refused there.)
+            local $b->{whole_stop} = $op eq 'PostfixDeref' && $s->is_array_deref
+                && blessed( $s->inputs->[0] ) && $s->inputs->[0]->operation eq 'Subscript' && _only_counted($s);
+            # (one of an element B::SoN knows is not there -- a missing key --
+            # would only stop: perl's count is undef, or its die)
+            out('a count of @{} over an element known undef')
+                if $b->{whole_stop} && ( $s->inputs->[0]->stamp // '' ) eq 'Undef';   # static type
+            # (A WHOLE AGGREGATE THROUGH A REFERENCE B::SoN pinned only to order
+            # it, whose value nothing takes -- `my %p = %$h` reads B::SoN's copy
+            # beside it -- is not made: its place is passed, what reads at it
+            # reads there. See _stood_already.)
+            if ( $op eq 'PostfixDeref' && ( $s->sigil // '' ) =~ /\A[\@%]\z/ && !$b->_value_read($s) ) { $b->{stood}{ refaddr($s) } = 1 }
+            else { $b->value($s) }
             push $b->{passed}->@*, $s;
             $ctl = $s;
         }
@@ -415,6 +429,7 @@ sub close_eval {
         # (a value made here is the catch's: not seen after -- an undef made in
         # one eval's catch was another's phi input, not dominating it)
         local $b->{memo} = { $b->{memo}->%* };
+        local $b->{stood} = { ( $b->{stood} // {} )->%* };   # (as its memo: see _stood_already)
         @cv = map { $b->as($b->value( $_->[0]->inputs->[-1] ), $_->[1]) } @in;
         $c = $b->{cur};
         $c->{term} = [ 'br', $join ];
@@ -470,12 +485,17 @@ sub if_stmt {
         my $blk = $b->new_block($i ? 'else' : 'then');
         $blk{$i} = $blk;
         local $b->{memo} = { $b->{memo}->%* };   # an arm's values are the arm's
+        local $b->{stood} = { ( $b->{stood} // {} )->%* };   # (as its memo: see _stood_already)
+        # (AND ITS MEMORY VERSIONS: a read at one is made in the arm or not at
+        # all -- made after the join it ran where the arm did not, `defined $r
+        # && @$r` counting through an undef $r)
+        local $b->{passed} = [ $b->{passed}->@* ];
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
         local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $if->inputs->[1], $i );
         $end{$i} = $b->walk($proj{$i});
         # The arm's memo is kept: its phi inputs are read from it (a call made
         # in the arm is that value, not made again).
-        $vals{$i} = { block => $b->{cur}, ctl => $end{$i}, memo => $b->{memo} };
+        $vals{$i} = { block => $b->{cur}, ctl => $end{$i}, memo => $b->{memo}, passed => $b->{passed} };
     }
     $from->{term} = [ 'condbr', $cond, $blk{0}, $blk{1} ];
     # IN A LOOP THAT LEAVES OR GOES ROUND FROM ITS BODY (see loop_breaks): an
@@ -493,6 +513,7 @@ sub if_stmt {
                 my $go = $left{0} ? 1 : 0;
                 $b->{cur}  = $vals{$go}{block};
                 $b->{memo} = $vals{$go}{memo};
+                $b->{passed} = $vals{$go}{passed};
                 return $end{$go};
             }
         }
@@ -510,6 +531,7 @@ sub if_stmt {
             out('an if both of whose arms die') if $vals{$go}{block}{dead};
             $b->{cur}  = $vals{$go}{block};
             $b->{memo} = $vals{$go}{memo};
+            $b->{passed} = $vals{$go}{passed};
             return $end{$go};
         }
         my ($jump) = grep { my $i = $_; $far{$i}->@* == 1 && $far{$i}[0]->reached_by($end{ 1 - $i }) } 0, 1;
@@ -519,6 +541,7 @@ sub if_stmt {
         my $go = 1 - $jump;
         $b->{cur}  = $vals{$go}{block};
         $b->{memo} = $vals{$go}{memo};
+        $b->{passed} = $vals{$go}{passed};
         return $end{$go};
     }
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($region)
@@ -712,6 +735,7 @@ sub loop {
     {
         # A value made in the body is the body's: not seen after the loop.
         local $b->{memo} = { $b->{memo}->%* };
+        local $b->{stood} = { ( $b->{stood} // {} )->%* };   # (as its memo: see _stood_already)
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
         local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $cond[0], 0 );   # (a body runs where its condition held)
         local $b->{loopx} = $lx;
@@ -734,6 +758,20 @@ sub loop {
     # THE EXIT'S MEMORY is a version too: a read at it, before a store after.
     push $b->{passed}->@*, $region->memory_phis if $region;
     return $region // $exitp;
+}
+
+# _only_counted($n) -> true where every value use of $n is a Count's (its
+# memory and control uses aside: a later read's version, a loop's way in).
+sub _only_counted {
+    my ($n) = @_;
+    for my $u (grep { blessed($_) } ( $n->consumers // [] )->@*) {
+        next if $u->operation =~ /\A(?:Loop|Region|If|Proj)\z/ || $u->operation eq 'Phi' && $u->is_memory;
+        my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
+        my $mem = $u->memory_operand;
+        pop @pos if @pos && blessed($mem) && refaddr($mem) == refaddr($n);
+        return 0 if @pos && $u->operation ne 'Count';
+    }
+    return 1;
 }
 
 # reads_topic -> the program reads the global $_ (a sub reading it, called

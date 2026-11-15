@@ -42,7 +42,7 @@ same	my @a = (1, 2, 3); for my $e (@a[0, 1]) { print $e } print "\n";
 same	my $r = [1, 2, 3]; my @x = @{$r}[0, 2]; print "@x\n";
 same	my @x = (1 .. 3, 7); print "@x\n";
 refused	my $s = join ",", (1 .. 4)[1, 2]; print "$s\n";
-refused	my $h = {a => 1}; my %p = %$h; $h->{a} = 2; print $p{a}, $h->{a}, "\n";
+same	my $h = {a => 1}; my %p = %$h; $h->{a} = 2; print $p{a}, $h->{a}, "\n";
 same	my $h = {a => 1, b => 2}; my %p = %$h; print join(",", map { "$_=$p{$_}" } sort keys %p), "\n";
 same	my $h; my %p = %$h; print scalar(keys %p), "\n";
 same	our $g = {x => 5}; print $g->{x}, "\n";
@@ -81,7 +81,7 @@ refused	use v5.42; use experimental 'class'; class K { field @l = (1); method r 
 same	use v5.42; use experimental 'class'; class K { field %h; method r { %h = (a => 1, b => 2, a => 3); join ",", map { "$_$h{$_}" } sort keys %h } } print K->new->r, "\n";
 same	my $r = {a => 1, b => 2}; my $n = %$r; print $n ? "t" : "f", "\n";
 same	my $r = {a => 1}; if (%$r) { print "y\n" }
-refused	my $r = {a => 1}; my @l = %$r; $r->{b} = 2; print scalar(@l), "\n";
+same	my $r = {a => 1}; my @l = %$r; $r->{b} = 2; print scalar(@l), "\n";
 same	my $r = {a => 1}; my %c = (%$r, b => 2); print join(",", sort keys %c), "\n";
 same	sub r { [1, 2] } my @a = r()->@*; print "@a\n";
 same	sub r { [1, 2] } print scalar(@{ r() }), "\n";
