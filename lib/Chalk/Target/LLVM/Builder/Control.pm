@@ -22,6 +22,8 @@ sub walk {
         # ONLY THE PROGRAM'S Return ends it: another hung on the same control is
         # not this program's (a graph built over an earlier one).
         @s = grep { $_->operation ne 'Return' || refaddr($_) == refaddr($b->{ret}) } @s;
+        # (A LOOP'S TEST pinned beside its effect is made by the loop, not walked.)
+        @s = grep { !$b->{loop_test}{ refaddr($_) } } @s;
         unless (@s) {
             # A MERGE AN EARLIER ARM JUMPED TO, this control its other way in.
             if (my $r = $b->join_jumps($ctl)) { $ctl = $r; next }
@@ -695,6 +697,22 @@ sub _head_aggregates {
     return @out;
 }
 
+# _loop_test(@pinned) -> the nodes pinned on a Loop that nothing else pinned
+# there reads, through values that are not themselves pinned or phis: the test
+# (`while (my $n = shift @w)` pins the shift and the test over it).
+sub _loop_test {
+    my (@pinned) = @_;
+    return @pinned if @pinned < 2;
+    my %read;
+    my @todo = map { $_->inputs->@* } @pinned;
+    while (defined( my $v = shift @todo )) {
+        next unless blessed($v) && $v->can('operation') && !$read{ refaddr($v) }++;
+        next if $v->operation eq 'Phi' || $v->can('control_in') && blessed( $v->control_in );
+        push @todo, $v->inputs->@*;
+    }
+    return grep { !$read{ refaddr($_) } } @pinned;
+}
+
 sub loop {
     my ($b, $L) = @_;
     my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } $L->successors_by_input;
@@ -705,8 +723,15 @@ sub loop {
                       && !$_->is_memory } ( $L->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
-    my @cond = grep { $_->operation !~ /\A(?:Phi|Proj)\z/ } $L->successors;
+    # AN EFFECT AND A TEST (`while (my $n = shift @w)`): B::SoN pins both on
+    # the Loop. The test is the one nothing else pinned there reads (through
+    # values); the other is a statement chain run each pass before it.
+    my @pinned = grep { $_->operation !~ /\A(?:Phi|Proj)\z/ } $L->successors;
+    my @cond = _loop_test(@pinned);
     out('a loop condition that is not one value') unless @cond == 1;
+    my @effect = grep { refaddr($_) != refaddr( $cond[0] ) } @pinned;
+    out('a loop condition of more than one effect') if @effect > 1;
+    $b->{loop_test}{ refaddr( $cond[0] ) } = 1 if @effect;
     out('a loop phi with other than two ways in') if grep { scalar( $_->inputs->@* ) != 2 } @phis;
 
     $b->reads_before($_) for $b->{passed}->@*;   # see if_stmt
@@ -722,7 +747,8 @@ sub loop {
     # A `my` ARRAY OR HASH ITS CONDITION READS (`my @s = ($x); while (@s) {
     # ... pop @s ... }`) was made before the loop, once: made first in the
     # header, it was made again each pass, the pops undone ("runs away").
-    $b->value($_) for $b->_head_aggregates($cond[0]);
+    # (and one its effect reads: `while (my $n = pop @walk)`)
+    $b->value($_) for map { $b->_head_aggregates($_) } $cond[0], map { $_->inputs->@* } @effect;
     my $pre = $b->{cur};
     # A LIST THE LOOP BUILDS starts empty each time the loop is entered: a
     # fresh array here (the empty literal, made once at entry, was every
@@ -746,6 +772,12 @@ sub loop {
     my @mphis = $L->memory_phis;
     $b->reads_before($_) for @mphis;
     push $b->{passed}->@*, @mphis;
+    # (the effect, walked here: each pass, before the test -- in the loop)
+    if (@effect) {
+        local $b->{depth} = ( $b->{depth} // 0 ) + 1;
+        my $e = $b->walk($L);
+        out('a loop condition whose effect does not end in the header') if $b->{cur}{dead} || !defined $e || $e->successors;
+    }
     my $cond = $b->truth($b->value($cond[0]));
     my $head_end = $b->{cur};
     my $body = $b->new_block('body');
