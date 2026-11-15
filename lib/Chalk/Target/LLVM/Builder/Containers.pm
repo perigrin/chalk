@@ -447,6 +447,21 @@ sub array_value {
         my $t = $in[0];
         # \&name: a code value of the named sub.
         return $b->code_ref($t) if blessed($t) && $t->operation eq 'Constant' && ( $t->const_type // '' ) eq 'code';
+        # \$h{k}: A REFERENCE TO A HASH ELEMENT is the element's own cell (tag
+        # 9), the hash made one of cells (t2_helem_ref): written through either
+        # name; a delete or a clear leaves it the hash's no more, as perl's.
+        if ( $v->is_hash_element_ref ) {
+            if ( my $why = $v->hash_element_ref_unsound ) { out($why) }
+            my ($c, $k) = $v->hash_element_subscript->inputs->@[0, 1];
+            out('a reference to an element through an element not made a hash first')
+                if blessed($c) && $c->operation eq 'Subscript' && !$b->{args}{ refaddr($c) };
+            my $key = $b->as($b->value($k), '%Str');
+            my $h = $b->hash_of($c);
+            # (taking it may make the key: a read of the hash still to be made,
+            # of the version before, is made first)
+            $b->hash_reads_settled('a reference to a hash element');
+            return $b->emit(op => 'HElemRef', type => '%Slot', inputs => [ $h, $key ]);
+        }
         # \$a[i]: A REFERENCE TO AN ELEMENT is the element's own cell (tag 9),
         # the array made one of aliases (t2_aelem_ref): written through either
         # name, kept past a grow, a shift, a refill -- where it is the element
@@ -462,10 +477,16 @@ sub array_value {
             my $arr = blessed($c) && $c->operation eq 'ArrayLiteral' && !defined $c->symbol && ( $c->stamp // '' ) eq 'Array'   # static type
                 ? do { local $b->{alias_strict} = 1; $b->alias_list($c) }
                 : do { local $b->{writing} = 1; $b->array_of($c) };
-            # (one T2 makes cannot die: its index is in the array or a constant
-            # past its start -- the message is never printed)
-            $b->{strs}{".\n"} //= scalar keys $b->{strs}->%*;
-            return $b->emit(op => 'AElemRef', type => '%Slot', inputs => [ $arr, $ix ], attr => { msg => ".\n", id => $b->{strs}{".\n"} });
+            # PERL DIES before the start, "Modification of non-creatable array
+            # value attempted, subscript -N at FILE line N.": one that may
+            # names its site (B::SoN), and its die is an eval's to catch. (One
+            # that names none cannot die: its index is in the array or a
+            # constant past its start -- the message is never printed.)
+            my $msg = defined $v->line ? ' at ' . ( $v->file // '-' ) . ' line ' . $v->line . ".\n" : ".\n";
+            $b->{strs}{$msg} //= scalar keys $b->{strs}->%*;
+            my $r = $b->emit(op => 'AElemRef', type => '%Slot', inputs => [ $arr, $ix ], attr => { msg => $msg, id => $b->{strs}{$msg} });
+            $b->after_call if defined $v->line;
+            return $r;
         }
         # \$x: a reference to the variable itself, kept on the heap (tag 9).
         # (NOT IN A LOOP BODY OR AN ARM: a `my` there is a new variable each time,

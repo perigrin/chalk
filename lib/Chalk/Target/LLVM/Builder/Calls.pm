@@ -626,7 +626,7 @@ sub _element_ref_read {
     }
     return undef unless $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '$';
     my $r = $n->inputs->[0];
-    return $r if blessed($r) && $r->operation eq 'Ref' && $r->element_subscript;
+    return $r if blessed($r) && $r->operation eq 'Ref' && ( $r->element_subscript || $r->hash_element_subscript );
     return $r if blessed($r) && $r->operation eq 'TernaryExpr' && blessed( $r->inputs->[1] ) && $r->inputs->[1]->operation eq 'Ref'
         && $r->inputs->[1]->element_subscript && Chalk::IR::Node::Ref::_guards( $r, $r->inputs->[1] );
     return undef;

@@ -78,6 +78,9 @@ class Chalk::Target::LLVM::Node::AElemRef :isa(Chalk::Target::LLVM::Node) {
     }
 }
 class Chalk::Target::LLVM::Node::AElemRefs :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_aelem_refs') } }
+# A HASH ELEMENT REFERENCE (`\$h{k}`): the element's cell, the hash made one of
+# cells (t2_helem_ref), the key made where it is not there.
+class Chalk::Target::LLVM::Node::HElemRef :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_helem_ref') } }
 # A READ THROUGH AN ELEMENT REFERENCE, passed to a sub: @_ holds the cell (t2_alias_of).
 class Chalk::Target::LLVM::Node::AliasOf :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_alias_of') } }
 

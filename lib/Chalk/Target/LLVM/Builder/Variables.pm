@@ -65,7 +65,7 @@ sub _through_ref {
     # undef: it never stops)
     if ( $op eq 'PostfixDeref' && ( $n->sigil // '' ) eq '$' ) {
         my $r = $n->inputs->[0];
-        return 0 if blessed($r) && $r->operation eq 'Ref' && $r->element_subscript;
+        return 0 if blessed($r) && $r->operation eq 'Ref' && ( $r->element_subscript || $r->hash_element_subscript );
         return 0 if blessed($r) && $r->operation eq 'TernaryExpr' && !$n->strict
             && blessed( $r->inputs->[1] ) && $r->inputs->[1]->operation eq 'Ref' && $r->inputs->[1]->element_subscript
             && Chalk::IR::Node::Ref::_guards( $r, $r->inputs->[1] );
@@ -320,6 +320,13 @@ sub local_elem {
     my ($b, $t) = @_;
     out('a local') unless blessed($t) && $t->operation eq 'Subscript' && ( $t->can('kind') ? $t->kind // '' : '' ) eq 'hash';
     out('a local of an element where a die may unwind past it') if $b->{has_eval};
+    # (PERL'S local PUTS A NEW ELEMENT THERE, and the restore the old one back:
+    # a reference to the element taken before it keeps the old one. T2 saves
+    # and stores the value, into the cell such a reference holds -- refused
+    # where the program takes a reference to a hash element, or a sub one into
+    # its @_, which may be one.)
+    out('a local of a hash element in a program that takes a reference to one (perl\'s local puts a new element there)')
+        if $b->{hash_elem_refs} //= ( $b->refs_into_args || scalar grep { $_->operation eq 'Ref' && $_->is_hash_element_ref } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} ) ) ? 1 : 0;
     my @r = grep { $_->operation eq 'ElemRestore' && ( $_->kind // '' ) eq 'hash'
                    && refaddr( $_->inputs->[0] ) == refaddr( $t->inputs->[0] ) && refaddr( $_->inputs->[1] ) == refaddr( $t->inputs->[1] ) }
         +($b->{own_nodes} // [])->@*;

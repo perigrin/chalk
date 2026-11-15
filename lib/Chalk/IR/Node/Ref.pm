@@ -18,6 +18,16 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
     # `\$x` of a `my` a loop renews each pass (B::SoN says so): each pass's
     # reference is to that pass's variable.
     field $fresh_each_pass :param :reader = 0;
+    # ONE THAT MAY DIE (B::SoN: a reference to an array element at an index
+    # that may be before the start) names its statement's file and line,
+    # which perl's message names: "Modification of non-creatable array value
+    # attempted, subscript -N at FILE line N."
+    field $file :reader = undef;
+    field $line :reader = undef;
+    method set_site($f, $l) {
+        ($file, $line) = ($f, $l);
+        return;
+    }
 
     # memory_operand -> the memory version a reference to an element reads the
     # array at (B::SoN: the element at its index THERE -- which scalar sits at
@@ -43,6 +53,32 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
         return $s;
     }
 
+    # hash_element_subscript -> the hash element this is a reference to
+    # (`\$h{k}`, `\$r->{k}`): its Subscript; undef for any other.
+    method hash_element_subscript() {
+        return undef if $each;
+        my $s = $self->inputs->[0];
+        return undef unless blessed($s) && $s->operation eq 'Subscript' && ( $s->can('kind') ? $s->kind // '' : '' ) eq 'hash';
+        return $s;
+    }
+    method is_hash_element_ref() { return $self->hash_element_subscript ? 1 : 0 }
+
+    # hash_element_ref_unsound -> why a reference to a hash element may not
+    # be the element perl's is, or undef. Perl's is the element there when
+    # its statement runs (taking it makes the key; a delete or a clear before
+    # or after changes which one): sound where B::SoN takes it where it stands
+    # (taken_where_it_stands). A special container's (%SIG's, %INC's: a MOP
+    # object's, or perl's own values) is not the program's.
+    method hash_element_ref_unsound() {
+        my $s = $self->hash_element_subscript or return 'a reference to what is no hash element';
+        my $h = $s->inputs->[0];
+        return 'a reference to an element of a hash whose values are perl\'s or a metaobject\'s (%SIG, %INC)'
+            if blessed($h) && $h->operation eq 'EntryDef' && ( $h->metaobject_class || $h->values_are_only_truths );
+        return 'a reference to a hash element B::SoN gives no place (perl takes it where its statement runs)'
+            unless $self->taken_where_it_stands;
+        return undef;
+    }
+
     # is_element_ref -> a reference to an array's element, or to each one (`\(@a)`).
     method is_element_ref() {
         return 1 if $self->element_subscript;
@@ -62,9 +98,9 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
     #    the index in the array;
     #  - TAKEN WHERE IT STANDS (taken_where_it_stands: B::SoN orders it on
     #    the array's memory) -- made there, in order, it is the element at its
-    #    index then, whatever reshapes the array before or after; its index a
-    #    constant not before the start (perl's die there names a site B::SoN
-    #    does not give the reference);
+    #    index then, whatever reshapes the array before or after; one that
+    #    may die (an index that may be before the start) names its site, which
+    #    perl's message names (an older B::SoN's names none: refused);
     #  - else its index a constant not before the start (perl's die before it
     #    would have no place either), its array one nothing reshapes: no shift,
     #    pop, unshift, splice, `$#a =`, delete, store of the whole array, nor a
@@ -77,13 +113,15 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
         my $arr = $s ? $s->inputs->[0] : $self->inputs->[0];
         my $ix  = $s ? $s->inputs->[1] : undef;
         if ( $s && @c && !grep { !_guards($_, $self) } @c ) { return undef }
-        if ($s) {
+        if ( $self->taken_where_it_stands ) {
+            # (one that may die before the start: perl's message names the
+            # site B::SoN gives it -- an older B::SoN gives none)
             return 'a reference to an element at an index not a constant (perl dies before the start, naming a site B::SoN does not give it)'
-                if $self->taken_where_it_stands && !_nonnegative_constant($ix);
-            return 'a reference to an element at an index not a constant (perl takes it where its statement runs; B::SoN gives it no place)'
-                unless _nonnegative_constant($ix);
+                if $s && !_nonnegative_constant($ix) && !defined $line;
+            return undef;
         }
-        return undef if $self->taken_where_it_stands;
+        return 'a reference to an element at an index not a constant (perl takes it where its statement runs; B::SoN gives it no place)'
+            if $s && !_nonnegative_constant($ix);
         return 'a reference to an element of an array that may be reshaped (perl takes it where its statement runs; B::SoN gives it no place)'
             if _reshaped( $arr, $s ? $ix->value : undef );
         return undef;

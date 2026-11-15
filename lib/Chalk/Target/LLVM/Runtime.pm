@@ -2930,6 +2930,35 @@ die:
   i8* bitcast (void (%Array*, i64)* @t2_aset_len_d to i8*)
 ]
 @t2_meta_alias = internal global %Meta { i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_alias, i64 0, i64 0), %Slot zeroinitializer }
+; A HASH OF CELLS (one an element reference was taken of, `\$h{k}`): each
+; value boxed in a heap cell (t2_hcells), read and stored through it, as an
+; array of aliases' elements are. Its pairs are a plain %Array (the array
+; entries the default's); its hash entries go through the cells. A delete
+; takes the pair out (a reference keeps the cell); a store of a key not there
+; makes a new cell; a whole assign truncates the pairs first (new cells).
+@t2_vt_hcells = internal global [20 x i8*] [
+  i8* bitcast (%Slot (%Array*, i64)* @t2_aget_d to i8*),
+  i8* bitcast (void (%Array*, i64, %Slot, i8*, i64)* @t2_aset_d to i8*),
+  i8* bitcast (i64 (%Array*)* @t2_alen_d to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_apush_d to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_apop_d to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_ashift_d to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_aunshift_d to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_aappend_d to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_aunshiftl_d to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_hc_hget to i8*),
+  i8* bitcast (void (%Slot, %Str, %Slot)* @t2_hc_hset to i8*),
+  i8* bitcast (i1 (%Slot, %Str)* @t2_hexists_d to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_hc_hdelete to i8*),
+  i8* bitcast (i64 (%Slot)* @t2_hcount_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hkeys_d to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hc_hvalues to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_hc_hpairs to i8*),
+  i8* bitcast (void (%Slot, %Array*)* @t2_hfroma_d to i8*),
+  i8* bitcast (i1 (%Array*, i64)* @t2_aexists_d to i8*),
+  i8* bitcast (void (%Array*, i64)* @t2_aset_len_d to i8*)
+]
+@t2_meta_hcells = internal global %Meta { i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_hcells, i64 0, i64 0), %Slot zeroinitializer }
 ; t2_new_args() -> an empty @_, its elements aliases
 define internal %Array* @t2_new_args() {
   %a = call %Array* @t2_new_array()
@@ -3199,7 +3228,6 @@ done:
 ; refill makes new ones. The reference is the cell's (tag 9), as `\$x` is.
 @msg_eref_tied = private unnamed_addr constant [71 x i8] c"chalk: refused at run time: a reference to an element of a tied array\0A\00"
 @msg_eref_ro = private unnamed_addr constant [65 x i8] c"chalk: refused at run time: a reference to a read-only argument\0A\00"
-@msg_eref_hash = private unnamed_addr constant [79 x i8] c"chalk: refused at run time: a reference to an argument that is a hash element\0A\00"
 ; t2_acells(a): a's elements each boxed in a cell (once; an @_ is already).
 ; A tied array's elements are its class's: stopped.
 define internal void @t2_acells(%Array* %a) {
@@ -3246,10 +3274,11 @@ done:
   ret void
 }
 ; t2_aelem_ref(a, i, at) -> a reference to a's element i (one from the end
-; for i < 0; perl's die before the start, naming at; past the end the array
-; grown to it). Of an @_, the caller's own: its variable's cell, its element's
-; (an element alias resolved, and kept so); a literal there is read-only
-; (stopped: a store through it would die in perl).
+; for i < 0; perl's die before the start, naming at -- an eval's to catch:
+; undef comes back, dying; past the end the array grown to it). Of an @_,
+; the caller's own: its variable's cell, its element's (an element alias
+; resolved -- an array's, or a hash's: t2_helem_ref -- and kept so); a
+; literal there is read-only (stopped: a store through it would die in perl).
 define internal %Slot @t2_aelem_ref(%Array* %a, i64 %i, i8* %at, i64 %atn) {
 entry:
   call void @t2_acells(%Array* %a)
@@ -3260,8 +3289,13 @@ entry:
   %lo = icmp slt i64 %j, 0
   br i1 %lo, label %die, label %grow
 die:
-  call void @t2_aset_d(%Array* %a, i64 %i, %Slot zeroinitializer, i8* %at, i64 %atn)
-  unreachable
+  %dm = call %Str @t2_str(i8* getelementptr ([64 x i8], [64 x i8]* @lit_aset, i64 0, i64 0), i64 63)
+  %ds = call %Str @t2_i64_str(i64 %i)
+  %dm2 = call %Str @t2_concat(%Str %dm, %Str %ds)
+  %da = call %Str @t2_str(i8* %at, i64 %atn)
+  %dm3 = call %Str @t2_concat(%Str %dm2, %Str %da)
+  call void @t2_die_unwind(%Str %dm3)
+  ret %Slot zeroinitializer
 grow:
   %j1 = add i64 %j, 1
   call void @t2_agrow(%Array* %a, i64 %j1)
@@ -3287,25 +3321,35 @@ elv:
   %e = inttoptr i64 %w to %Elv*
   %kp = getelementptr %Elv, %Elv* %e, i32 0, i32 0
   %k = load i8, i8* %kp
-  %ish = icmp eq i8 %k, 1
-  br i1 %ish, label %hash, label %arr
-arr:
   %cp = getelementptr %Elv, %Elv* %e, i32 0, i32 1
   %cs = load %Slot, %Slot* %cp
   %xp = getelementptr %Elv, %Elv* %e, i32 0, i32 2
   %xs = load %Slot, %Slot* %xp
+  %ish = icmp eq i8 %k, 1
+  br i1 %ish, label %hash, label %arr
+arr:
   %ai = extractvalue %Slot %cs, 1
   %inner = inttoptr i64 %ai to %Array*
   %ix = extractvalue %Slot %xs, 1
   %ir = call %Slot @t2_aelem_ref(%Array* %inner, i64 %ix, i8* %at, i64 %atn)
+  %dying = load i1, i1* @t2_dying
+  br i1 %dying, label %died, label %keep
+died:
+  ret %Slot %ir
+keep:
   %ep2 = getelementptr %Array, %Array* %a, i32 0, i32 2
   %els2 = load %Slot*, %Slot** %ep2
   %p2 = getelementptr %Slot, %Slot* %els2, i64 %j
   store %Slot %ir, %Slot* %p2
   ret %Slot %ir
 hash:
-  call void @t2_stop(i8* getelementptr ([79 x i8], [79 x i8]* @msg_eref_hash, i64 0, i64 0), i64 78)
-  unreachable
+  %hk = call %Str @t2_slot_str(%Slot %xs)
+  %hr = call %Slot @t2_helem_ref(%Slot %cs, %Str %hk)
+  %ep3 = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els3 = load %Slot*, %Slot** %ep3
+  %p3 = getelementptr %Slot, %Slot* %els3, i64 %j
+  store %Slot %hr, %Slot* %p3
+  ret %Slot %hr
 ro:
   call void @t2_stop(i8* getelementptr ([65 x i8], [65 x i8]* @msg_eref_ro, i64 0, i64 0), i64 64)
   unreachable
@@ -3342,6 +3386,128 @@ body:
   %i2 = add i64 %i, 1
   br label %loop
 done:
+  ret %Array* %r
+}
+; HASH ELEMENT REFERENCES (`\$h{k}`): the hash made one of cells
+; (t2_meta_hcells), the reference the element's cell (tag 9), as `\$x` is.
+@msg_href_tied = private unnamed_addr constant [70 x i8] c"chalk: refused at run time: a reference to an element of a tied hash\0A\00"
+; t2_hcells(h): h's values each boxed in a cell (once). A tied hash's (or a
+; MOP object's, %SIG's) elements are its class's: stopped.
+define internal void @t2_hcells(%Slot %h) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %h)
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %hc = icmp eq %Meta* %m, @t2_meta_hcells
+  br i1 %hc, label %done, label %plain
+plain:
+  %d = icmp eq %Meta* %m, @t2_meta_default
+  br i1 %d, label %box, label %tied
+tied:
+  call void @t2_stop(i8* getelementptr ([70 x i8], [70 x i8]* @msg_href_tied, i64 0, i64 0), i64 69)
+  unreachable
+box:
+  %n = call i64 @t2_alen_d(%Array* %a)
+  %ep = getelementptr %Array, %Array* %a, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  br label %loop
+loop:
+  %i = phi i64 [ 2, %box ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %mark
+body:
+  %p = getelementptr %Slot, %Slot* %els, i64 %i
+  %v = load %Slot, %Slot* %p
+  %f = call %Slot @t2_fresh(%Slot %v)
+  store %Slot %f, %Slot* %p
+  %i2 = add i64 %i, 2
+  br label %loop
+mark:
+  %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
+  store %Meta* @t2_meta_hcells, %Meta** %mp
+  br label %done
+done:
+  ret void
+}
+; t2_helem_ref(h, k) -> a reference to h's element k: its cell, the key made
+; (undef) where it is not there, as perl's `\$h{k}` makes it.
+define internal %Slot @t2_helem_ref(%Slot %h, %Str %k) {
+entry:
+  call void @t2_hcells(%Slot %h)
+  %a = call %Array* @t2_harr(%Slot %h)
+  %i = call i64 @t2_hfind(%Array* %a, %Str %k)
+  %miss = icmp slt i64 %i, 0
+  br i1 %miss, label %add, label %have
+add:
+  %f = call %Slot @t2_fresh(%Slot zeroinitializer)
+  %ks = call %Slot @t2_box_str(%Str %k)
+  call void @t2_apush_d(%Array* %a, %Slot %ks)
+  call void @t2_apush_d(%Array* %a, %Slot %f)
+  ret %Slot %f
+have:
+  %j = add i64 %i, 1
+  %r = call %Slot @t2_aget_d(%Array* %a, i64 %j)
+  ret %Slot %r
+}
+; the hash entries of a hash of cells (t2_vt_hcells)
+define internal %Slot @t2_hc_hget(%Slot %h, %Str %k) {
+  %r = call %Slot @t2_hget_d(%Slot %h, %Str %k)
+  %v = call %Slot @t2_alias_val(%Slot %r)
+  ret %Slot %v
+}
+define internal void @t2_hc_hset(%Slot %h, %Str %k, %Slot %v) {
+entry:
+  %a = call %Array* @t2_harr(%Slot %h)
+  %i = call i64 @t2_hfind(%Array* %a, %Str %k)
+  %miss = icmp slt i64 %i, 0
+  br i1 %miss, label %add, label %put
+add:
+  %f = call %Slot @t2_fresh(%Slot %v)
+  %ks = call %Slot @t2_box_str(%Str %k)
+  call void @t2_apush_d(%Array* %a, %Slot %ks)
+  call void @t2_apush_d(%Array* %a, %Slot %f)
+  ret void
+put:
+  %j = add i64 %i, 1
+  %r = call %Slot @t2_aget_d(%Array* %a, i64 %j)
+  %rp = extractvalue %Slot %r, 1
+  %c = inttoptr i64 %rp to %Slot*
+  store %Slot %v, %Slot* %c
+  ret void
+}
+define internal %Slot @t2_hc_hdelete(%Slot %h, %Str %k) {
+  %r = call %Slot @t2_hdelete_d(%Slot %h, %Str %k)
+  %v = call %Slot @t2_alias_val(%Slot %r)
+  ret %Slot %v
+}
+; t2_hc_vals(l): each cell of l (from index 0 on, every other one from start) read
+define internal void @t2_hc_read(%Array* %l, i64 %from, i64 %step) {
+entry:
+  %n = call i64 @t2_alen_d(%Array* %l)
+  %ep = getelementptr %Array, %Array* %l, i32 0, i32 2
+  %els = load %Slot*, %Slot** %ep
+  br label %loop
+loop:
+  %i = phi i64 [ %from, %entry ], [ %i2, %body ]
+  %more = icmp slt i64 %i, %n
+  br i1 %more, label %body, label %done
+body:
+  %p = getelementptr %Slot, %Slot* %els, i64 %i
+  %r = load %Slot, %Slot* %p
+  %v = call %Slot @t2_alias_val(%Slot %r)
+  store %Slot %v, %Slot* %p
+  %i2 = add i64 %i, %step
+  br label %loop
+done:
+  ret void
+}
+define internal %Array* @t2_hc_hvalues(%Slot %h) {
+  %r = call %Array* @t2_hvalues_d(%Slot %h)
+  call void @t2_hc_read(%Array* %r, i64 0, i64 1)
+  ret %Array* %r
+}
+define internal %Array* @t2_hc_hpairs(%Slot %h) {
+  %r = call %Array* @t2_hpairs_d(%Slot %h)
+  call void @t2_hc_read(%Array* %r, i64 1, i64 2)
   ret %Array* %r
 }
 ; t2_meta(a) -> the metaobject a container points at
@@ -3827,7 +3993,9 @@ entry:
   %m = call %Meta* @t2_meta(%Array* %a)
   %d = icmp eq %Meta* %m, @t2_meta_default
   %al = icmp eq %Meta* %m, @t2_meta_alias
-  %own = or i1 %d, %al
+  %hc = icmp eq %Meta* %m, @t2_meta_hcells
+  %own0 = or i1 %d, %al
+  %own = or i1 %own0, %hc
   br i1 %own, label %is, label %other
 is:
   ret %Meta* %m
@@ -3865,8 +4033,10 @@ entry:
   %vp = getelementptr %Meta, %Meta* %m, i32 0, i32 0
   %vt = load i8**, i8*** %vp
   %dm = icmp eq i8** %vt, getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_mophash, i64 0, i64 0)   ; (nor a MOP object's)
+  %dh = icmp eq %Meta* %m, @t2_meta_hcells   ; (nor a hash of cells)
   %d1 = or i1 %d0, %da
-  %d = or i1 %d1, %dm
+  %d2 = or i1 %d1, %dh
+  %d = or i1 %d2, %dm
   br i1 %d, label %no, label %yes
 no:
   ret %Slot zeroinitializer
@@ -5058,7 +5228,9 @@ entry:
   call void @t2_aappend(%Array* %c, %Array* %l)
   %a = call %Array* @t2_harr(%Slot %h)
   %m = call %Meta* @t2_meta(%Array* %a)
-  %d = icmp eq %Meta* %m, @t2_meta_default
+  %d0 = icmp eq %Meta* %m, @t2_meta_default
+  %dh = icmp eq %Meta* %m, @t2_meta_hcells   ; (a hash of cells: new ones)
+  %d = or i1 %d0, %dh
   br i1 %d, label %plain, label %tied
 plain:
   ; (element 0 is the hash's class: kept)

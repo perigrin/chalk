@@ -66,12 +66,14 @@ for my $case (
     # so it says so on the eval instead.
     eval { through_llvm(q{my $z = $ENV{NO_SUCH_VAR} // 0; my $r = eval { my $q = 1 / $z; 1 }; print defined $r ? "ran\n" : "died\n";}) };
     like($@, qr/GAP: .*eval.*may die/, 'an unused division that may be by zero, in an eval, is refused');
-    # So with a reference to an element: one before the start dies.
-    eval { through_llvm(q{my @a = (1, 2); my $r = eval { my $p = \$a[-5]; 1 }; print defined $r ? "ran\n" : "died\n";}) };
-    like($@, qr/GAP: .*eval.*may die/, 'an unused element reference, in an eval, is refused');
-    # In a sub the eval calls, the eval cannot see it: chalk refuses it there.
-    eval { through_llvm(q{sub g { my @a = (1, 2); my $p = \$a[$_[0]]; $$p // 'u' } my $i = $ENV{NO_SUCH_VAR} // -5; my $r = eval { g($i) }; print defined $r ? "ran\n" : "died\n";}) };
-    like($@, qr/GAP: .*inside a block eval/, 'an element reference in a sub an eval calls is refused');
+    # So with a reference to an element: one before the start dies. B::SoN
+    # stands it where it is taken, naming its site, so the eval catches it
+    # there -- perl's answer, its message in $@ -- in the eval's body or in a
+    # sub the eval calls.
+    my ($e1) = eval { through_llvm(q{my @a = (1, 2); my $r = eval { my $p = \$a[-5]; 1 }; print defined $r ? "ran\n" : "died\n"; print $@ =~ /\AModification of non-creatable array value attempted, subscript -5 at \S+ line 1\.$/ ? "msg\n" : "no msg: $@\n";}) };
+    is($e1, "died\nmsg\n", 'an unused element reference before the start, in an eval: perl\'s answer') or diag $@;
+    my ($e2) = eval { through_llvm(q{sub g { my @a = (1, 2); my $p = \$a[$_[0]]; $$p // 'u' } my $i = $ENV{NO_SUCH_VAR} // -5; my $r = eval { g($i) }; print defined $r ? "ran\n" : "died\n"; print $@ =~ /\AModification of non-creatable array value attempted, subscript -5 at / ? "msg\n" : "no msg: $@\n";}) };
+    is($e2, "died\nmsg\n", 'an element reference in a sub an eval calls: perl\'s answer') or diag $@;
 }
 
 done_testing;

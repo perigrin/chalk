@@ -86,8 +86,9 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Value) {
                 && $memory;
             # ...or a read B::SoN pinned where it stands (through a reference,
             # it may die; a tied one is a call), on a phi the producer says is
-            # memory: a value phi may merge the read's value.
-            return 1 if $in->operation =~ /\A(?:Subscript|Exists|PostfixDeref|Count)\z/ && $in->is_pinned
+            # memory: a value phi may merge the read's value. (So is a
+            # reference to an element taken where it stands: Ref's.)
+            return 1 if $in->operation =~ /\A(?:Subscript|Exists|PostfixDeref|Count|Ref)\z/ && $in->is_pinned
                 && $memory;
             # a memory phi of a nested structure
             return 1 if $in->operation eq 'Phi' && $in->is_memory($seen);

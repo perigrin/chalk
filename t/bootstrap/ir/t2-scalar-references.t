@@ -31,6 +31,12 @@ for my $case (
     [ q{sub inc { my $r = shift; $$r++ } my $n = 1; inc(\$n); inc(\$n); print "$n\n";}, 'a sub increments through a reference' ],
     [ q{sub f { 7 } my $c = \&f; my $x = 5; my $r = \$x; print $$r, " ", ref($c), " ", $c->(), "\n";}, 'a code reference beside a scalar deref' ],
     [ q{use strict; sub f { 7 } my $c = \&f; eval { my $t = $$c; 1 } or print "d: $@"; print "after\n";}, 'a deref of a code reference dies, caught' ],
+    # `$$r .= "x"` (perl's multiconcat appending through the reference:
+    # B::SoN refused it before)
+    [ q{my $s = "a"; my $r = \$s; $$r .= "x"; print "$s\n";}, 'an append of a constant through a reference' ],
+    [ q{my $s; my $r = \$s; $$r .= "x"; print "$s\n";}, 'an append of a constant to undef through a reference' ],
+    [ q{my $s = "a"; my $r = \$s; my $y = 3; $$r .= "x${y}z"; print "$s\n";}, 'an append of strings and a value through a reference' ],
+    [ q{my $s = "a"; my $r = \$s; $$r .= "x" for 1 .. 3; print "$s\n";}, 'an append through a reference in a loop' ],
 ) {
     my ($src, $name) = @$case;
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);

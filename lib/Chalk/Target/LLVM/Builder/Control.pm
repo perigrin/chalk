@@ -155,11 +155,10 @@ sub walk {
         }
         elsif ($op eq 'Assign') { $b->assign($s); push $b->{passed}->@*, $s; $ctl = $s }
         # A REFERENCE TO AN ELEMENT, taken where it stands (B::SoN orders it on
-        # the array's memory: Ref's taken_where_it_stands): made here, in order
-        # -- the element at its index now, made if it is not there.
+        # the aggregate's memory: Ref's taken_where_it_stands): made here, in
+        # order -- the element at its index or key now, made if it is not there.
         elsif ($op eq 'Ref' && $s->taken_where_it_stands) {
-            out('a reference to a hash element') if blessed( $s->inputs->[0] ) && $s->inputs->[0]->operation eq 'Subscript' && ( $s->inputs->[0]->can('kind') ? $s->inputs->[0]->kind // '' : '' ) eq 'hash';
-            out('a reference to what is no array element') unless $s->is_element_ref;
+            out('a reference to what is no array or hash element') unless $s->is_element_ref || $s->is_hash_element_ref;
             $s->each ? $b->array_of($s) : $b->value($s);
             push $b->{passed}->@*, $s;
             $ctl = $s;
@@ -343,8 +342,10 @@ sub walk {
         # A `{...}` PINNED WHERE IT RUNS: a fresh hash there, each time.
         elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'HashRef') { $b->value($s); $ctl = $s }   # static type
         # A `my %h = (...)` LIST PINNED where it runs: made by the assign that
-        # stores it into its hash, in place.
-        elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'Hash') { $ctl = $s }
+        # stores it into its hash, in place. A `my %g` PINNED where it runs
+        # (B::SoN: `my %g = %h` of a hash the program writes, its pairs read
+        # there; one in a loop body or an arm) is made there.
+        elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'Hash') { $b->value($s) if defined $s->symbol; $ctl = $s }
         # A chdir OR A require is made where it stands (the next -d reads its cwd).
         elsif ($op eq 'Call' && ( t2_builtin( $s, 'in_place' ) // '' ) eq 'value') { $b->value($s); $ctl = $s }
         # A lock is a no-op without threads (its operand the variable, not a value).
