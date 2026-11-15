@@ -756,6 +756,8 @@ sub set_want {
     if ($b->{tail} && $b->{tail}{call} == refaddr($c)) {   # handed on from this sub's caller
         return $b->emit(op => 'SetWant', type => 'void', inputs => [ $b->{tail}{want} ]);
     }
+    my $fn = blessed( $c->target ) ? $b->{funcs}{ refaddr( $c->target ) } : undef;
+    out('a call not in list context of a sub\'s list-context copy') if $fn && $fn->{list_copy} && !_list_use($c);
     my $w = $b->emit(op => 'Const', type => 'i1', attr => { value => _list_use($c) });
     $b->emit(op => 'SetWant', type => 'void', inputs => [$w]);
 }
@@ -852,7 +854,13 @@ sub func {
     # truth in a scalar.
     my $mret = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation =~ /\A(?:RegexMatch|Match)\z/
         ? $ret->inputs->[0] : undef;
-    my $listret = $ret->inputs->@* == 2 || $valueless || $hkv || $arrret || $mret;
+    # A LIST-CONTEXT COPY OF A SUB (Serialize::JSON's CONTEXT_COPY: its
+    # caller's-context eval made a list one) returning a list: only a call in
+    # list context runs it, and its value is that list.
+    my $ctxlist = ( $sub->can('context') ? $sub->context // '' : '' ) eq 'list'
+        && $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && _is_list( $ret->inputs->[0] )
+        ? $ret->inputs->[0] : undef;
+    my $listret = $ret->inputs->@* == 2 || $valueless || $hkv || $arrret || $mret || $ctxlist;
     out("sub $name returns more than one reading") if $ret->inputs->@* > 2;
     # A METHOD OF THE CLASS FEATURE: $self is its first argument, its signature's
     # parameter i the i+1th (B::SoN's Parameter nodes). One reading @_, or with
@@ -1026,7 +1034,7 @@ sub func {
     $list = 1 if $is_method && defined $margs{slurpy};
     my $nargs = $is_method ? 1 + $margs{np} : $list ? 1 : scalar @reads;
     my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $nargs,
-        signature => $sig, list => $list, listret => $listret, closure => $closure, blocks => [] , minargs => ( $optional ? ( $decl->{mandatory} // 0 ) - $decl->{optional} : $slurpy && $sig ? scalar @positional : undef ),
+        signature => $sig, list => $list, listret => $listret, list_copy => ( $ctxlist ? 1 : 0 ), closure => $closure, blocks => [] , minargs => ( $optional ? ( $decl->{mandatory} // 0 ) - $decl->{optional} : $slurpy && $sig ? scalar @positional : undef ),
         maxargs => ( $optional && !$slurpy ? $decl->{mandatory} // 0 : undef ),
         direct_only => ( $optional || $padded ? 1 : 0 ), sig_min => $cmin, sig_max => $cmax,
         slurpy_sigil => ( $slurpy && $sig ? ( $slurpy->can('sigil') ? $slurpy->sigil // '@' : '@' ) : undef ) };
@@ -1162,6 +1170,7 @@ sub func {
         out("sub $name returns a /g match") if $mret && ( $mret->flags // '' ) =~ /g/;
         $b->emit(op => 'AAppend', type => 'void', inputs => [ $copy, $mret ? $b->array_of($mret) : $b->as_list($v) ]);
         my $l = $b->emit(op => 'ARef', type => '%Slot', inputs => [$copy]);
+        # (a list-context copy has no scalar reading: no call takes one)
         my $sv = $mret ? $b->as( $b->value($mret), '%Slot' )
                : $arrret ? $b->as( $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($arrret) ]), '%Slot' )
                : blessed( $ret->inputs->[1] ) ? $b->as($b->value( $ret->inputs->[1] ), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');

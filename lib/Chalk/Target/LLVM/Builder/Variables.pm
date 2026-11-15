@@ -211,7 +211,10 @@ sub reads_before {
     # there (ref_reads_settled), not made after it.
     # (a read pinned on the chain is made where it stands -- a $@ read made
     # early read the inner eval's message after the outer's die: "in" for "out")
-    $b->value($_) for grep { !$_->is_pinned && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_) }
+    # (A READ AN EVAL'S BODY MADE was made there, before any store after it:
+    # its value is dropped only because a die skips it -- not made again here,
+    # it is not read here; a use past the eval is refused where it is: value.)
+    $b->value($_) for grep { !$_->is_pinned && !$b->{past_eval}{ refaddr($_) } && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_) }
         +($b->{readers}{ refaddr($version) } // [])->@*;
 }
 

@@ -67,6 +67,16 @@ sub phi_type {
     # last value in the other): an array, each arm's value a list of it.
     return '%Array*' if grep { blessed($_) && $_->operation eq 'Return' && $_->inputs->@* == 2 && refaddr( $_->inputs->[0] ) == refaddr($phi) }
         ( $phi->consumers // [] )->@*;
+    # AN EVAL'S VALUE IN LIST CONTEXT, typed a list: the body's list, or the
+    # empty one where a die was caught (close_eval). (B::SoN merges nothing
+    # else at an eval's join but its memory: a variable the body rebinds it
+    # refuses.) One typed a scalar (B::SoN's Maybe[Int] for `my @r = eval
+    # { ...; 7 }`) is read as one element by what takes it: refused, its
+    # die's empty list is no element.
+    if ( ( _eval_want_of($phi) // '' ) eq 'list' ) {
+        return '%Array*' if $st =~ /\A(?:List|Array)\z/;   # static type
+        out('an eval in list context whose value is typed a scalar (a die gives the empty list)');
+    }
     return '%Slot' if $st =~ /\A(?:Str|Unknown|None|Scalar)\z/ || $st =~ /\AMaybe\[/;   # a Maybe: T or undef
     # A LIST A LOOP BUILDS (map, grep): one array, its back edge a ListAppend
     # to it. Another array phi (`@p = ()` in a loop) is not this.
@@ -93,6 +103,16 @@ sub phi_type {
         out("a phi stamped $st");
     }
     return $SCALAR{$st} // out("a phi stamped $st");
+}
+
+# _eval_want_of($Phi) -> the context of the eval whose value $Phi is (B::SoN's
+# eval_want: undef for scalar or void, 'list', or 'scalar' in a sub's copy for
+# a scalar call), or undef for a phi at no eval's join.
+sub _eval_want_of {
+    my ($phi) = @_;
+    my $r = $phi->region;
+    return undef unless blessed($r) && $r->operation eq 'Region' && defined $r->eval_entry && !$phi->is_memory;
+    return $r->eval_want;
 }
 
 # _fresh_arrays($Phi, $seen, \%pad) -> true for a merge (not a loop's) each of

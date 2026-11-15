@@ -385,8 +385,10 @@ sub open_eval {
     my $r = $b->{eval_at}{ refaddr($ctl) } or return;
     return if $b->{eval_opened}{ refaddr($r) }++;
     out('an eval whose body makes a value that may die') if $r->can('eval_may_die') && $r->eval_may_die;
-    # IN LIST OR ITS CALLER'S CONTEXT a caught die gives the empty list, not undef.
-    out('an eval in list or its caller\'s context') if $r->can('eval_want') && defined $r->eval_want;
+    # IN ITS CALLER'S CONTEXT (B::SoN's runtime: no copy of the sub for a
+    # context) a caught die gives undef or the empty list, by the caller's.
+    # In list context, the empty list (close_eval); in scalar context, undef.
+    out('an eval in its caller\'s context') if defined $r->eval_want && $r->eval_want !~ /\A(?:list|scalar|void)\z/;
     $b->hash_reads_settled('an eval');
     $b->emit(op => 'EvalEnter', type => 'void');
     push $b->{evals}->@*, { region => $r, catch => undef, depth => $b->{depth} // 0, start => $b->{cur}, made_before => { map { ( $_ => 1 ) } keys $b->{memo}->%* } };
@@ -423,7 +425,7 @@ sub close_eval {
     my @in;
     for my $p (@phis) {
         my $ty = $b->phi_type($p);
-        push @in, [ $p, $ty, $dead ? undef : $b->as($b->value( $p->inputs->[0] ), $ty) ];
+        push @in, [ $p, $ty, $dead ? undef : $b->phi_input( $p, $p->inputs->[0], $ty ) ];
     }
     pop $b->{evals}->@*;
     my $end = $b->{cur};
@@ -445,7 +447,10 @@ sub close_eval {
         # one eval's catch was another's phi input, not dominating it)
         local $b->{memo} = { $b->{memo}->%* };
         local $b->{stood} = { ( $b->{stood} // {} )->%* };   # (as its memo: see _stood_already)
-        @cv = map { $b->as($b->value( $_->[0]->inputs->[-1] ), $_->[1]) } @in;
+        # (in list context a caught die gives the empty list, not B::SoN's undef)
+        @cv = map { ( $r->eval_want // '' ) eq 'list' && $_->[1] eq '%Array*'
+                    ? $b->emit(op => 'NewArray', type => '%Array*')
+                    : $b->as($b->value( $_->[0]->inputs->[-1] ), $_->[1]) } @in;
         $c = $b->{cur};
         $c->{term} = [ 'br', $join ];
         push @from, $c;
