@@ -692,8 +692,9 @@ sub loop {
     # THE WAYS OUT: the header's (its condition false), and each `last`.
     my @out = grep { !$_->{block}{dead} } $lx->{exits}->@*;
     if (@out) {
-        ( $b->{cur}, $b->{memo} ) = $b->merge_at( $region, 'exit', $b->{memo},
-            { block => $exit, memo => $b->{memo}, end => $exitp }, @out );
+        # (each way's value made at its end, in the body: its depth)
+        ( $b->{cur}, $b->{memo} ) = do { local $b->{depth} = ( $b->{depth} // 0 ) + 1; $b->merge_at( $region, 'exit', $b->{memo},
+            { block => $exit, memo => $b->{memo}, end => $exitp }, @out ) };
     }
     # (what $_ held put back where every way out has met)
     $b->emit(op => 'GStore', type => 'void', inputs => [$save], attr => { global => $b->global_named('main::_') }) if $save;
@@ -788,7 +789,7 @@ sub loop_breaks {
     # THE EXIT: the ways out merged, with the exit Region's phis.
     my @out = grep { !$_->{block}{dead} } $lx->{exits}->@*;
     out('a loop that never leaves') unless @out;
-    ( $b->{cur}, $b->{memo} ) = $b->merge_at( $R, 'exit', $outer_memo, @out );
+    ( $b->{cur}, $b->{memo} ) = do { local $b->{depth} = ( $b->{depth} // 0 ) + 1; $b->merge_at( $R, 'exit', $outer_memo, @out ) };
     push $b->{passed}->@*, $R->memory_phis;
     return $R;
 }
@@ -798,6 +799,9 @@ sub loop_breaks {
 # head phis' back edges, and it goes back to the head.
 sub go_round {
     my ($b, $lx, $head, $head_memo, $phis, $t2) = @_;
+    # (what is made here is the body's: in it, each pass -- a `\$x` or a cell
+    # made for a back edge is refused there as in the body)
+    local $b->{depth} = ( $b->{depth} // 0 ) + 1;
     my @lat = grep { !$_->{block}{dead} } $lx->{latches}->@*;
     out('a loop that never goes round') unless @lat;
     # A WAY ROUND THROUGH A REGION THAT FEEDS THE LATCH (a `redo` in a nested
