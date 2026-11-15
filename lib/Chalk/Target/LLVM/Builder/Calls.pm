@@ -158,7 +158,15 @@ sub call {
         out('a direct call of a closure made elsewhere') unless @anon == 1;
         my @args = $c->inputs->@*;
         pop @args if $c->can('memory_input') && $c->memory_input;
-        return $b->code_call($c, $b->value( $anon[0] ), @args);
+        my $code = $b->value( $anon[0] );
+        # A SIGNATURE'S ARITY where the call's count is known: perl dies on
+        # another -- refused by name here (its entry's check is a run-time stop).
+        my $fn = $b->{funcs}{ refaddr( $c->target // 0 ) };
+        if ($fn && defined $fn->{sig_min} && !grep { _is_list($_) } @args) {
+            out('a call of a closure\'s signature with another arity (perl dies)')
+                if @args < $fn->{sig_min} || defined $fn->{sig_max} && @args > $fn->{sig_max};
+        }
+        return $b->code_call($c, $code, @args);
     }
     my $sub = $c->target;
     out( $c->name . ' is XS: there is no Perl source to compile' ) if $c->can('xs') && $c->xs;
@@ -645,6 +653,17 @@ sub func {
         my $opt = defined $decl->{mandatory} ? $decl->{optional} // 0 : scalar @defaulted;
         $cmin = $slurpy ? scalar @positional - $opt : $all - $opt;
         $cmax = $slurpy ? undef : $all;
+        # PERL DIES ON ANOTHER ARITY: a call of a code value -- this closure,
+        # maybe -- passing another count than it takes, or a list (a count
+        # unknown here), is refused by name; the entry's check (a run-time
+        # stop) is for what this cannot see.
+        for my $k (grep { $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) eq 'indirect' || ( $_->name // '' ) eq $name ) } _all_nodes( $b->{mop}, $b->{ret} ), $g->component) {
+            my @a = grep { blessed($_) } $k->inputs->@*;
+            pop @a if $k->can('memory_input') && $k->memory_input;
+            shift @a if ( $k->dispatch_kind // '' ) eq 'indirect';   # (the code)
+            out("a call of a code value that may be closure $name, of a count perl checks against its signature")
+                if grep { _is_list($_) } @a or @a < $cmin or defined $cmax && @a > $cmax;
+        }
         $list = 1;
     }
     out("closure $name reads \@_ other than T2 takes it") if $closure && !$list;
@@ -691,7 +710,7 @@ sub func {
     my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $nargs,
         signature => $sig, list => $list, listret => $listret, closure => $closure, blocks => [] , minargs => ( $optional ? ( $decl->{mandatory} // 0 ) - $decl->{optional} : $slurpy && $sig ? scalar @positional : undef ),
         maxargs => ( $optional && !$slurpy ? $decl->{mandatory} // 0 : undef ),
-        direct_only => ( $optional || $padded ? 1 : 0 ),
+        direct_only => ( $optional || $padded ? 1 : 0 ), sig_min => $cmin, sig_max => $cmax,
         slurpy_sigil => ( $slurpy && $sig ? ( $slurpy->can('sigil') ? $slurpy->sigil // '@' : '@' ) : undef ) };
     my @argn = map { Chalk::Target::LLVM::Node::_n(op => 'Arg', type => '%Slot', attr => { index => $_ }) } 0 .. ( $is_method ? $nargs : scalar @reads ) - 1;
     $argn[$_]->set_name("%a$_") for 0 .. $#argn;
