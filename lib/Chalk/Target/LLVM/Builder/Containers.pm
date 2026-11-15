@@ -638,6 +638,17 @@ sub array_value {
             my ($c, $cls, @rest) = @args;
             my $sig = blessed($c) && $c->can('sigil') && defined $c->sigil ? $c->sigil
                 : blessed($c) && $c->operation eq 'ArrayLiteral' ? '@' : blessed($c) && $c->operation eq 'HashLiteral' ? '%' : '';
+            # A TIE OF A SCALAR Analysis rewrote (its read FETCH on the tie's
+            # object, its tied() the object): the class's TIESCALAR, given the
+            # class and the arguments -- its object the tie's value.
+            if ( $sig eq '$' && $name eq 'tie' && $Chalk::IR::Analysis::TIED{ refaddr($v) } ) {
+                my $r = $b->emit(op => 'NewArray', type => '%Array*');
+                for my $e (@rest) {
+                    if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $r, $b->array_of($e) ]) }
+                    else { $b->emit(op => 'APush', type => 'void', inputs => [ $r, $b->as($b->value($e), '%Slot') ]) }
+                }
+                return $b->emit(op => 'TieScalar', type => '%Slot', inputs => [ $b->as($b->value($cls), '%Slot'), $r ]);
+            }
             out("a $name of a scalar") unless $sig =~ /\A[\@%]\z/;
             my $h = $sig eq '%';
             my $box = $h ? $b->hash_of($c) : $b->array_of($c);

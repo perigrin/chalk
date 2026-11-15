@@ -237,7 +237,7 @@ sub make_mop {
     my $dynamic = grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'dynamic_method' } _all_nodes($mop, $b->{ret});
     out('a method named at run time in a program with an AUTOLOAD') if $dynamic && grep { $_->name eq 'AUTOLOAD' } map { ( $_->subs, $_->methods ) } $mop->classes;
     # A TIE'S METHODS are the runtime's to call, by these names.
-    $called{$_} = 1 for grep { my $t = $_; grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' } _all_nodes($mop, $b->{ret}) } qw(TIEARRAY TIEHASH FETCH STORE FETCHSIZE PUSH POP SHIFT UNSHIFT EXISTS DELETE CLEAR EXTEND STORESIZE FIRSTKEY NEXTKEY);
+    $called{$_} = 1 for grep { my $t = $_; grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' } _all_nodes($mop, $b->{ret}) } qw(TIESCALAR TIEARRAY TIEHASH FETCH STORE FETCHSIZE PUSH POP SHIFT UNSHIFT EXISTS DELETE CLEAR EXTEND STORESIZE FIRSTKEY NEXTKEY);
     # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES, VERSION), else
     # perl's die ("Can't locate object method"), unless an AUTOLOAD answers.
     my %defined = map { ( $_->name => 1 ) } map { ( $_->subs, $_->methods ) } @classes;

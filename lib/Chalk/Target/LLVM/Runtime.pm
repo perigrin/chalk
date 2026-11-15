@@ -2803,6 +2803,7 @@ die:
 @lit_tm_clear = private unnamed_addr constant [6 x i8] c"CLEAR\00"
 @lit_tm_tiearray = private unnamed_addr constant [9 x i8] c"TIEARRAY\00"
 @lit_tm_tiehash = private unnamed_addr constant [8 x i8] c"TIEHASH\00"
+@lit_tm_tiescalar = private unnamed_addr constant [10 x i8] c"TIESCALAR\00"
 ; THE CONTAINER PROTOCOL (perigrin: a tie swaps a container's metaobject).
 ; Every %Array -- an array, or a hash's pairs -- points at a metaobject:
 ; a vtable of its operations and a datum (a tie's object). The default's
@@ -4023,6 +4024,16 @@ define internal %Slot @t2_tie_hash(%Slot %h, %Slot %cls, %Array* %rest) {
   %c = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_tm_tiehash, i64 0, i64 0), i64 7)
   %r = call %Slot @t2_tie(%Array* %a, i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_tiehash, i64 0, i64 0), %Slot %cls, %Array* %rest, %Str %c)
   ret %Slot %r
+}
+; t2_tie_scalar(cls, rest) -> cls's TIESCALAR(cls, rest...): a tied scalar's
+; object (Analysis made its reads FETCH on it).
+define internal %Slot @t2_tie_scalar(%Slot %cls, %Array* %rest) {
+  %args = call %Array* @t2_new_array()
+  call void @t2_apush(%Array* %args, %Slot %cls)
+  call void @t2_aappend(%Array* %args, %Array* %rest)
+  %c = call %Str @t2_str(i8* getelementptr ([10 x i8], [10 x i8]* @lit_tm_tiescalar, i64 0, i64 0), i64 9)
+  %o = call %Slot @t2_tie_call(%Array* %args, %Str %c)
+  ret %Slot %o
 }
 ; t2_tied(a) -> the tie's object, or undef where a has the default metaobject
 define internal %Slot @t2_tied(%Array* %a) {

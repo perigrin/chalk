@@ -7,6 +7,7 @@ no warnings 'experimental::class';
 
 class Chalk::Target::LLVM::Node::TieArray :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_tie_array') } }
 class Chalk::Target::LLVM::Node::TieHash :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_tie_hash') } }
+class Chalk::Target::LLVM::Node::TieScalar :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_tie_scalar') } }
 class Chalk::Target::LLVM::Node::TiedA :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_tied') } }
 class Chalk::Target::LLVM::Node::TiedH :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_tied_h') } }
 class Chalk::Target::LLVM::Node::UntieA :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_untie') } }

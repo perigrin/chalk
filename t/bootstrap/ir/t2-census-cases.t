@@ -17,7 +17,7 @@ my @CASES = qw(
     chalk-found-gaps:134 chalk-found-gaps:141 quote-like-terms:1
     argument-extent:3
     chalk-found-gaps:86 chalk-found-gaps:130 chalk-found-gaps:4 jumps:2 adjacency-04_operators:1 bitwise:2
-    range:2 adjacency-03_context:1
+    range:2 adjacency-03_context:1 adjacency-11_oo:1 tie:1 tie:2
     adjacency-09_regex:1 aggregate-operators:1 aggregate-operators:2
     aggregate-operators:3 aggregate-operators:4 aggregate-operators:5
     aggregate-operators:6 aggregates-in-context:1 aggregates-in-context:2
