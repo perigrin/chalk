@@ -1143,6 +1143,9 @@ sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
 sub _stash_changes ($data) {
     my %methods = ( $data->{methods} // {} )->%*;
     for my $m (values %methods) {
+        # (CHALK'S OWN CODE linked in -- a container's metaobject, Chalk::Impl --
+        # changes no stash: its derefs are of what the runtime hands it)
+        next if $m->{impl};
         my %by = map { ( $_->{id} // '' ) => $_ } ( $m->{nodes} // [] )->@*;
         for my $n (values %by) {
             my $op = $n->{op} // '';
@@ -1240,7 +1243,10 @@ sub _wire_nodes ($m) {
 }
 
 sub from_json ($json_string) {
-    my $data    = JSON::PP->new->decode($json_string);
+    # THE WIRE IS UTF-8 (B::SoN prints its JSON encoded): decoded as such, a
+    # string constant is perl's characters -- not their UTF-8 bytes, which a
+    # program printing "caf\xe9" printed as two bytes for its last.
+    my $data    = JSON::PP->new->utf8->decode($json_string);
     # The text after __DATA__ / __END__, which DATA reads (absent: none).
     our $DATA_SECTION = $data->{data_section};
 

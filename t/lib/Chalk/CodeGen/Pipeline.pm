@@ -52,13 +52,31 @@ method run_detail ($json, $select, %opts) {
     return $self->_run($json, $select, %opts);
 }
 
+# THE IMPLEMENTATION LAYER is linked in for T2: the metaobject classes of
+# the special containers the program uses (%SIG's, %INC's, a stash's
+# Chalk::MOP::Class), compiled with it. A unit T2 refuses falls back to
+# Context, which has no use for them (it answers those containers itself):
+# it lowers the program's own wire, unlinked, as before the layer existed.
 method _run ($json, $select, %opts) {
+    my $linked;
+    try { $linked = Chalk::Impl::link_json($json) }
+    catch ($e) { return ([], undef, undef, "from_json failed: $e") }
+    my @r = $self->_run_once($linked, $select, %opts);
+    return @r if $linked eq $json || !grep { ( $_->{path} // '' ) ne 't2' } $r[0]->@*;
+    my ($plain) = $self->_run_once($json, $select, %opts);
+    my %fb = map { ( $_->{label} => $_ ) } $plain->@*;
+    for my $u ( $r[0]->@* ) {
+        next if ( $u->{path} // '' ) eq 't2' || !$fb{ $u->{label} };
+        my $why = $u->{path_why};
+        $u = { $fb{ $u->{label} }->%*, path => 'fallback', path_why => $why };   # (T2's reason is the linked run's)
+    }
+    return @r;
+}
+
+method _run_once ($json, $select, %opts) {
     my $graphs;
     my $load_error;
     try {
-        # THE IMPLEMENTATION LAYER linked in: the metaobject classes of the
-        # special containers the program uses (%SIG's, %INC's), compiled with it.
-        $json = Chalk::Impl::link_json($json);
         $graphs = Chalk::IR::Serialize::JSON::from_json($json);
     }
     catch ($e) {

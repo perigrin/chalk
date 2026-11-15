@@ -684,8 +684,8 @@ sub path_value {
         out( 'a require of ' . $f->value . ', not compiled in' )
             unless Chalk::Impl::is_built_in( $f->value )
                 || $Chalk::IR::Serialize::JSON::FOLLOWED{ $f->value } || $Chalk::IR::Serialize::JSON::FOLLOWED{$mod};
-        $b->impl_call( 'Chalk::Impl::INC', 'enter', $b->as( $b->const_str( Chalk::Impl::inc_key( $f->value ) ), '%Slot' ) )
-            if $b->special_containers->{'Chalk::Impl::INC'};
+        $b->impl_call( '%INC', 'enter', $b->as( $b->const_str( Chalk::Impl::inc_key( $f->value ) ), '%Slot' ) )
+            if $b->special_containers->{'%INC'};
         return $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), $ty );
     }
     return $b->as( $b->emit(op => $v->name eq 'ftdir' ? 'FtDir' : 'Chdir', type => '%Slot', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty );

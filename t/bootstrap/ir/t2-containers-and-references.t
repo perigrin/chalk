@@ -73,7 +73,7 @@ same	use v5.42; use experimental 'class'; class K { field @l = (1, 2); method ad
 same	use v5.42; use experimental 'class'; class K { field %h = (a => 1); method n { $h{b} = 2; join ",", sort keys %h } } print K->new->n, "\n";
 refused	use v5.42; use experimental 'class'; class K { field $x = 3; field $y = $x + 1; method y { $y } } print K->new->y, "\n";
 refused	use v5.42; use experimental 'class'; my $n = 5; class K { field $x = $n; method x { $x } } print K->new->x, "\n";
-refused	use v5.42; use experimental 'class'; class K { field $r = {a => 1}; method a { $r->{a} } } print K->new->a, "\n";
+same	use v5.42; use experimental 'class'; class K { field $r = {a => 1}; method a { $r->{a} } } print K->new->a, "\n";
 same	use v5.42; use experimental 'class'; class K { field @l = (1, 2); method s { "@l" } } for (1, 2) { print K->new->s, ";" } print "\n";
 same	use v5.42; use experimental 'class'; class K { field @l = (1, 2); method r { @l = (@l, 3); return scalar @l } method s { "@l" } } my $k = K->new; print $k->r, $k->s, "\n";
 same	use v5.42; use experimental 'class'; class K { field %h; method set ($r) { %h = %$r; return } method g { join ",", map { "$_$h{$_}" } sort keys %h } } my $k = K->new; $k->set({a => 1, b => 2}); print $k->g, "\n";

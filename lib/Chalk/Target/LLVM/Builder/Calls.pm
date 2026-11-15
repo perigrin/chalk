@@ -254,7 +254,7 @@ sub make_mop {
             if defined $cls->parent_name && length $cls->parent_name;
         # (A SPECIAL CONTAINER'S METAOBJECT CLASS -- Chalk::Impl::* -- every sub:
         # its new, the container protocol, what its methods call, the runtime's.)
-        my $impl = $b->special_containers->{ $cls->name };
+        my $impl = $b->special_classes->{ $cls->name };
         my %sub = map { ( $_->name => $_ ) } grep { ( $impl || $called{can} || $dynamic || $called{ $_->name } ) && $_->graph } ( $cls->subs, $cls->methods );
         for my $sub (@sub{ sort keys %sub }) {
             my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
@@ -290,6 +290,20 @@ sub _is_feature_class {
 # a required one missing, is perl's death: refused (T2 has no die yet).
 sub construct {
     my ($b, $c, $leaf) = @_;
+    my @in = $c->inputs->@*;
+    pop @in if $c->can('memory_input') && $c->memory_input;
+    my @names = +($c->can('param_names') ? $c->param_names // [] : [])->@*;
+    out('a new whose arguments are not name => value') if @names != @in || grep { _is_list($_) } @in;
+    my %arg = map { ( $names[$_] => $in[$_] ) } 0 .. $#in;
+    return $b->construct_with( $leaf, \@names, sub ($p) { exists $arg{$p} ? $b->as( $b->value( $arg{$p} ), '%Slot' ) : undef } );
+}
+
+# construct_with($leaf, \@names, $arg) -> a new object of $leaf made with the
+# named arguments @names, each one's %Slot $arg->($name) gives where its field
+# is set (a call's `new`, or chalk's start-up making a container's metaobject).
+sub construct_with {
+    my ($b, $leaf, $names, $argval) = @_;
+    my @names = @$names;
     # ITS CLASSES, the root first (:isa): each class's fields, then its
     # ADJUST blocks, in that order, as perl initializes them.
     my @chain;
@@ -298,11 +312,7 @@ sub construct {
         out('an :isa cycle') if @chain > 64;
         unshift @chain, $k;
     }
-    my @in = $c->inputs->@*;
-    pop @in if $c->can('memory_input') && $c->memory_input;
-    my @names = +($c->can('param_names') ? $c->param_names // [] : [])->@*;
-    out('a new whose arguments are not name => value') if @names != @in || grep { _is_list($_) } @in;
-    my %arg = map { ( $names[$_] => $in[$_] ) } 0 .. $#in;
+    my %given = map { ( $_ => 1 ) } @names;
     my %param = map { ( $_->param_name => 1 ) } grep { defined $_->param_name } map { $_->fields } @chain;
     out("a new with a parameter its class has not ($_)") for grep { !$param{$_} } @names;
     my $obj = $b->emit(op => 'HNew', type => '%Slot');
@@ -332,7 +342,7 @@ sub construct {
             }
             out('a ' . $f->sigil . ' field') unless $f->sigil eq '$';
             my $v;
-            if (defined $f->param_name && exists $arg{ $f->param_name }) { $v = $b->as($b->value( $arg{ $f->param_name } ), '%Slot') }
+            if (defined $f->param_name && $given{ $f->param_name }) { $v = $argval->( $f->param_name ) }
             elsif ($f->has_default) { $v = $b->field_default( $f->default_value ) }
             elsif (defined $f->param_name) { out('a new missing a required parameter (perl dies)') }
             else { $v = $b->emit(op => 'Undef', type => '%Slot') }
@@ -363,7 +373,7 @@ sub _self_made {
     return 1 if $seen->{ refaddr($n) }++;
     my $op = $n->operation;
     return 0 unless $op eq 'Constant' || $op eq 'ArrayLiteral' && ( $n->stamp // '' ) =~ /\A(?:Array|ArrayRef)\z/   # static type
-        || $op eq 'HashLiteral' && ( $n->stamp // '' ) eq 'Hash'
+        || $op eq 'HashLiteral' && ( $n->stamp // '' ) =~ /\A(?:Hash|HashRef)\z/   # (`{...}`: a new hash each object, as `[...]` is)
         || $op eq 'Call' && ( $n->dispatch_kind // '' ) eq 'method' && blessed( $n->inputs->[0] ) && $n->inputs->[0]->operation eq 'Constant';
     return !grep { !_self_made($_, $seen) } grep { blessed($_) } $n->inputs->@*;
 }
@@ -372,6 +382,7 @@ sub field_default {
     out('a field default that is not made of itself') unless _self_made($d, {});
     local $b->{memo} = {};
     local $b->{depth} = 0;   # (made here, for this object: an arm's or a body's is its own)
+    local $b->{in_field_default} = 1;   # (a {...} in it is made here, each object its own)
     return $b->as($b->value($d), '%Slot');
 }
 sub field_default_into {
@@ -758,10 +769,12 @@ sub func {
         && $ret->inputs->[0]->lists_a_hash
         && ( $ret->inputs->[0]->can('want') ? $ret->inputs->[0]->want // '' : '' ) ne 'scalar'   # `scalar(keys %h)`: a count always
         ? $ret->inputs->[0] : undef;
-    # `return @a` (one input, an array): in the caller's context, its
+    # `return @a` (one input, an array -- a `my` one, or a class's array
+    # field: `method items { return @items }`): in the caller's context, its
     # elements or its count. A list return too.
     my $arrret = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && !$hkv
-        && ( $ret->inputs->[0]->is_my_array || $ret->inputs->[0]->operation eq 'ArrayLiteral' && ( $ret->inputs->[0]->stamp // '' ) eq 'Array' )   # static type
+        && ( $ret->inputs->[0]->is_my_array || $ret->inputs->[0]->operation eq 'ArrayLiteral' && ( $ret->inputs->[0]->stamp // '' ) eq 'Array'   # static type
+             || $ret->inputs->[0]->operation eq 'FieldAccess' && ( $b->field_of( $ret->inputs->[0] ) )[1] eq '@' )
         ? $ret->inputs->[0] : undef;
     # `return /x/` (a match its last statement): its groups in a list, its
     # truth in a scalar.

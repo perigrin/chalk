@@ -78,7 +78,7 @@ class Chalk::MOP {
     }
 
     method declare_class($name, %opts) {
-        die "Chalk::MOP: declare_class('$name') on a sealed MOP — "
+        die "Chalk::MOP: declare_class('$name') on a sealed MOP -- "
           . "construction ended at seal()" if $sealed;
         my $cls = Chalk::MOP::Class->new(
             name => $name,

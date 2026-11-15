@@ -171,7 +171,7 @@ sub walk {
                 # (its __DIE__ handler first, where the program has %SIG: the
                 # runtime's die and unwind ask it themselves)
                 $full = $b->emit(op => 'DieHook', type => '%Str', inputs => [$full])
-                    if $b->special_containers->{'Chalk::Impl::SIG'};
+                    if $b->special_containers->{'%SIG'};
                 $b->emit(op => 'SetErr', type => 'void', inputs => [$full]);
                 $b->{cur}{term} = [ 'br', $b->eval_catch($f) ];
             }

@@ -37,7 +37,7 @@ class Chalk::MOP::Class {
     method seal()      { $sealed = true; return }
 
     method _assert_unsealed($what) {
-        die "Chalk::MOP::Class: $what on sealed class '$name' — "
+        die "Chalk::MOP::Class: $what on sealed class '$name' -- "
           . "construction ended at seal()" if $sealed;
         return;
     }
@@ -67,25 +67,60 @@ class Chalk::MOP::Class {
     # program compiled) are answered neither way; with no table given at all
     # (undef), nothing is claimed.
     field $symbols;
-    field %symbols_unknown;
+    field $symbols_unknown = {};
 
     method knows_symbols() { return defined $symbols ? true : false }
 
     method declare_symbols($table, $unknown) {
         $self->_assert_unsealed('declare_symbols');
-        $symbols = { $table->%* };
-        %symbols_unknown = map { ( $_ => 1 ) } $unknown->@*;
+        my %t;
+        for my $n ( keys $table->%* ) { $t{$n} = $table->{$n} }
+        $symbols = \%t;
+        my %u;
+        for my $n ( $unknown->@* ) { $u{$n} = 1 }
+        $symbols_unknown = \%u;
         return;
     }
 
     # has_symbol($name) -> 1 there, 0 not there, undef not known.
     method has_symbol($n) {
-        return undef unless defined $symbols && !$symbols_unknown{$n};
+        return undef unless defined $symbols && !$symbols_unknown->{$n};
         return exists $symbols->{$n} ? 1 : 0;
     }
 
     method symbol($n)     { return defined $symbols ? $symbols->{$n} : undef }
     method symbol_names() { return defined $symbols ? sort keys $symbols->%* : () }
+    method symbols_unknown() { return sort keys $symbols_unknown->%* }
+
+    # THE STASH IS THIS CLASS, SEEN AS A HASH (perigrin: a stash is a container
+    # whose metaobject is its package's Class): `exists $Foo::{x}` asks it
+    # whether the package has the symbol. An entry's value is a glob, whose
+    # slots are the stash's: only its truth is answered (the compiler lets a
+    # program read no more of it). A name the Class cannot answer, and a
+    # change to the stash at run time, stop the program by name.
+    method EXISTS($key) {
+        my $has = $self->has_symbol($key);
+        return $has if defined $has;
+        return _refuse("whether ${name}:: holds $key (its presence is not known: the toolchain made it, or no symbol table was given)");
+    }
+
+    method FETCH($key) {
+        my $has = $self->has_symbol($key);
+        return $has ? 1 : undef if defined $has;
+        return _refuse("whether ${name}:: holds $key (its presence is not known: the toolchain made it, or no symbol table was given)");
+    }
+
+    method STORE($key, $value) { return _refuse("a store into the stash ${name}:: (a change to the MOP at run time)") }
+    method DELETE($key)        { return _refuse("a delete from the stash ${name}:: (a change to the MOP at run time)") }
+    method CLEAR()             { return _refuse("the stash ${name}:: emptied or assigned whole (a change to the MOP at run time)") }
+    method FIRSTKEY()          { return _refuse("the keys of the stash ${name}:: (perl's own names in it are not all known)") }
+    method NEXTKEY($last)      { return _refuse("the keys of the stash ${name}:: (perl's own names in it are not all known)") }
+
+    # _refuse($why): a question the stash does not answer, stopped by name.
+    sub _refuse ($why) {
+        print STDERR "chalk: refused at run time: $why\n";
+        exit 255;
+    }
 
     method declare_field($field_name, %opts) {
         $self->_assert_unsealed('declare_field');

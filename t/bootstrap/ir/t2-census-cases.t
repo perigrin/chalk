@@ -12,7 +12,7 @@ require Chalk::CodeGen::Harness::T2Case;
 # Cases by file:N (script/t2-case runs one). Retiring Context.pm needs every
 # census case here (docs/plans/2026-11-14-context-only-census.tsv lists the rest).
 my @CASES = qw(
-    adjacency-01_literals:1 adjacency-05_scoping:1 adjacency-06_control:2
+    adjacency-01_literals:1 adjacency-12_packages:1 adjacency-05_scoping:1 adjacency-06_control:2
     argument-extent:3
     adjacency-09_regex:1 aggregate-operators:1 aggregate-operators:2
     aggregate-operators:3 aggregate-operators:4 aggregate-operators:5
@@ -65,7 +65,7 @@ my @CASES = qw(
     chalk-found-gaps:77 chalk-found-gaps:78 chalk-found-gaps:79
     chalk-found-gaps:8 chalk-found-gaps:80 chalk-found-gaps:81
     chalk-found-gaps:82 chalk-found-gaps:83 chalk-found-gaps:84
-    chalk-found-gaps:85 chalk-found-gaps:87 chalk-found-gaps:89
+    chalk-found-gaps:85 chalk-found-gaps:87 chalk-found-gaps:88 chalk-found-gaps:89
     chalk-found-gaps:9 chalk-found-gaps:90 chalk-found-gaps:91
     chalk-found-gaps:92 chalk-found-gaps:93 chalk-found-gaps:95
     chalk-found-gaps:96 chalk-found-gaps:97 chalk-found-gaps:98
@@ -87,11 +87,11 @@ my @CASES = qw(
     hashes:5 heredocs:1 heredocs:2 heredocs:3 jumps:1 jumps:3
     list-operators-in-context:1 list-operators-in-context:2
     list-operators-in-context:3 list-operators-in-context:4
-    list-operators-in-context:5 loading:1 loading:4 loading:5 loading:6 loops:1 loops:10
+    list-operators-in-context:5 loading:1 loading:2 loading:3 loading:4 loading:5 loading:6 loops:1 loops:10
     loops:11 loops:2 loops:3 loops:4 loops:5 loops:6 loops:7 loops:8 loops:9
     named-operators:1 named-operators:2 named-operators:3 named-operators:4
     named-operators:5 named-operators:6 named-operators:7 named-operators:8
-    named-operators:9 names:1 names:3 names:4 names:5 numeric-point:1
+    named-operators:9 names:1 names:3 names:4 names:5 names:6 numeric-point:1
     numeric-point:2 numeric-point:3 numeric-point:4 numeric-point:5
     numeric-radix:1 numeric-radix:2 numeric-radix:3 numeric-radix:4
     numeric-radix:5 numeric-radix:6 packages:1 packages:2 packages:3

@@ -27,7 +27,7 @@ class Chalk::Target::LLVM::Node {
     method _call ($sig) { "$name = call $sig(" . $self->_args($inputs->@*) . ')' }
     method _void ($fn) { "call void $fn(" . $self->_args($inputs->@*) . ')' }
     method _gep ($len, $id) { "i8* getelementptr ([" . ( $len + 1 ) . " x i8], [" . ( $len + 1 ) . " x i8]* \@s$id, i64 0, i64 0)" }
-    method _cstr ($s, $id) { my $len = do { use bytes; length $s }; $self->_gep($len, $id) . ", i64 $len" }
+    method _cstr ($s, $id) { my $len = Chalk::Target::LLVM::Printer::byte_length($s); $self->_gep($len, $id) . ", i64 $len" }
 
     # A node of its op's class: Node::<op>. An op with no class is refused
     # here, by name, rather than printed as nothing.

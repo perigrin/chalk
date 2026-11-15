@@ -34,7 +34,8 @@ sub hash_value {
     if ($op eq 'HashLiteral') {
         my $st = $v->stamp // ''; # static type
         out('a hash that is not a {...} or a `my %h`') unless $st =~ /\A(?:HashRef|Hash)\z/;
-        out('a {...} not made where it runs') if $st eq 'HashRef' && !$v->is_pinned;
+        # (one in a field's default is made where the object is: field_default)
+        out('a {...} not made where it runs') if $st eq 'HashRef' && !$v->is_pinned && !$b->{in_field_default};
         # A `my %h` NOT MADE AT ENTRY, needed in an arm or a loop body, would be
         # made there -- again each pass, and gone after.
         out('a hash first made in an arm or a loop body') if $st eq 'Hash' && $b->{depth} && !$v->is_pinned;
@@ -193,53 +194,125 @@ sub pkg_agg {
     return $b->{locs}{$name} //= $b->emit_entry(%op);
 }
 
-# special_hash($EntryDef) -> the %Slot of one of perl's special hashes (%SIG):
-# held in a global, its metaobject a MOP object installed at start-up
-# (special_containers).
+# special_key($EntryDef) -> the special container's own name: %SIG, %INC, %main::.
+sub special_key { my ($n) = @_; return $n->sigil . $n->symbol }
+
+# special_hash($EntryDef) -> the %Slot of one of perl's special hashes (%SIG,
+# a stash): held in a global, its metaobject a MOP object installed at
+# start-up (special_startup).
 sub special_hash {
     my ($b, $n) = @_;
     my $class = $n->metaobject_class;
     out("a container whose metaobject, $class, is not linked in") unless $b->{mop} && $b->{mop}->for_class($class);
-    return $b->{locs}{"special::$class"} //= $b->emit_entry(op => 'GHash', type => '%Slot',
-        attr => { global => $b->global_named( 'pkghash::main::' . $n->symbol ) });
+    my $key = special_key($n);
+    return $b->{locs}{"special::$key"} //= $b->emit_entry(op => 'GHash', type => '%Slot',
+        attr => { global => $b->global_named( ( defined $n->metaobject_package ? 'stash::' : 'pkghash::main::' ) . $n->symbol ) });
 }
 
-# special_containers -> { class => an EntryDef of its container } for each of
-# perl's special containers the program uses (a MOP object its metaobject).
+# special_containers -> { %SIG / %INC / %main:: => an EntryDef of it } for each
+# of perl's special containers the program uses (a MOP object its metaobject).
 sub special_containers {
     my ($b) = @_;
-    return $b->{special} //= { map { ( $_->metaobject_class => $_ ) }
+    return $b->{special} //= { map { ( special_key($_) => $_ ) }
         grep { $_->operation eq 'EntryDef' && $_->metaobject_class } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) };
 }
 
+# impl_global($EntryDef) -> the global its metaobject is held in (a stash's by
+# its package; %SIG's and %INC's by their class, one each).
+sub impl_global {
+    my ($b, $n) = @_;
+    return $b->global_named( 'impl::' . ( defined $n->metaobject_package ? special_key($n) : $n->metaobject_class ) );
+}
+
+# special_classes -> { class => 1 } of the metaobjects' classes.
+sub special_classes {
+    my ($b) = @_;
+    return { map { ( $_->metaobject_class => 1 ) } values $b->special_containers->%* };
+}
+
+# const_data($perl) -> a %Slot of a constant structure the builder holds (a
+# hash's or an array's reference, a string, an integer), made where it stands.
+sub const_data {
+    my ($b, $d) = @_;
+    if (ref $d eq 'HASH') {
+        my $h = $b->emit(op => 'HNew', type => '%Slot');
+        for my $k (sort keys %$d) {
+            $b->emit(op => 'HSet', type => 'void', inputs => [ $h, $b->const_str($k), $b->const_data( $d->{$k} ) ]);
+        }
+        return $h;
+    }
+    if (ref $d eq 'ARRAY') {
+        my $a = $b->emit(op => 'NewArray', type => '%Array*');
+        $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->const_data($_) ]) for @$d;
+        return $b->emit(op => 'ARef', type => '%Slot', inputs => [$a]);
+    }
+    out('a constant structure holding a reference of another kind') if ref $d;
+    return $b->emit(op => 'Undef', type => '%Slot') unless defined $d;
+    return $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => $d }), '%Slot' ) if $d =~ /\A-?[0-9]{1,18}\z/;
+    return $b->as( $b->const_str($d), '%Slot' );
+}
+
 # special_startup: before the program's first statement, each special
-# container it uses gets its metaobject -- an instance of its class (new,
-# looked up as a method call is) -- and %SIG's hash is the handler table.
+# container it uses gets its metaobject. A stash's is its package's
+# Chalk::MOP::Class -- made as `new(name => ..., mop => undef)` and given the
+# symbols the compiler's Class for that package holds (the instance carried
+# from the compile into the run); another's an instance of its Impl class
+# (new, looked up as a method call is). %SIG's hash is the handler table.
 sub special_startup {
     my ($b) = @_;
     my $sp = $b->special_containers;
     # (perl's own warnings reach a __WARN__ handler; chalk raises none)
-    if ( $sp->{'Chalk::Impl::SIG'} and my $why = Chalk::Impl::perl_may_warn( $b->{root_ret} // $b->{ret}, _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) ) ) {
+    if ( $sp->{'%SIG'} and my $why = Chalk::Impl::perl_may_warn( $b->{root_ret} // $b->{ret}, _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) ) ) {
         out("%SIG where perl may raise warnings of its own ($why), which chalk does not raise");
     }
-    for my $class (sort keys %$sp) {
-        my $h = $b->special_hash( $sp->{$class} );
-        my $cls = $b->as( $b->const_str($class), '%Slot' );
-        my $arr = $b->emit(op => 'NewArray', type => '%Array*');
-        $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $cls ]);
-        # (the registry new is made with: %INC's)
-        if ($sp->{$class}->symbol eq 'INC') {
-            my ($whole, @keys) = $b->inc_registry;
-            $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => $whole }), '%Slot' ) ]);
-            $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as( $b->const_str($_), '%Slot' ) ]) for @keys;
+    for my $key (sort keys %$sp) {
+        my $n = $sp->{$key};
+        my $class = $n->metaobject_class;
+        my $h = $b->special_hash($n);
+        my $o;
+        if ( defined( my $pkg = $n->metaobject_package ) ) {
+            # (the symbols are the compile's: a program that may change its stash
+            # while it runs -- the loader says how -- would read them stale)
+            out("a stash where the program may change it at run time ($Chalk::IR::Serialize::JSON::STASH_CHANGES)")
+                if defined $Chalk::IR::Serialize::JSON::STASH_CHANGES;
+            my $leaf = $b->{mop}->for_class($class) // out("a stash whose metaobject, $class, is not linked in");
+            my %arg = ( name => $b->as( $b->const_str($pkg), '%Slot' ), mop => $b->emit(op => 'Undef', type => '%Slot') );
+            $o = $b->construct_with( $leaf, [ 'name', 'mop' ], sub ($p) { $arg{$p} } );
+            my $desc = $b->{mop}->for_class($pkg);
+            if ( $desc && $desc->knows_symbols ) {
+                my %table = map { ( $_ => $desc->symbol($_) ) } $desc->symbol_names;
+                $b->method_by_name( $o, 'declare_symbols', $b->const_data( \%table ), $b->const_data( [ $desc->symbols_unknown ] ) );
+            }
         }
-        my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => 0 },
-            inputs => [ $cls, $b->const_str('new'), $b->const_str(" at chalk's start-up.\n"), $b->const_str('') ]);
-        my $o = $b->emit(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
+        else {
+            my $cls = $b->as( $b->const_str($class), '%Slot' );
+            my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+            $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $cls ]);
+            # (the registry new is made with: %INC's)
+            if ($n->symbol eq 'INC') {
+                my ($whole, @keys) = $b->inc_registry;
+                $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => $whole }), '%Slot' ) ]);
+                $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as( $b->const_str($_), '%Slot' ) ]) for @keys;
+            }
+            my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => 0 },
+                inputs => [ $cls, $b->const_str('new'), $b->const_str(" at chalk's start-up.\n"), $b->const_str('') ]);
+            $o = $b->emit(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
+        }
         $b->emit(op => 'MopHash', type => 'void', inputs => [ $h, $o ]);
-        $b->emit(op => 'GStore', type => 'void', inputs => [$o], attr => { global => $b->global_named("impl::$class") });
-        $b->emit(op => 'SigTable', type => 'void', inputs => [$h]) if $sp->{$class}->symbol eq 'SIG';
+        $b->emit(op => 'GStore', type => 'void', inputs => [$o], attr => { global => $b->impl_global($n) });
+        $b->emit(op => 'SigTable', type => 'void', inputs => [$h]) if $n->symbol eq 'SIG';
     }
+}
+
+# method_by_name($obj, $method, @args) -> a call of $obj's method by name (the
+# run-time MOP's lookup), its arguments %Slots.
+sub method_by_name {
+    my ($b, $o, $m, @args) = @_;
+    my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+    $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for $o, @args;
+    my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => 0 },
+        inputs => [ $o, $b->const_str($m), $b->const_str(" at chalk's start-up.\n"), $b->const_str('') ]);
+    return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
 }
 
 # read_as_a_truth($n) -> true where every node that takes $n's value takes
@@ -261,11 +334,13 @@ sub read_as_a_truth {
     return 1;
 }
 
-# impl_call($class, $method, @args) -> a call of a method of the special
-# container's metaobject (the instance start-up made), by name.
+# impl_call($key, $method, @args) -> a call of a method of a special
+# container's metaobject (the instance start-up made: %INC's), by name.
 sub impl_call {
-    my ($b, $class, $m, @args) = @_;
-    my $o = $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_named("impl::$class") });
+    my ($b, $key, $m, @args) = @_;
+    my $n = $b->special_containers->{$key} // out("a call of the metaobject of $key, which the program does not use");
+    my $class = $n->metaobject_class;
+    my $o = $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->impl_global($n) });
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
     $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for $o, @args;
     my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => 0 },

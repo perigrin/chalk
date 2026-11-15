@@ -29,7 +29,7 @@ sub print_module {
     my @L = ('; chalk T2: a graph typed in LLVM types, printed', Chalk::Target::LLVM::Runtime::prelude());
     my $strs = $bld->{strs};
     for my $s (sort { $strs->{$a} <=> $strs->{$b} } keys %$strs) {
-        my $len = do { use bytes; length $s };
+        my $len = byte_length($s);
         push @L, sprintf('@s%d = private unnamed_addr constant [%d x i8] c"%s\00"', $strs->{$s}, $len + 1, _c($s));
     }
     push @L, "$_ = internal global %Slot zeroinitializer" for sort values +($bld->{globals} // {})->%*;
@@ -39,7 +39,7 @@ sub print_module {
         my @add;
         my $n = 0;
         for my $name (sort grep { /\A[\w:]+::\w+\z/ && !/\Amy::/ } keys +($bld->{globals} // {})->%*) {
-            my $len = do { use bytes; length $name };
+            my $len = byte_length($name);
             push @L, sprintf('@sym%d = private unnamed_addr constant [%d x i8] c"%s\00"', $n, $len + 1, $name);
             push @add, sprintf('  call void @t2_symtab_add(i8* getelementptr ([%d x i8], [%d x i8]* @sym%d, i64 0, i64 0), i64 %d, %%Slot* %s)', $len + 1, $len + 1, $n, $len, $bld->{globals}{$name});
             $n++;
@@ -76,7 +76,7 @@ sub print_module {
         if ($fn->{arity} && !$fn->{coderef}) {
             my ($mn, $mx, $off) = $fn->{arity}->@*;
             my $nm = $fn->{pname};
-            my $len = do { use bytes; length $nm };
+            my $len = byte_length($nm);
             push @arity, sprintf('  %%aok = call i1 @t2_arity(%%Array* %%args, i64 %d, i64 %d, i64 %d, i8* getelementptr ([%d x i8], [%d x i8]* @s%d, i64 0, i64 0), i64 %d)',
                     $off // 0, $mn, $mx, $len + 1, $len + 1, $strs->{$nm}, $len),
                 '  br i1 %aok, label %call, label %bad', 'bad:', '  ret %Slot zeroinitializer', 'call:';
@@ -116,6 +116,16 @@ sub _blocks {
                :                    "  br i1 " . $t[0]->name . ", label %$t[1]{label}, label %$t[2]{label}";
     }
     return @L;
+}
+
+# byte_length($s) -> the bytes a string constant is: one a character, each
+# below 0x100 (the wire hands bytes past ASCII over upgraded, as characters
+# -- `use bytes` counted their internal encoding, two each: an lli type
+# error). A wider character has no one byte: refused by name.
+sub byte_length {
+    my ($s) = @_;
+    die "T2: out of its slices (a string constant with a character past 0xFF)\n" if $s =~ /[^\x00-\xff]/;
+    return length $s;
 }
 
 sub _c { my $s = shift; $s =~ s/([^\x20-\x21\x23-\x5b\x5d-\x7e])/sprintf('\\%02X', ord $1)/ge; $s }

@@ -8,7 +8,7 @@ no warnings 'experimental::class';
 class Chalk::Target::LLVM::Node::Env :isa(Chalk::Target::LLVM::Node) {
     method to_ll () {
         my %a = $self->attr->%*;
-        my $len = do { use bytes; length $a{key} };
+        my $len = Chalk::Target::LLVM::Printer::byte_length($a{key});
         return $self->name . ' = call %Slot @t2_env(' . $self->_gep($len, $a{id}) . ')';
     }
 }

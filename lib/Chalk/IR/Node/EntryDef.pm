@@ -76,10 +76,21 @@ class Chalk::IR::Node::EntryDef :isa(Chalk::IR::Node::Access) {
     # metaobject_class_of($sigil, $symbol) -> the class whose instance is the
     # metaobject of perl's container of that name, or undef (a sub, for the
     # wire, before a node exists).
-    sub metaobject_class_of ($sg, $sym) { return $METAOBJECT_CLASS{ $sg // '' }{ $sym // '' } }
+    #
+    # A STASH (`%main::`, `%Foo::`) is a hash whose metaobject is its
+    # package's Chalk::MOP::Class -- the compiler's own description of the
+    # package, carried into the run: its symbols are the stash's keys.
+    sub metaobject_class_of ($sg, $sym) {
+        return 'Chalk::MOP::Class' if ( $sg // '' ) eq '%' && ( $sym // '' ) =~ /\A\w+(?:::\w+)*::\z/;
+        return $METAOBJECT_CLASS{ $sg // '' }{ $sym // '' };
+    }
 
     # metaobject_classes -> every class a special container's metaobject is.
-    sub metaobject_classes () { return sort map { values %$_ } values %METAOBJECT_CLASS }
+    sub metaobject_classes () { return sort( ( map { values %$_ } values %METAOBJECT_CLASS ), 'Chalk::MOP::Class' ) }
+
+    # metaobject_package -> the package a stash describes (`main` for
+    # `%main::`), undef for a container that is no stash.
+    method metaobject_package() { return ( $sigil // '' ) eq '%' && ( $symbol // '' ) =~ /\A(\w+(?:::\w+)*)::\z/ ? $1 : undef }
 
     # metaobject_class -> this container's metaobject class (a MOP object), or undef.
     method metaobject_class() { return metaobject_class_of( $sigil, $symbol ) }
@@ -87,7 +98,9 @@ class Chalk::IR::Node::EntryDef :isa(Chalk::IR::Node::Access) {
     # values_are_only_truths -> true where what a key holds is perl's own, not
     # the program's: %INC's values are paths in perl's file system. Whether a
     # module is loaded is the registry's to answer; the path is not.
-    method values_are_only_truths() { return ( $sigil // '' ) eq '%' && ( $symbol // '' ) eq 'INC' ? 1 : 0 }
+    # A stash's values are globs, whose slots are the stash's: only their truth
+    # (the symbol is there) is answered.
+    method values_are_only_truths() { return ( $sigil // '' ) eq '%' && ( ( $symbol // '' ) eq 'INC' || defined $self->metaobject_package ) ? 1 : 0 }
 
     # is_package_scalar -> true for A PACKAGE SCALAR (`our $g`, `$::s`,
     # `$P::v`): one global every sub reads and writes. $@ is one too (the

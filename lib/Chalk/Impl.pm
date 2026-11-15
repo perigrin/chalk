@@ -22,6 +22,14 @@ use Chalk::IR::Node::EntryDef;
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $DIR = File::Spec->catdir( dirname(__FILE__), 'Impl' );
+my $LIB = File::Spec->catdir( dirname(__FILE__), File::Spec->updir );   # chalk's lib: an Impl class's own uses
+
+# WHAT THE RUNTIME CALLS on a special container's metaobject: its constructor
+# (a feature class's field defaults and ADJUST blocks), the container
+# protocol, and a class's own start-up and registry entry points. Linked in:
+# these and what they reach -- never the rest of a class's code.
+my @PROTOCOL = qw(new FETCH STORE EXISTS DELETE CLEAR FIRSTKEY NEXTKEY);
+my %ROOTS = ( 'Chalk::Impl::INC' => ['enter'], 'Chalk::MOP::Class' => ['declare_symbols'] );
 my %WIRE;   # class -> its decoded wire, this process
 
 # THE MODULES BUILT INTO CHALK (perigrin: strict and warnings are built into
@@ -118,8 +126,8 @@ sub warn_handlers_do_nothing ($root, @nodes) {
 
 # file_of($class) -> the file an Impl class is written in.
 sub file_of ($class) {
-    my ($leaf) = $class =~ /\AChalk::Impl::(\w+)\z/ or die "Chalk::Impl: no Impl class $class\n";
-    return File::Spec->catfile( $DIR, "$leaf.pm" );
+    die "Chalk::Impl: no class of chalk's own: $class\n" unless $class =~ /\AChalk::\w+(?:::\w+)*\z/;
+    return File::Spec->catfile( $LIB, split( /::/, $class ) ) . '.pm';
 }
 
 # wire($class) -> the class's wire (decoded), B::SoN's translation of its file:
@@ -132,19 +140,23 @@ sub wire ($class) {
     close $fh;
     my $son = File::Spec->catfile( $SON, 'B', 'SoN.pm' );
     die "GAP: $class cannot be compiled in: B::SoN is not at $SON (set PERL5_SON_LIB)\n" unless -f $son;
-    my $key = sha256_hex( $src, ( stat $son )[9] // 0 );
+    # (its wire is its file's and what that uses: the MOP and the Impl layer,
+    # which depend on nothing above them -- t/bootstrap/mop-depends-on-nothing.t)
+    my @deps = sort( glob( File::Spec->catfile( $LIB, 'Chalk', 'MOP', '*.pm' ) ), glob( File::Spec->catfile( $LIB, 'Chalk', 'MOP', '*', '*.pm' ) ),
+        glob( File::Spec->catfile( $LIB, 'Chalk', 'MOP.pm' ) ), glob( File::Spec->catfile( $DIR, '*.pm' ) ) );
+    my $key = sha256_hex( $src, ( stat $son )[9] // 0, map { ( $_, ( stat $_ )[9] // 0, -s $_ ) } @deps );
     my $cache = File::Spec->catdir( File::Spec->tmpdir, "chalk-impl-$<" );
     my $path  = File::Spec->catfile( $cache, "$class-$key.json" =~ s/::/-/gr );
     my $json;
     if ( open my $in, '<:raw', $path ) { local $/; $json = <$in>; close $in }
     unless ( defined $json && length $json ) {
-        $json = qx($^X -I$SON -MO=-q,SoN,json,package=$class $file 2>/dev/null);
+        $json = qx($^X -I$SON -I$LIB -MO=-q,SoN,json,package=$class $file 2>/dev/null);
         die "GAP: $class cannot be compiled in: B::SoN gave no wire for $file\n" unless $? == 0 && $json =~ /\S/;
         make_path($cache);
         my $tmp = "$path.$$";
         if ( open my $out, '>:raw', $tmp ) { print $out $json; close $out; rename $tmp, $path }
     }
-    return $WIRE{$class} = JSON::PP->new->decode($json);
+    return $WIRE{$class} = JSON::PP->new->utf8->decode($json);   # (the wire is UTF-8)
 }
 
 # needed($data) -> the Impl classes a program's wire needs: those whose
@@ -172,10 +184,9 @@ sub needed ($data) {
 # in (their subs and their class records), or $json itself where it needs none.
 sub link_json ($json) {
     # (a cheap look first: a wire naming no special container is not decoded twice)
-    my @names = Chalk::IR::Node::EntryDef::metaobject_classes();
-    my %sym = map { ( ( $_ =~ /(\w+)\z/ )[0] => 1 ) } @names;
-    return $json unless grep { $json =~ /"symbol"\s*:\s*"\Q$_\E"/ } keys %sym;
-    my $data = JSON::PP->new->decode($json);
+    # (perl's special hashes by name, and any stash: a name ending in ::)
+    return $json unless $json =~ /"symbol"\s*:\s*"(?:SIG|INC|\w+(?:::\w+)*::)"/;
+    my $data = JSON::PP->new->utf8->decode($json);   # (the wire is UTF-8: kept so)
     my @need = needed($data) or return $json;
     for my $class (@need) {
         my $w = wire($class);
@@ -191,13 +202,55 @@ sub link_json ($json) {
         }
         die "GAP: the program defines $class, which is chalk's own (the metaobject of a container it uses)\n"
             if ( $data->{classes} // {} )->{$class} || grep { /\A\Q$class\E::/ } keys +( $data->{methods} // {} )->%*;
-        die "GAP: B::SoN refused part of $class: " . join( '; ', map { "$_: $w->{refused}{$_}" } sort keys $w->{refused}->%* ) . "\n"
-            if $w->{refused} && $w->{refused}->%*;
-        my %m = ( $w->{methods} // {} )->%*;
-        $data->{methods}{$_} = $m{$_} for keys %m;
-        $data->{classes}{$class} = $w->{classes}{$class} or die "GAP: B::SoN gave no class record for $class\n";
+        link_class( $data, $class, $w );
     }
-    return JSON::PP->new->canonical->encode($data);
+    return JSON::PP->new->utf8->canonical->encode($data);
+}
+
+# link_class($data, $class, $wire): the subs of $class's wire the runtime's
+# roots reach (the protocol, its constructor's defaults, its own entry
+# points), and the class records they belong to, into the program's wire --
+# as the program's own code, so the loader keeps them and counts none of
+# their files among the modules the program followed. A sub of a record not
+# reached is named in its stash, unloaded (as the loader does for a module's).
+sub link_class ($data, $class, $w) {
+    require Chalk::IR::Serialize::JSON;
+    my %m = ( $w->{methods} // {} )->%*;
+    my %root = map { ( $_ => 1 ) } @PROTOCOL, ( $ROOTS{$class} // [] )->@*;
+    my $is_root = sub ($k) {
+        my ($pkg, $sub) = $k =~ /\A(.+)::(\w+)\z/ or return 0;
+        return $pkg eq $class && ( $root{$sub} || $sub =~ /\A__(?:DEFAULT|ADJUST)_\d+\z/ );
+    };
+    my %scope = map { ( $_ => { $m{$_}->%*, ( $is_root->($_) ? () : ( module => $class ) ) } ) } keys %m;
+    delete $scope{$_}{module} for grep { $is_root->($_) } keys %scope;
+    my %run = map { ( $_ => 1 ) } Chalk::IR::Serialize::JSON::_reachable_methods( \%scope, $w->{classes} // {}, $w->{refused} // {} );
+    for my $k (sort keys %run) {
+        die "GAP: the program defines $k, which is chalk's own ($class, a container's metaobject)\n" if $data->{methods}{$k};
+        my %g = $m{$k}->%*;
+        delete $g{module};
+        $g{impl} = $class;   # (chalk's own code: the loader's whole-program questions are not about it)
+        $data->{methods}{$k} = \%g;
+    }
+    for my $cname ( sort keys +( $w->{classes} // {} )->%* ) {
+        my $cd = $w->{classes}{$cname};
+        my $linked = $cname eq $class || grep { /\A\Q$cname\E::\w+\z/ } keys %run;
+        next unless $linked;
+        die "GAP: the program defines $cname, which is chalk's own ($class, a container's metaobject)\n" if ( $data->{classes} // {} )->{$cname};
+        my %rec = %$cd;
+        delete $rec{external};
+        for my $kind (qw(subs methods)) {
+            my $h = $rec{$kind} or next;
+            my %keep;
+            for my $n ( keys %$h ) {
+                my $gk = ref $h->{$n} eq 'HASH' ? $h->{$n}{graph} // '' : $h->{$n} // '';
+                if ( $run{$gk} ) { $keep{$n} = $h->{$n} } else { push $rec{unloaded}->@*, $n }
+            }
+            $rec{$kind} = \%keep;
+        }
+        $data->{classes}{$cname} = \%rec;
+    }
+    die "GAP: B::SoN gave no class record for $class\n" unless $data->{classes}{$class};
+    return;
 }
 
 1;
