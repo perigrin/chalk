@@ -635,6 +635,26 @@ sub full_jump {
 # ifs see the loop's edges (loopx, see loop_breaks); the ways round merge at
 # the latch, and the ways out -- the header's, then each `last` -- at the
 # Region the exit Proj feeds, whose phis are made there.
+# _head_aggregates($cond) -> the `my @a` / `my %h` lists (ArrayLiteral,
+# HashLiteral, not pinned, not yet made) a loop's condition reads, through
+# anything but a phi -- none of them the loop's own (made in its body).
+sub _head_aggregates {
+    my ($b, $cond) = @_;
+    my (%seen, @out);
+    my @q = ($cond);
+    while (defined( my $n = shift @q )) {
+        next unless blessed($n) && $n->can('operation') && !$seen{ refaddr($n) }++;
+        next if $n->operation eq 'Phi' || $n->is_memory_version;
+        if ( $n->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( $n->stamp // '' ) =~ /\A(?:Array|Hash)\z/   # static type
+                && !$n->is_pinned && !$b->{memo}{ refaddr($n) } && !$b->_needs_unmade_phi($n, {}) ) {
+            push @out, $n;
+            next;
+        }
+        push @q, $n->inputs->@*;
+    }
+    return @out;
+}
+
 sub loop {
     my ($b, $L) = @_;
     my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } $L->successors_by_input;
@@ -659,6 +679,10 @@ sub loop {
     # perl makes the list before it walks it.
     $b->value($_) for grep { blessed($_) && $_->operation =~ /\A(?:Slice|Range)\z/ }
         map { $_->inputs->[0] } grep { blessed($_) && $_->operation eq 'Count' } $cond[0]->inputs->@*;
+    # A `my` ARRAY OR HASH ITS CONDITION READS (`my @s = ($x); while (@s) {
+    # ... pop @s ... }`) was made before the loop, once: made first in the
+    # header, it was made again each pass, the pops undone ("runs away").
+    $b->value($_) for $b->_head_aggregates($cond[0]);
     my $pre = $b->{cur};
     # A LIST THE LOOP BUILDS starts empty each time the loop is entered: a
     # fresh array here (the empty literal, made once at entry, was every
