@@ -29,9 +29,7 @@ sub hash_reads_settled {
     return if $b->{settling};
     local $b->{settling} = 1;
     for my $ver ($b->{passed}->@*) {
-        # (a %{...} is no value of its own: what reads the hash makes it)
-        my @waiting = grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) }
-                             && !( $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '%' ) } +($b->{readers}{ refaddr($ver) } // [])->@*;
+        my @waiting = grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) } } +($b->{readers}{ refaddr($ver) } // [])->@*;
         next unless @waiting;
         # MADE HERE WHERE NOTHING RAN BETWEEN: the read's version is the
         # statement just before this one, in this block, and the read is under
