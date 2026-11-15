@@ -7,6 +7,7 @@ use experimental 'class';
 use Scalar::Util qw(blessed refaddr);
 use Chalk::IR::Serialize::JSON ();
 use Chalk::Target::LLVM ();
+use Chalk::Impl ();
 
 class Chalk::CodeGen::Pipeline;
 
@@ -55,6 +56,9 @@ method _run ($json, $select, %opts) {
     my $graphs;
     my $load_error;
     try {
+        # THE IMPLEMENTATION LAYER linked in: the metaobject classes of the
+        # special containers the program uses (%SIG's, %INC's), compiled with it.
+        $json = Chalk::Impl::link_json($json);
         $graphs = Chalk::IR::Serialize::JSON::from_json($json);
     }
     catch ($e) {

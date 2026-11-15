@@ -168,6 +168,10 @@ sub walk {
             if (my $f = ( $b->{evals} // [] )->[-1]) {
                 # IN AN EVAL HERE: $@ is the message, and on to its catch.
                 out('a die of another eval than the one open here') if defined $s->eval_id && $s->eval_id ne ( $f->{region}->eval_id // '' );
+                # (its __DIE__ handler first, where the program has %SIG: the
+                # runtime's die and unwind ask it themselves)
+                $full = $b->emit(op => 'DieHook', type => '%Str', inputs => [$full])
+                    if $b->special_containers->{'Chalk::Impl::SIG'};
                 $b->emit(op => 'SetErr', type => 'void', inputs => [$full]);
                 $b->{cur}{term} = [ 'br', $b->eval_catch($f) ];
             }

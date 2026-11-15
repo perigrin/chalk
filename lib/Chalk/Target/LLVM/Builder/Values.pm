@@ -47,6 +47,7 @@ our %T2_BUILTIN = (
     index    => { type => 'i64',   value => 'substr_value' },
     ftis     => { type => '%Slot', value => 'builtin_value' },
     ( map { ( $_ => { value => 'builtin_value' } ) } qw(chr ord time reverse sprintf lock prototype pack) ),
+    warn     => { type => '%Slot', value => 'warn_value', in_place => 'passed' },
 );
 
 # t2_builtin($Call, $column) -> what T2's table says of a builtin's call, or undef.
@@ -153,6 +154,7 @@ sub type_of {
     # AN ARRAY is an %Array of %Slot, by pointer; a count of it an i64, an
     # element a %Slot (it holds what was stored, by its tag).
     # AN ARRAY REFERENCE is a %Slot (tag 6) over an %Array: a scalar.
+    return '%Slot' if $op eq 'EntryDef' && $v->metaobject_class;   # a special hash (%SIG): its %Slot
     return $v->sigil eq '@' ? '%Array*' : '%Slot' if $v->is_package_aggregate;   # a hash is its %Slot
     return '%Slot' if $op eq 'ArrayLiteral' && ( $v->stamp // '' ) eq 'ArrayRef'; # static type
     return '%Slot' if $op eq 'Ref';
@@ -249,6 +251,7 @@ sub _value {
     out( 'the match variable ' . ( $v->sigil // '$' ) . $v->symbol . ' (B::SoN ties it to no match)' )
         if $v->operation eq 'EntryDef' && ( $v->symbol // '' ) =~ /\A(?:[&`'+-]|\d+)\z/;
     return $b->pkg_agg($v) if $v->is_package_aggregate;
+    return $b->special_hash($v) if $v->operation eq 'EntryDef' && $v->metaobject_class;
     # $] IS THE VERSION OF THE PERL T2 IS: the one compiling (whose semantics it
     # keeps), read-only.
     return $b->as( $b->const_str("$]"), $b->type_of($v) )   # (its text: "5.042000")
@@ -664,8 +667,14 @@ sub path_value {
         my $f = $a[0];
         out('a require of a file named at run time') unless $f->operation eq 'Constant' && defined $f->value;
         ( my $mod = $f->value ) =~ s{\.pm\z}{}; $mod =~ s{/}{::}g;
+        # A BUILT-IN (strict, warnings) loads no file; a module B::SoN followed
+        # is compiled in. Either is entered in the registry where the program
+        # reads %INC.
         out( 'a require of ' . $f->value . ', not compiled in' )
-            unless $Chalk::IR::Serialize::JSON::FOLLOWED{ $f->value } || $Chalk::IR::Serialize::JSON::FOLLOWED{$mod};
+            unless Chalk::Impl::is_built_in( $f->value )
+                || $Chalk::IR::Serialize::JSON::FOLLOWED{ $f->value } || $Chalk::IR::Serialize::JSON::FOLLOWED{$mod};
+        $b->impl_call( 'Chalk::Impl::INC', 'enter', $b->as( $b->const_str( Chalk::Impl::inc_key( $f->value ) ), '%Slot' ) )
+            if $b->special_containers->{'Chalk::Impl::INC'};
         return $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), $ty );
     }
     return $b->as( $b->emit(op => $v->name eq 'ftdir' ? 'FtDir' : 'Chdir', type => '%Slot', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty );
@@ -702,6 +711,31 @@ sub substr_value {
     out('an index of fewer than two arguments') if @a < 2;
     my $pos = @a > 2 ? $b->as( $b->value( $a[2] ), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
     return $b->emit(op => 'Index', type => 'i64', inputs => [ $str, $b->as( $b->value( $a[1] ), '%Str' ), $pos ]);
+}
+
+# warn LIST: its message (the list joined) handed to its __WARN__ handler, else
+# to STDERR -- t2_warn asks %SIG (the handler table) -- and true. Where it
+# runs is its place on the control chain; one B::SoN puts on none (a warn
+# inside an expression) runs nowhere it says: refused. A message not ending in
+# a newline names its file and line, which B::SoN does not give a warn:
+# refused where its last part is a constant, a stop at run time otherwise.
+sub warn_value {
+    my ($b, $v, $ty) = @_;
+    out('a warn B::SoN places on no control chain (when it runs is not known)')
+        unless $v->can('control_in') && blessed( $v->control_in );
+    my @a = grep { blessed($_) } $v->inputs->@*;
+    pop @a if $v->can('memory_input') && $v->memory_input;
+    out('a warn of nothing (perl warns of $@, or that something is wrong)') unless @a;
+    out('a warn whose message may not end in a newline (perl adds its file and line, which B::SoN does not give a warn)')
+        if $a[-1]->operation eq 'Constant' && !_is_list( $a[-1] ) && ( $a[-1]->value // '' ) !~ /\n\z/;
+    my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+    for my $e (@a) {
+        if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($e) ]) }
+        else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as( $b->value($e), '%Slot' ) ]) }
+    }
+    my $m = $b->emit(op => 'Join', type => '%Str', inputs => [ $b->const_str(''), $arr ]);
+    $b->hash_reads_settled('a warn');   # (its handler may store)
+    return $b->as( $b->emit_call(op => 'Warn', type => '%Slot', inputs => [$m]), $ty );
 }
 
 # builtin_value($Call, $ty) -> a builtin of one value: chr, ord, time, -e,

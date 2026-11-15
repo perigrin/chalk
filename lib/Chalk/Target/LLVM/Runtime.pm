@@ -1983,7 +1983,13 @@ addat:
 done:
   ret %Str %m
 }
-define internal void @t2_die(%Str %m) {
+; t2_die(msg): the __DIE__ handler first (t2_die_hook), then perl's uncaught die.
+define internal void @t2_die(%Str %m0) {
+  %m = call %Str @t2_die_hook(%Str %m0)
+  call void @t2_die_raw(%Str %m)
+  unreachable
+}
+define internal void @t2_die_raw(%Str %m) {
   %p = extractvalue %Str %m, 0
   %n = extractvalue %Str %m, 1
   call i64 @write(i32 2, i8* %p, i64 %n)
@@ -2013,8 +2019,9 @@ define internal void @t2_eval_leave() {
   store i64 %d1, i64* @t2_eval_depth
   ret void
 }
-define internal void @t2_die_unwind(%Str %m) {
+define internal void @t2_die_unwind(%Str %m0) {
 entry:
+  %m = call %Str @t2_die_hook(%Str %m0)
   %d = load i64, i64* @t2_eval_depth
   %open = icmp sgt i64 %d, 0
   br i1 %open, label %catch, label %exit
@@ -2023,8 +2030,135 @@ catch:
   store i1 1, i1* @t2_dying
   ret void
 exit:
-  call void @t2_die(%Str %m)
+  call void @t2_die_raw(%Str %m)
   unreachable
+}
+; THE HANDLER TABLE (%SIG): @t2_sig holds %SIG's hash where the program uses
+; %SIG -- its metaobject Chalk::Impl::SIG's instance, which holds the
+; handlers -- else nothing, and no handler is ever set. warn and die ask it.
+@t2_sig = internal global %Slot zeroinitializer
+@t2_hooking = internal global i1 0
+@lit_h_warn = private unnamed_addr constant [9 x i8] c"__WARN__\00"
+@lit_h_die = private unnamed_addr constant [8 x i8] c"__DIE__\00"
+@lit_h_default = private unnamed_addr constant [8 x i8] c"DEFAULT\00"
+@lit_h_ignore = private unnamed_addr constant [7 x i8] c"IGNORE\00"
+@msg_h_named = private unnamed_addr constant [101 x i8] c"chalk: refused at run time: a %SIG handler other than a code value (a sub by its name, a reference)\0A\00"
+@msg_warn_at = private unnamed_addr constant [141 x i8] c"chalk: refused at run time: a warn whose message does not end in a newline (perl adds its file and line, which B::SoN does not give a warn)\0A\00"
+define internal void @t2_sig_set(%Slot %h) {
+  store %Slot %h, %Slot* @t2_sig
+  ret void
+}
+; t2_sig_handler(name) -> the code value %SIG holds for name, or undef where
+; none is set (no %SIG, undef, "", DEFAULT, IGNORE -- which for __WARN__ and
+; __DIE__ is perl's default too). A sub named by a string: a stop.
+define internal %Slot @t2_sig_handler(%Str %k) {
+entry:
+  %h = load %Slot, %Slot* @t2_sig
+  %ht = extractvalue %Slot %h, 0
+  %has = icmp eq i8 %ht, 5
+  br i1 %has, label %look, label %none
+look:
+  %v = call %Slot @t2_hget(%Slot %h, %Str %k)
+  %t = extractvalue %Slot %v, 0
+  switch i8 %t, label %named [ i8 8, label %code
+                               i8 0, label %none
+                               i8 3, label %str ]
+code:
+  ret %Slot %v
+str:
+  %s = call %Str @t2_slot_str(%Slot %v)
+  %n = extractvalue %Str %s, 1
+  %empty = icmp eq i64 %n, 0
+  br i1 %empty, label %none, label %words
+words:
+  %dflt = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_h_default, i64 0, i64 0), i64 7)
+  %c1 = call i64 @t2_strcmp(%Str %s, %Str %dflt)
+  %is1 = icmp eq i64 %c1, 0
+  %ign = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_h_ignore, i64 0, i64 0), i64 6)
+  %c2 = call i64 @t2_strcmp(%Str %s, %Str %ign)
+  %is2 = icmp eq i64 %c2, 0
+  %plain = or i1 %is1, %is2
+  br i1 %plain, label %none, label %named
+named:
+  call void @t2_stop(i8* getelementptr ([101 x i8], [101 x i8]* @msg_h_named, i64 0, i64 0), i64 100)
+  unreachable
+none:
+  ret %Slot zeroinitializer
+}
+; t2_call_handler(code, msg): a handler called with the message, as perl calls it.
+define internal void @t2_call_handler(%Slot %c, %Str %m) {
+  %args = call %Array* @t2_new_array()
+  %ms = call %Slot @t2_box_str(%Str %m)
+  call void @t2_apush(%Array* %args, %Slot %ms)
+  %f = call i8* @t2_code_fn(%Slot %c)
+  %e = call %Slot** @t2_code_env(%Slot %c)
+  %fn = bitcast i8* %f to %Slot (%Array*, %Slot**)*
+  %w = load i1, i1* @t2_want
+  store i1 0, i1* @t2_want
+  %r = call %Slot %fn(%Array* %args, %Slot** %e)
+  store i1 %w, i1* @t2_want
+  ret void
+}
+; t2_warn(msg) -> 1: perl's warn -- its __WARN__ handler called with the
+; message, else the message to STDERR. A message not ending in a newline
+; would need its file and line: a stop.
+define internal %Slot @t2_warn(%Str %m) {
+entry:
+  %n = extractvalue %Str %m, 1
+  %empty = icmp eq i64 %n, 0
+  br i1 %empty, label %noat, label %last
+last:
+  %p = extractvalue %Str %m, 0
+  %li = sub i64 %n, 1
+  %lp = getelementptr i8, i8* %p, i64 %li
+  %lc = load i8, i8* %lp
+  %nl = icmp eq i8 %lc, 10
+  br i1 %nl, label %go, label %noat
+noat:
+  call void @t2_stop(i8* getelementptr ([141 x i8], [141 x i8]* @msg_warn_at, i64 0, i64 0), i64 140)
+  unreachable
+go:
+  %k = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_h_warn, i64 0, i64 0), i64 8)
+  %h = call %Slot @t2_sig_handler(%Str %k)
+  %t = extractvalue %Slot %h, 0
+  %code = icmp eq i8 %t, 8
+  br i1 %code, label %call, label %print
+call:
+  call void @t2_call_handler(%Slot %h, %Str %m)
+  br label %done
+print:
+  call void @t2_eprint(%Str %m)
+  br label %done
+done:
+  %one = call %Slot @t2_slot(i8 1, i64 1)
+  ret %Slot %one
+}
+; t2_die_hook(msg) -> the message a die dies with: its __DIE__ handler is
+; called with it first (not again while it runs, as perl's); a handler that
+; dies (an eval open: the dying flag) makes its own message the one.
+define internal %Str @t2_die_hook(%Str %m) {
+entry:
+  %busy = load i1, i1* @t2_hooking
+  br i1 %busy, label %plain, label %look
+look:
+  %k = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_h_die, i64 0, i64 0), i64 7)
+  %h = call %Slot @t2_sig_handler(%Str %k)
+  %t = extractvalue %Slot %h, 0
+  %code = icmp eq i8 %t, 8
+  br i1 %code, label %call, label %plain
+call:
+  store i1 1, i1* @t2_hooking
+  call void @t2_call_handler(%Slot %h, %Str %m)
+  store i1 0, i1* @t2_hooking
+  %d = load i1, i1* @t2_dying
+  br i1 %d, label %replaced, label %plain
+replaced:
+  store i1 0, i1* @t2_dying
+  %e = load %Slot, %Slot* @t2_err
+  %es = call %Str @t2_slot_str(%Slot %e)
+  ret %Str %es
+plain:
+  ret %Str %m
 }
 define internal void @t2_apush_if(%Array* %a, %Slot %v, i1 %c) {
 entry:
@@ -2716,6 +2850,28 @@ die:
   i8* bitcast (void (%Array*, i64)* @t2_tie_aset_len to i8*)
 ]
 @t2_vt_tiehash = internal global [20 x i8*] [
+  i8* bitcast (%Slot (%Array*, i64)* @t2_aget_d to i8*),
+  i8* bitcast (void (%Array*, i64, %Slot, i8*, i64)* @t2_aset_d to i8*),
+  i8* bitcast (i64 (%Array*)* @t2_alen_d to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_apush_d to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_apop_d to i8*),
+  i8* bitcast (%Slot (%Array*)* @t2_ashift_d to i8*),
+  i8* bitcast (void (%Array*, %Slot)* @t2_aunshift_d to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_aappend_d to i8*),
+  i8* bitcast (void (%Array*, %Array*)* @t2_aunshiftl_d to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_tie_hget to i8*),
+  i8* bitcast (void (%Slot, %Str, %Slot)* @t2_tie_hset to i8*),
+  i8* bitcast (i1 (%Slot, %Str)* @t2_tie_hexists to i8*),
+  i8* bitcast (%Slot (%Slot, %Str)* @t2_tie_hdelete to i8*),
+  i8* bitcast (i64 (%Slot)* @t2_tie_hcount to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_tie_hkeys to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_tie_hvalues to i8*),
+  i8* bitcast (%Array* (%Slot)* @t2_tie_hpairs to i8*),
+  i8* bitcast (void (%Slot, %Array*)* @t2_tie_hfroma to i8*),
+  i8* bitcast (i1 (%Array*, i64)* @t2_aexists_d to i8*),
+  i8* bitcast (void (%Array*, i64)* @t2_aset_len_d to i8*)
+]
+@t2_vt_mophash = internal global [20 x i8*] [
   i8* bitcast (%Slot (%Array*, i64)* @t2_aget_d to i8*),
   i8* bitcast (void (%Array*, i64, %Slot, i8*, i64)* @t2_aset_d to i8*),
   i8* bitcast (i64 (%Array*)* @t2_alen_d to i8*),
@@ -3518,7 +3674,11 @@ entry:
   %m = call %Meta* @t2_meta(%Array* %a)
   %d0 = icmp eq %Meta* %m, @t2_meta_default
   %da = icmp eq %Meta* %m, @t2_meta_alias   ; (@_ is no tie)
-  %d = or i1 %d0, %da
+  %vp = getelementptr %Meta, %Meta* %m, i32 0, i32 0
+  %vt = load i8**, i8*** %vp
+  %dm = icmp eq i8** %vt, getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_mophash, i64 0, i64 0)   ; (nor a MOP object's)
+  %d1 = or i1 %d0, %da
+  %d = or i1 %d1, %dm
   br i1 %d, label %no, label %yes
 no:
   ret %Slot zeroinitializer
@@ -3526,10 +3686,35 @@ yes:
   %o = call %Slot @t2_tie_obj(%Array* %a)
   ret %Slot %o
 }
+; t2_mop_hash(h, o): h's metaobject is the MOP object o (a special
+; container's, Chalk::Impl::*): each access a call of o's method by the
+; protocol's name. No tie: tied is false.
+define internal void @t2_mop_hash(%Slot %h, %Slot %o) {
+  %a = call %Array* @t2_harr(%Slot %h)
+  %mm = call i8* @malloc(i64 32)
+  %m = bitcast i8* %mm to %Meta*
+  %vp = getelementptr %Meta, %Meta* %m, i32 0, i32 0
+  store i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_mophash, i64 0, i64 0), i8*** %vp
+  %dp = getelementptr %Meta, %Meta* %m, i32 0, i32 1
+  store %Slot %o, %Slot* %dp
+  %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
+  store %Meta* %m, %Meta** %mp
+  ret void
+}
 ; t2_untie(a): a back to the default metaobject (its own elements, untouched by the tie)
+; (a MOP object's container -- %SIG -- is no tie: untie leaves it as it is, as perl's)
 define internal void @t2_untie(%Array* %a) {
+entry:
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %vp = getelementptr %Meta, %Meta* %m, i32 0, i32 0
+  %vt = load i8**, i8*** %vp
+  %mop = icmp eq i8** %vt, getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_mophash, i64 0, i64 0)
+  br i1 %mop, label %done, label %reset
+reset:
   %mp = getelementptr %Array, %Array* %a, i32 0, i32 3
   store %Meta* @t2_meta_default, %Meta** %mp
+  br label %done
+done:
   ret void
 }
 define internal void @t2_aunshiftl_d(%Array* %a, %Array* %l) {

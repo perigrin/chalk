@@ -10,6 +10,10 @@ class Chalk::Target::LLVM::Node::Call :isa(Chalk::Target::LLVM::Node) {
 }
 class Chalk::Target::LLVM::Node::Die :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_die') } }
 class Chalk::Target::LLVM::Node::DieMsg :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_die_msg') } }
+# warn of a message: its __WARN__ handler called with it, else STDERR; 1.
+class Chalk::Target::LLVM::Node::Warn :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_warn') } }
+# a die's message after its __DIE__ handler: the handler's own where it died.
+class Chalk::Target::LLVM::Node::DieHook :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_die_hook') } }
 class Chalk::Target::LLVM::Node::DieUnwind :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_die_unwind') } }
 class Chalk::Target::LLVM::Node::SetErr :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_set_err') } }
 class Chalk::Target::LLVM::Node::EvalEnter :isa(Chalk::Target::LLVM::Node) { method to_ll () { 'call void @t2_eval_enter()' } }

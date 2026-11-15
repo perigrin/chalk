@@ -252,7 +252,10 @@ sub make_mop {
         $b->emit(op => 'MopClass', type => 'void', inputs => [$cs]);
         $b->emit(op => 'MopIsa', type => 'void', inputs => [ $cs, $b->const_str($cls->parent_name) ])
             if defined $cls->parent_name && length $cls->parent_name;
-        my %sub = map { ( $_->name => $_ ) } grep { ( $called{can} || $dynamic || $called{ $_->name } ) && $_->graph } ( $cls->subs, $cls->methods );
+        # (A SPECIAL CONTAINER'S METAOBJECT CLASS -- Chalk::Impl::* -- every sub:
+        # its new, the container protocol, what its methods call, the runtime's.)
+        my $impl = $b->special_containers->{ $cls->name };
+        my %sub = map { ( $_->name => $_ ) } grep { ( $impl || $called{can} || $dynamic || $called{ $_->name } ) && $_->graph } ( $cls->subs, $cls->methods );
         for my $sub (@sub{ sort keys %sub }) {
             my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
             out('a sub of a signature T2 checks at its calls, called other than directly') if $fn->{direct_only} && !$fn->{arity};

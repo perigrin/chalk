@@ -5,6 +5,7 @@ use utf8;
 
 package Chalk::Target::LLVM::Builder;
 
+require Chalk::Impl;
 use Scalar::Util qw(blessed refaddr);
 
 # make_constant_arrays(@nodes): an array whose literal holds only constants
@@ -73,6 +74,10 @@ sub hash_value {
     }
     my $kind = $v->can('kind') ? $v->kind // '' : '';
     if ($op =~ /\A(?:Subscript|Exists|Delete)\z/ && $kind eq 'hash') {
+        # (%INC's value is a path, perl's: only its truth is the program's)
+        out( 'a value of %' . $in[0]->symbol . ' read as other than a truth (it is perl\'s, not chalk\'s)' )
+            if $op eq 'Subscript' && $in[0] isa Chalk::IR::Node && $in[0]->operation eq 'EntryDef' && $in[0]->values_are_only_truths
+            && !$b->read_as_a_truth($v);
         my $h = $b->hash_of($in[0]);
         my $k = $b->as($b->value($in[1]), '%Str');
         return $b->emit(op => 'HGet', type => '%Slot', inputs => [ $h, $k ]) if $op eq 'Subscript';
@@ -188,6 +193,100 @@ sub pkg_agg {
     return $b->{locs}{$name} //= $b->emit_entry(%op);
 }
 
+# special_hash($EntryDef) -> the %Slot of one of perl's special hashes (%SIG):
+# held in a global, its metaobject a MOP object installed at start-up
+# (special_containers).
+sub special_hash {
+    my ($b, $n) = @_;
+    my $class = $n->metaobject_class;
+    out("a container whose metaobject, $class, is not linked in") unless $b->{mop} && $b->{mop}->for_class($class);
+    return $b->{locs}{"special::$class"} //= $b->emit_entry(op => 'GHash', type => '%Slot',
+        attr => { global => $b->global_named( 'pkghash::main::' . $n->symbol ) });
+}
+
+# special_containers -> { class => an EntryDef of its container } for each of
+# perl's special containers the program uses (a MOP object its metaobject).
+sub special_containers {
+    my ($b) = @_;
+    return $b->{special} //= { map { ( $_->metaobject_class => $_ ) }
+        grep { $_->operation eq 'EntryDef' && $_->metaobject_class } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) };
+}
+
+# special_startup: before the program's first statement, each special
+# container it uses gets its metaobject -- an instance of its class (new,
+# looked up as a method call is) -- and %SIG's hash is the handler table.
+sub special_startup {
+    my ($b) = @_;
+    my $sp = $b->special_containers;
+    for my $class (sort keys %$sp) {
+        my $h = $b->special_hash( $sp->{$class} );
+        my $cls = $b->as( $b->const_str($class), '%Slot' );
+        my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+        $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $cls ]);
+        # (the registry new is made with: %INC's)
+        if ($sp->{$class}->symbol eq 'INC') {
+            my ($whole, @keys) = $b->inc_registry;
+            $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => $whole }), '%Slot' ) ]);
+            $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as( $b->const_str($_), '%Slot' ) ]) for @keys;
+        }
+        my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => 0 },
+            inputs => [ $cls, $b->const_str('new'), $b->const_str(" at chalk's start-up.\n"), $b->const_str('') ]);
+        my $o = $b->emit(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
+        $b->emit(op => 'MopHash', type => 'void', inputs => [ $h, $o ]);
+        $b->emit(op => 'GStore', type => 'void', inputs => [$o], attr => { global => $b->global_named("impl::$class") });
+        $b->emit(op => 'SigTable', type => 'void', inputs => [$h]) if $sp->{$class}->symbol eq 'SIG';
+    }
+}
+
+# read_as_a_truth($n) -> true where every node that takes $n's value takes
+# only its truth: a ?:'s choice, an if's, a not, a defined, an &&'s left
+# (what it gives back where $n is true is its right).
+sub read_as_a_truth {
+    my ($b, $n) = @_;
+    for my $u (grep { blessed($_) } ( $n->consumers // [] )->@*) {
+        my @in = $u->inputs->@*;
+        my $m = $u->memory_operand;
+        my @pos = grep { blessed( $in[$_] ) && refaddr( $in[$_] ) == refaddr($n) && !( blessed($m) && refaddr($m) == refaddr($n) ) } 0 .. $#in;
+        next unless @pos;
+        my $op = $u->operation;
+        next if $op eq 'TernaryExpr' && !grep { $_ != 0 } @pos;
+        next if $op eq 'And' && !grep { $_ != 0 } @pos;
+        next if $op =~ /\A(?:If|Not|Defined)\z/;
+        return 0;
+    }
+    return 1;
+}
+
+# impl_call($class, $method, @args) -> a call of a method of the special
+# container's metaobject (the instance start-up made), by name.
+sub impl_call {
+    my ($b, $class, $m, @args) = @_;
+    my $o = $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_named("impl::$class") });
+    my $arr = $b->emit(op => 'NewArray', type => '%Array*');
+    $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for $o, @args;
+    my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => 0 },
+        inputs => [ $o, $b->const_str($m), $b->const_str(" at chalk's $class.\n"), $b->const_str('') ]);
+    return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
+}
+
+# inc_registry -> (whole, keys): the module registry as the program starts --
+# each module a `use` loaded, and, where no require may load another at run
+# time, each B::SoN followed (and what those loaded in turn). Whole where the
+# program loads only modules that load no other (perl's %INC starts empty).
+sub inc_registry {
+    my ($b) = @_;
+    my %used = map { ( Chalk::Impl::inc_key($_) => 1 ) } keys %Chalk::IR::Serialize::JSON::USED_MODULES;
+    my @req = map {
+        my ($f) = grep { blessed($_) && $_->operation eq 'Constant' } $_->inputs->@*;
+        $f ? $f->value // '' : '';
+    } grep { $_->operation eq 'Call' && $_->is_builtin && ( $_->name // '' ) eq 'require' } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
+    my $late = grep { !Chalk::Impl::is_built_in($_) } @req;
+    my %k = %used;
+    unless ($late) { $k{ Chalk::Impl::inc_key($_) } = 1 for keys %Chalk::IR::Serialize::JSON::FOLLOWED }
+    my $whole = !%Chalk::IR::Serialize::JSON::FOLLOWED && !grep { !Chalk::Impl::loads_no_other($_) } keys %used, @req;
+    return ( $whole ? 1 : 0, sort keys %k );
+}
+
 # _pkg_agg_name($n): the name of the global a package aggregate is held in
 # (T2's: a hash's apart from an array's of one name).
 sub _pkg_agg_name {
@@ -228,6 +327,7 @@ sub hash_of {
     # A SLURPY HASH PARAMETER: its hash, made at the sub's entry (args_rest).
     return $b->{memo}{ refaddr($n) } if blessed($n) && $n->operation eq 'Parameter' && $b->{memo}{ refaddr($n) };
     return $b->value($n) if $n isa Chalk::IR::Node && ( $n->is_named_hash || $n->is_package_aggregate && $n->sigil eq '%' );
+    return $b->value($n) if $n isa Chalk::IR::Node && $n->operation eq 'EntryDef' && $n->metaobject_class;   # %SIG
     if ($n->operation eq 'FieldAccess') {   # a hash field: its hash
         my (undef, $sg) = $b->field_of($n);
         return $b->value($n) if $sg eq '%';

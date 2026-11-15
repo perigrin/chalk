@@ -29,6 +29,11 @@ class Chalk::Target::LLVM::Node::MCall :isa(Chalk::Target::LLVM::Node) {
     }
 }
 
+# A SPECIAL CONTAINER'S METAOBJECT, a MOP object (Chalk::Impl::*): installed
+# on its hash at start-up -- no tie (tied is false).
+class Chalk::Target::LLVM::Node::MopHash :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_mop_hash') } }
+# THE HANDLER TABLE warn and die ask: %SIG's hash, held where the runtime finds it.
+class Chalk::Target::LLVM::Node::SigTable :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_sig_set') } }
 class Chalk::Target::LLVM::Node::IsaOp :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i1 @t2_isa_op') } }
 class Chalk::Target::LLVM::Node::DynName :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_dyn_name') } }
 

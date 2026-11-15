@@ -55,7 +55,9 @@ for my $src (
 }
 
 # What %INC holds is a path this run does not share; a module that loads
-# others leaves the rest of %INC unknown.
+# others leaves the rest of %INC unknown. Refused when the program is built,
+# or -- %INC's metaobject (Chalk::Impl::INC) asked a key its registry cannot
+# answer -- stopped by name when it runs.
 for my $src (
     q{require strict; print $INC{"strict.pm"}, "\n";},
     q{use POSIX (); print $INC{"Fcntl.pm"} ? "y" : "n", "\n";},
@@ -63,7 +65,7 @@ for my $src (
     q{use POSIX (); sub f { "f" } if ($ENV{R}) { require strict } print f(), ($INC{"strict.pm"} ? "y" : "n"), "\n";},
 ) {
     my $got = eval { through_llvm($src) };
-    like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';
+    like($@, qr/GAP|chalk: refused at run time/, "refused by name: $src") or diag "got: ", $got // '';
 }
 
 # A REQUIRE OF A NAME COMPUTED AT RUN TIME cannot be followed: which module it

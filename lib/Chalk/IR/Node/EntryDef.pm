@@ -65,6 +65,30 @@ class Chalk::IR::Node::EntryDef :isa(Chalk::IR::Node::Access) {
     # sigil.
     method is_perls_own() { return $PERLS_OWN{ $sigil // '' }{ $symbol // '' } ? 1 : 0 }
 
+    # PERL'S SPECIAL HASHES WHOSE METAOBJECT IS A MOP OBJECT
+    # (docs/plans/2026-11-15-perls-special-hashes-have-mop-metaobjects.md):
+    # a container like any other, its operations answered by an instance of
+    # the class chalk compiles in for it (lib/Chalk/Impl/*.pm). Not a tie:
+    # there is no tie object, and `tied` is false, as in perl. perl puts these
+    # names in main whatever package names them.
+    my %METAOBJECT_CLASS = ( '%' => { SIG => 'Chalk::Impl::SIG', INC => 'Chalk::Impl::INC' } );
+
+    # metaobject_class_of($sigil, $symbol) -> the class whose instance is the
+    # metaobject of perl's container of that name, or undef (a sub, for the
+    # wire, before a node exists).
+    sub metaobject_class_of ($sg, $sym) { return $METAOBJECT_CLASS{ $sg // '' }{ $sym // '' } }
+
+    # metaobject_classes -> every class a special container's metaobject is.
+    sub metaobject_classes () { return sort map { values %$_ } values %METAOBJECT_CLASS }
+
+    # metaobject_class -> this container's metaobject class (a MOP object), or undef.
+    method metaobject_class() { return metaobject_class_of( $sigil, $symbol ) }
+
+    # values_are_only_truths -> true where what a key holds is perl's own, not
+    # the program's: %INC's values are paths in perl's file system. Whether a
+    # module is loaded is the registry's to answer; the path is not.
+    method values_are_only_truths() { return ( $sigil // '' ) eq '%' && ( $symbol // '' ) eq 'INC' ? 1 : 0 }
+
     # is_package_scalar -> true for A PACKAGE SCALAR (`our $g`, `$::s`,
     # `$P::v`): one global every sub reads and writes. $@ is one too (the
     # runtime's: die sets it).

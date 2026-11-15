@@ -1,5 +1,5 @@
-# ABOUTME: warn under an empty $SIG{__WARN__} handler writes nothing and is
-# ABOUTME: true; warn with no handler, or another handler, is refused by name.
+# ABOUTME: warn under an empty $SIG{__WARN__} handler writes nothing and is true; with no
+# ABOUTME: handler it writes to STDERR, with one it calls it (%SIG's metaobject, Chalk::Impl::SIG).
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -47,15 +47,17 @@ for my $src (
     is($got, $want, "perl's answer for $src") or diag $@;
 }
 
-# perl's own message names the file and line, which this run does not
-# share; a handler that does something runs code this does not call.
+# warn ASKS %SIG (its metaobject, Chalk::Impl::SIG, the handler table): no
+# handler writes the message to STDERR, a handler is called with it; a
+# __DIE__ handler never called changes nothing.
 for my $src (
     q{warn "x\n"; print "ok\n";},
     q{$SIG{__WARN__} = sub { print "got @_" }; warn "x\n";},
     q{$SIG{__DIE__} = sub { }; print "ok\n";},
 ) {
+    my $want = qx($^X -e '$src' 2>&1);
     my $got = eval { through_llvm($src) };
-    like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';
+    is($got, $want, "perl's answer for $src") or diag $@;
 }
 
 done_testing;
