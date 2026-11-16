@@ -71,7 +71,7 @@ sub _conforms {
     my ($actual, $op, $allowed, $node_repr) = @_;
     return $actual eq ($node_repr // $allowed->[0]) ? true : false
         if $OP_REQUIRES_OWN_REPR{$op};
-    return grep({ $actual eq $_ } $allowed->@*) ? true : false;
+    return ( grep { $actual eq $_ } $allowed->@* ) ? true : false;
 }
 
 # _arm_proj_of($control) -> the Proj this arm hangs off, or undef.
