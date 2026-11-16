@@ -431,7 +431,14 @@ sub _value {
         # as the closure does). A variable a loop renews, captured in it, is a
         # new one each pass: not this (one storage per call).
         my $var = Chalk::Target::LLVM::Context::_cell_variable($v) // out('a captured variable that is not one kept in memory');
-        out('a variable captured in a loop body or an arm') if $b->{depth};
+        # WHERE THE CELL IS MADE, not where it is first used: the aggregate
+        # arm's rule. A closure made at the top and called in an arm or a
+        # loop (`if (...) { $add->(5) }`) asked for its cell there, and was
+        # refused as one captured in the arm.
+        my $ver = $v->inputs->[1];
+        my $at = blessed($ver) ? $b->{at}{ refaddr($ver) } : undef;
+        my $depth = $at ? $at->[2] : blessed($ver) && $ver->operation eq 'MemStart' ? 0 : $b->{depth};
+        out('a variable captured in a loop body or an arm') if $depth;
         return $b->location($var);
     }
     if ($op eq 'CellParam') {

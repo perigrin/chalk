@@ -2888,6 +2888,13 @@ sub _stop_past_i64 {
 # a bare untyped operand was passed to `add i64` unconverted.
 sub _lower_as_repr {
     my ($self, $node, $want) = @_;
+    # A CAPTURED VARIABLE'S READ is the %Slot its cell holds, stamped nothing:
+    # taken for an Int or a Num as it stood, `$t = $t + $_[0]` in a closure
+    # added a %Slot as a double, and lli rejected the module. T2 lowers it.
+    die "GAP: arithmetic on a captured variable read from its cell (a %Slot stamped "
+      . "nothing) is not lowered by this path\n"
+        if blessed($node) && $node->operation eq 'CellRead'
+        && ( $node->stamp // 'Unknown' ) !~ /\A(?:Scalar|Slot)\z/;   # static type
     my $ref  = $self->lower_value($node);
     # The stamp, not _repr_of: an operand held as Undef (its defined bit, an
     # i1) has no conversion to a number here yet -- a T2 seam (plan-t1-t2).
