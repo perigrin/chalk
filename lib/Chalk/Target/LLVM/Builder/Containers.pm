@@ -213,7 +213,7 @@ sub hash_value {
     # -- a later store through r does not reach it. (r no hash: a stop.)
     if ($op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '%' && $v->copy) {
         my $h = $b->emit(op => 'HNew', type => '%Slot');
-        my $pairs = $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->as($b->value($in[0]), '%Slot') ]);
+        my $pairs = $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->whole_hash($v, $b->as($b->value($in[0]), '%Slot')) ]);
         $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $pairs ]);
         return $h;
     }
@@ -250,8 +250,10 @@ sub hash_value {
     if ($op eq 'Call' && $v->lists_a_hash) {
         # %$r READ WHOLE: the hash the reference holds; an undefined one is an
         # empty hash here, as in perl (a store through it would autovivify: not this).
+        # (A COPY's -- `my %c = %$h; keys %c` -- is read where B::SoN may say
+        # perl dies: whole_hash)
         my $h = blessed($in[0]) && $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%'
-            ? $b->emit(op => 'HDerefR', type => '%Slot', inputs => [ $b->as($b->value( $in[0]->inputs->[0] ), '%Slot') ])
+            ? $b->emit(op => 'HDerefR', type => '%Slot', inputs => [ $b->whole_hash($in[0], $b->as($b->value( $in[0]->inputs->[0] ), '%Slot')) ])
             : $b->hash_of($in[0]);
         return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]) if $v->lists_a_hash eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar';
         return $b->emit(op => $v->lists_a_hash eq 'keys' ? 'HKeys' : 'HValues', type => '%Array*', inputs => [$h]);
@@ -500,6 +502,37 @@ sub read_as_a_truth {
     return 1;
 }
 
+# _count_may_be_undef($Count) -> true for a count of an array through a
+# reference where B::SoN says perl may die (its site), without strict refs --
+# perl's is undef there of an undef reference -- read other than as a number
+# or a truth (_read_as_a_number), where that undef shows.
+sub _count_may_be_undef {
+    my ($b, $v) = @_;
+    my $d = $v->inputs->[0];
+    return 0 unless blessed($d) && $d->operation eq 'PostfixDeref' && $d->is_array_deref && defined $d->line && !$d->strict;
+    # (through what a scalar holds -- a variable, an element: an array itself is no reference)
+    return 0 unless blessed( $d->inputs->[0] ) && $b->type_of( $d->inputs->[0] ) eq '%Slot';
+    return $b->{memo}{ 'count_undef:' . refaddr($v) } //= $b->_read_as_a_number($v) ? 0 : 1;
+}
+
+# _read_as_a_number($n) -> true where every reader of $n takes it as a number
+# or a truth only (a numeric comparison, + - *, an if's or ?:'s condition, a
+# not, an && or || or a merge itself so read), where an undef and a 0 read
+# the same.
+sub _read_as_a_number {
+    my ($b, $n, $seen) = @_;
+    return 1 if ( $seen //= {} )->{ refaddr($n) }++;
+    for my $u ( $b->value_readers($n) ) {
+        my $op = $u->operation;
+        next if $op =~ /\A(?:Num(?:Eq|Ne|Lt|Le|Gt|Ge)|Add|Subtract|Multiply|If|Not)\z/;
+        next if ( $op =~ /\A(?:And|Or)\z/ || $op eq 'Phi' && !$u->is_memory ) && $b->_read_as_a_number($u, $seen);
+        next if $op eq 'TernaryExpr' && refaddr( $u->inputs->[0] ) == refaddr($n)
+            && !grep { blessed($_) && refaddr($_) == refaddr($n) } $u->inputs->@[1, 2];
+        return 0;
+    }
+    return 1;
+}
+
 # impl_call($key, $method, @args) -> a call of a method of a special
 # container's metaobject (the instance start-up made: %INC's), by name.
 sub impl_call {
@@ -581,7 +614,7 @@ sub hash_of {
     # own, made where it is first read (its version's reads keep it in order).
     if ($n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%') {
         return $b->value($n) if $n->copy;
-        return $b->as($b->value( $n->inputs->[0] ), '%Slot');
+        return $b->whole_hash($n, $b->as($b->value( $n->inputs->[0] ), '%Slot'));
     }
     # THROUGH AN ELEMENT (`$h{x}{y}`): the reference the element holds. A deref
     # for a write B::SoN spells as the element made a hash first (`//= {}`).
@@ -775,6 +808,9 @@ sub array_value {
         return $arr;
     }
     if ($v->is_array_deref) {
+        # (READ WHOLE WHERE PERL MAY DIE -- B::SoN names the site and strict
+        # refs: an undef there dies under strict, reads empty without)
+        local $b->{whole_die} = defined $v->line ? $v : undef;
         # `my @p = @$r` IS A COPY (B::SoN's copy): its own array, of the
         # elements as they are here.
         return $b->array_of($in[0]) unless $v->can('copy') && $v->copy;
@@ -789,6 +825,15 @@ sub array_value {
     if ($op eq 'Count' && blessed($in[0]) && ( $in[0]->is_named_hash || $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%' || $in[0]->operation eq 'FieldAccess' && ( $b->field_of($in[0]) )[1] eq '%' )) {
         my $h = $in[0]->operation eq 'PostfixDeref' ? $b->hash_of($in[0]->inputs->[0]) : $b->hash_of($in[0]);
         return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]);
+    }
+    # A COUNT OF AN ARRAY THROUGH A REFERENCE WITHOUT STRICT REFS, where perl
+    # may die under them (B::SoN's site): of an undef reference perl's is
+    # undef, not 0 -- read other than as a number or a truth, a %Slot.
+    if ($op eq 'Count' && $b->_count_may_be_undef($v)) {
+        my $d = $in[0];
+        my $r = $b->as($b->value( $d->inputs->[0] ), '%Slot');
+        my $n = $b->as($b->emit(op => 'ALen', type => 'i64', inputs => [ $b->whole_deref($d, $r) ]), '%Slot');
+        return $b->emit(op => 'Select', type => '%Slot', inputs => [ $b->emit(op => 'Defined', type => 'i1', inputs => [$r]), $n, $b->emit(op => 'Undef', type => '%Slot') ]);
     }
     return $b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($in[0]) ]) if $op eq 'Count';
     if ($op eq 'Subscript') {
@@ -928,6 +973,9 @@ sub array_var {
 # array_of($n) -> the %Array* a T1 node names (an ArrayLiteral, a deref of one).
 sub array_of {
     my ($b, $n) = @_;
+    # THE WHOLE ARRAY READ WHERE B::SoN SAYS PERL MAY DIE (its deref names its
+    # site and strict refs): for this array only, not one read to make it.
+    my $whole = delete local $b->{whole_die};
     # A split: its fields, from its pattern's graph (the split flavor).
     return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->regex_split($n) ])
         if blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) eq 'split';
@@ -1008,10 +1056,12 @@ sub array_of {
         # (READ WHOLE WHERE B::SoN PINNED IT -- `scalar @{ $h->{l} }` -- an undef
         # there stops, loudly, where perl dies under strict refs or reads
         # nothing without: never a stand-in)
-        out('an array through an element read whole') unless $b->{writing} || $b->{elem_read} || $b->{whole_stop};
+        # (READ WHOLE WHERE B::SoN SAYS PERL MAY DIE: perl's die, or empty)
+        out('an array through an element read whole') unless $b->{writing} || $b->{elem_read} || $b->{whole_stop} || $whole;
         my $w = $b->{writing} || $b->{whole_stop};
         local $b->{elem_read} = 0;
         local $b->{whole_stop} = 0;
+        return $b->whole_deref($whole, $b->value($n)) if $whole && !$b->{writing};
         return $b->emit(op => $w ? 'ADeref' : 'ADerefR', type => '%Array*', inputs => [ $b->as($b->value($n), '%Slot') ]);
     }
     # @Pkg::ISA IS THE RUN-TIME MOP'S OWN PARENT LIST: the array method lookup
@@ -1026,7 +1076,35 @@ sub array_of {
     # array, or a run-time stop when it holds none.
     out('an array that is not a `my` array (' . ( blessed($n) ? $n->operation . ( $n->can('symbol') && defined $n->symbol ? ' ' . $n->symbol : '' ) : 'none' ) . ')')
         unless blessed($n) && $b->type_of($n) eq '%Slot';
+    return $b->whole_deref($whole, $b->value($n)) if $whole && !$b->{writing};
     return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ]);
+}
+
+# whole_hash($PostfixDeref, $slot) -> the hash reference $slot, read whole
+# through $PostfixDeref: where B::SoN says perl may die there (its site and
+# strict refs), checked as perl's (t2_hderef_whole); elsewhere as it is.
+sub whole_hash {
+    my ($b, $d, $r) = @_;
+    return $r unless defined $d->line;
+    return $b->{memo}{ 'whole:' . refaddr($d) } //= do {
+        my $at = $b->deref_at($d);
+        my $h = $b->emit(op => 'HDerefWhole', type => '%Slot', inputs => [ $r ],
+            attr => { strict => ( $d->strict ? 1 : 0 ), msg => $at->{msg}, id => $at->{id} });
+        $b->after_call;
+        $h;
+    };
+}
+
+# whole_deref($PostfixDeref, $value) -> the array $value refers to, read whole
+# where B::SoN says perl may die (t2_aderef_whole): its die names the deref's
+# site, and an eval around it catches it.
+sub whole_deref {
+    my ($b, $d, $r) = @_;
+    my $at = $b->deref_at($d);
+    my $a = $b->emit(op => 'ADerefWhole', type => '%Array*', inputs => [ $b->as($r, '%Slot') ],
+        attr => { strict => ( $d->strict ? 1 : 0 ), msg => $at->{msg}, id => $at->{id} });
+    $b->after_call;
+    return $a;
 }
 
 # list_choice($TernaryExpr) -> c ? A : B read as a list: each arm made in its

@@ -41,6 +41,22 @@ class Chalk::Target::LLVM::Node::APushIf :isa(Chalk::Target::LLVM::Node) { metho
 class Chalk::Target::LLVM::Node::OneOf :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_one_of') } }
 class Chalk::Target::LLVM::Node::ARef :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_aref') } }
 class Chalk::Target::LLVM::Node::ADeref :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_aderef') } }
+# The whole hash read through a reference where perl may die: strict refs
+# and the site its message names, as constants (t2_hderef_whole).
+class Chalk::Target::LLVM::Node::HDerefWhole :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call %Slot @t2_hderef_whole(' . $self->_args($self->inputs->@*) . ", i1 $a{strict}, " . $self->_cstr($a{msg}, $a{id}) . ')';
+    }
+}
+# The whole array read through a reference where perl may die: strict refs
+# and the site its message names, as constants (t2_aderef_whole).
+class Chalk::Target::LLVM::Node::ADerefWhole :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call %Array* @t2_aderef_whole(' . $self->_args($self->inputs->@*) . ", i1 $a{strict}, " . $self->_cstr($a{msg}, $a{id}) . ')';
+    }
+}
 class Chalk::Target::LLVM::Node::ADerefR :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_aderef_r') } }
 class Chalk::Target::LLVM::Node::ASet :isa(Chalk::Target::LLVM::Node) {
     method to_ll () {

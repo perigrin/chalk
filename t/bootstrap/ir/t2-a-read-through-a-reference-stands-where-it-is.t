@@ -32,14 +32,15 @@ for my $case (
 }
 
 # COUNTED THROUGH AN ELEMENT where it stands (`scalar @{ $h->{l} }`): an
-# array there, its count; none, a stop -- perl dies under strict refs, reads
-# undef without -- never a count of a stand-in.
+# array there, its count; none, perl's -- it dies under strict refs (B::SoN
+# names the site), its count is undef without -- never a count of a stand-in.
 {
     my $r = tap(qq{sub f { my (\$s, \$t) = \@_; my \$g = scalar \@{ \$s->{s} }; push \$s->{s}->\@*, \$t; "x\$g" } my \$o = { s => [] }; print f(\$o, "a"), f(\$o, "b"), "\\n";\n});
     is $r->{verdict}, 'SAME', 'a count through an element, before a push into it' or diag $r->{why} // explain $r;
     $r = tap(qq{sub f { my (\$s) = \@_; my \$g = scalar \@{ \$s->{s} }; \$s->{t} = 1; "x\$g" } print f({}), "\\n";\n});
-    if ( $r->{verdict} eq 'REFUSED' ) { pass('none there: refused') }
-    else { like $r->{llvm}{err} // '', qr/refused at run time/, 'none there: a stop, not a count' or diag explain $r }
+    is $r->{verdict}, 'SAME', 'none there, without strict refs: undef, as perl' or diag $r->{why} // explain $r;
+    $r = tap(qq{use strict; sub f { my (\$s) = \@_; my \$g = scalar \@{ \$s->{s} }; \$s->{t} = 1; "x\$g" } print f({}), "\\n";\n});
+    is $r->{verdict}, 'SAME', "none there, under strict refs: perl's die" or diag $r->{why} // explain $r;
 }
 
 done_testing;

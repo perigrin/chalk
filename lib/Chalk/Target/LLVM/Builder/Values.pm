@@ -277,7 +277,7 @@ sub type_of {
     return $v->copy ? '%Slot' : '%Array*' if $op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '%';   # (a copy: its own hash; else its pairs)
     return '%Array*' if $op eq 'ArrayLiteral' || $v->is_array_deref || $v->is_my_array || $op eq 'ArgsSource' || $op eq 'ListAppend';
     return '%Array*' if $op eq 'Slice' || $op eq 'Range';   # a list of its own, made where it is
-    return 'i64' if $op eq 'Count';
+    return $b->_count_may_be_undef($v) ? '%Slot' : 'i64' if $op eq 'Count';   # (undef, or the count: see array_value)
     return '%Slot' if $op eq 'Subscript';
     # A HASH REFERENCE is a %Slot (tag 5) over a %Hash: it is a scalar.
     return '%Slot' if $op eq 'HashLiteral' && ( $v->stamp // '' ) =~ /\A(?:HashRef|Hash)\z/; # static type

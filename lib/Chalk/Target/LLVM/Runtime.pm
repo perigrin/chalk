@@ -1965,6 +1965,127 @@ yes:
   %a = inttoptr i64 %v to %Array*
   ret %Array* %a
 }
+; t2_aderef_whole(s, strict, at, n) -> for the WHOLE array read through s
+; where B::SoN says perl may die (`@$x > 0`, `"@$x"`, `my @c = @$x`): the
+; array s refers to; an undef s dies under strict refs ("Can't use an
+; undefined value as an ARRAY reference at FILE line N.") and reads as an
+; empty one without (perl leaves it undef); another reference dies ("Not an
+; ARRAY reference"); a string dies under strict refs, and without it names a
+; package array: a stop. After a die an eval catches, an empty array.
+@lit_av_undef = private unnamed_addr constant [51 x i8] c"Can't use an undefined value as an ARRAY reference\00"
+@lit_av_not = private unnamed_addr constant [23 x i8] c"Not an ARRAY reference\00"
+@lit_av_str1 = private unnamed_addr constant [46 x i8] c"\22) as an ARRAY ref while \22strict refs\22 in use\00"
+define internal %Array* @t2_aderef_whole(%Slot %s, i1 %strict, i8* %at, i64 %n) {
+entry:
+  %t = extractvalue %Slot %s, 0
+  switch i8 %t, label %str [ i8 6, label %ok
+                             i8 0, label %undef
+                             i8 5, label %not
+                             i8 7, label %not
+                             i8 8, label %not
+                             i8 9, label %not ]
+ok:
+  %a = call %Array* @t2_aderef(%Slot %s)
+  ret %Array* %a
+undef:
+  br i1 %strict, label %undefdie, label %none
+none:
+  %e = call %Array* @t2_new_array()
+  ret %Array* %e
+undefdie:
+  %u = call %Str @t2_str(i8* getelementptr ([51 x i8], [51 x i8]* @lit_av_undef, i64 0, i64 0), i64 50)
+  br label %die
+not:
+  %nm = call %Str @t2_str(i8* getelementptr ([23 x i8], [23 x i8]* @lit_av_not, i64 0, i64 0), i64 22)
+  br label %die
+str:
+  br i1 %strict, label %strdie, label %sym
+sym:
+  call void @t2_stop(i8* getelementptr ([65 x i8], [65 x i8]* @msg_symref, i64 0, i64 0), i64 64)
+  unreachable
+strdie:
+  %sv = call %Str @t2_slot_str(%Slot %s)
+  %sl = extractvalue %Str %sv, 1
+  %long = icmp ugt i64 %sl, 32
+  %cut = select i1 %long, i64 32, i64 %sl
+  %sp = extractvalue %Str %sv, 0
+  %head = call %Str @t2_str(i8* %sp, i64 %cut)
+  %p0 = call %Str @t2_str(i8* getelementptr ([20 x i8], [20 x i8]* @lit_sc_str0, i64 0, i64 0), i64 19)
+  %p1 = call %Str @t2_concat(%Str %p0, %Str %head)
+  %more = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_sc_more, i64 0, i64 0), i64 4)
+  %p2 = call %Str @t2_concat(%Str %p1, %Str %more)
+  %tail0 = call %Str @t2_str(i8* getelementptr ([46 x i8], [46 x i8]* @lit_av_str1, i64 0, i64 0), i64 45)
+  %tail1 = call %Str @t2_str(i8* getelementptr ([46 x i8], [46 x i8]* @lit_av_str1, i64 0, i64 1), i64 44)
+  %lp = select i1 %long, %Str %p2, %Str %p1
+  %tl = select i1 %long, %Str %tail1, %Str %tail0
+  %sm = call %Str @t2_concat(%Str %lp, %Str %tl)
+  br label %die
+die:
+  %m0 = phi %Str [ %u, %undefdie ], [ %nm, %not ], [ %sm, %strdie ]
+  %as = call %Str @t2_str(i8* %at, i64 %n)
+  %m = call %Str @t2_concat(%Str %m0, %Str %as)
+  call void @t2_die_unwind(%Str %m)
+  %e2 = call %Array* @t2_new_array()
+  ret %Array* %e2
+}
+; t2_hderef_whole(s, strict, at, n) -> for the WHOLE hash read through s
+; where B::SoN says perl may die (`my %c = %$h`, `%$h ? 1 : 0`): s, a hash
+; reference; an undef s dies under strict refs ("Can't use an undefined value
+; as a HASH reference at FILE line N.") and is read as an empty one without;
+; another reference dies ("Not a HASH reference"); a string dies under strict
+; refs, and without it names a package hash: a stop. After a die an eval
+; catches, undef.
+@lit_hv_undef = private unnamed_addr constant [49 x i8] c"Can't use an undefined value as a HASH reference\00"
+@lit_hv_not = private unnamed_addr constant [21 x i8] c"Not a HASH reference\00"
+@lit_hv_str1 = private unnamed_addr constant [44 x i8] c"\22) as a HASH ref while \22strict refs\22 in use\00"
+define internal %Slot @t2_hderef_whole(%Slot %s, i1 %strict, i8* %at, i64 %n) {
+entry:
+  %t = extractvalue %Slot %s, 0
+  switch i8 %t, label %str [ i8 5, label %ok
+                             i8 0, label %undef
+                             i8 6, label %not
+                             i8 7, label %not
+                             i8 8, label %not
+                             i8 9, label %not ]
+ok:
+  ret %Slot %s
+undef:
+  br i1 %strict, label %undefdie, label %ok
+undefdie:
+  %u = call %Str @t2_str(i8* getelementptr ([49 x i8], [49 x i8]* @lit_hv_undef, i64 0, i64 0), i64 48)
+  br label %die
+not:
+  %nm = call %Str @t2_str(i8* getelementptr ([21 x i8], [21 x i8]* @lit_hv_not, i64 0, i64 0), i64 20)
+  br label %die
+str:
+  br i1 %strict, label %strdie, label %sym
+sym:
+  call void @t2_stop(i8* getelementptr ([65 x i8], [65 x i8]* @msg_symref, i64 0, i64 0), i64 64)
+  unreachable
+strdie:
+  %sv = call %Str @t2_slot_str(%Slot %s)
+  %sl = extractvalue %Str %sv, 1
+  %long = icmp ugt i64 %sl, 32
+  %cut = select i1 %long, i64 32, i64 %sl
+  %sp = extractvalue %Str %sv, 0
+  %head = call %Str @t2_str(i8* %sp, i64 %cut)
+  %p0 = call %Str @t2_str(i8* getelementptr ([20 x i8], [20 x i8]* @lit_sc_str0, i64 0, i64 0), i64 19)
+  %p1 = call %Str @t2_concat(%Str %p0, %Str %head)
+  %more = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_sc_more, i64 0, i64 0), i64 4)
+  %p2 = call %Str @t2_concat(%Str %p1, %Str %more)
+  %tail0 = call %Str @t2_str(i8* getelementptr ([44 x i8], [44 x i8]* @lit_hv_str1, i64 0, i64 0), i64 43)
+  %tail1 = call %Str @t2_str(i8* getelementptr ([44 x i8], [44 x i8]* @lit_hv_str1, i64 0, i64 1), i64 42)
+  %lp = select i1 %long, %Str %p2, %Str %p1
+  %tl = select i1 %long, %Str %tail1, %Str %tail0
+  %sm = call %Str @t2_concat(%Str %lp, %Str %tl)
+  br label %die
+die:
+  %m0 = phi %Str [ %u, %undefdie ], [ %nm, %not ], [ %sm, %strdie ]
+  %as = call %Str @t2_str(i8* %at, i64 %n)
+  %m = call %Str @t2_concat(%Str %m0, %Str %as)
+  call void @t2_die_unwind(%Str %m)
+  ret %Slot zeroinitializer
+}
 @msg_oneof = private unnamed_addr constant [88 x i8] c"chalk: refused at run time: a list of other than one value passed as one argument (T2)\0A\00"
 ; t2_one_of(a) -> a's one element; a stop when it has another number.
 define internal %Slot @t2_one_of(%Array* %a) {
