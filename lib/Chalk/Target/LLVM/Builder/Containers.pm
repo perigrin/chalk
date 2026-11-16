@@ -249,7 +249,7 @@ sub hash_value {
     }
     # caller: the site of the call this sub is in, N frames up (the stack
     # each call pushes). A package in scalar context; (package, file, line).
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'caller') {
+    if ($op eq 'Call' && $v->reads_call_stack) {
         my ($n) = grep { blessed($_) && !( $v->can('memory_input') && $v->memory_input && refaddr($_) == refaddr( $v->memory_input ) ) } @in;
         my $depth = $n ? $b->as( $b->value($n), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
         return $b->emit(op => 'CallerPkg', type => '%Slot', inputs => [$depth]) if ( $v->stamp // '' ) eq 'Scalar';   # static type
@@ -273,7 +273,7 @@ sub hash_value {
     }
     # each %h IN A LIST: its next key and value, or none (and it starts over).
     # In scalar context (the key alone) not T2's.
-    if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'each') {
+    if ($op eq 'Call' && $v->advances_iterator) {
         out('an each in scalar context') unless ( $v->can('want') ? $v->want // '' : '' ) eq 'list';
         out('an each of what is not a hash') unless $in[0] isa Chalk::IR::Node && $in[0]->is_named_hash;
         # keys AND values START A HASH'S each OVER, but B::SoN places neither
@@ -295,7 +295,7 @@ sub hash_value {
         # A SORT WITH ITS OWN COMPARATOR (a block, a named sub): a function of
         # no arguments, called for each pair with $a and $b -- the sort
         # package's -- set to it; its number orders the pair.
-        my $by = $v->name eq 'sort' && ( ( $v->can('sort_cmp_body') && $v->sort_cmp_body ) || !( $v->can('sort_cmp') && defined $v->sort_cmp ) );
+        my $by = ( $v->builtin_kind // '' ) eq 'sorted' && ( ( $v->can('sort_cmp_body') && $v->sort_cmp_body ) || !( $v->can('sort_cmp') && defined $v->sort_cmp ) );
         my $cmp_fn;
         my (%cmp_env, $cmp_envpads);
         if ($by) {
@@ -324,7 +324,7 @@ sub hash_value {
             if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($e) ]) }
             else { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $b->as($b->value($e), '%Slot') ]) }
         }
-        return $b->emit(op => 'ARev', type => '%Array*', inputs => [$arr]) if $v->name eq 'reverse';
+        return $b->emit(op => 'ARev', type => '%Array*', inputs => [$arr]) if ( $v->builtin_kind // '' ) eq 'reversed';
         if ($cmp_fn) {
             my $pk = ( $v->can('sort_package') ? $v->sort_package : undef ) // 'main';
             $b->hash_reads_settled('a sort comparator');
@@ -570,7 +570,7 @@ sub inc_registry {
     my @req = map {
         my ($f) = grep { blessed($_) && $_->operation eq 'Constant' } $_->inputs->@*;
         $f ? $f->value // '' : '';
-    } grep { $_->operation eq 'Call' && $_->is_builtin && ( $_->name // '' ) eq 'require' } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
+    } grep { $_->operation eq 'Call' && $_->loads_a_file } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
     my $late = grep { !Chalk::Impl::is_built_in($_) } @req;
     my %k = %used;
     unless ($late) { $k{ Chalk::Impl::inc_key($_) } = 1 for keys %Chalk::IR::Serialize::JSON::FOLLOWED }
@@ -851,6 +851,7 @@ sub array_value {
     }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin') {
         my $name = $v->name // '';
+        my $kind = $v->builtin_kind // '';
         if ($v->is_tie_builtin) {
             # (a tie's methods may die, and nothing after them looks: not T2's in a program with an eval)
             out("a $name in a program with an eval") if $b->{has_eval};
@@ -862,7 +863,7 @@ sub array_value {
             # A TIE OF A SCALAR Analysis rewrote (its read FETCH on the tie's
             # object, its tied() the object): the class's TIESCALAR, given the
             # class and the arguments -- its object the tie's value.
-            if ( $sig eq '$' && $name eq 'tie' && $Chalk::IR::Analysis::TIED{ refaddr($v) } ) {
+            if ( $sig eq '$' && $kind eq 'binds' && $Chalk::IR::Analysis::TIED{ refaddr($v) } ) {
                 my $r = $b->emit(op => 'NewArray', type => '%Array*');
                 for my $e (@rest) {
                     if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $r, $b->array_of($e) ]) }
@@ -873,9 +874,9 @@ sub array_value {
             out("a $name of a scalar") unless $sig =~ /\A[\@%]\z/;
             my $h = $sig eq '%';
             my $box = $h ? $b->hash_of($c) : $b->array_of($c);
-            if ($name eq 'tied') { return $b->emit(op => $h ? 'TiedH' : 'TiedA', type => '%Slot', inputs => [$box]) }
+            if ($kind eq 'tied_object') { return $b->emit(op => $h ? 'TiedH' : 'TiedA', type => '%Slot', inputs => [$box]) }
             $b->hash_reads_settled("a $name");
-            if ($name eq 'untie') {
+            if ($kind eq 'unbinds') {
                 $b->emit(op => $h ? 'UntieH' : 'UntieA', type => 'void', inputs => [$box]);
                 return $b->as($b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), '%Slot');
             }
@@ -890,7 +891,7 @@ sub array_value {
         # string's bytes, each a number. Another template, or scalar context
         # (its first value alone), is not T2's; nor a string past ASCII (perl's
         # C is of characters, T2's strings are bytes).
-        if ($name eq 'unpack') {
+        if ($kind eq 'unpacked') {
             $b->list_only($v, 'an unpack');
             my @a = grep { blessed($_) && !$_->is_memory_version } @in;
             out('an unpack of other than a template and one string') unless @a == 2;
@@ -906,7 +907,7 @@ sub array_value {
         }
         # glob PATTERN (`<*.x>`), in a list: the files it matches (t2_glob). In
         # scalar context glob is an iterator: not T2's; nor several patterns.
-        if ($name eq 'glob') {
+        if ($kind eq 'file_names') {
             $b->list_only($v, 'a glob');
             my @a = grep { blessed($_) && !$_->is_memory_version } @in;
             out('a glob of other than one pattern') unless @a == 1;
@@ -916,10 +917,10 @@ sub array_value {
             out('a glob pattern with a brace (perl keeps its alternatives in order)') if $lit->operation eq 'Constant' && ( $lit->value // '' ) =~ /\{/;
             return $b->emit(op => 'Glob', type => '%Array*', inputs => [ $b->as($b->value($a[0]), '%Str') ]);
         }
-        if ($name eq 'shift' || $name eq 'pop') {
-            return $b->emit(op => $name eq 'shift' ? 'AShift' : 'APop', type => '%Slot', inputs => [ $b->array_of($in[0]) ]);
+        if ( ( $v->builtin_family // '' ) eq 'array' ) {
+            return $b->emit(op => $kind eq 'takes_first' ? 'AShift' : 'APop', type => '%Slot', inputs => [ $b->array_of($in[0]) ]);
         }
-        if ($name eq 'join') {
+        if ($kind eq 'joined') {
             my @args = @in;
             pop @args if $v->can('memory_input') && $v->memory_input;
             my ($sep, @list) = @args;
@@ -1063,7 +1064,7 @@ sub array_of {
     my $whole = delete local $b->{whole_die};
     # A split: its fields, from its pattern's graph (the split flavor).
     return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->regex_split($n) ])
-        if blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'builtin' && ( $n->name // '' ) eq 'split';
+        if blessed($n) && $n->operation eq 'Call' && $n->splits_a_string;
     # A MATCH IN LIST CONTEXT: its groups (or 1), or with /g every match's --
     # the list its pattern's graph (the list or all flavor) makes.
     return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->regex_list($n) ])
@@ -1258,7 +1259,8 @@ sub array_stmt {
     $b->hash_reads_settled('a ' . $s->name);   # (it may store through a reference: `push @$r, 1`)
     my @in = $s->inputs->@*;
     pop @in if $s->can('memory_input') && $s->memory_input;
-    if ($s->name eq 'push') {
+    my $kind = $s->builtin_kind // '';
+    if ($kind eq 'adds_last') {
         my ($arr, @vals) = @in;
         my $a = $b->array_of($arr);
         # MORE THAN ONE VALUE is one list pushed: a tie's PUSH gets them all at once.
@@ -1282,7 +1284,7 @@ sub array_stmt {
             : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
         return;
     }
-    if ($s->name eq 'unshift') {
+    if ($kind eq 'adds_first') {
         my ($arr, @vals) = @in;
         my $a = $b->array_of($arr);
         out('a list unshifted') if grep { _is_list($_) } @vals;

@@ -344,7 +344,7 @@ sub make_mop {
     my $dynamic = grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'dynamic_method' } _all_nodes($mop, $b->{ret});
     out('a method named at run time in a program with an AUTOLOAD') if $dynamic && grep { $_->name eq 'AUTOLOAD' } map { ( $_->subs, $_->methods ) } $mop->classes;
     # A TIE'S METHODS are the runtime's to call, by these names.
-    $called{$_} = 1 for grep { my $t = $_; grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' } _all_nodes($mop, $b->{ret}) } qw(TIESCALAR TIEARRAY TIEHASH FETCH STORE FETCHSIZE PUSH POP SHIFT UNSHIFT EXISTS DELETE CLEAR EXTEND STORESIZE FIRSTKEY NEXTKEY);
+    $called{$_} = 1 for grep { my $t = $_; grep { $_->operation eq 'Call' && ( $_->builtin_kind // '' ) eq 'binds' } _all_nodes($mop, $b->{ret}) } qw(TIESCALAR TIEARRAY TIEHASH FETCH STORE FETCHSIZE PUSH POP SHIFT UNSHIFT EXISTS DELETE CLEAR EXTEND STORESIZE FIRSTKEY NEXTKEY);
     # A NAME NO PACKAGE DEFINES is UNIVERSAL's (isa, can, DOES, VERSION), else
     # perl's die ("Can't locate object method"), unless an AUTOLOAD answers.
     my %defined = map { ( $_->name => 1 ) } map { ( $_->subs, $_->methods ) } @classes;
@@ -1451,7 +1451,7 @@ sub fh_cell {
 sub _opens_it {
     my ($pad) = @_;
     my @u = grep { blessed($_) } ( $pad->consumers // [] )->@*;
-    return @u && !grep { !( $_->operation eq 'Ref' && !grep { !( $_->operation eq 'Call' && ( $_->name // '' ) eq 'open' ) } grep { blessed($_) } ( $_->consumers // [] )->@* ) } @u;
+    return @u && !grep { !( $_->operation eq 'Ref' && !grep { !( $_->operation eq 'Call' && ( $_->builtin_kind // '' ) eq 'opens' ) } grep { blessed($_) } ( $_->consumers // [] )->@* ) } @u;
 }
 
 # fh_handle($fh) -> the handle a filehandle operand names, where it is used.
@@ -1468,7 +1468,7 @@ sub fh_handle {
 # print to no handle goes to the one selected.
 sub selects {
     my ($b) = @_;
-    return $b->{selects} //= scalar grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'select' }
+    return $b->{selects} //= scalar grep { $_->operation eq 'Call' && ( $_->builtin_kind // '' ) eq 'selects_output' }
         _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
 }
 
@@ -1479,27 +1479,30 @@ sub _after_close {
     my ($ver, $fh, $nodes) = @_;
     my $sym = $fh->can('symbol') ? $fh->symbol // '' : '';
     my $is_fh = sub ($x) { blessed($x) && $x->operation eq 'PadAccess' && ( $x->symbol // '' ) eq $sym };
-    my $opens = grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'open' && $is_fh->( $_->inputs->[0] ) } @$nodes;
+    my $opens = grep { $_->operation eq 'Call' && ( $_->builtin_kind // '' ) eq 'opens' && $is_fh->( $_->inputs->[0] ) } @$nodes;
     return 0 unless $opens == 1;
     my %been;
     for ( my $c = $ver; blessed($c) && !$been{ refaddr($c) }++; $c = $c->can('control_in') ? $c->control_in : undef ) {
-        return 1 if $c->operation eq 'Call' && ( $c->dispatch_kind // '' ) eq 'builtin' && ( $c->name // '' ) eq 'close' && $is_fh->( $c->inputs->[0] );
+        return 1 if $c->operation eq 'Call' && ( $c->builtin_kind // '' ) eq 'closes' && $is_fh->( $c->inputs->[0] );
     }
     return 0;
 }
 
-# io_value($Call) -> open, close, eof, readline, select of a handle.
+# io_value($Call) -> an operation on a handle, by what it does
+# (builtin_kind): open, close, eof, readline, select of a handle, and
+# four-argument select.
 sub io_value {
     my ($b, $v) = @_;
     my $name = $v->name;
+    my $kind = $v->builtin_kind // '';
     my @in = grep { blessed($_) } $v->inputs->@*;
     pop @in if $v->can('memory_input') && $v->memory_input;
     # AN OP ON A HANDLE B::SoN DOES NOT PLACE (a close whose value is read, not
     # on the chain): where it runs against the others is not known.
-    out("a $name B::SoN does not place on the chain") if $name ne 'sselect' && !$v->is_pinned;
+    out("a $name B::SoN does not place on the chain") if $kind ne 'waits_for_handles' && !$v->is_pinned;
     # (a handle's open, print and close write a variable behind the reads of it)
     $b->reads_before($_) for $b->{passed}->@*;
-    if ($name eq 'open') {
+    if ($kind eq 'opens') {
         out('an open of other than three arguments') unless @in == 3;
         my ($fh, $mode, $to) = @in;
         my $m = $mode->operation eq 'Constant' ? $mode->value // '' : '';
@@ -1531,12 +1534,12 @@ sub io_value {
         # A HANDLE REOPENED WHILE SELECTED: perl's select holds the glob (the
         # new handle), T2's the handle it was given (the old one).
         out('a handle opened again in a program that selects one')
-            if $b->selects && 1 < grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'open'
+            if $b->selects && 1 < grep { $_->operation eq 'Call' && ( $_->builtin_kind // '' ) eq 'opens'
                 && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->symbol // '' ) eq ( $fh->symbol // '' ) } +($b->{own_nodes} // [])->@*;
         $b->emit(op => 'Store', type => 'void', inputs => [ $h, $b->fh_cell($fh) ]);
         return $b->emit(op => 'Const', type => 'i64', attr => { value => 1 });
     }
-    if ($name eq 'select') {
+    if ($kind eq 'selects_output') {
         out('a select of other than one argument') unless @in == 1;
         my $x = $in[0];
         out('a select of undef (a `my $fh` never opened)') if $x->operation eq 'Constant' && !defined $x->value;
@@ -1545,7 +1548,7 @@ sub io_value {
             if $x->operation eq 'PadAccess' && ( $x->stamp // '' ) eq 'GlobRef';   # static type
         return $b->emit(op => 'SelectName', type => '%Slot', inputs => [ $b->as( $b->value($x), '%Slot' ) ], attr => { used => $used });
     }
-    if ($name eq 'sselect') {
+    if ($kind eq 'waits_for_handles') {
         # select(undef, undef, undef, 0): no handles, no wait -- none ready.
         out('a four-argument select of handles or a wait') unless @in == 4
             && ( grep { $_->operation eq 'Constant' && !defined $_->value } @in[0 .. 2] ) == 3
@@ -1554,9 +1557,9 @@ sub io_value {
     }
     out("a $name of no handle (of the last one read)") unless @in == 1;
     my $h = $b->fh_handle( $in[0] );
-    return $b->emit(op => 'FhClose', type => 'i1', inputs => [$h]) if $name eq 'close';
-    return $b->emit(op => 'FhEof', type => 'i1', inputs => [$h]) if $name eq 'eof';
-    out("a $name T2 does not have") unless $name eq 'readline';   # (a handle's op the IR names that T2 has no emitter for)
+    return $b->emit(op => 'FhClose', type => 'i1', inputs => [$h]) if $kind eq 'closes';
+    return $b->emit(op => 'FhEof', type => 'i1', inputs => [$h]) if $kind eq 'at_end';
+    out("a $name T2 does not have") unless $kind eq 'reads_lines';   # (a handle's op the IR names that T2 has no emitter for)
     return $b->emit(op => 'FhReadlines', type => '%Array*', inputs => [$h]) if $b->type_of($v) eq '%Array*';
     return $b->emit(op => 'FhReadline', type => '%Slot', inputs => [$h]);
 }

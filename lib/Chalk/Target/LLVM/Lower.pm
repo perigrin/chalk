@@ -40,7 +40,7 @@ sub lower_program {
         grep { $_->operation eq 'Print' } Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
     # caller ANYWHERE: each call of a sub pushes its site, for caller to read.
     local $Chalk::Target::LLVM::Builder::FRAMES = scalar grep {
-        $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'caller'
+        $_->operation eq 'Call' && $_->reads_call_stack
     } Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
     my $ok = eval {
         # THE MOP IS READ SEALED: an unsealed one may still change under the reader.

@@ -103,7 +103,7 @@ sub pos_reset {
     my $name = $pad->name;
     return unless grep {
         my $x = $_->operation =~ /\A(?:RegexMatch|Match)\z/ && ( ( $_->flags // '' ) =~ /g/ || ( $_->can('pattern') ? $_->pattern // '' : '' ) =~ /\\G/ ) ? $_->inputs->[0]
-              : $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'pos' ? $_->inputs->[0] : undef;
+              : $_->operation eq 'Call' && $_->gives_match_offset ? $_->inputs->[0] : undef;
         blessed($x) && $x->operation eq 'PadAccess' && ( $x->name // '' ) eq $name
     } +($b->{own_nodes} // [])->@*;
     $b->emit(op => 'Store', type => 'void', inputs => [ $b->emit(op => 'Undef', type => '%Slot'), $_ ]) for $b->pos_cells($pad);
@@ -417,7 +417,7 @@ sub _pattern_parts {
             return undef if grep { !defined } @p;
             return join '', @p;
         }
-        if ( $op eq 'Call' && ( $x->dispatch_kind // '' ) eq 'builtin' && ( $x->name // '' ) eq 'quotemeta' ) {
+        if ( $op eq 'Call' && $x->quotes_metacharacters ) {
             my ($arg) = grep { blessed($_) } $x->inputs->@*;
             my $c = $arg isa Chalk::IR::Node ? $arg->const_pattern : undef;
             return quotemeta $c if defined $c;    # (known here: quoted here)

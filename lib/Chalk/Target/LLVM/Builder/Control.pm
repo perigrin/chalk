@@ -208,7 +208,7 @@ sub walk {
         # exit: the process ends with the status (0 when none is given). Like
         # a die, nothing after it in its block runs.
         # shortcut: END blocks are not run (T2 refuses a program with one).
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'exit') {
+        elsif ($op eq 'Call' && $s->ends_program) {
             my ($x) = grep { blessed($_) } $s->inputs->@*;
             my $v = $x && !( $s->can('memory_input') && $s->memory_input && refaddr($x) == refaddr( $s->memory_input ) )
                 ? $b->as( $b->value($x), 'i64' )
@@ -395,9 +395,9 @@ sub walk {
         # A chdir OR A require is made where it stands (the next -d reads its cwd).
         elsif ($op eq 'Call' && $s->changes_state) { $b->value($s); $ctl = $s }
         # A lock is a no-op without threads (its operand the variable, not a value).
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'lock') { $ctl = $s }
+        elsif ($op eq 'Call' && $s->does_nothing_unthreaded) { $ctl = $s }
         # `$#a = N` where it stands: the array resized (t2_aset_len).
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'set_arylen') {
+        elsif ($op eq 'Call' && ( $s->builtin_kind // '' ) eq 'sets_last_index') {
             my @a = grep { blessed($_) } $s->inputs->@*;
             pop @a if $s->can('memory_input') && $s->memory_input;
             $b->emit(op => 'ASetLen', type => 'void', inputs => [ $b->array_of( $a[0] ), $b->as( $b->value( $a[1] ), 'i64' ) ]);
@@ -406,7 +406,7 @@ sub walk {
         }
         # A FOUR-ARGUMENT substr (an lvalue substr, an s/// into one): its part
         # replaced in the `my` scalar where it stands.
-        elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'substr') { $b->substr_write($s); $ctl = $s }
+        elsif ($op eq 'Call' && ( $s->builtin_kind // '' ) eq 'piece') { $b->substr_write($s); $ctl = $s }
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands.
         elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || $s->is_sub_call )) {

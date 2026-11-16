@@ -81,7 +81,7 @@ sub build {
         if grep { $_->operation eq 'EntryDef' && ( $_->special_scalar // '' ) eq 'start_time' } _all_nodes($b->{mop}, $ret);
     # (a tie calls its class's methods too)
     # (and `isa`, and a method named at run time, look through it)
-    $b->make_mop if $b->special_containers->%* || grep { $_->operation eq 'IsaOp' || $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) =~ /\A(?:method|dynamic_method)\z/ || ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' ) } _all_nodes($b->{mop}, $ret);
+    $b->make_mop if $b->special_containers->%* || grep { $_->operation eq 'IsaOp' || $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) =~ /\A(?:method|dynamic_method)\z/ || ( $_->builtin_kind // '' ) eq 'binds' ) } _all_nodes($b->{mop}, $ret);
     $b->special_startup;
     $b->glob_stashes;
     # $_ ALIASED (topic_alias): outside any alias it is $main::_ itself.

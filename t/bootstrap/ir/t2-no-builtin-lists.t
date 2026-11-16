@@ -7,6 +7,8 @@ use utf8;
 use Test::More;
 use File::Find;
 use Pod::Functions ();
+use lib "lib";
+use Chalk::Grammar::Perl::BuiltinTable;
 
 # A BUILTIN-NAME ALTERNATION: a call's name (->name, or a $name taken from
 # one) matched against /\A(?:a|b|...)\z/. Such a set says something about the
@@ -42,7 +44,29 @@ sub builtin_keys ($src) {
     return @t;
 }
 
-my ( @alts, @tables );
+# A BUILTIN NAME COMPARED: a call's name (->name, or a $name taken from one)
+# compared with eq or ne to one of perl's builtins -- perlfunc's, or one
+# B::SoN names a builtin by (ftdir, sselect, reftype_of_ref ...: those
+# BuiltinTable holds facts of). What the comparison decides is a fact of
+# perl's about that builtin (its arity, context, side effect, what it
+# returns, its family: T1's, read through a Call method) or which emitter
+# lowers it (to be chosen by such a fact, or by the IR node's class). Either
+# way the target names no builtin.
+$BUILTIN{$_} = 1 for Chalk::Grammar::Perl::BuiltinTable::names();
+my $NAME_EQ = qr{
+    (?: ->name \b (?: \s* // \s* (?: '' | q\{\} ) \s* \) )?   # a call's name, ( $c->name // '' )
+      | \$name\b )                                          # or a $name taken from one
+    \s* (?: eq | ne ) \s* (['"]) ([a-z_]+) \1               # compared to a string
+}x;
+
+# builtin_compared($line) -> the builtin names it compares a call's name to.
+sub builtin_compared ($l) {
+    my @b;
+    while ( $l =~ /$NAME_EQ/g ) { push @b, $2 if $BUILTIN{$2} }
+    return @b;
+}
+
+my ( @alts, @tables, @eqs );
 find( { no_chdir => 1, wanted => sub {
     return unless /\.pm\z/;
     my $file = $_;
@@ -51,13 +75,18 @@ find( { no_chdir => 1, wanted => sub {
     my $n = 0;
     for my $l ( split /\n/, $src ) {
         $n++;
-        push @alts, "$file:$n: " . ( $l =~ s/^\s+//r =~ s/\s+\z//r ) if $file =~ m{\Alib/Chalk/Target/LLVM/} && $l =~ $NAME_ALT;
+        next unless $file =~ m{\Alib/Chalk/Target/LLVM/};
+        my $at = "$file:$n: " . ( $l =~ s/^\s+//r =~ s/\s+\z//r );
+        push @alts, $at if $l =~ $NAME_ALT;
+        push @eqs, $at if builtin_compared($l);
     }
     push @tables, map { "$file: %$_->[0] keyed by " . join ' ', $_->@[ 1 .. $_->$#* ] } builtin_keys($src);
 } }, 'lib/Chalk/Target' );
 
 is( scalar @alts, 0, 'no builtin-name alternation in lib/Chalk/Target/LLVM' )
     or diag join "\n", @alts;
+is( scalar @eqs, 0, 'no call name compared to a builtin\'s in lib/Chalk/Target/LLVM' )
+    or diag join "\n", scalar(@eqs) . ' comparisons:', @eqs;
 is( scalar @tables, 0, 'no table keyed by builtin names in lib/Chalk/Target' )
     or diag join "\n", @tables;
 
@@ -66,6 +95,17 @@ like( q{( $u->name // '' ) =~ /\A(?:push|unshift|join)\z/}, $NAME_ALT, 'the guar
 like( q{$name =~ /\A(?:open|close)\z/}, $NAME_ALT, 'and one over a $name' );
 unlike( q{$f =~ /\A(?:sitofp|zext|fptosi)\z/}, $NAME_ALT, 'an LLVM opcode set is not a builtin list' );
 unlike( q{( $u->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/}, $NAME_ALT, 'nor a dispatch kind' );
+
+is_deeply( [ builtin_compared(q~if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'caller') {~) ],
+    ['caller'], 'the guard sees a call name compared to a builtin\'s' );
+is_deeply( [ builtin_compared(q~if ($name eq 'shift' || $n->name ne 'pop') {~) ], [qw(shift pop)], 'eq and ne, a $name and a bare ->name' );
+is_deeply( [ builtin_compared(q~my $op = $v->name eq 'ftdir' ? 'FtDir' : 'Chdir';~) ], ['ftdir'], 'and a name B::SoN gives a builtin' );
+is_deeply( [ builtin_compared(q~elsif ($op eq 'Call' && ( $s->name // '' ) eq 'set_arylen') {~) ], ['set_arylen'], 'set_arylen (`$#a = N`) too' );
+is_deeply( [ builtin_compared(q~if ( ( $c->name // '' ) eq 'new' && $k eq 'method' ) {~) ], [], 'a method\'s name is not one' );
+is_deeply( [ builtin_compared(q~return 0 if ( $c->can('want') ? $c->want // '' : '' ) eq 'scalar';~) ], [], 'a context named like a builtin is not one' );
+is_deeply( [ builtin_compared(q~$_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'undef'~) ], [], 'nor a constant\'s type' );
+is_deeply( [ builtin_compared(q~return undef if $fam eq 'scalar';~) ], [], 'nor a family' );
+is_deeply( [ builtin_compared(q~$_->operation eq 'LocalAlias' && ( $_->name // '' ) eq '_'~) ], [], 'nor a variable\'s name' );
 
 is_deeply( [ builtin_keys(q{our %T = ( ( map { ( $_ => { type => 1 } ) } qw(shift pop) ), join => { x => 1 } );}) ],
     [ [ 'T', qw(join pop shift) ] ], 'the guard sees a table keyed by builtin names, qw() keys too' );

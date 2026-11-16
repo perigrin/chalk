@@ -363,7 +363,7 @@ sub assign {
         return;
     }
     # pos($s) = N: where its next m//g starts
-    if (blessed($target) && $target->operation eq 'Call' && ( $target->dispatch_kind // '' ) eq 'builtin' && ( $target->name // '' ) eq 'pos') {
+    if (blessed($target) && $target->operation eq 'Call' && $target->gives_match_offset) {
         my ( $pc, $zc ) = $b->pos_cells( $target->inputs->[0] );
         $b->emit(op => 'Store', type => 'void', inputs => [ $b->as($b->value($v), '%Slot'), $pc ]);
         $b->emit(op => 'Store', type => 'void', inputs => [ $b->emit(op => 'Undef', type => '%Slot'), $zc ]);

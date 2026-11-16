@@ -96,15 +96,13 @@ sub _collect_positional_arg_reads {
         }
 
         # `shift @_` / `pop @_`: the arg-read we can bind (shift only).
-        if ($op eq 'Call' && $n->can('dispatch_kind')
-                && ($n->dispatch_kind // '') eq 'builtin'
-                && defined $n->name && ($n->name eq 'shift' || $n->name eq 'pop')) {
+        if ($op eq 'Call' && ( $n->builtin_family // '' ) eq 'array') {
             my ($operand) = grep { blessed($_) } $n->inputs->@*;
             next unless defined $operand && _is_args_array($operand);
             die "GAP: direct call to '$name': callee reads \@_ via `pop` — only "
               . "positional `shift \@_` argument binding is inlined (`pop \@_` "
               . "reads from the end, which inlining does not model)."
-                if $n->name eq 'pop';
+                if $n->builtin_kind eq 'takes_last';
             push @shifts, $n;
         }
         # `my (...) = @_`: an Assign whose last input is @_ and whose others
@@ -150,9 +148,7 @@ sub _collect_positional_arg_reads {
             my @other = grep {
                 blessed($_)
                     && !( $_->operation eq 'Call'
-                        && $_->can('dispatch_kind')
-                        && ($_->dispatch_kind // '') eq 'builtin'
-                        && defined $_->name && $_->name eq 'shift' )
+                        && ( $_->builtin_kind // '' ) eq 'takes_first' )
                     && $_->operation ne 'Subscript'
                     && !( $_->operation eq 'Assign'
                           && refaddr($_->inputs->[-1] // 0) == refaddr($n) )
