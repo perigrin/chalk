@@ -37,9 +37,17 @@ for my $body (
     is $r->{verdict}, 'SAME', $body or diag $r->{why} // explain $r;
 }
 
-# RETURNED, a match's context is its caller's: refused, not guessed.
-my $r = tap(qq{sub g { return \$_[0] =~ /(a)/ } my \$one = g('ab'); print "\$one\\n";\n});
-is $r->{verdict}, 'REFUSED', 'a match returned: refused';
-like $r->{why}, qr/returned/, '... saying why';
+# RETURNED, a match's context is its caller's. It was refused until
+# c43d787f; since then a sub whose last statement is a match gives its groups
+# in a list and its truth in a scalar, by its caller's context. Both callers:
+for my $caller (
+    q{my $one = g('ab'); print "$one\n";},
+    q{my @l = g('ab'); print scalar(@l), "[@l]\n";},
+    q{my $no = g('zz'); print "[$no]\n";},
+    q{my @l = g('zz'); print scalar(@l), "\n";},
+) {
+    my $r = tap("sub g { return \$_[0] =~ /(a)/ } $caller\n");
+    is $r->{verdict}, 'SAME', "a match returned: $caller" or diag $r->{why} // explain $r;
+}
 
 done_testing;
