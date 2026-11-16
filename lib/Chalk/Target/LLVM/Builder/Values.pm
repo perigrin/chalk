@@ -991,7 +991,6 @@ sub number_value {
     my $name = $v->name;
     my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
     out("a $name of no argument (of \$_)") if $name ne 'rand' && !@a;
-    out("a $name of a list") if @a && _is_list( $a[0] );
     my $node = t2_builtin( $v, 'node' );
     if ( $node eq 'HexOct' ) {
         my $s = $b->as( $b->value( $a[0] ), '%Str' );
