@@ -1,5 +1,5 @@
 # ABOUTME: a Print stamped Maybe[Boolean] (perl's print: true, or undef when it fails)
-# ABOUTME: is kept by the loader and lowered as perl answers, through T2 or Context.
+# ABOUTME: is kept by the loader and lowered as perl answers through T2, or refused by its reason.
 use 5.42.0;
 use Test::More;
 use File::Temp qw(tempfile);
@@ -16,6 +16,17 @@ sub run ($cmd) {
     my $out = qx($cmd 2>/dev/null);
     return $out . 'exit ' . ( $? >> 8 );
 }
+
+# T2 REFUSES THESE, by its reason (only the retired fallback lowered them):
+# the value of a print to a handle opened nowhere, read. Never a wrong answer.
+my %T2_REFUSES = map { ( $_ => 'a print to a handle opened nowhere, its value read' ) } (
+    q{my $r = print NOWHERE "x"; print defined $r && $r ? "t" : "f", "\n";},
+    q{my $r = print NOWHERE "x"; print defined($r) ? "d" : "u", "\n";},
+    q{my $r = print NOWHERE "x"; my $x = defined $r && $r; print defined($x) ? "d" : "u", "[$x]\n";},
+    q{my $r = print NOWHERE "x"; my $x = defined $r ? $r : !1; print defined($x) ? "d" : "u", "[$x]\n";},
+    q{my $r = print NOWHERE "x"; if (defined $r) { print "[$r]\n" } print "end\n";},
+    q{my $r = print NOWHERE "x"; my $x = !defined $r || $r; print defined($x) ? "d" : "u", "[$x]\n";},
+);
 
 for my $src (
     q{my $ok = print "x\n"; print "[$ok]\n";},
@@ -42,6 +53,11 @@ for my $src (
     my @prints = grep { $_->operation eq 'Print' } map { $_->nodes->@* } values %{ $graphs // {} };
     ok( @prints && !grep( { ( $_->stamp // '' ) ne 'Maybe[Boolean]' } @prints ), "$src: the loader keeps Maybe[Boolean]" );
     my $ll = !$err && $units->[0]{ok} ? $units->[0]{ll} : undef;
+    if (my $why = $T2_REFUSES{$src}) {
+        ok(!defined $ll, "$src: T2 lowers no module for it");
+        like($err // $units->[0]{err} // '', qr/GAP: T2: out of its slices \(\Q$why\E\)/, "$src: refused by T2's reason");
+        next;
+    }
     ok(defined $ll, "$src: lowered") or diag $err // $units->[0]{err};
     next unless defined $ll;
     my ($lf, $llp) = tempfile(SUFFIX => '.ll', UNLINK => 1);

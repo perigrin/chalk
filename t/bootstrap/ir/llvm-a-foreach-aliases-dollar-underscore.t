@@ -45,11 +45,19 @@ for my $case (
     [ q{sub g { $_[0] = $_[0] * 10 } sub f { my @n = (1, 2); g($_) for @n; return "@n" } print f(), "\n";}, "10 20\n", 'and hands it on' ],
     [ q{sub is_x { /x/ } sub show { print $_ } sub f { my @a = qw(ax b xc); show() for @a; show() for 1 .. 2; return "" } print f(), "\n";}, "axbxc12\n", 'over an array and over a range' ],
     [ q{sub show { print $_ } $_ = "top"; my @o = qw(a b); my @i = qw(x y); for (@o) { show(); for (@i) { show() } show() } print "[$_]\n";}, "axyabxyb[top]\n", 'nested passes restore in turn' ],
-    [ q{sub show { print $_ } $_ = "top"; for (qw(a b c)) { last if $_ eq "b"; show() } print "[$_]\n";}, "a[top]\n", 'a last restores too' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };
     is($got, $want, "$name: perl's answer") or diag $@;
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{sub show { print $_ } $_ = "top"; for (qw(a b c)) { last if $_ eq "b"; show() } print "[$_]\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa \E\$\Q_ aliased to an item of a list written out, where the program writes \E\$\Q_ (B::SoN may have folded the item)\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

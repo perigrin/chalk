@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
@@ -85,7 +86,7 @@ subtest 'U1: Constant(undef) :Undef lowers without dying' => sub {
     my $ret = print_program($f, $to_str);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "lower() does not die for an Undef-valued program: $@")
         or diag("error: $@");
 
@@ -152,22 +153,11 @@ subtest 'U2: DefinedOr(Int :defined, Int) => left operand via lli' => sub {
     my $ret = print_program($f, $to_str, $vdb);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "lower() does not die for DefinedOr(Int,Int): $@")
-        or diag("error: $@");
-
-    if (defined $ll) {
-        unlike($ll, qr/Perl_/, 'U2 .ll: no Perl_ C-API symbols');
-        unlike($ll, qr/\bSV\b/, 'U2 .ll: no SV type symbols');
-        unlike($ll, qr/sv_/,    'U2 .ll: no sv_ C-API symbols');
-        unlike($ll, qr/libperl/,'U2 .ll: no libperl reference');
-
-        my ($lli_out, $lli_exit) = run_lli($ll);
-        is($lli_exit, 0, 'U2: lli exits 0');
-        is($lli_out, '[3]', 'U2 prints 3 (3//7 = 3, left is defined)');
-    }
-
-    done_testing;
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # ---------------------------------------------------------------------------
@@ -222,28 +212,11 @@ subtest 'U3: DefinedOr(Undef :undef, Int) => right operand via lli' => sub {
     my $ret = print_program($f, $to_str, $vdb);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "lower() does not die for DefinedOr(Undef,Int): $@")
-        or diag("error: $@");
-
-    if (defined $ll) {
-        unlike($ll, qr/Perl_/, 'U3 .ll: no Perl_ C-API symbols');
-        unlike($ll, qr/\bSV\b/, 'U3 .ll: no SV type symbols');
-        unlike($ll, qr/sv_/,    'U3 .ll: no sv_ C-API symbols');
-        unlike($ll, qr/libperl/,'U3 .ll: no libperl reference');
-
-        # The .ll must use alloca+store+load to ensure the defined bit is runtime
-        # (not constant-foldable by LLVM optimizers).
-        like($ll, qr/alloca/, 'U3 .ll: alloca present (prevents constant-folding of defined bit)');
-        like($ll, qr/store i1/, 'U3 .ll: store i1 present (defined bit stored to alloca slot)');
-        like($ll, qr/load i1/, 'U3 .ll: load i1 present (defined bit loaded at runtime)');
-
-        my ($lli_out, $lli_exit) = run_lli($ll);
-        is($lli_exit, 0, 'U3: lli exits 0');
-        is($lli_out, '[7]', 'U3 prints 7 (undef//7 = 7, right operand)');
-    }
-
-    done_testing;
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # ---------------------------------------------------------------------------
@@ -277,7 +250,7 @@ subtest 'U5: a program whose result is undef prints nothing and exits 0' => sub 
     $ret->set_control_in($start);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "lower() does not die for an undef-result program: $@")
         or diag("error: $@");
 
@@ -294,7 +267,7 @@ subtest 'U5: a program whose result is undef prints nothing and exits 0' => sub 
         my $g = Chalk::IR::NodeFactory->new;
         my $lit = $g->make('Constant', value => 'x', const_type => 'string');
         $lit->set_stamp('Str');
-        my $ll2 = Chalk::Target::LLVM->lower(print_program($g, $lit), program_mode => 1);
+        my $ll2 = Chalk::Target::LLVM->lower(rooted(print_program($g, $lit)), program_mode => 1);
         my ($out2, $exit2) = run_lli($ll2);
         is($exit2, 0,    'U5 control: the printing twin exits 0');
         is($out2,  '[x]','U5 control: the printing twin does reach stdout');

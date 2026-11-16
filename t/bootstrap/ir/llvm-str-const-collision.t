@@ -5,6 +5,7 @@ use utf8;
 
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
@@ -117,7 +118,7 @@ subtest 'two method bodies with Str constants: no duplicate @str_const_0' => sub
     my ($ret, $f, $mop) = build_dual_str_graph();
 
     my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower($ret, mop => $mop) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret, $mop), mop => $mop) };
     $err = $@;
 
     ok(!defined $err || !length $err,
@@ -152,7 +153,7 @@ subtest 'three method bodies with Str constants: no duplicate globals (I1)' => s
     my ($ret, $f, $mop) = build_triple_str_graph();
 
     my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower($ret, mop => $mop) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret, $mop), mop => $mop) };
     $err = $@;
 
     ok(!defined $err || !length $err,

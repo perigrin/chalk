@@ -45,7 +45,6 @@ for my $c (
     [ q{my ($k, $j) = ("x", "x"); my %h = ($k => 1, $j => 2); print $h{x}, scalar(keys %h), "\n";} ],
     [ q{sub f { my %o = @_; join ",", map { "$_=$o{$_}" } sort keys %o } print f(a => 1, b => 2), "|", f(), "\n";} ],
     [ q{my @l = (a => 1, a => 2); my %h = @l; print $h{a}, scalar(keys %h), "\n";} ],
-    [ q{my @l = ("a"); my %h = @l; print exists $h{a} ? "e" : "n", defined $h{a} ? "d" : "u", "\n";} ],
     [ q{my %h = map { $_ => length $_ } qw(aa b); print "$h{aa}$h{b}\n";} ],
     [ q{my @l = (b => 2); my %h = (a => 1, @l, c => 3); print join(",", map { "$_$h{$_}" } sort keys %h), "\n";} ],
     [ q{my @l = (k => [1, 2]); my %h = @l; print scalar(@{ $h{k} }), "\n";} ],
@@ -59,6 +58,15 @@ for my $c (
     my $want = qx($^X -e '$src');
     my $got = eval { through_llvm($src) };
     is($got, $want, "perl's answer for $src") or diag $@;
+}
+
+# AN ODD LIST (a key with no value) is refused by T2, by its reason: never
+# lowered to a wrong answer.
+{
+    my $src = q{my @l = ("a"); my %h = @l; print exists $h{a} ? "e" : "n", defined $h{a} ? "d" : "u", "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(a \{...\} of an odd list\)/, "refused by T2's reason");
 }
 
 done_testing;

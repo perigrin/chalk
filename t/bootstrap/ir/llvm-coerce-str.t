@@ -168,10 +168,9 @@ sub make_str_to_bool_graph {
 # "0x10"  -> 0     (perl does NOT parse hex)
 #
 # The non-finite cases live in their own table below because they exercise a
-# separate branch: Coerce(Num->Str) special-cases Inf/-Inf/NaN with fcmp uno /
-# fcmp oeq against the Inf bit patterns (see the `from eq 'Num'` branch of
-# Chalk::Target::LLVM::Context), so that a program prints perl's capitalized
-# Inf/-Inf/NaN rather than C's lowercase inf/-inf/nan.
+# separate branch: Coerce(Num->Str) special-cases Inf/-Inf/NaN, so that a
+# program prints perl's capitalized Inf/-Inf/NaN rather than C's lowercase
+# inf/-inf/nan.
 # ---------------------------------------------------------------------------
 
 my @str_to_num_cases = (

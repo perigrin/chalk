@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
@@ -15,7 +16,7 @@ unless (-x $LLI) {
 
 sub lli_run {
     my ($ret) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $fh $ll;
@@ -72,20 +73,22 @@ subtest '$1: "ab-cd" =~ /(\\w+)-(\\w+)/ -> "ab"' => sub {
     my $f = _mk();
     my (undef, $cap) = capture_graph($f, 'ab-cd', '(\\w+)-(\\w+)', 1);
     my $ret = print_and_return($f, $cap);
-    my ($out, $ll) = eval { lli_run($ret) };
-    ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
-    is($out, 'ab', '$1 is the first captured run');
-    ok($ll !~ /Perl_|(?<![A-Za-z0-9_])SV(?![A-Za-z0-9_])|sv_|libperl|\bAV\b|\bHV\b/,
-        '.ll is libperl-free');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { lli_run($ret) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa capture read where its match may have failed (perl reads the last match that succeeded)\E\)/, "refused by T2's reason");
 };
 
 subtest '$2: "ab-cd" =~ /(\\w+)-(\\w+)/ -> "cd"' => sub {
     my $f = _mk();
     my (undef, $cap) = capture_graph($f, 'ab-cd', '(\\w+)-(\\w+)', 2);
     my $ret = print_and_return($f, $cap);
-    my ($out) = eval { lli_run($ret) };
-    ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
-    is($out, 'cd', '$2 is the second captured run');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { lli_run($ret) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa capture read where its match may have failed (perl reads the last match that succeeded)\E\)/, "refused by T2's reason");
 };
 
 subtest 'guarded idiom: matched ? length($1) : 0 (the realistic lib/ shape)' => sub {
@@ -115,9 +118,11 @@ subtest 'capture via qr-applied Match also works' => sub {
     my $cap = $f->make('RegexCapture', n => 1, inputs => [$m]);
     $cap->set_stamp('Str');
     my $ret = print_and_return($f, $cap);
-    my ($out) = eval { lli_run($ret) };
-    ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
-    is($out, '42', '$1 through a qr-applied Match');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { lli_run($ret) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa capture read where its match may have failed (perl reads the last match that succeeded)\E\)/, "refused by T2's reason");
 };
 
 # These are GUARDS, not GAPs. `$3` against a 2-group pattern and a capture read
@@ -127,23 +132,22 @@ subtest 'capture via qr-applied Match also works' => sub {
 # means "perl does this, Chalk does not yet", and it is what puts a construct on
 # the worklist. A guard on the worklist reads as unbuilt work that nobody will
 # ever build.
-subtest 'guards: out-of-range n and a non-match input die loudly' => sub {
+subtest 'guards: out-of-range n and a non-match input are refused by name' => sub {
     my $f = _mk();
     my (undef, $cap) = capture_graph($f, 'ab-cd', '(\\w+)-(\\w+)', 3);
-    my $ret = $f->make_cfg('Return', inputs => [$cap]);
-    eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    like($@, qr/out of range/,
-        '$3 with a 2-group pattern dies, naming the range');
+    # (printed: a value the program never reads is no part of what T2 builds)
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted(print_and_return($f, $cap)), program_mode => 1) };
+    ok(!defined $ll, '$3 with a 2-group pattern: T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa capture read where its match may have failed (perl reads the last match that succeeded)\E\)/, '$3 with a 2-group pattern: refused by T2\'s reason');
 
     my $f2 = _mk();
     my $c = $f2->make('Constant', value => 'x', const_type => 'string');
     $c->set_stamp('Str');
     my $cap2 = $f2->make('RegexCapture', n => 1, inputs => [$c]);
     $cap2->set_stamp('Str');
-    my $ret2 = $f2->make_cfg('Return', inputs => [$cap2]);
-    eval { Chalk::Target::LLVM->lower($ret2, program_mode => 1) };
-    like($@, qr/not a regex match node/,
-        'RegexCapture on a non-match input dies, naming the input');
+    my $ll2 = eval { Chalk::Target::LLVM->lower(rooted(print_and_return($f2, $cap2)), program_mode => 1) };
+    ok(!defined $ll2, 'RegexCapture on a non-match input: T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa capture of no regex match\E\)/, 'RegexCapture on a non-match input: refused by T2\'s reason');
 };
 
 # ---------------------------------------------------------------------------
@@ -212,9 +216,11 @@ subtest 'capture crossing a Str phi merge prints exactly the capture' => sub {
     $if_node->set_control_in($vx);
     my $ret = print_and_return($f, $rx, $if_node);
 
-    my ($out) = eval { lli_run($ret) };
-    ok(!$@, 'lowering + lli succeeded') or do { diag("error: $@"); return };
-    is($out, 'ab', 'merged capture prints exactly "ab", not the subject tail');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { lli_run($ret) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 done_testing;

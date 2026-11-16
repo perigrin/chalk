@@ -53,7 +53,6 @@ for my $f (qw(b.txt A.txt a.txt c.dat)) { open my $fh, '>', "$dir/$f" or die $!;
 # glob was refused as a host effect; it lists files through libc glob(3).
 for my $case (
     [ q{my @none = <*.nonexistent-xyz>; print "got ", scalar(@none), "\n";}, 'pvm 366' ],
-    [ qq{my \@t = glob "$dir/{a,c}.*"; print scalar(\@t), "\\n";}, 'braces' ],
     [ q{my $pattern = $ENV{NOPE_XYZ} // "*.nonexistent-xyz"; my @none = glob $pattern; print "got ", scalar(@none), "\n";}, 'a computed pattern' ],
 ) {
     my ($src, $name) = @$case;
@@ -81,6 +80,14 @@ sub write_pl ($src) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src; close $fh;
     return $pl;
+}
+
+# A PATTERN WITH A BRACE is refused by T2, by its reason (perl keeps its
+# alternatives in order): never a wrong answer.
+{
+    my ($got) = eval { through_llvm(qq{my \@t = glob "$dir/{a,c}.*"; print scalar(\@t), "\\n";}, {}) };
+    ok(!defined $got, 'braces: T2 lowers no module for it');
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa glob pattern with a brace (perl keeps its alternatives in order)\E\)/, "braces: refused by T2's reason");
 }
 
 done_testing;

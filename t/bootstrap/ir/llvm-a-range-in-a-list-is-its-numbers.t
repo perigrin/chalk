@@ -53,8 +53,11 @@ for my $case (
 # A RANGE OF STRINGS counts by perl's string increment ('aa' .. 'ad'), not
 # as numbers (llvm-a-range-of-strings.t has the increment's edges).
 {
+    # (T2 refuses it, by its reason: a numeric read may have made the bound a
+    # number, and it does not know which -- never a wrong answer.)
     my $got = eval { through_llvm(q{my $e = $ENV{NO_SUCH_VAR} // "ad"; my @c = ("aa" .. $e); print "@c\n";}) };
-    is($got, "aa ab ac ad\n", 'a range of strings counts by string increment') or diag $@;
+    ok(!defined $got, 'a range of strings: T2 lowers no module for it');
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa range of strings a numeric read may have made numbers\E\)/, "a range of strings: refused by T2's reason");
 }
 
 done_testing;

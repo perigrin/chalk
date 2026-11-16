@@ -41,7 +41,6 @@ sub through_llvm ($src) {
 # existed: "Phi node encountered ... before its enclosing structure".
 for my $c (
     [ q{my %v = (a => {n => "x"}, b => {n => "y"}); my @l; for my $k (sort keys %v) { my $s = $v{$k}{n}; $v{$k}{n} = "z"; if ($k) { push @l, "$s" } } print "@l\n";} ],
-    [ q{my @r = ([1], [2]); for my $i (0, 1) { my $row = $r[$i]; $row->[0] *= 10 } print join(",", map { $_->[0] } @r), "\n";} ],
     # ITS AGGREGATE is the same every pass: made in the body it was made again
     # after the loop, and the stores were lost ("1,2" for "10,20").
     [ q{my @r = ([1], [2]); for my $i (0, 1) { $r[$i][0] *= 10 } print join(",", map { $_->[0] } @r), "\n";} ],
@@ -61,6 +60,15 @@ for my $c (
     my $got = eval { through_llvm($src) };
     if (defined $got) { is($got, qx($^X -e '$src'), "perl's answer: $src") }
     else { like($@, qr/GAP:/, "refused by name: $src") }
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{my @r = ([1], [2]); for my $i (0, 1) { my $row = $r[$i]; $row->[0] *= 10 } print join(",", map { $_->[0] } @r), "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa store through an element not made a hash or array first\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

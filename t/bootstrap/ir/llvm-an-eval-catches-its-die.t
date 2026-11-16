@@ -59,7 +59,7 @@ for my $case (
 # IN LIST CONTEXT a die gives the empty list, not undef: refused by name.
 {
     my $got = eval { through_llvm(q{sub f { die "x\n" if $_[0]; 7 } print eval { f(0) }, "\n";}) };
-    like($@, qr/GAP: .*list or caller context/, 'a list-context eval that can die is refused');
+    like($@, qr/GAP: T2: out of its slices \(\Qan eval in list context whose value is typed a scalar (a die gives the empty list)\E\)/, 'a list-context eval that can die is refused');
 }
 
 # A DIE IN A BODY THAT IS NOT INLINED -- a class method, lowered as its own

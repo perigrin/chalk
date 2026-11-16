@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
@@ -127,9 +128,11 @@ subtest 'if-merge explicit Phi with a multi-block then-arm (I5)' => sub {
     $if_node->set_control_in($vn);
     $ret->set_control_in($if_node);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
-    is($exit, 0, 'lli exits 0 (valid IR)') or diag($out);
-    is($out, '[42]', 'multi-block then-arm value flows through the merge phi (perl: 42)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret)), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my $n = 1; if/else merging TWO values: $u = $n>0 ? 5 : 7 and
@@ -177,9 +180,11 @@ subtest 'two explicit Phis on one Region, later arm multi-block (review C1)' => 
     $if_node->set_control_in($vn);
     $ret->set_control_in($if_node);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
-    is($exit, 0, 'lli exits 0 (valid IR)') or diag($out);
-    is($out, '[47]', 'both phis carry correct incoming labels (perl: 5+42=47)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret)), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my $s = 0; my $n = [3]->[0]; while ($n > 0) { $s += $n; $n-- } return $s;
@@ -242,9 +247,11 @@ subtest 'loop phi with a multi-block init value (I5)' => sub {
     $loop->set_control_in($vs);
     $ret->set_control_in($loop);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
-    is($exit, 0, 'lli exits 0 (valid IR)') or diag($out);
-    is($out, '[6]', 'multi-block init value reaches the loop phi (perl: 6)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret)), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my @a = (0,5); my $s = 0; my $n = 1; while ($n > 0) { $s = $a[$n]; $n-- }
@@ -305,9 +312,11 @@ subtest 'loop phi with a multi-block backedge value (I5)' => sub {
     $loop->set_control_in($vs);
     $ret->set_control_in($loop);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
-    is($exit, 0, 'lli exits 0 (valid IR)') or diag($out);
-    is($out, '[5]', 'multi-block backedge value reaches the loop phi (perl: 5)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret)), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my $t = 0; if ($n > 0) { $t = 1 } else { $t = 2 }
@@ -372,10 +381,11 @@ subtest 'elab phi labels + branch-snapshot arm reads (review gaps 2+3)' => sub {
     $vt->set_control_in($vn);
     $ret->set_control_in($if_node);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
-    is($exit, 0, 'lli exits 0 (elab phi names the extended tail)') or diag($out);
-    is($out, '[42]',
-        'arm reads then-branch $t via snapshot; elab phi merges $t (perl: 41+1=42)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret)), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 done_testing;

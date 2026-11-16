@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
@@ -142,9 +143,11 @@ subtest 'match re-tested after subject reassign sees the new value' => sub {
     $asg->set_control_in($vy);
     $vy->set_control_in($vs);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
-    is($exit, 0, 'lli exits 0');
-    is($out, '[]', 'the second match tests the reassigned subject (perl: false)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret)), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my $s = "aa x"; $s =~ /(a+)/; my $p = $1;
@@ -196,9 +199,11 @@ subtest 'capture records are per program point' => sub {
     $asg->set_control_in($vp);
     $vp->set_control_in($vs);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
-    is($exit, 0, 'lli exits 0');
-    is($out, '[aa-aaa]', 'each $1 reads its own match record (perl: aa-aaa)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret)), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my $re = qr/b/; my $s = "b"; my $y = ($s =~ $re); $s = "x";
@@ -242,9 +247,11 @@ subtest 'qr-apply (Match) re-applied after subject reassign sees the new value' 
     $asg->set_control_in($vy);
     $vy->set_control_in($vs);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
-    is($exit, 0, 'lli exits 0');
-    is($out, '[]', 'the second qr-apply tests the reassigned subject (perl: false)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret)), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 done_testing;

@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted body reader);
 
 use Chalk::IR::Graph;
 use Chalk::MOP;
@@ -85,8 +86,8 @@ subtest "parent ADJUST runs on a child constructor" => sub {
     my $f   = Chalk::IR::NodeFactory->new;
     my $mop = Chalk::MOP->new;
 
-    my $base = $mop->declare_class('Base');
-    $base->declare_field('b', sigil => '$', type => 'Int', attributes => [':param']);
+    my $base = $mop->declare_class('Base', is_class => 1);
+    $base->declare_field('b', sigil => '$', type => 'Int', attributes => [':param'], param_name => 'b');
     $base->declare_field('d', sigil => '$', type => 'Int', attributes => []);
     # ADJUST { $d = $b + 1 }
     my $b_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'Base', inputs => []);
@@ -97,12 +98,12 @@ subtest "parent ADJUST runs on a child constructor" => sub {
     $d_lv->set_stamp('Int');
     my $d_st = $f->make('Assign', inputs => [$d_lv, $d_val]);
     $d_st->set_stamp('Int');
-    $base->declare_adjust(graph => Chalk::IR::Graph->new)->graph->merge($d_st);
+    body($base->declare_adjust(graph => Chalk::IR::Graph->new)->graph, $d_st);
 
-    my $kid = $mop->declare_class('Kid', parent_name => 'Base');
+    my $kid = $mop->declare_class('Kid', parent_name => 'Base', is_class => 1);
     $kid->declare_field('k', sigil => '$', type => 'Int', attributes => []);
     # ADJUST { $k = $b + 10 } — reads the inherited :param field b (index 0)
-    my $b_rd2 = $f->make('FieldAccess', field_index => 0, field_stash => 'Kid', inputs => []);
+    my $b_rd2 = $f->make('FieldAccess', field_index => 0, field_stash => 'Base', inputs => []);
     $b_rd2->set_stamp('Int');
     my $k_val = $f->make('Add', inputs => [$b_rd2, int_const($f, 10)]);
     $k_val->set_stamp('Int');
@@ -110,10 +111,10 @@ subtest "parent ADJUST runs on a child constructor" => sub {
     $k_lv->set_stamp('Int');
     my $k_st = $f->make('Assign', inputs => [$k_lv, $k_val]);
     $k_st->set_stamp('Int');
-    $kid->declare_adjust(graph => Chalk::IR::Graph->new)->graph->merge($k_st);
+    body($kid->declare_adjust(graph => Chalk::IR::Graph->new)->graph, $k_st);
 
     # method sum { $d + $k }  (Kid struct: b=0, d=1, k=2)
-    my $d_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Kid', inputs => []);
+    my $d_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Base', inputs => []);
     $d_rd->set_stamp('Int');
     my $k_rd = $f->make('FieldAccess', field_index => 2, field_stash => 'Kid', inputs => []);
     $k_rd->set_stamp('Int');
@@ -132,7 +133,7 @@ subtest "parent ADJUST runs on a child constructor" => sub {
     $call->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret), $mop), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0') or diag $out;
     is($out, '[21]', 'both ADJUSTs ran (base d=6 + child k=15 = 21)');
 };
@@ -147,8 +148,8 @@ subtest "inherited ADJUST when child sorts before parent" => sub {
     my $f   = Chalk::IR::NodeFactory->new;
     my $mop = Chalk::MOP->new;
 
-    my $zoo = $mop->declare_class('Zoo');
-    $zoo->declare_field('z', sigil => '$', type => 'Int', attributes => [':param']);
+    my $zoo = $mop->declare_class('Zoo', is_class => 1);
+    $zoo->declare_field('z', sigil => '$', type => 'Int', attributes => [':param'], param_name => 'z');
     $zoo->declare_field('d', sigil => '$', type => 'Int', attributes => []);
     my $z_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'Zoo', inputs => []);
     $z_rd->set_stamp('Int');
@@ -158,11 +159,11 @@ subtest "inherited ADJUST when child sorts before parent" => sub {
     $d_lv->set_stamp('Int');
     my $d_st = $f->make('Assign', inputs => [$d_lv, $d_val]);
     $d_st->set_stamp('Int');
-    $zoo->declare_adjust(graph => Chalk::IR::Graph->new)->graph->merge($d_st);
+    body($zoo->declare_adjust(graph => Chalk::IR::Graph->new)->graph, $d_st);
 
-    my $apple = $mop->declare_class('Apple', parent_name => 'Zoo');
+    my $apple = $mop->declare_class('Apple', parent_name => 'Zoo', is_class => 1);
     # method val { $d }  (Apple struct: z=0, d=1)
-    my $d_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Apple', inputs => []);
+    my $d_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Zoo', inputs => []);
     $d_rd->set_stamp('Int');
     my $val_m = $apple->declare_method('val', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $val_m->graph->merge($f->make_cfg('Return', inputs => [$d_rd]));
@@ -177,7 +178,7 @@ subtest "inherited ADJUST when child sorts before parent" => sub {
     $call->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret), $mop), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0') or diag $out;
     is($out, '[21]', 'parent ADJUST ran across the sort-order boundary (z=20 -> d=21)');
 };
@@ -190,13 +191,13 @@ subtest "three-level field + ADJUST inheritance" => sub {
     my $f   = Chalk::IR::NodeFactory->new;
     my $mop = Chalk::MOP->new;
 
-    my $g = $mop->declare_class('G');
-    $g->declare_field('g', sigil => '$', type => 'Int', attributes => [':param']);
+    my $g = $mop->declare_class('G', is_class => 1);
+    $g->declare_field('g', sigil => '$', type => 'Int', attributes => [':param'], param_name => 'g');
 
-    my $mid = $mop->declare_class('Mid', parent_name => 'G');
+    my $mid = $mop->declare_class('Mid', parent_name => 'G', is_class => 1);
     $mid->declare_field('m', sigil => '$', type => 'Int', attributes => []);
     # ADJUST { $m = $g + 1 } — $g is the inherited field at flattened slot 0
-    my $g_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'Mid', inputs => []);
+    my $g_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'G', inputs => []);
     $g_rd->set_stamp('Int');
     my $m_val = $f->make('Add', inputs => [$g_rd, int_const($f, 1)]);
     $m_val->set_stamp('Int');
@@ -204,12 +205,12 @@ subtest "three-level field + ADJUST inheritance" => sub {
     $m_lv->set_stamp('Int');
     my $m_st = $f->make('Assign', inputs => [$m_lv, $m_val]);
     $m_st->set_stamp('Int');
-    $mid->declare_adjust(graph => Chalk::IR::Graph->new)->graph->merge($m_st);
+    body($mid->declare_adjust(graph => Chalk::IR::Graph->new)->graph, $m_st);
 
-    my $kid = $mop->declare_class('Kid', parent_name => 'Mid');
+    my $kid = $mop->declare_class('Kid', parent_name => 'Mid', is_class => 1);
     $kid->declare_field('k', sigil => '$', type => 'Int', attributes => []);
     # ADJUST { $k = $m + 1 } — $m at flattened slot 1
-    my $m_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Kid', inputs => []);
+    my $m_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Mid', inputs => []);
     $m_rd->set_stamp('Int');
     my $k_val = $f->make('Add', inputs => [$m_rd, int_const($f, 1)]);
     $k_val->set_stamp('Int');
@@ -217,7 +218,7 @@ subtest "three-level field + ADJUST inheritance" => sub {
     $k_lv->set_stamp('Int');
     my $k_st = $f->make('Assign', inputs => [$k_lv, $k_val]);
     $k_st->set_stamp('Int');
-    $kid->declare_adjust(graph => Chalk::IR::Graph->new)->graph->merge($k_st);
+    body($kid->declare_adjust(graph => Chalk::IR::Graph->new)->graph, $k_st);
 
     # method val { $k }  (Kid struct: g=0, m=1, k=2)
     my $k_rd = $f->make('FieldAccess', field_index => 2, field_stash => 'Kid', inputs => []);
@@ -235,7 +236,7 @@ subtest "three-level field + ADJUST inheritance" => sub {
     $call->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret), $mop), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0') or diag $out;
     is($out, '[42]', 'grandparent + parent ADJUSTs chained (g=40 -> m=41 -> k=42)');
 };
@@ -246,16 +247,17 @@ subtest "inherited :reader and field-inheriting override" => sub {
     my $f   = Chalk::IR::NodeFactory->new;
     my $mop = Chalk::MOP->new;
 
-    my $base = $mop->declare_class('B');
-    $base->declare_field('v', sigil => '$', type => 'Int', attributes => [':param', ':reader']);
+    my $base = $mop->declare_class('B', is_class => 1);
+    $base->declare_field('v', sigil => '$', type => 'Int', attributes => [':param', ':reader'], param_name => 'v');
+    reader($base, 'v');   # (the reader method B::SoN gives the class)
     # method tag { 1 }
     my $one_b = int_const($f, 1);
     my $tag_b = $base->declare_method('tag', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $tag_b->graph->merge($f->make_cfg('Return', inputs => [$one_b]));
 
-    my $kid = $mop->declare_class('K', parent_name => 'B');
+    my $kid = $mop->declare_class('K', parent_name => 'B', is_class => 1);
     # K overrides tag { $v + 100 } while inheriting field v (slot 0)
-    my $v_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'K', inputs => []);
+    my $v_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'B', inputs => []);
     $v_rd->set_stamp('Int');
     my $ov = $f->make('Add', inputs => [$v_rd, int_const($f, 100)]);
     $ov->set_stamp('Int');
@@ -278,7 +280,7 @@ subtest "inherited :reader and field-inheriting override" => sub {
     $sum->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret), $mop), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0') or diag $out;
     is($out, '[110]', 'inherited :reader (5) + field-inheriting override (105) = 110');
 };

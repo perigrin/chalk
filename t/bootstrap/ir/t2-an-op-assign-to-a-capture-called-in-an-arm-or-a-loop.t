@@ -12,8 +12,8 @@ plan skip_all => "lli not found at $LLI (set LLI)"                  unless -x $L
 require Chalk::CodeGen::Pipeline;
 require Chalk::CodeGen::Harness::TapDiff;
 
-# through($src) -> { path, out, exit, why, perl }: the whole pipeline (T2, or
-# the fallback where T2 declines) and lli.
+# through($src) -> { path, out, exit, why, perl }: the whole pipeline (T2, or its
+# refusal) and lli.
 sub through ($src) {
     my ( $fh, $pl ) = tempfile( SUFFIX => '.pl', UNLINK => 1 );
     print $fh $src; close $fh;
@@ -44,19 +44,6 @@ for my $src (
     print $fh "$src\n"; close $fh;
     my $r = Chalk::CodeGen::Harness::TapDiff->compare($pl);
     is $r->{verdict}, 'SAME', "T2 lowers it as perl: $src" or diag $r->{why} // explain $r;
-}
-
-# THE FALLBACK ADDED A %Slot AS A double: refused by name now.
-{
-    require Chalk::Target::LLVM::Lower;
-    no warnings 'redefine', 'once';
-    local *Chalk::Target::LLVM::Lower::lower_program = sub {
-        $Chalk::Target::LLVM::Lower::PATH = { path => 'fallback', why => 'forced by the test' };
-        return undef;
-    };
-    my $r = through(q{my $t = 0; my $add = sub { $t += $_[0] }; if (@ARGV == 0) { $add->(5) } print "$t\n";});
-    like $r->{why} // 'lowered', qr/GAP: .*captured variable/, 'the fallback refuses arithmetic on a captured variable it reads as a %Slot'
-        or diag explain $r;
 }
 
 # WIDER: op= spellings, call sites, closures and string evals -- perl's answer

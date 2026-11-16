@@ -893,7 +893,7 @@ L: GAP: LLVM backend: cannot lower op=Call (not in literal-arithmetic slice)
 
 It was filed because the backend CRASHED rather than refusing:
 
-    Can't call method "id" on an undefined value at lib/Chalk/Target/LLVM/Context.pm
+    Can't call method "id" on an undefined value (in the fallback backend, since retired)
 
 A crash is not a refusal. The GAP-not-miscompile invariant says an unsupported
 construct must be REFUSED with a message naming what is missing; dying on an

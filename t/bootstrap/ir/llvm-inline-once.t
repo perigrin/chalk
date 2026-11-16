@@ -7,6 +7,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
@@ -80,32 +81,11 @@ subtest 'an inlined effectful callee used as both a statement and a value lowers
 
     Chalk::IR::Graph->new(start => $start, returns => [$ret]);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, 'the graph lowers without a GAP') or diag $@;
-    ok(defined $ll && length $ll, 'lowering produced IR') or return;
-
-    # Exactly ONE write: the callee's inlined `print "x\n"`. The bug doubles
-    # it (the Call is reached both as a statement and as the Return's value),
-    # producing two. program_mode emits no result-print epilogue, so this
-    # count is the callee's print alone. (A print is an fwrite of the string's
-    # every byte since 5e0c9341; it was a printf.)
-    my $writes = () = $ll =~ /call i64 \@fwrite\(/g;
-    is($writes, 1, 'exactly one fwrite call: the callee print is inlined once')
-        or diag $ll;
-
-    # Count in the IR is static; RUN it to prove the effect fires once.
-    require File::Temp;
-    my ($lfh, $lf) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
-    print $lfh $ll;
-    close $lfh;
-    my $out  = qx($LLI $lf 2>&1);
-    my $exit = $? >> 8;
-    is($exit, 0, 'lli exits 0');
-    is($out, "x\n", 'the inlined callee print runs exactly once at runtime');
-
-    my $string_globals = () = $ll =~ /\@str_const_\d+ = /g;
-    is($string_globals, 1, 'exactly one string constant global for the "x\n" literal')
-        or diag $ll;
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 done_testing;

@@ -5,6 +5,7 @@ use utf8;
 
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
@@ -77,7 +78,7 @@ sub print_returned_value {
 sub lli_run {
     my ($ret_node, $mop, $factory) = @_;
     $ret_node = print_returned_value($factory, $ret_node) if $factory;
-    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop, program_mode => 1);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret_node, $mop), mop => $mop, program_mode => 1);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -103,7 +104,7 @@ subtest 'method-simple: $g->greet => 42 (Int)' => sub {
 
     # MOP: class Greeter { method greet { return 42 } }
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('Greeter');
+    my $cls = $mop->declare_class('Greeter', is_class => 1);
     my $m   = $cls->declare_method('greet', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
     $mop->seal;
@@ -157,7 +158,7 @@ subtest 'class-simple: ref($e) => "Empty" (Str)' => sub {
 
     # Empty class: no methods, no fields
     my $mop = Chalk::MOP->new;
-    $mop->declare_class('Empty');
+    $mop->declare_class('Empty', is_class => 1);
     $mop->seal;
 
     my $new_e = $f->make('Call', dispatch_kind => 'method', name => 'new',
@@ -208,9 +209,9 @@ subtest 'field-basic: $a->name => "cat" (Str)' => sub {
 
     # MOP: class Animal { field $name :param; method name { return $name } }
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('Animal');
+    my $cls = $mop->declare_class('Animal', is_class => 1);
     $cls->declare_field('name', sigil => '$', type => 'Str',
-        attributes => [':param']);
+        attributes => [':param'], param_name => 'name');
     my $m = $cls->declare_method('name', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m->graph->merge($f->make_cfg('Return', inputs => [$field_read]));
     $mop->seal;
@@ -285,10 +286,14 @@ subtest 'Str field store in method body: $t->set; $t->get => "hi" (Str)' => sub 
 
     # MOP: class Tag { field $s; method set; method get }
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('Tag');
+    my $cls = $mop->declare_class('Tag', is_class => 1);
     $cls->declare_field('s', sigil => '$', type => 'Str', attributes => []);
     my $m_set = $cls->declare_method('set', graph => Chalk::IR::Graph->new, return_type => 'Str');
-    $m_set->graph->merge($f->make_cfg('Return', inputs => [$store]));
+    # (the store is a statement and the Return comes after it, returning the
+    # value assigned -- as B::SoN's does)
+    my $set_ret = $f->make_cfg('Return', inputs => [$hi]);
+    $set_ret->set_control_in($store);
+    $m_set->graph->merge($set_ret);
     my $m_get = $cls->declare_method('get', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m_get->graph->merge($f->make_cfg('Return', inputs => [$fa_rd]));
     $mop->seal;
@@ -330,14 +335,14 @@ subtest 'Str field store in method body: $t->set; $t->get => "hi" (Str)' => sub 
 # Test: Adversarial — Call(method) on absent method MUST die loudly
 # ---------------------------------------------------------------------------
 
-subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => sub {
+subtest 'adversarial: Call(method) on absent method dies as perl does, at run time' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     # class Greeter has 'greet' (no 'wave' method defined)
     my $body42 = $f->make('Constant', value => 42, const_type => 'integer');
     $body42->set_stamp('Int');
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('Greeter');
+    my $cls = $mop->declare_class('Greeter', is_class => 1);
     my $m   = $cls->declare_method('greet', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
     $mop->seal;
@@ -349,7 +354,7 @@ subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => 
     );
     $new_g->set_stamp('Object');
 
-    # Call 'wave' which is NOT defined — must die at lowering
+    # Call 'wave', which Greeter has not: perl dies when the call runs.
     my $bad_call = $f->make('Call',
         dispatch_kind => 'method',
         name          => 'wave',   # absent from vtable!
@@ -360,17 +365,11 @@ subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => 
 
     my $ret = $f->make_cfg('Return', inputs => [$bad_call]);
 
-    my $died = false;
-    my $error_msg = '';
-    eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
-    if ($@) {
-        $died = true;
-        $error_msg = $@;
-    }
-
-    ok($died, 'lowering dies when method is absent from vtable');
-    like($error_msg, qr/wave|absent|vtable|method/i,
-        'die message mentions the missing method or vtable');
+    # T2's module dies there too, with perl's message (the retired fallback
+    # refused the call while lowering).
+    eval { lli_run($ret, $mop, $f) };
+    like($@, qr/lli failed \(exit 255\): .*Can't locate object method "wave" via package "Greeter"/,
+        'the call of an absent method stops the program with perl\'s message');
 };
 
 # ---------------------------------------------------------------------------
@@ -380,14 +379,14 @@ subtest 'adversarial: Call(method) on absent method dies loudly at lowering' => 
 # the sealed-MOP registry, so the equivalent is an unregistered class name.)
 # ---------------------------------------------------------------------------
 
-subtest 'adversarial: Call(method) on undeclared class dies loudly at lowering' => sub {
+subtest 'adversarial: Call(method) naming an undeclared class dispatches on the object, as perl does' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     # KnownClass has 'foo' but UndeclaredClass is never declared in the MOP
     my $body = $f->make('Constant', value => 1, const_type => 'integer');
     $body->set_stamp('Int');
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('KnownClass');
+    my $cls = $mop->declare_class('KnownClass', is_class => 1);
     my $m   = $cls->declare_method('foo', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body]));
     $mop->seal;
@@ -411,13 +410,12 @@ subtest 'adversarial: Call(method) on undeclared class dies loudly at lowering' 
 
     my $ret = $f->make_cfg('Return', inputs => [$bad_call]);
 
-    my $died = false;
-    eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
-    if ($@) {
-        $died = true;
-    }
-
-    ok($died, 'lowering dies when calling method on class with no matching method');
+    # T2 DISPATCHES ON THE OBJECT'S CLASS at run time, as perl does: KnownClass
+    # has no bar, so the call dies with perl's message (the retired fallback
+    # refused it while lowering).
+    eval { lli_run($ret, $mop, $f) };
+    like($@, qr/lli failed \(exit 255\): .*Can't locate object method "bar" via package "KnownClass"/,
+        'the call stops the program with perl\'s message');
 };
 
 done_testing;

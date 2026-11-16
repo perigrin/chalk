@@ -42,14 +42,9 @@ sub builtin_keys ($src) {
     return @t;
 }
 
-# Context.pm and ElaboratedContext.pm are being deleted (the fallback T2 retires).
-# (The alternations are looked for under Target/LLVM/, T2's own; LLVM.pm is the
-# fallback's driver, retiring with it.)
-my %EXEMPT = map { ( "lib/Chalk/Target/LLVM/$_" => 1 ) } qw(Context.pm ElaboratedContext.pm);
-
 my ( @alts, @tables );
 find( { no_chdir => 1, wanted => sub {
-    return unless /\.pm\z/ && !$EXEMPT{$_};
+    return unless /\.pm\z/;
     my $file = $_;
     open my $fh, '<:utf8', $file or die "$file: $!";
     my $src = do { local $/; <$fh> };

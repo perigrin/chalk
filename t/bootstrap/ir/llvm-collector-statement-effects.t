@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::Graph;
 use Chalk::MOP;
@@ -89,8 +90,8 @@ sub int_const {
 subtest 'a method Call in an if-branch is collected and lowered' => sub {
     my $f   = Chalk::IR::NodeFactory->new;
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('C');
-    $cls->declare_field('n', sigil => '$', type => 'Int', attributes => [':param']);
+    my $cls = $mop->declare_class('C', is_class => 1);
+    $cls->declare_field('n', sigil => '$', type => 'Int', attributes => [':param'], param_name => 'n');
 
     # method bump { $n = $n + 100 }
     my $fa_rd = $f->make('FieldAccess', field_index => 0, field_stash => 'C', inputs => []);
@@ -149,9 +150,11 @@ subtest 'a method Call in an if-branch is collected and lowered' => sub {
     $vc->set_control_in($new);
     $ret->set_control_in($if_node);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
-    is($exit, 0, 'lli exits 0') or diag $out;
-    is($out, '[105]', 'the branch method call mutated the field (perl: 105)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret), $mop), mop => $mop, program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\QAssign\E\)/, "refused by T2's reason");
 };
 
 done_testing;

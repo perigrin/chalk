@@ -61,25 +61,4 @@ subtest 'a mainline die (Unwind on the control chain) emits the abort' => sub {
         '@exit is declared in the prologue');
 };
 
-subtest 'the abort is idempotent per Unwind node' => sub {
-    # _emit_unwind_terminator guards by node id so an Unwind reachable via BOTH
-    # the control chain and an If-arm Proj aborts once. Calling it twice on the
-    # same node must not emit a second `call @exit`.
-    my $f      = Chalk::IR::NodeFactory->new;
-    my $start  = $f->make('Start');
-    my $msg    = $f->make('Constant', value => "x\n", const_type => 'string');
-    $msg->set_stamp('Str');
-    my $unwind = $f->make_cfg('Unwind', inputs => [$msg]);
-    $unwind->set_control_in($start);
-
-    my $ctx = Chalk::Target::LLVM::Context->new;
-    $ctx->_emit_unwind_terminator($unwind, 'first');
-    $ctx->_emit_unwind_terminator($unwind, 'second (must be suppressed)');
-
-    my $emitted = join "\n",
-        map { join "\n", ($_->{insts} // [])->@* } ($ctx->blocks // [])->@*;
-    my $n = () = $emitted =~ /call void \@exit\(i32 255\)/g;
-    is($n, 1, 'the second emit for the same Unwind is suppressed');
-};
-
 done_testing;

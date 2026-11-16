@@ -44,9 +44,17 @@ for my $c (
     [ "our \$name = \"widget\"; our \$qty = 7;\nformat STDOUT =\n\@<<<<<<< \@>>>\n\$name,   \$qty\n.\nwrite;\nprint \"after write\\n\";\n" ],
     # Short values padded, long cut, a newline ends the value, undef empty,
     # centred, numeric; trailing spaces chopped.
-    [ "our (\$a, \$b, \$c) = (\"ab\", \"x\\ny\", undef); our \$long = \"a-very-long-name\";\nformat STDOUT =\n[\@<<<<<] \@<<<< \@>>> \@|||||| \@##.## \@###\n\$a, \$b, \$c, \"mid\", 3.14159, -2.5\n\@<<<<<<< \@<<<<\n\$long, \$a\n.\nwrite; write;\n" ],
+    [ "our (\$a, \$b, \$c) = (\"ab\", \"x\\ny\", undef); our \$long = \"a-very-long-name\";\nformat STDOUT =\n[\@<<<<<] \@<<<< \@>>> \@|||||| \@##.## \@###\n\$a, \$b, \$c, \"mid\", 3.14159, -2.5\n\@<<<<<<< \@<<<<\n\$long, \$a\n.\nwrite; write;\n", 'a format field T2 does not have (@|||||)' ],
 ) {
-    my ($src) = @$c;
+    # A CASE WITH A REASON is one T2 refuses, by exactly that reason (only the
+    # retired fallback lowered it): never a wrong answer.
+    my ($src, $why) = @$c;
+    if (defined $why) {
+        my $got = eval { through_llvm($src) };
+        ok(!defined $got, "T2 lowers no module for: $src");
+        like($@, qr/\Alower: GAP: T2: out of its slices \(\Q$why\E\)/, "refused by T2's reason: $src");
+        next;
+    }
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src; close $fh;
     my $want = qx($^X $pl);

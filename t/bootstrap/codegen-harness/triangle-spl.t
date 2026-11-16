@@ -54,11 +54,19 @@ sub _build_arith_add {
 # ---------------------------------------------------------------------------
 # Helper: build a Scalar-representation graph (L cannot lower)
 # ---------------------------------------------------------------------------
-sub _build_scalar_graph {
+# _build_refused_graph -> a graph T2 refuses by name: a VarDecl statement (the
+# old dialect, which only the retired fallback lowered).
+sub _build_refused_graph {
     my $f  = Chalk::IR::NodeFactory->new;
+    my $xn = $f->make( 'Constant', value => '$x', const_type => 'string' );
+    $xn->set_stamp('Str');
     my $c1 = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c1->set_stamp('Scalar');    # Scalar = GAP on L corner
+    $c1->set_stamp('Int');
+    my $vx = $f->make( 'VarDecl', inputs => [ $xn, $c1 ] );
+    $vx->set_stamp('Int');
+    $vx->set_control_in( $f->make('Start') );
     my $ret = $f->make_cfg( 'Return', inputs => [$c1] );
+    $ret->set_control_in($vx);
     return $ret;
 }
 
@@ -109,12 +117,14 @@ subtest 'LLVMDriver L record carries runtime-free coverage fraction' => sub {
     is( $frac, 1.0, 'arith-add is fully runtime-free (fraction == 1.0)' );
 };
 
-subtest 'LLVMDriver returns GAP for Scalar-representation graph' => sub {
-    my $graph = _build_scalar_graph();
+subtest 'LLVMDriver returns GAP for a graph T2 refuses' => sub {
+    my $graph = _build_refused_graph();
     my ( $L, $l_meta ) = Chalk::CodeGen::Harness::LLVMDriver->run($graph);
 
     ok( $l_meta->{marked_unsupported} || !$l_meta->{emitted_for_every_construct},
-        'Scalar-repr graph verdicts as cannot-lower (GAP, not a libperl fallback)' );
+        'a refused graph verdicts as cannot-lower (GAP, not a libperl fallback)' );
+    like( $l_meta->{lower_error} // '', qr/\AGAP: T2: out of its slices \(\Qa statement VarDecl\E\)/,
+        'its error is T2\'s named reason' );
     is( $l_meta->{gap_reason}, 'cannot-lower-runtime-free',
         'gap_reason is cannot-lower-runtime-free' );
 };

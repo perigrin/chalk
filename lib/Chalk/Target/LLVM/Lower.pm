@@ -11,11 +11,11 @@ use Chalk::Target::LLVM::Printer;
 use Chalk::IR::Value;      # narrow_num tests operands with isa
 use Chalk::IR::Analysis;   # not_a_value_type, is_fractional_constant: T1's facts
 
-# lower_program($return_node) -> the module's text, or undef when the program
-# is not slice 1's.
-# $PATH: which path the last lower_program took -- { path => 't2' }, or
-# { path => 'fallback', why => T2's reason } -- read by whoever lowered (the
-# pipeline puts it on its unit), so a corpus can count T2's share.
+# lower_program($return_node) -> the module's text, or undef when T2 refuses
+# the program.
+# $PATH: what the last lower_program did -- { path => 't2' }, or
+# { path => 'refused', why => T2's reason } -- read by whoever lowered (the
+# pipeline puts it on its unit; Chalk::Target::LLVM::lower dies with the reason).
 our $PATH;
 sub lower_program {
     my ($class, $ret, %opt) = @_;
@@ -43,6 +43,8 @@ sub lower_program {
         $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'caller'
     } Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
     my $ok = eval {
+        # THE MOP IS READ SEALED: an unsealed one may still change under the reader.
+        Chalk::Target::LLVM::Builder::out('an unsealed MOP') if $opt{mop} && !$opt{mop}->is_sealed;
         # A LIST ASSIGN TO AN ARRAY OR HASH (which takes the rest of the list)
         # is not T2's, ON THE CHAIN OR NOT: one B::SoN left floating was never
         # made, and its array read empty (`my ($f, @rest) = ...`: "1 " for "1 2 3").
@@ -70,11 +72,11 @@ sub lower_program {
                           || Chalk::Target::LLVM::Builder::_scalar_ref_of( $_->inputs->[0] ) ) }
                      Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
         $b->build($ret); 1 };
-    unless ($ok) { $PATH = { path => 'fallback', why => ( $@ =~ s/\n.*//sr ) }; return undef }
-    # A PRINTING FAILURE (a conversion T2 lacks) falls back too: it escaped
-    # as a death, a GAP where the fallback had lowered it (pvm 140).
+    unless ($ok) { $PATH = { path => 'refused', why => ( $@ =~ s/\n.*//sr ) }; return undef }
+    # A PRINTING FAILURE (a conversion T2 lacks) is a refusal too, by its reason:
+    # it once escaped as a bare death (pvm 140).
     my $ir = eval { Chalk::Target::LLVM::Printer::print_module($b) };
-    $PATH = defined $ir ? { path => 't2' } : { path => 'fallback', why => 'T2 printing: ' . ( $@ =~ s/\n.*//sr ) };
+    $PATH = defined $ir ? { path => 't2' } : { path => 'refused', why => 'T2 printing: ' . ( $@ =~ s/\n.*//sr ) };
     return $ir;
 }
 

@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
@@ -53,7 +54,7 @@ sub lli_run {
     my ($ret, %opts) = @_;
     my $factory = delete $opts{factory};
     $ret = print_returned_value($factory, $ret) if $factory;
-    my $ll = Chalk::Target::LLVM->lower($ret, %opts, program_mode => 1);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret, $opts{mop}), %opts, program_mode => 1);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $fh $ll;

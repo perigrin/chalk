@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted body);
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
@@ -79,8 +80,8 @@ sub build_pt_mop {
     my ($f) = @_;
 
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('Pt');
-    $cls->declare_field('x', sigil => '$', type => 'Int', attributes => [':param']);
+    my $cls = $mop->declare_class('Pt', is_class => 1);
+    $cls->declare_field('x', sigil => '$', type => 'Int', attributes => [':param'], param_name => 'x');
     $cls->declare_field('y', sigil => '$', type => 'Int', attributes => []);
 
     my $fa_x = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
@@ -94,7 +95,7 @@ sub build_pt_mop {
     my $asg = $f->make('Assign', inputs => [$fa_y_lv, $add]);
     $asg->set_stamp('Int');
     my $adj = $cls->declare_adjust(graph => Chalk::IR::Graph->new);
-    $adj->graph->merge($asg);
+    body($adj->graph, $asg);
 
     my $fa_y_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
     $fa_y_rd->set_stamp('Int');
@@ -120,7 +121,7 @@ subtest 'single new runs ADJUST (sanity)' => sub {
     $get_a->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$get_a]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret), $mop), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0');
     is($out, '[6]', 'ADJUST stores y = x + 1 (perl: 6)');
 };
@@ -153,7 +154,7 @@ subtest 'second new of the same class runs ADJUST too (I6)' => sub {
     $sum->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$sum]);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), mop => $mop, program_mode => 1));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret), $mop), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0');
     is($out, '[107]', 'both objects get their own ADJUST stores (perl: 6+101=107)');
 };

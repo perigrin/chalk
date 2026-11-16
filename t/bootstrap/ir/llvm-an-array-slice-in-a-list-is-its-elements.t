@@ -53,7 +53,7 @@ for my $c (
 # through the loop variable would not reach the array (pvm 192).
 {
     eval { through_llvm(q{sub g { $_[0] = 5 } my @n = (1, 2); g($_) for @n[1 .. 1]; print "@n\n";}) };
-    like($@, qr/GAP: a loop over an array slice whose element is passed or referenced/, 'an aliased slice element is refused');
+    like($@, qr/GAP: T2: out of its slices \(\Qa slice of an array B::SoN reads at no version, aliased where it may be written\E\)/, 'an aliased slice element is refused');
 }
 
 done_testing;

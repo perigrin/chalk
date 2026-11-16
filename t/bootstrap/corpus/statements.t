@@ -138,7 +138,7 @@ subtest 'constructive proof: return integer literal builds and lowers to 5' => s
     }
 };
 
-subtest 'constructive proof: multiple-statements builds and lowers to 3' => sub {
+subtest 'constructive proof: multiple-statements builds; T2 refuses the block by name' => sub {
     my ($case) = grep { $_->{title} =~ /multiple.*statements/i } @$cases;
     ok(defined $case, 'multiple-statements case found');
 
@@ -156,13 +156,12 @@ subtest 'constructive proof: multiple-statements builds and lowers to 3' => sub 
     is($verdict, 'GREEN', 'multiple-statements ir block declares L: GREEN');
 
     if (defined $return_node) {
+        # THE HAND-WRITTEN BLOCK is the old VarDecl dialect, which only the retired
+        # fallback lowered; the program is gate-green through B::SoN and T2
+        # (son-corpus-wide.t). T2 refuses the block by its reason.
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
-        ok(!$meta->{marked_unsupported},
-            'multiple-statements graph is truly GREEN (not marked_unsupported)');
-        my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '3', 'multiple-statements lli prints 3 (printed)');
-        is($lli_out, $case->{_perl_actual} // '3',
-            'multiple-statements lli output matches perl oracle');
+        ok($meta->{marked_unsupported}, 'multiple-statements block: T2 lowers no module for it');
+        like($meta->{lower_error} // '', qr/\AGAP: T2: out of its slices \(\QPadAccess\E\)/, "multiple-statements block: refused by T2's reason");
     }
 };
 

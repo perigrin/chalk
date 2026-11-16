@@ -10,6 +10,7 @@ use File::Temp qw(tempfile);
 use Scalar::Util qw(blessed);
 
 use Chalk::Target::LLVM;
+use Chalk::CodeGen::Harness::Rooted qw(rooted);   # a hand-written block begins at a Start, as B::SoN's graphs do
 use Chalk::CodeGen::Harness::BehaviorRecord;
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 
@@ -65,7 +66,7 @@ sub run {
     # scaffolding around an unfinished migration instead of the end of one.
     my ( $ll_text, $lower_error );
     eval {
-        $ll_text = Chalk::Target::LLVM->lower($return_node,
+        $ll_text = Chalk::Target::LLVM->lower(rooted($return_node, $opts->{mop}),
             program_mode => 1,
             (defined $opts->{mop} ? (mop => $opts->{mop}) : ()));
     };

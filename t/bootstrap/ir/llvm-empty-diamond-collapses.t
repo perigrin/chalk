@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# ABOUTME: A diamond whose arms hold no fixed nodes lowers as a select, not a branch.
+# ABOUTME: A diamond whose arms hold no fixed nodes merges to the arm taken; a fixed node runs only in its arm.
 # ABOUTME: The structural collapse test — Graal's, not a scan of what the arms contain.
 
 use 5.42.0;
@@ -60,7 +60,7 @@ sub build_pure_diamond () {
     my $else = $f->make('Proj', index => 1, inputs => [$if]);
 
     # Both arms are PURE: they contribute a value and nothing else.
-    my $region = $f->make('Region', inputs => [[$then, $else]]);
+    my $region = $f->make('Region', inputs => [$then, $else]);
     # set_region wires BOTH directions: If->region (read by phi placement) and
     # Region->head (read by the control-chain walk, and by the phi-before-region
     # recovery). A hand-built graph that omits it leaves head=undef.
@@ -111,7 +111,7 @@ sub build_effectful_diamond () {
     my $guarded = $f->make('Print', inputs => [$msg]);
     $guarded->set_control_in($then);          # <-- a FIXED node inside the arm
 
-    my $region = $f->make('Region', inputs => [[$else, $guarded]]);
+    my $region = $f->make('Region', inputs => [$else, $guarded]);
     $if->set_region($region);
 
     my $done = $f->make('Constant', value => "done\n", const_type => 'string');
@@ -129,36 +129,30 @@ sub build_effectful_diamond () {
     return ($g, $ret);
 }
 
-subtest 'a diamond with no fixed nodes in either arm becomes a select' => sub {
+# run_ll($ll) -> what the module prints under lli.
+sub run_ll ($ll) {
+    require File::Temp;
+    my ($fh, $path) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
+    print $fh $ll; close $fh;
+    my $lli = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
+    return scalar qx($lli $path 2>&1);
+}
+
+subtest 'a diamond with no fixed nodes in either arm prints the arm taken' => sub {
     my ($g, $ret) = build_pure_diamond();
     my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok defined $ll, 'the graph lowers' or do { diag $@; return };
-
-    # The merge ALREADY lowers as a select -- that half works today.
-    like $ll, qr/\bselect\b/,
-        'the merge lowered as a select';
-
-    # STEP 5, NOT YET BUILT. The backend emits the select AND the (now dead)
-    # arm blocks. That is wasted code, not a wrong answer, which is why this is
-    # a TODO rather than a failure: the collapse pass is what removes them, and
-    # it is only reachable now that Phi-before-Region is fixed.
-    TODO: {
-        local $TODO = 'collapse pass (step 5) not built: dead arm blocks remain';
-        unlike $ll, qr/^if\.(then|else)\.\d+:/m,
-            'no branch arm blocks were emitted';
-    }
+    # 2 > 1: the merge is the then-arm's 1. (How T2 builds the merge -- a
+    # select or a branch -- is its own; the answer is perl's.)
+    is run_ll($ll), "1\n", 'the merge is the arm taken';
 };
 
-subtest 'a diamond with a fixed node in an arm KEEPS its control flow' => sub {
-    # The safety half. A collapse that fires here would hoist a guarded effect
-    # and run it unconditionally -- the miscompile this whole arc is about.
+subtest 'a diamond with a fixed node in an arm runs it only in that arm' => sub {
+    # The safety half: a guarded effect is never hoisted to run unconditionally.
     my ($g, $ret) = build_effectful_diamond();
     my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
     ok defined $ll, 'the graph lowers' or do { diag $@; return };
-
-    like $ll, qr/^if\.(then|else)\.\d+:/m,
-        'the branch arms are still emitted'
-        or diag "no arms in:\n$ll";
+    is run_ll($ll), "in\ndone\n", 'the arm taken (2 > 1) prints, then the code after the merge';
 };
 
 done_testing;

@@ -8,7 +8,6 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::IR::NodeFactory;
-use Chalk::Target::LLVM::Context;
 
 # The question: may a cached SSA ref for this node go STALE across a store?
 #
@@ -59,55 +58,13 @@ subtest 'every node class answers staleness_kind with a valid kind' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# Agreement with the registries it replaces
-# ---------------------------------------------------------------------------
-#
-# This is the step-1 pattern: the method and the registry must AGREE on every
-# op the registry names, so a later deletion of the registry cannot change
-# behaviour silently and a divergence fails loudly.
-
-subtest 'staleness_kind agrees with %MUTABLE_READ_OPS' => sub {
-    my $f = Chalk::IR::NodeFactory->new;
-    my $c = $f->make('Constant', const_type => 'integer', value => 1);
-
-    my @ops = Chalk::Target::LLVM::Context::_mutable_read_ops();
-    ok scalar(@ops), 'the registry is non-empty (' . scalar(@ops) . ')';
-
-    for my $op (@ops) {
-        my $n = _build($f, $op, $c) or do {
-            fail "$op could not be constructed -- agreement NOT checked";
-            next;
-        };
-        is $n->staleness_kind, 'mutable_read',
-            "$op is mutable_read (registry says so)";
-    }
-};
-
-subtest 'staleness_kind agrees with %PURE_DESCEND_OPS' => sub {
-    my $f = Chalk::IR::NodeFactory->new;
-    my $c = $f->make('Constant', const_type => 'integer', value => 1);
-
-    my @ops = Chalk::Target::LLVM::Context::_pure_descend_ops();
-    ok scalar(@ops), 'the registry is non-empty (' . scalar(@ops) . ')';
-
-    for my $op (@ops) {
-        my $n = _build($f, $op, $c) or do {
-            fail "$op could not be constructed -- agreement NOT checked";
-            next;
-        };
-        is $n->staleness_kind, 'transparent',
-            "$op is transparent (registry says descend)";
-    }
-};
-
-# ---------------------------------------------------------------------------
 # THE POINT OF THIS FILE: the partition is TOTAL
 # ---------------------------------------------------------------------------
 
 subtest 'the third bucket is DECLARED, not defined by absence' => sub {
-    # The registry pair answers "opaque" by falling off the end of an
-    # if/elsif. That makes a new op silently answer "no, it cannot go stale"
-    # -- and a wrong "no" serves a stale SSA ref across a store, which is the
+    # The registry pair (the retired fallback's) answered "opaque" by falling
+    # off the end of an if/elsif. That makes a new op silently answer "no, it
+    # cannot go stale" -- and a wrong "no" serves a stale SSA ref across a store, which is the
     # whole-branch review C1/C2 miscompile class.
     #
     # With the property on the type, an op that never declares its kind

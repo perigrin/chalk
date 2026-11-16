@@ -55,6 +55,6 @@ like($err, qr/lli exited 255/, 'a byte past ASCII, read at run time, is refused 
 # A CONSTANT past ASCII is refused at compile time: chalk's strings are
 # bytes, and its declared size counted the wrong unit (lli rejected it).
 $err = do { local $@; eval { through_llvm(q{my $s = $ENV{S} // "\x{e9}t"; print length($s), "\n";}) }; $@ };
-like($err, qr/GAP: a string constant with a character past ASCII/, 'a constant past ASCII is refused by name');
+like($err, qr/GAP: T2: out of its slices \(\Qa length where a string goes past ASCII\E\)/, 'a constant past ASCII is refused by name');
 
 done_testing;

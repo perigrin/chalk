@@ -53,8 +53,6 @@ for my $case (
     [ 'my %h = (a => 7); my ($k, $v) = each %h; print $k, "\n"; print $v, "\n";', 'one entry (pvm 021)' ],
     [ 'my %h = (a => 1); my @x = each %h; my @y = each %h; my @z = each %h; print scalar(@x), scalar(@y), scalar(@z), "\n";',
       'the empty list once, then from the start' ],
-    [ 'my %h = (a => 1); my $k = each %h; my $e = each %h; print $k, defined $e ? "d" : "u", "\n";',
-      'in scalar context, the key' ],
 ) {
     my ($src, $name) = @$case;
     my ($got, $pl) = eval { through_llvm($src, {}) };
@@ -66,7 +64,7 @@ for my $case (
 {
     my $src = 'my %h = (a => 1); my @x = each %h; my @k = keys %h; my @y = each %h; print scalar(@y), "\n";';
     eval { through_llvm($src, {}) };
-    like($@, qr/GAP: each over a hash whose keys/, 'keys between two calls of each: refused');
+    like($@, qr/GAP: T2: out of its slices \(\Qan each in a program with a keys or values (which reset it, B::SoN places them nowhere)\E\)/, 'keys between two calls of each: refused');
 }
 
 # A while LOOP ON each is a loop shape not lowered yet (a condition with two
@@ -75,6 +73,14 @@ for my $case (
     my $src = 'my %h = (a => 1, b => 2); my $t = 0; while (my ($k, $v) = each %h) { $t += $v } print "$t\n";';
     eval { through_llvm($src, {}) };
     like($@, qr/GAP: /, 'a while loop on each: refused by name');
+}
+
+# T2 REFUSES IT, by its reason (only the retired fallback lowered it): each in
+# scalar context, refused by name, never a wrong answer.
+{
+    my $got = eval { through_llvm('my %h = (a => 1); my $k = each %h; my $e = each %h; print $k, defined $e ? "d" : "u", "\n";', {}) };
+    ok(!defined $got, 'each in scalar context: T2 lowers no module for it');
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qan each in scalar context\E\)/, "each in scalar context: refused by T2's reason");
 }
 
 done_testing;

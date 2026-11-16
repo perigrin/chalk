@@ -5,6 +5,7 @@ use utf8;
 
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted reader);
 
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
@@ -70,7 +71,7 @@ sub print_returned_value {
 sub lli_run {
     my ($ret_node, $mop, $factory) = @_;
     $ret_node = print_returned_value($factory, $ret_node) if $factory;
-    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop, program_mode => 1);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret_node, $mop), mop => $mop, program_mode => 1);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -91,7 +92,7 @@ subtest 'Call(name=new): class-simple ref($e) => "Empty" (Str)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $mop = Chalk::MOP->new;
-    $mop->declare_class('Empty');
+    $mop->declare_class('Empty', is_class => 1);
     $mop->seal;
 
     # Use Call(name='new') instead of New node
@@ -133,11 +134,13 @@ subtest 'Call(name=new): field-attrs Pair->new(left=>10, right=>20), left+right 
     my $f = Chalk::IR::NodeFactory->new;
 
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('Pair');
+    my $cls = $mop->declare_class('Pair', is_class => 1);
     $cls->declare_field('left', sigil => '$', type => 'Int',
-        attributes => [':param', ':reader']);
+        attributes => [':param', ':reader'], param_name => 'left');
+    reader($cls, 'left');   # (the reader method B::SoN gives the class)
     $cls->declare_field('right', sigil => '$', type => 'Int',
-        attributes => [':param', ':reader']);
+        attributes => [':param', ':reader'], param_name => 'right');
+    reader($cls, 'right');   # (the reader method B::SoN gives the class)
     $mop->seal;
 
     my $lval = $f->make('Constant', value => 10, const_type => 'integer');

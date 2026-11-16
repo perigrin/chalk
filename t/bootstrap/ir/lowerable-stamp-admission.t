@@ -85,24 +85,15 @@ subtest 'the lowerable names reach the field' => sub {
 # because the answer was discarded at load.
 #
 # WHAT REMAINS TRUE, and is what this file now pins: `Unknown` is not
-# LOWERABLE. It has no machine encoding and the backend refuses it. Carrying a
-# type is not claiming an encoding.
+# LOWERABLE. It has no machine encoding. Carrying a type is not claiming an
+# encoding. (The retired fallback's type map refused it by name, which this
+# file once asserted; T2 builds its LLVM types per node, from no such map.)
 subtest 'Unknown is carried as a type but is never lowerable' => sub {
     is loads_as('Unknown'), 'Unknown',
         'Unknown reaches the field -- it is a lattice member, not an absence';
 
     ok !Chalk::IR::Serialize::JSON::is_lowerable_stamp('Unknown'),
         'and is NOT claimed lowerable';
-
-    # The reason, asserted rather than described: the backend refuses it. If
-    # this ever stops dying, the exclusion's justification has changed and this
-    # test should be revisited rather than deleted.
-    require Chalk::Target::LLVM::Context;
-    my $err = dies {
-        Chalk::Target::LLVM::Context::_repr_to_llvm_type('Unknown')
-    };
-    like $err, qr/Unknown/,
-        'a node still holding Unknown dies at machine-type selection';
 };
 
 # THE "no machine encoding stay out" SUBTEST IS REMOVED AS STALE, not silently

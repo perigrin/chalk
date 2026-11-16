@@ -17,8 +17,8 @@ use utf8;
 #
 # SLICE 1 is a program with no subs, loops or aggregates: constants,
 # arithmetic, numeric comparisons, ?: and //, Concat, an %ENV read, print.
-# Any other node makes the whole program fall back to Context.pm (lower
-# returns undef), so the slice can only ever add programs, never break one.
+# A node no slice takes refuses the whole program by name (out(); lower_program
+# returns undef and Chalk::Target::LLVM::lower dies with the reason).
 
 package Chalk::Target::LLVM::Builder;
 

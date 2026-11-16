@@ -52,7 +52,6 @@ sub write_pl ($src) {
 for my $case (
     [ q{package N { sub new { bless { v => $_[1] }, $_[0] } sub val { $_[0]{v} } }
 sub f { my ($n) = @_; my $v = $n->val; return "v=${\(defined $v ? $v : q{u})}" } print f(N->new(5)), f(N->new(undef)), "\n";}, 'a ternary in an interpolation' ],
-    [ q{my $n = 3; print "n=${\($n * 2)} s=${\ 'x'}\n";}, 'arithmetic and a constant' ],
     [ q{sub g { my ($c) = @_; my $v = 7; my $r = \($c ? $v : 0); $$r = 9 if $c; return "$v" } print g(1), g(0), "\n";}, 'a store through it: perl, or refused' ],
 ) {
     my ($src, $name) = @$case;
@@ -60,6 +59,15 @@ sub f { my ($n) = @_; my $v = $n->val; return "v=${\(defined $v ? $v : q{u})}" }
     if (defined $got) { is($got, perl_says($pl, {}), "$name: perl's answer") }
     elsif ($name =~ /refused/) { like($@, qr/GAP/, "$name: refused by name") }
     else { fail("$name: perl's answer"); diag $@ }
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{my $n = 3; print "n=${\($n * 2)} s=${\ 'x'}\n";};
+    my $got = eval { through_llvm($src, {}) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa scalar deref where a reference T2 does not make may reach it\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

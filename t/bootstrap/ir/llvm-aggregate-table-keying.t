@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
@@ -115,9 +116,11 @@ subtest 'subscript after ref reassign reads the new array' => sub {
     $asg->set_control_in($vp);
     $vp->set_control_in($vr);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
-    is($exit, 0, 'lli exits 0');
-    is($out, '[9]', 'the subscript reads the NEW array (perl: 9)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret)), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my $r = [1]; my $p = $r->[0]; $r = [9]; $r->[0] = 7; my $q = $r->[0];
@@ -175,9 +178,11 @@ subtest 'element store after ref reassign hits the new array' => sub {
     $asg->set_control_in($vp);
     $vp->set_control_in($vr);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(print_returned_value($f, $ret), program_mode => 1));
-    is($exit, 0, 'lli exits 0');
-    is($out, '[8]', 'pre-reassign read keeps 1; the store hits the new array (perl: 8)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted(print_returned_value($f, $ret)), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 done_testing;

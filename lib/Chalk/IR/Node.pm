@@ -151,8 +151,8 @@ class Chalk::IR::Node {
     # May a cached SSA ref for this node go STALE across a store?
     #
     # A PROPERTY OF THE TYPE, for the same reason is_fixed is. The same
-    # question is answered today by %MUTABLE_READ_OPS and %PURE_DESCEND_OPS in
-    # Target/LLVM/Context.pm — two op-name lists whose `if/elsif` leaves a
+    # question was answered by %MUTABLE_READ_OPS and %PURE_DESCEND_OPS in the
+    # retired fallback backend — two op-name lists whose `if/elsif` leaves a
     # THIRD bucket implicit, so an op in neither list answers "no" by falling
     # off the end.
     #
@@ -285,7 +285,7 @@ class Chalk::IR::Node {
     # ---------------------------------------------------------------------
     # QUESTIONS A BACKEND ASKS OF A NODE. Each is answered from the node, its
     # inputs and its consumers alone, so it belongs to the node: T2 asked them
-    # as subs of its own (2026-11-14, step 1a of retiring Context.pm), where
+    # as subs of its own (2026-11-14, step 1a of retiring the fallback), where
     # the next backend could not reach them. The answer here is every node's
     # that does not say otherwise; a class that answers differently overrides.
     # ---------------------------------------------------------------------

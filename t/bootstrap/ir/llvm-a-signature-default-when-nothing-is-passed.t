@@ -41,7 +41,6 @@ sub through_llvm ($src) {
 # reached @_ unbound (pvm 102).
 for my $c (
     [ q{use v5.36; sub f ($x = 5) { $x + 1 } print f(), f(1), "\n";} ],
-    [ q{use v5.36; sub f ($x = 2, $y = $x * 3) { "$x/$y" } print f(), " ", f(4), " ", f(4, 1), "\n";} ],
     [ q{use v5.36; sub f ($x = "d") { scalar(@_) . $x } print f(), f("p"), "\n";} ],
 ) {
     my ($src) = @$c;
@@ -62,6 +61,15 @@ for my $src (
     my $got = eval { through_llvm($src) };
     if (defined $got) { is($got, qx($^X -e '$src'), "perl's answer: $src") }
     else { like($@, qr/\S/, "refused: $src") }
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{use v5.36; sub f ($x = 2, $y = $x * 3) { "$x/$y" } print f(), " ", f(4), " ", f(4, 1), "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qsub main::f has a default that is not made the same anywhere\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

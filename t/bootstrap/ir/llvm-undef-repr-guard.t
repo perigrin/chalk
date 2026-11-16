@@ -1,5 +1,5 @@
-# ABOUTME: G.6 gate-hardening: undef-repr nodes must GAP loudly, not silently lower as Int.
-# ABOUTME: Verifies that nodes with no representation set die rather than silently emit i64.
+# ABOUTME: A value with no stamp is never guessed as Int: T2 refuses it by name where it cannot
+# ABOUTME: type it, and types it from its operands where it can (two Ints' Add) -- never i64 by default.
 use 5.42.0;
 use utf8;
 
@@ -8,6 +8,18 @@ use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
+
+# printed($f, $value) -> a Return after a Print of $value: a value the program
+# never reads is no part of what T2 builds, so each fixture prints its value.
+sub printed ($f, $v) {
+    my $p = $f->make('Print', inputs => [$v]);
+    my $u = $f->make('Constant', value => undef, const_type => 'undef');
+    $u->set_stamp('Undef');
+    my $r = $f->make_cfg('Return', inputs => [$u]);
+    $r->set_control_in($p);
+    return rooted($r);
+}
 
 # G.6 (F7): ~19 sites use `my $repr = $node->stamp // 'Int'`.
 # An undef-repr node is silently lowered as i64 BEFORE the `repr eq 'Scalar' -> die`
@@ -23,7 +35,7 @@ subtest 'undef-repr Constant dies loudly instead of silently lowering as Int' =>
     my $f = Chalk::IR::NodeFactory->new;
     my $c = $f->make('Constant', value => 42, const_type => 'integer');
     # Intentionally do NOT set representation — simulates a TypeInference gap.
-    my $ret = $f->make_cfg('Return', inputs => [$c]);
+    my $ret = printed($f, $c);
 
     my ($ll, $err);
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
@@ -43,7 +55,7 @@ subtest 'undef-repr Constant dies loudly instead of silently lowering as Int' =>
 };
 
 # Test 2: undef-repr Add dies loudly
-subtest 'undef-repr Add node dies loudly instead of silently lowering as i64' => sub {
+subtest 'an unstamped Add of two Ints is typed from its operands' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $a = $f->make('Constant', value => 3, const_type => 'integer');
     $a->set_stamp('Int');
@@ -51,20 +63,19 @@ subtest 'undef-repr Add node dies loudly instead of silently lowering as i64' =>
     $b->set_stamp('Int');
     my $add = $f->make('Add', inputs => [$a, $b]);
     # Intentionally do NOT set representation on Add.
-    my $ret = $f->make_cfg('Return', inputs => [$add]);
+    my $ret = printed($f, $add);
 
-    my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
-    $err = $@;
-
-    ok(defined $err && length $err,
-        'undef-repr Add node: lower() dies loudly')
-        or diag("Got no error; .ll:\n" . substr($ll // '', 0, 300));
-
-    if (defined $err) {
-        like($err, qr/representation|repr|GAP/i,
-            'error message mentions representation or GAP')
-            or diag("error: $err");
+    # T2 TYPES IT FROM ITS OPERANDS (two Ints), not from a stamp: no guess to
+    # make, and the module prints perl's answer.
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    ok(defined $ll, 'an unstamped Add: T2 lowers it') or diag $@;
+    my $lli = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
+    SKIP: {
+        skip "no lli at $lli", 1 unless -x $lli && defined $ll;
+        require File::Temp;
+        my ($fh, $path) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
+        print $fh $ll; close $fh;
+        is(scalar qx($lli $path 2>&1), '7', 'an unstamped Add: prints perl\'s 7');
     }
 };
 
@@ -73,7 +84,7 @@ subtest 'well-typed graph with explicit repr still lowers correctly' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $c = $f->make('Constant', value => 7, const_type => 'integer');
     $c->set_stamp('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$c]);
+    my $ret = printed($f, $c);
 
     my ($ll, $err);
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
@@ -104,7 +115,7 @@ subtest 'undef-repr VarDecl dies loudly instead of silently lowering as Int' => 
     # Intentionally do NOT set representation on vx — this is the gap.
     my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     $rx->set_stamp('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+    my $ret = printed($f, $rx);
 
     my ($ll, $err);
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
@@ -131,7 +142,7 @@ subtest 'undef-repr PadAccess dies loudly instead of silently lowering as Int' =
     $vx->set_stamp('Int');
     my $rx = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
     # Intentionally do NOT set representation on PadAccess.
-    my $ret = $f->make_cfg('Return', inputs => [$rx]);
+    my $ret = printed($f, $rx);
 
     my ($ll, $err);
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
@@ -162,7 +173,7 @@ subtest 'undef-repr Assign dies loudly instead of silently lowering as Int' => s
     $rxL->set_stamp('Int');
     my $asg = $f->make('Assign', inputs => [$rxL, $c2]);
     # Intentionally do NOT set representation on Assign.
-    my $ret = $f->make_cfg('Return', inputs => [$asg]);
+    my $ret = printed($f, $asg);
 
     my ($ll, $err);
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
@@ -193,7 +204,7 @@ subtest 'undef-repr TernaryExpr true-branch dies loudly' => sub {
     $fals_c->set_stamp('Int');
     my $tern = $f->make('TernaryExpr', inputs => [$cond, $true_c, $fals_c]);
     $tern->set_stamp('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$tern]);
+    my $ret = printed($f, $tern);
 
     my ($ll, $err);
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
@@ -213,83 +224,6 @@ subtest 'undef-repr TernaryExpr true-branch dies loudly' => sub {
     }
 };
 
-# Test 7b: CG3 — undef-repr Phi at Region merge point dies loudly.
-# Tests the _require_repr guard at _wire_region_phis_with_preblock (~line 4098):
-#   `my $repr = _require_repr($phi_node, 'ElaboratedContext.Region.Phi')`
-# Trigger: manually add an explicit Phi node (undef-repr) as a consumer of Region.
-subtest 'undef-repr Phi at Region merge (lower_with_elaboration path) dies loudly (CG3)' => sub {
-    use Chalk::IR::Schedule::Dominators;
-    use Chalk::IR::Schedule::Elaborate;
-    use Chalk::IR::Node::Phi;
-
-    my $f = Chalk::IR::NodeFactory->new;
-
-    # Build minimal if/else: if ($cond) { ... } else { ... }; return Int constant
-    my $c_cond = $f->make('Constant', value => 1, const_type => 'integer');
-    $c_cond->set_stamp('Int');
-    my $cmp = $f->make('Coerce', inputs => [$c_cond], from_repr => 'Int', to_repr => 'Boolean');
-    $cmp->set_stamp('Boolean');
-
-    my $c1 = $f->make('Constant', value => 1, const_type => 'integer');
-    $c1->set_stamp('Int');
-    my $c2 = $f->make('Constant', value => 2, const_type => 'integer');
-    $c2->set_stamp('Int');
-
-    my $xn = $f->make('Constant', value => '$x', const_type => 'string');
-    $xn->set_stamp('Str');
-    my $vx = $f->make('VarDecl', inputs => [$xn, $c1]);
-    $vx->set_stamp('Int');
-
-    my $lhs1 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
-    $lhs1->set_stamp('Int');
-    my $as1 = $f->make('Assign', inputs => [$lhs1, $c1]);
-    $as1->set_stamp('Int');
-
-    my $lhs2 = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'x', inputs => [$vx]);
-    $lhs2->set_stamp('Int');
-    my $as2 = $f->make('Assign', inputs => [$lhs2, $c2]);
-    $as2->set_stamp('Int');
-
-    my $if_node = $f->make('If',   inputs => [$vx, $cmp]);
-    my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
-    my $proj1   = $f->make('Proj', inputs => [$if_node], index => 1);
-    my $region  = $f->make('Region', inputs => [$proj0, $proj1]);
-    $if_node->set_region($region);
-    $as1->set_control_in($proj0);
-    $as2->set_control_in($proj1);
-
-    # Return a simple Int (not the $x variable) so the basic lowering works
-    my $c_ret = $f->make('Constant', value => 99, const_type => 'integer');
-    $c_ret->set_stamp('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$c_ret]);
-    $if_node->set_control_in($vx);
-    $ret->set_control_in($region);  # Region-as-control_in path
-
-    # Inject an explicit Phi node as a consumer of the Region.
-    # The Phi has two incoming values but NO representation set.
-    # This simulates a TypeInference gap where the Phi's output type is unknown.
-    my $phi = $f->make('Phi', region => $region, inputs => [$c1, $c2]);
-    # Intentionally do NOT call $phi->set_stamp(...) — this is the gap.
-    # Add phi as a consumer of region to trigger _wire_region_phis_with_preblock.
-    $region->add_consumer($phi);
-
-    my $dom  = Chalk::IR::Schedule::Dominators->from_return_node($ret);
-    my $elab = Chalk::IR::Schedule::Elaborate->from_return_node($ret, $dom);
-
-    my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower_with_elaboration($ret, $elab) };
-    $err = $@;
-
-    ok(defined $err && length $err,
-        'undef-repr Phi at Region merge: lower_with_elaboration dies loudly (CG3)')
-        or diag("Got no error — _require_repr guard may be missing at Region.Phi site;\n"
-                . ".ll:\n" . substr($ll // '', 0, 300));
-    if (defined $err && length $err) {
-        like($err, qr/representation|repr|GAP|Region.*Phi|Phi/i,
-            'Phi error message mentions representation or GAP (CG3)')
-            or diag("error: $err");
-    }
-};
 
 # Test 8: undef-repr DefinedOr lhs dies loudly (site: line ~2163, _lower_defined_or)
 subtest 'undef-repr DefinedOr lhs dies loudly' => sub {
@@ -300,7 +234,7 @@ subtest 'undef-repr DefinedOr lhs dies loudly' => sub {
     $rhs->set_stamp('Int');
     my $dor = $f->make('DefinedOr', inputs => [$lhs, $rhs]);
     $dor->set_stamp('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$dor]);
+    my $ret = printed($f, $dor);
 
     my ($ll, $err);
     eval { $ll = Chalk::Target::LLVM->lower($ret) };
@@ -325,12 +259,11 @@ subtest 'undef-repr DefinedOr lhs dies loudly' => sub {
 # silent guess is the only unacceptable outcome; a GAP is fine.
 # ============================================================
 
-use Chalk::Target::LLVM::Context;
 
 # Site A (_lower_defined_or, the phi-repr read): the DefinedOr NODE's own repr.
 # Test 8 above covers the LHS; this covers the node. `$repr` is read TWICE in
 # one ternary, so the fix hoists a single required fetch above the expression.
-subtest 'undef-repr DefinedOr NODE dies loudly at the phi-repr read' => sub {
+subtest 'an unstamped DefinedOr of two Ints is typed from its operands' => sub {
     my $f = Chalk::IR::NodeFactory->new;
     my $lhs = $f->make('Constant', value => 5, const_type => 'integer');
     $lhs->set_stamp('Int');
@@ -338,106 +271,21 @@ subtest 'undef-repr DefinedOr NODE dies loudly at the phi-repr read' => sub {
     $rhs->set_stamp('Int');
     my $dor = $f->make('DefinedOr', inputs => [$lhs, $rhs]);
     # Intentionally do NOT set representation on the DefinedOr itself.
-    my $ret = $f->make_cfg('Return', inputs => [$dor]);
+    my $ret = printed($f, $dor);
 
-    my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower($ret) };
-    $err = $@;
-
-    ok(defined $err && length $err,
-        'undef-repr DefinedOr node: lower() dies loudly')
-        or diag("Got no error; .ll:\n" . substr($ll // '', 0, 300));
-    like($err // '', qr/GAP/, 'DefinedOr node error is a GAP');
-    like($err // '', qr/DefinedOr/, 'DefinedOr node error names the node');
-    like($err // '', qr/repr/i, 'DefinedOr node error names the missing repr');
+    # T2 TYPES IT FROM ITS OPERANDS (two Ints), not from a stamp: no guess to
+    # make, and the module prints perl's answer.
+    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
+    ok(defined $ll, 'an unstamped DefinedOr: T2 lowers it') or diag $@;
+    my $lli = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
+    SKIP: {
+        skip "no lli at $lli", 1 unless -x $lli && defined $ll;
+        require File::Temp;
+        my ($fh, $path) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
+        print $fh $ll; close $fh;
+        is(scalar qx($lli $path 2>&1), '5', 'an unstamped DefinedOr: prints perl\'s 5');
+    }
 };
 
-# Site B (_process_if_node, the elab merge phi): the VarDecl repr side table.
-# Drive it directly -- an injected phi record whose vd_id has no _vd_repr entry
-# is exactly the shape the guess covered for.
-subtest 'missing _vd_repr for an elab merge phi dies loudly' => sub {
-    my $f = Chalk::IR::NodeFactory->new;
-
-    my $cond = $f->make('Constant', value => 1, const_type => 'integer');
-    $cond->set_stamp('Int');
-    my $if_node = $f->make('If', inputs => [undef, $cond]);
-    my $proj0   = $f->make('Proj', inputs => [$if_node], index => 0);
-    my $proj1   = $f->make('Proj', inputs => [$if_node], index => 1);
-    my $region  = $f->make('Region', inputs => [$proj0, $proj1]);
-    $if_node->set_region($region);
-
-    my $ctx = Chalk::Target::LLVM::Context->new;
-    # One phi to place, for a VarDecl id the repr table does not know.
-    $ctx->{elab_phi_by_block}{ 'if.merge.' . $region->id } = [ { vd_id => 4242 } ];
-
-    my $err;
-    eval { $ctx->_process_if_node($if_node); 1 };
-    $err = $@;
-
-    ok(defined $err && length $err,
-        'unknown _vd_repr at merge phi: _process_if_node dies loudly')
-        or diag('Got no error');
-    like($err // '', qr/GAP/, 'merge-phi error is a GAP');
-    like($err // '', qr/(?:Phi|VarDecl|vd=?4242)/i,
-        'merge-phi error names the node');
-    like($err // '', qr/repr/i, 'merge-phi error names the missing repr');
-};
-
-# Site C (_lower_builtin_shift_pop): the guess was already effectively dead --
-# the very next line dies unless the repr is exactly 'Int'. Dropping the `//`
-# lets that existing die carry the GAP, so this pins the message, not a new guard.
-subtest 'undef-repr shift/pop dies loudly naming the missing repr' => sub {
-    my $f = Chalk::IR::NodeFactory->new;
-    my $arr = $f->make('ArrayLiteral', inputs => []);
-    $arr->set_stamp('ArrayRef');
-    my $shift = $f->make('Call', name => 'shift', dispatch_kind => 'builtin',
-                         inputs => [$arr]);
-    # Intentionally do NOT set representation on the shift.
-
-    my $ctx = Chalk::Target::LLVM::Context->new;
-    my $err;
-    eval { $ctx->_lower_builtin_shift_pop($shift); 1 };
-    $err = $@;
-
-    ok(defined $err && length $err, 'undef-repr shift: dies loudly')
-        or diag('Got no error');
-    like($err // '', qr/GAP/, 'shift error is a GAP');
-    like($err // '', qr/shift/, 'shift error names the node');
-    # RED at HEAD: the guess makes the message say "repr=Int", which is a lie --
-    # the node has NO repr. The GAP must not report a repr the node never had.
-    unlike($err // '', qr/repr=Int\b/,
-        'shift error does not report the guessed Int as the node repr');
-};
-
-# Site D (_lower_call_method, the vtable ABI cross-check): the registry's
-# return_repr. The census saw Str (Child.kind, Animal.name) and Undef
-# (Counter.bump) here -- an undef arrival under the guess would have compared
-# a Str node repr against a fabricated 'Int' and died with the wrong reason,
-# or worse agreed with an Int node and emitted the mismatched indirect call.
-subtest 'missing vtable return_repr dies loudly naming the method' => sub {
-    my $f = Chalk::IR::NodeFactory->new;
-    my $obj = $f->make('Constant', value => 1, const_type => 'integer');
-    $obj->set_stamp('Int');
-    my $call = $f->make('Call', name => 'kind', dispatch_kind => 'method',
-                        class_name => 'Child', inputs => [$obj]);
-    $call->set_stamp('Int');
-
-    my $ctx = Chalk::Target::LLVM::Context->new(
-        class_registry => {
-            Child => { methods => [ { name => 'kind', vtable_slot => 0 } ] },
-        },
-    );
-
-    my $err;
-    eval { $ctx->_lower_call_method($call); 1 };
-    $err = $@;
-
-    ok(defined $err && length $err,
-        'registry entry with no return_repr: dies loudly')
-        or diag('Got no error');
-    like($err // '', qr/GAP/, 'vtable ABI error is a GAP');
-    like($err // '', qr/kind/, 'vtable ABI error names the method');
-    like($err // '', qr/return_repr/, 'vtable ABI error names the missing repr');
-};
 
 done_testing();

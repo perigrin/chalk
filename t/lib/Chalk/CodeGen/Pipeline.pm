@@ -54,23 +54,13 @@ method run_detail ($json, $select, %opts) {
 
 # THE IMPLEMENTATION LAYER is linked in for T2: the metaobject classes of
 # the special containers the program uses (%SIG's, %INC's, a stash's
-# Chalk::MOP::Class), compiled with it. A unit T2 refuses falls back to
-# Context, which has no use for them (it answers those containers itself):
-# it lowers the program's own wire, unlinked, as before the layer existed.
+# Chalk::MOP::Class), compiled with it. A unit T2 refuses is refused, by
+# T2's reason: there is no other backend to hand the unlinked wire to.
 method _run ($json, $select, %opts) {
     my $linked;
     try { $linked = Chalk::Impl::link_json($json) }
     catch ($e) { return ([], undef, undef, "from_json failed: $e") }
-    my @r = $self->_run_once($linked, $select, %opts);
-    return @r if $linked eq $json || !grep { ( $_->{path} // '' ) ne 't2' } $r[0]->@*;
-    my ($plain) = $self->_run_once($json, $select, %opts);
-    my %fb = map { ( $_->{label} => $_ ) } $plain->@*;
-    for my $u ( $r[0]->@* ) {
-        next if ( $u->{path} // '' ) eq 't2' || !$fb{ $u->{label} };
-        my $why = $u->{path_why};
-        $u = { $fb{ $u->{label} }->%*, path => 'fallback', path_why => $why };   # (T2's reason is the linked run's)
-    }
-    return @r;
+    return $self->_run_once($linked, $select, %opts);
 }
 
 method _run_once ($json, $select, %opts) {
@@ -165,8 +155,8 @@ method _run_once ($json, $select, %opts) {
             ok    => ($ll ? true : false),
             ll    => $ll,
             err   => $err // ($ll ? undef : 'lower produced no output'),
-            # WHICH PATH it took: T2, or the fallback and T2's reason (T2's $PATH).
-            path     => ( $Chalk::Target::LLVM::Lower::PATH // { path => 'fallback', why => 'T2 not tried' } )->{path},
+            # WHAT T2 DID: took it, or refused it and why (T2's $PATH).
+            path     => ( $Chalk::Target::LLVM::Lower::PATH // { path => 'refused', why => 'T2 not tried' } )->{path},
             path_why => ( $Chalk::Target::LLVM::Lower::PATH // { why => 'T2 not tried' } )->{why},
         };
     }

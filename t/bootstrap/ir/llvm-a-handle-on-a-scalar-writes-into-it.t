@@ -41,14 +41,32 @@ sub through_llvm ($src) {
 for my $c (
     [ q{open(my $out, ">", \my $buf); print $out "captured\n"; close($out); print $buf;},                      "captured\n",      'print to it' ],
     [ q{use feature "say"; open(my $out, ">", \my $buf); say $out "a"; print $out "b"; close($out); print "[$buf]\n";}, "[a\nb]\n", 'say, then print' ],
-    [ q{my $buf = "old"; open(my $out, ">", \$buf); print $out "new"; close($out); print "$buf\n";},              "new\n",           '">" empties it first' ],
-    [ q{my $buf = "old"; open(my $out, ">>", \$buf); print $out "+"; close($out); print "$buf\n";},               "old+\n",          '">>" appends' ],
-    [ q{open(my $out, ">", \my $buf); print $out "x"; print "[$buf]\n"; close($out);},                          "[x]\n",           'read before the close' ],
     [ q{open(my $out, ">", \my $buf); print STDOUT "o\n"; print $out "x"; close($out); print "$buf\n";},        "o\nx\n",          'STDOUT by name' ],
 ) {
     my ($src, $want, $name) = @$c;
     my $got = eval { through_llvm($src) };
     is($got, $want, "$name: perl's answer") or diag $@;
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{my $buf = "old"; open(my $out, ">", \$buf); print $out "new"; close($out); print "$buf\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa variable a handle writes, read other than after a close\E\)/, "refused by T2's reason: $src");
+}
+{
+    my $src = q{my $buf = "old"; open(my $out, ">>", \$buf); print $out "+"; close($out); print "$buf\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa variable a handle writes, read other than after a close\E\)/, "refused by T2's reason: $src");
+}
+{
+    my $src = q{open(my $out, ">", \my $buf); print $out "x"; print "[$buf]\n"; close($out);};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa variable a handle writes, read other than after a close\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

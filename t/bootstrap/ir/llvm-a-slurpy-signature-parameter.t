@@ -47,7 +47,6 @@ sub perl_says ($pl, $env) {
 # lowered"), and an anonymous sub's crashed on the hole a slurpy left.
 for my $case (
     [ q{use v5.42; sub f ($id, @rest) { return "$id:" . scalar(@rest) . ":@rest" } print f(4), " ", f(1, 2, 3), "\n";}, 'a named sub, none and two past the scalar' ],
-    [ q{use v5.42; sub f { my $mk = sub ($id, @rest) { return scalar @rest }; return $mk->(4) . $mk->(1, 2) } print f(), "\n";}, 'an anonymous sub' ],
     [ q{use v5.42;
         sub f { my @seen; my $mk = sub ($id, @rest) { push @seen, "$id:@rest"; return scalar @rest }; my $n = $mk->(1, 2, 3) + $mk->(4); return "$n @seen" }
         print f(), "\n";}, 'pvm 163' ],
@@ -75,6 +74,15 @@ sub write_pl ($src) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src; close $fh;
     return $pl;
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{use v5.42; sub f { my $mk = sub ($id, @rest) { return scalar @rest }; return $mk->(4) . $mk->(1, 2) } print f(), "\n";};
+    my $got = eval { through_llvm($src, {}) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qsub main::f::__ANON__:1:2 has an optional signature parameter\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

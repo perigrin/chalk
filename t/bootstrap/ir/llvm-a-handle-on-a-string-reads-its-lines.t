@@ -61,7 +61,7 @@ for my $c (
 # A REAL FILE is refused by name: only a string in memory is a file here.
 {
     eval { through_llvm(q{open(my $fh, "<", "/etc/passwd"); my $l = <$fh>; print $l;}) };
-    like($@, qr/GAP: open of a file/, 'a file on disk is refused');
+    like($@, qr/GAP: T2: out of its slices \(\Qan open of a file (or of what is not a reference to a constant string)\E\)/, 'a file on disk is refused');
 }
 
 done_testing;

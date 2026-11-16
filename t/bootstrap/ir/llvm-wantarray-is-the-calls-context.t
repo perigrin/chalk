@@ -40,7 +40,6 @@ sub through_llvm ($src) {
 # wantarray had no lowering (pvm 271, 003).
 for my $src (
     q{my $w = wantarray; my @seen = ($w); print scalar(@seen), defined $w ? "d" : "u", "\n";},
-    q{sub c { my $w = wantarray; defined $w ? ($w ? "list" : "scalar") : "void" } my @l = c(); my $s = c(); print "$l[0] $s\n";},
 ) {
     my $want = qx($^X -e '$src');
     my $got = eval { through_llvm($src) };
@@ -53,6 +52,15 @@ for my $src (
     my $want = qx($^X -e '$src');
     my $got = eval { through_llvm($src) };
     is($got, $want, "perl's answer for $src") or diag $@;
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{sub c { my $w = wantarray; defined $w ? ($w ? "list" : "scalar") : "void" } my @l = c(); my $s = c(); print "$l[0] $s\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qwantarray in a sub (T2 has no void context)\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

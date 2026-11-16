@@ -312,7 +312,7 @@ END_MD
 
 # GUARD 3: claiming L: GREEN for a real GAP idiom MUST fail
 subtest 'guard: L verdict GREEN for a real GAP FAILS' => sub {
-    # A Constant with Scalar representation cannot lower runtime-free.
+    # A block T2 refuses by name (a VarDecl statement, the old dialect).
     # The ir block claims GREEN but the real L corner will say GAP.
     my $fake_green_md = <<'END_MD';
 # Fake Green
@@ -330,8 +330,11 @@ context: scalar
 ```
 
 ```ir
-%c1  = Constant(1) :Scalar
-return %c1
+%xn = Constant("$x") :Str
+%c1 = Constant(1) :Int
+%vx = VarDecl(%xn, %c1) :Int
+return %vx
+control: %vx
 L: GREEN
 ```
 END_MD

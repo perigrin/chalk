@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
@@ -143,18 +144,10 @@ sub print_and_return {
     is($rx1->id, $rxL->id,
         'Case (a): lhs of Assign also hash-cons to same PadAccess node');
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, 'Case (a): my $x=1; my $y=$x; $x=2; return $x+$y — lowers without dying')
-        or diag("lower() died: $@");
-
-    SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
-        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (a): .ll is libperl-free');
-        my ($out, $exit) = run_lli($ll);
-        is($exit, 0, 'Case (a): lli exits 0');
-        is($out, '3',
-            'Case (a): lli=3 == perl=3 (x=2 post-assign, y=1 pre-assign, 2+1=3)');
-    }
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "Case (a): my \$x=1; my \$y=\$x; \$x=2; return \$x+\$y —: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "Case (a): my \$x=1; my \$y=\$x; \$x=2; return \$x+\$y —: refused by T2's reason");
 }
 
 # ===========================================================================
@@ -217,18 +210,10 @@ sub print_and_return {
     ok($all_same,
         'Case (b): all five $x PadAccess nodes hash-cons to one node (stale-cache risk maximal)');
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, 'Case (b): my $x=1; y=$x; $x=2; z=$x; $x=3; return $x+$y+$z — lowers without dying')
-        or diag("lower() died: $@");
-
-    SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
-        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (b): .ll is libperl-free');
-        my ($out, $exit) = run_lli($ll);
-        is($exit, 0, 'Case (b): lli exits 0');
-        is($out, '6',
-            'Case (b): lli=6 == perl=6 (x=3, y=1, z=2: 3+1+2=6)');
-    }
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "Case (b): my \$x=1; y=\$x; \$x=2; z=\$x; \$x=3; return \$x+\$y+\$z —: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "Case (b): my \$x=1; y=\$x; \$x=2; z=\$x; \$x=3; return \$x+\$y+\$z —: refused by T2's reason");
 }
 
 # ===========================================================================
@@ -297,18 +282,10 @@ for my $pair ([5, 6], [-1, 2]) {
     $vx->set_control_in($vn);
     my $ret = print_and_return($f, $add, $if_node);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "Case (c) n=$n_val: if-branch reassign lowers without dying")
-        or diag("lower() died: $@");
-
-    SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
-        unlike($ll, qr/\bSV\b|Perl_|libperl/, "Case (c) n=$n_val: .ll is libperl-free");
-        my ($out, $exit) = run_lli($ll);
-        is($exit, 0, "Case (c) n=$n_val: lli exits 0");
-        is($out, "$expected",
-            "Case (c) n=$n_val: lli=$expected == perl=$expected");
-    }
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "Case (c) n=\$n_val: if-branch reassign: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "Case (c) n=\$n_val: if-branch reassign: refused by T2's reason");
 }
 
 # ===========================================================================
@@ -378,18 +355,10 @@ for my $pair ([5, 6], [-1, 2]) {
     $loop->set_control_in($vs);
     my $ret = print_and_return($f, $s_phi, $loop);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, 'Case (d): loop-carried $x reassign ($i<3; $x=$x+1; $s+=$x) lowers without dying')
-        or diag("lower() died: $@");
-
-    SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
-        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (d): .ll is libperl-free');
-        my ($out, $exit) = run_lli($ll);
-        is($exit, 0, 'Case (d): lli exits 0');
-        is($out, '6',
-            'Case (d): lli=6 == perl=6 (sum 1+2+3=6 via loop-carried x reassign)');
-    }
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "Case (d): loop-carried \$x reassign (\$i<3; \$x=\$x+1; \$s+=\$x): T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "Case (d): loop-carried \$x reassign (\$i<3; \$x=\$x+1; \$s+=\$x): refused by T2's reason");
 }
 
 # ===========================================================================
@@ -459,18 +428,10 @@ for my $pair ([5, 6], [-1, 2]) {
     ok($all_same,
         'Case (e): all five $x accesses (3 reads + 2 assigns) hash-cons to one node');
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, 'Case (e): acc1=$x; $x=2; acc2=$x; $x=3; acc3=$x; return acc1+acc2+acc3 — lowers without dying')
-        or diag("lower() died: $@");
-
-    SKIP: {
-        skip 'lower() failed', 3 unless defined $ll;
-        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'Case (e): .ll is libperl-free');
-        my ($out, $exit) = run_lli($ll);
-        is($exit, 0, 'Case (e): lli exits 0');
-        is($out, '6',
-            'Case (e): lli=6 == perl=6 (1+2+3=6: x reads each program-point value)');
-    }
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "Case (e): acc1=\$x; \$x=2; acc2=\$x; \$x=3; acc3=\$x; return acc1+acc2+acc3 —: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "Case (e): acc1=\$x; \$x=2; acc2=\$x; \$x=3; acc3=\$x; return acc1+acc2+acc3 —: refused by T2's reason");
 }
 
 done_testing;

@@ -1,5 +1,5 @@
 # ABOUTME: A string eval whose code B::SoN knew is a block eval calling the body it compiled
-# ABOUTME: (a closure over the lexicals the code names): T2 answers as perl, the fallback refuses.
+# ABOUTME: (a closure over the lexicals the code names): T2 answers as perl, or refuses by its own reason.
 use 5.42.0;
 use Test::More;
 use File::Temp qw(tempfile);
@@ -74,12 +74,12 @@ for my $case (
     is($got->[2], $want->[2], "$name: perl's exit code");
 }
 
-# THE FALLBACK HAS NO RULE FOR IT: where T2 refuses the program for something
-# else (here a list slice), it is refused by name -- never lowered by the fallback.
+# WHERE T2 REFUSES THE PROGRAM for something else (here a list slice), it is
+# refused by T2's own reason -- never lowered some other way.
 {
     my ($pl, $u, $err) = lower(q{my $i = 0; eval q{$i = 1}; my @a = (1, 2, 3)[1, 2]; print "@a $i\n";});
     my $why = $err // ( $u && !$u->{ok} ? $u->{err} : undef );
-    like($why // 'lowered', qr/GAP: a string eval.*T2's alone/, 'a string eval where T2 refuses is refused by name, not by the fallback');
+    like($why // 'lowered', qr/\AGAP: T2: out of its slices \(/, "a string eval where T2 refuses the program is refused by T2's reason");
 }
 
 # A STRING MADE AT RUN TIME stays refused by name (B::SoN skips the program).

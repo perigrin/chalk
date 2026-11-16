@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
@@ -90,14 +91,11 @@ subtest 'an if-arm die preceded by a Print still emits the abort' => sub {
 
     Chalk::IR::Graph->new(start => $start, returns => [$ret]);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret) };
-    ok(!$@, 'the effect-before-die graph lowers without a GAP') or diag $@;
-    ok(defined $ll && length $ll, 'lowering produced IR') or return;
-
-    like($ll, qr/call void \@exit\(i32 255\)/,
-        'the abort (exit 255) is emitted for the die arm');
-    like($ll, qr/unreachable/,
-        'the taken arm terminates with unreachable, not a fallthrough br');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret)) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 done_testing;

@@ -73,7 +73,6 @@ for my $case (
     # the variable, so a read before the match sees the block's write; a
     # string it stores is a string; its integers stay integers (review 2).
     [ q{my $n = 1; my $s = "ab"; my $r = $n + ($s =~ /a(?{ $n *= 3 })b/); print "$r $n\n";}, 'a read before the match, in its expression' ],
-    [ q{my $n = 1; my $s = "ab"; print $n, ($s =~ /a(?{ $n = 7 })b/), "\n";}, 'a print list read before the match' ],
     [ q{my $x = 3; my $t = "ab"; $t =~ /a(?{ $x = "abc" })b/; print "$x\n"; my $y = $x * 2;}, 'a string the block stores' ],
     [ q{my $n = 0; my $t = "ab"; $t =~ /a(?{ $n = $n + 1.5 })b/; $t =~ /a(?{ $n = $n . "x" })b/; print "$n\n";}, 'a number, then a string, the blocks store' ],
     [ q{my $n = 0; "aab" =~ /a(?{ $n++ })(?{ $n += 10 })b/; print "$n\n";}, 'a ++ and a += in two blocks' ],
@@ -87,14 +86,14 @@ for my $case (
 for my $src (q{my $t = 0; my $s = "azax"; $s =~ /a(?{ $t = $t + 1 })[xy]/; print "$t\n";},
               q{my $t = 0; my $s = "aaab"; $s =~ /a+(?{ $t = $t + 1 })b/; print "$t\n";}) {
     my ($got) = eval { through_llvm($src, {}) };
-    like($@, qr/GAP: a regex code block in a pattern that is not all literal/, "refused by name: $src") or diag "got: " . ($got // 'undef');
+    like($@, qr/GAP: T2: out of its slices \(\Qa regex: a regex code block in a pattern that is not all literal -- how often it runs is perl's optimizer's\E\)/, "refused by name: $src") or diag "got: " . ($got // 'undef');
 }
 
 # A BLOCK'S END IS FOUND BY BRACES AND QUOTES; a quote-like op (q(...)) can
 # hide a `})` -- refused, not misread (review, 2026-11-04).
 for my $src (q|my $t = ""; my $s = "ab"; my $h = $s =~ /a(?{ $t = join q(}), "(" })b/ ? 1 : 0; print "$h [$t]\n";|) {
     my ($got) = eval { through_llvm($src, {}) };
-    like($@, qr/GAP: a regex code block with a quote-like op/, "refused by name: $src") or diag "got: " . ($got // 'undef');
+    like($@, qr/GAP: T2: out of its slices \(\Qa regex: a regex code block with a quote-like op, a comment or a heredoc is not lowered -- where it ends is not found by braces and quotes\E\)/, "refused by name: $src") or diag "got: " . ($got // 'undef');
 }
 
 # KNOWN, NOT YET: arithmetic on a shared file lexical is done as a double, in a
@@ -105,6 +104,15 @@ TODO: {
     my $src = q{my $x = 9007199254740993; my $s = "ab"; my $r; $s =~ /a(?{ $r = $x + 0 })b/; print "$r\n";};
     my ($got, $pl) = eval { through_llvm($src, {}) };
     is($got, perl_says($pl // write_pl($src), {}), 'an integer past 2**53 the block adds');
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{my $n = 1; my $s = "ab"; print $n, ($s =~ /a(?{ $n = 7 })b/), "\n";};
+    my $got = eval { through_llvm($src, {}) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa regex match with code blocks\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

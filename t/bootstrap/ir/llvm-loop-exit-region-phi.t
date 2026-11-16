@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
@@ -60,9 +61,11 @@ subtest 'an exit-Region phi consumer dies with a diagnostic' => sub {
     $ret->set_control_in($loop);
 
     my $err;
-    eval { Chalk::Target::LLVM->lower($ret); 1 } or $err = $@;
-    like($err, qr/exit.*Region|loop.exit.*phi|single predecessor|header/i,
-        'attaching a phi to a loop-exit Region dies with a structural diagnostic');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret)) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 done_testing;

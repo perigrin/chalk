@@ -34,11 +34,6 @@ class Chalk::MOP::Sub {
     field $graph       :param :reader = undef;
     field $body        :param :reader = [];
 
-    # The Maybe shim only (LLVM.pm _context_sees_maybe_as_scalar): it shows
-    # Context Scalar for a Maybe[T] and puts it back -- not a narrowing, so
-    # it does not go through set_return_type. Delete it with Context.
-    method shim_return_type($type) { $return_type = $type; return }
-
     # set_return_type($type): the return type the compiler settled on. Which
     # answer wins -- the wire's or a narrower one whole-program analysis
     # derives -- is analysis's to decide (Chalk::IR::Analysis::

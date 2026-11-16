@@ -5,6 +5,7 @@ use utf8;
 
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
@@ -63,7 +64,7 @@ sub lower_binop ($f, $op, $lhs, $rhs, $node_repr) {
     my $node = $f->make($op, inputs => [$lhs, $rhs]);
     $node->set_stamp($node_repr) if defined $node_repr;
     my $ret = $f->make_cfg('Return', inputs => [$node]);
-    my $ll  = eval { Chalk::Target::LLVM->lower($ret) };
+    my $ll  = eval { Chalk::Target::LLVM->lower(rooted($ret)) };
     return ($ll, $@);
 }
 

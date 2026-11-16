@@ -136,7 +136,7 @@ subtest 'MdtestCorpus classifies lowered-but-lli-rejected as MISCOMPILE not GAP'
 #
 # CG1 (R1 reopened): the existing tests use a monkey-patched LLVMDriver to simulate
 # a "lowered-but-lli-rejected" case. This test exercises the UNMOCKED path:
-# - The emitter (Chalk::Target::LLVM::lower_with_elaboration) is locally overridden
+# - The emitter (Chalk::Target::LLVM::Lower::lower_program, T2) is locally overridden
 #   to return a syntactically valid but semantically invalid .ll (lli rejects it).
 # - LLVMDriver->run is NOT mocked — it calls the real lower() path.
 # - MdtestCorpus._run_l_verdict_check must classify it as MISCOMPILE.
@@ -144,11 +144,11 @@ subtest 'MdtestCorpus classifies lowered-but-lli-rejected as MISCOMPILE not GAP'
 # Note: after the I1/I2/I3 fixes, all previously emittable miscompiles now die (GAP).
 # The only way to produce a MISCOMPILE via the current emitter is to construct a graph
 # whose lowering "succeeds" but whose output is semantically invalid. We achieve this
-# by locally overriding lower_with_elaboration to return known-malformed IR.
+# by locally overriding lower_program to return known-malformed IR.
 # LLVMDriver itself is not mocked (it calls the real lower() dispatch chain).
 subtest 'REAL-FIXTURE: unmocked LLVMDriver+MdtestCorpus classifies malformed .ll as MISCOMPILE' => sub {
-    # Locally override lower_with_elaboration to return intentionally malformed .ll.
-    # lower() calls lower_with_elaboration() — so by overriding this method we inject
+    # Locally override lower_program to return intentionally malformed .ll.
+    # lower() calls lower_program() — so by overriding this method we inject
     # the malformed output without mocking LLVMDriver itself.
     #
     # The malformed .ll: defines @main() with a type-error (referencing %Bogus which
@@ -156,7 +156,8 @@ subtest 'REAL-FIXTURE: unmocked LLVMDriver+MdtestCorpus classifies malformed .ll
     # lower() itself does NOT die (the override succeeds) -> emission_meta has
     # ll_text=defined and lli_exit != 0 -> MISCOMPILE.
     no warnings 'redefine';
-    local *Chalk::Target::LLVM::lower_with_elaboration = sub {
+    require Chalk::Target::LLVM::Lower;
+    local *Chalk::Target::LLVM::Lower::lower_program = sub {
         # Return deliberately malformed LLVM IR: references %Bogus which is not declared.
         # lli rejects this with a type-definition error.
         return join("\n",

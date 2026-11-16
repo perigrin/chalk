@@ -41,7 +41,6 @@ sub through_llvm ($src) {
 for my $src (
     q{sub answer { 42 } print &answer, " ", &answer(), "\n";},
     q{sub f { return "[@_]" } sub outer { return &f } print outer("x", "y"), "\n";},
-    q{sub f { return $_[1] } sub outer { return &f . "|" . f(7) } print outer(3, 4), "\n";},
     # a shift in the caller first: the callee sees what is left (once refused)
     q{sub f { return "[@_]" } sub outer { my $a = shift; return &f } print outer(1, 2), "\n";},
 ) {
@@ -56,6 +55,15 @@ for my $src (
 ) {
     my $got = eval { through_llvm($src) };
     like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{sub f { return $_[1] } sub outer { return &f . "|" . f(7) } print outer(3, 4), "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qan & call sharing \E\@\Q_ of a sub not taking it as a list\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

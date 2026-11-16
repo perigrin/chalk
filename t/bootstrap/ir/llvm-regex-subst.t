@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
@@ -17,7 +18,7 @@ unless (-x $LLI) {
 
 sub lli_run {
     my ($ret, %lower_opts) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1, %lower_opts);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret, $lower_opts{mop}), program_mode => 1, %lower_opts);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $fh $ll;
@@ -124,12 +125,14 @@ subtest 's/$/X/ appends (and respects a trailing newline)' => sub {
 };
 
 # Review: $10 must not silently parse as $1 . "0".
-subtest 'replacement $N with multiple digits dies GAP' => sub {
+subtest 'replacement $N with multiple digits is refused by name, never read as $1 . "0"' => sub {
+    # perl: s/(\d)/[$10]/ on "a1b" is "a[]b" ($10 is group 10). T2 has no
+    # group past 9: it refuses by its reason, never splices $1 . "0".
     my $f = _mk();
-    my $s = subst_node($f, 'a1b', '(\\d)', '[$10]');
-    my $ret = $f->make_cfg('Return', inputs => [$s]);
-    eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    like($@, qr/GAP/, '$10 in a 1-group replacement dies GAP (not $1 . "0")');
+    my $ret = print_and_return($f, subst_node($f, 'a1b', '(\\d)', '[$10]'));
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa regex: s\E\/\Q\E\/\Q\E\/\Q replacement \E\$\Q10 (a group past 9) is not lowered\E\)/, "refused by T2's reason");
 };
 
 # Review: s/// literal-segment globals inside method bodies need the same

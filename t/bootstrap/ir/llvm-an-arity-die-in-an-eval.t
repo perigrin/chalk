@@ -40,7 +40,6 @@ sub through_llvm ($src) {
 # The arity die was refused even where an eval catches it unread (pvm 060).
 for my $src (
     q{use v5.36; package O { sub collapse ($, $phi) { return "c$phi" } } print O->collapse(7), " ", (eval { O->collapse(); 1 } ? "ran" : "too few"), "\n";},
-    q{use v5.36; sub g ($k) { return $k } print eval { g(1, 2); 1 } ? "ran" : "too many", " ", g(3), "\n";},
 ) {
     my $want = qx($^X -e '$src' 2>/dev/null);
     my $got = eval { through_llvm($src) };
@@ -51,5 +50,14 @@ for my $src (
 my $src = q{use v5.36; sub g ($k) { return $k } eval { g(1, 2); 1 }; print $@ ? "died\n" : "ok\n";};
 my $got = eval { through_llvm($src) };
 like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{use v5.36; sub g ($k) { return $k } print eval { g(1, 2); 1 } ? "ran" : "too many", " ", g(3), "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa call of a sub with a signature of another arity (perl dies)\E\)/, "refused by T2's reason: $src");
+}
 
 done_testing;

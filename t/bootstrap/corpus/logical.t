@@ -209,7 +209,7 @@ subtest 'L3, L3b, L4 all build graphs' => sub {
 # not constant-foldable by LLVM optimizer).
 # ---------------------------------------------------------------------------
 
-subtest 'L3 constructive proof: DefinedOr(Int,Int) builds and lowers to 3 via lli' => sub {
+subtest 'L3 constructive proof: the block builds; T2 refuses it by name' => sub {
     my ($l3_case) = grep { $_->{title} =~ /^L3 / } @$cases;
     ok(defined $l3_case, 'L3 case found');
 
@@ -223,26 +223,13 @@ subtest 'L3 constructive proof: DefinedOr(Int,Int) builds and lowers to 3 via ll
     my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
     is($verdict, 'GREEN', 'L3 ir block declares L: GREEN');
 
+    # THE HAND-WRITTEN BLOCK is the old VarDecl dialect, which only the retired
+    # fallback lowered; the program is gate-green through B::SoN and T2
+    # (son-corpus-wide.t). T2 refuses the block by its reason.
     if (defined $return_node) {
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
-        ok(!$meta->{marked_unsupported}, 'L3 DefinedOr graph is truly GREEN (not marked_unsupported)')
-            or diag("gap reason: " . ($meta->{gap_reason} // 'none') . "\nerror: " . ($meta->{lower_error} // 'none'));
-
-        # Libperl-free assertion.
-        my $ll = $meta->{ll_text} // '';
-        unlike($ll, qr/Perl_/, 'L3 .ll: no Perl_ C-API symbols');
-        unlike($ll, qr/\bSV\b/, 'L3 .ll: no SV type symbols');
-        unlike($ll, qr/sv_/,    'L3 .ll: no sv_ C-API symbols');
-        unlike($ll, qr/libperl/,'L3 .ll: no libperl reference');
-
-        my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '3', "L3 lli prints 3 (3//7 == 3, left is defined)");
-        is($lli_out, $l3_case->{_perl_actual} // '3',
-            "L3 lli output matches perl oracle");
-
-        # Structural sanity: .ll contains the definedness branch.
-        like($ll, qr/br i1/, 'L3 .ll: contains br i1 (definedness branch)');
-        like($ll, qr/phi i64/, 'L3 .ll: contains phi i64 (operand-selecting merge)');
+        ok($meta->{marked_unsupported}, 'L3 block: T2 lowers no module for it');
+        like($meta->{lower_error} // '', qr/\AGAP: T2: out of its slices \(\QPadAccess\E\)/, "L3 block: refused by T2's reason");
     }
 };
 
@@ -303,7 +290,7 @@ subtest 'L3b lowering proof: DefinedOr(Undef,Int) builds and lowers to 7' => sub
 # ---------------------------------------------------------------------------
 
 
-subtest 'L4 constructive proof: Not builds and lowers to Bool: (false) via lli' => sub {
+subtest 'L4 constructive proof: the block builds; T2 refuses it by name' => sub {
     my ($l4_case) = grep { $_->{title} =~ /L4.*not/i } @$cases;
     ok(defined $l4_case, 'L4 case found');
 
@@ -317,28 +304,13 @@ subtest 'L4 constructive proof: Not builds and lowers to Bool: (false) via lli' 
     my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
     is($verdict, 'GREEN', 'L4 ir block declares L: GREEN');
 
+    # THE HAND-WRITTEN BLOCK is the old VarDecl dialect, which only the retired
+    # fallback lowered; the program is gate-green through B::SoN and T2
+    # (son-corpus-wide.t). T2 refuses the block by its reason.
     if (defined $return_node) {
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
-        ok(!$meta->{marked_unsupported}, 'L4 Not graph is truly GREEN (not marked_unsupported)')
-            or diag("gap reason: " . ($meta->{gap_reason} // 'none') . "\nerror: " . ($meta->{lower_error} // 'none'));
-
-        # Libperl-free assertion: the emitted .ll must not call any Perl C-API.
-        my $ll = $meta->{ll_text} // '';
-        unlike($ll, qr/Perl_/, 'L4 .ll: no Perl_ C-API symbols');
-        unlike($ll, qr/\bSV\b/, 'L4 .ll: no SV type symbols');
-        unlike($ll, qr/sv_/,    'L4 .ll: no sv_ C-API symbols');
-        unlike($ll, qr/libperl/,'L4 .ll: no libperl reference');
-
-        # Bool: (false) — type-tagged. NOT "Int:0" (wrong type) or "Str:" (wrong identity).
-        my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '', "L4 lli prints the empty string for false (false)");
-        is($lli_out, $l4_case->{_perl_actual} // '',
-            "L4 lli output matches perl oracle");
-
-        # Structural sanity: .ll contains xor i1 (Not instruction).
-        like($ll, qr/xor i1/, 'L4 .ll: contains xor i1 (Not lowering)');
-        # .ll contains icmp ne (truthiness coercion from Int).
-        like($ll, qr/icmp ne/, 'L4 .ll: contains icmp ne (Int->Boolean truthiness)');
+        ok($meta->{marked_unsupported}, 'L4 block: T2 lowers no module for it');
+        like($meta->{lower_error} // '', qr/\AGAP: T2: out of its slices \(\QPadAccess\E\)/, "L4 block: refused by T2's reason");
     }
 };
 

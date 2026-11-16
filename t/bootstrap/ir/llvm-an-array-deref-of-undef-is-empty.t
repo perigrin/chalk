@@ -37,22 +37,24 @@ sub through_llvm ($src) {
 }
 
 # A read stamped Undef (its key known missing) was bitcast as an i8* -- an
-# i1 where a ptr was wanted, invalid IR.
-for my $c (
-    [ q{my %h = (n => [1]); my @l = @{ $h{z} }; print scalar(@l), "|", join(",", @{ $h{z} }), "|", scalar(@{ $h{n} }), "|", join(",", @{ $h{n} }), "\n";} ],
-) {
-    my ($src) = @$c;
-    my $want = qx($^X -e '$src');
-    my $got = eval { through_llvm($src) };
-    is($got, $want, "perl's answer for $src") or diag $@;
-}
+# i1 where a ptr was wanted, invalid IR. Its program is T2's named refusal now,
+# below.
 
 # perl's scalar(@{ undef }) is undef ("" printed), not the 0 an empty array
 # counts: refused, not answered.
 {
     my $src = q{my %h = (n => [1]); print scalar(@{ $h{z} }), "\n";};
     my $got = eval { through_llvm($src) };
-    like($@, qr/a count of \@\{\} over what may be undef/, "a count of \@{ undef } is refused by name");
+    like($@, qr/GAP: T2: out of its slices \(\Qa count of \E\@\Q{} over an element known undef\E\)/, "a count of \@{ undef } is refused by name");
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{my %h = (n => [1]); my @l = @{ $h{z} }; print scalar(@l), "|", join(",", @{ $h{z} }), "|", scalar(@{ $h{n} }), "|", join(",", @{ $h{n} }), "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa count of \E\@\Q{} over an element known undef\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

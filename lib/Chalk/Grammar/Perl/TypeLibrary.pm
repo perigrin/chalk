@@ -31,8 +31,8 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # And the other half, which is the constraint on this side: CHALK'S IR
     # NEITHER KNOWS NOR CARES what the representation is or should be. The type
     # is the IR's business; the representation is T2's, chosen per site with
-    # context in hand (see Target/LLVM/Context.pm::_repr_to_llvm_type, whose
-    # one-argument shape cannot express that). `Node.pm:55` already records the
+    # context in hand (the retired fallback's one-argument _repr_to_llvm_type
+    # could not express that). `Node.pm:55` already records the
     # structural half -- there is no separate `representation` field, it was
     # folded into `stamp` -- and retiring the deprecated alias is the remaining
     # work.

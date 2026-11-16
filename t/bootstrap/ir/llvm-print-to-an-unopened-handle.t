@@ -40,11 +40,19 @@ sub through_llvm ($src) {
 # `print __CLASS__;` is a print of $_ to an unopened handle (pvm 424).
 for my $src (
     q{print __CLASS__; print "after\n";},
-    q{my $r = print NOWHERE "x"; print defined $r && $r ? "t" : "f", "\n";},
 ) {
     my $want = qx($^X -e '$src' 2>/dev/null);
     my $got = eval { through_llvm($src) };
     is($got, $want, "perl's answer for $src") or diag $@;
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{my $r = print NOWHERE "x"; print defined $r && $r ? "t" : "f", "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa print to a handle opened nowhere, its value read\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

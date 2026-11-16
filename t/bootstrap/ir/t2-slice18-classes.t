@@ -80,12 +80,13 @@ my $c = Ch->new(a => 5); print $c->a, $c->b, $c->s, $c->who, Pa->new->who, ref($
     like($LAST_LL, qr/^; chalk T2/m, "$name: lowered through T2");
 }
 
-# PERL DIES or T2 lacks it: perl's answer, or refused.
-TODO: {
-    local $TODO = 'Context.pm makes an object missing a required parameter (perl dies); T2 has no die yet';
+# PERL DIES at a new missing a required parameter; T2 has no die there yet:
+# refused by its reason, never a made object.
+{
     my $src = q{use v5.42; use experimental 'class'; class C { field $n :param; } my $c = eval { C->new } ; print defined $c ? "made" : "died", "\n";};
-    my ($got, $pl) = eval { through_llvm($src, {}) };
-    is($got, perl_says($pl // write_pl($src), {}), "a required parameter missing: perl's answer");
+    my ($got) = eval { through_llvm($src, {}) };
+    ok(!defined $got, 'a required parameter missing: T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa new missing a required parameter (perl dies)\E\)/, "a required parameter missing: refused by T2's reason");
 }
 
 done_testing;

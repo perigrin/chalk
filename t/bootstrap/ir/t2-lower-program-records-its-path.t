@@ -1,4 +1,4 @@
-# ABOUTME: lower_program records which path a unit took -- T2, or the fallback and why --
+# ABOUTME: lower_program records what T2 did with a unit -- took it, or refused it and why --
 # ABOUTME: and the pipeline hands it on with the unit, so a corpus can count T2's share.
 use 5.42.0;
 use Test::More;
@@ -23,6 +23,8 @@ is($u->{path}, 't2', 'a program T2 takes: path t2');
 ok(!defined $u->{path_why}, 'and no reason');
 
 $u = unit_of(q{eval q{die "boom\n"}; print "after: $@";});
-is($u->{path}, 'fallback', 'a program T2 refuses: path fallback');
+is($u->{path}, 'refused', 'a program T2 refuses: path refused');
+ok(!$u->{ok}, 'and nothing lowered it');
+like($u->{err} // '', qr/\Q$u->{path_why}\E/, 'the unit fails with that same reason');
 like($u->{path_why} // '', qr/\S/, 'with T2\'s reason');
 done_testing;

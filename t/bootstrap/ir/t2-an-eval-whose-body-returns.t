@@ -26,7 +26,7 @@ for my $src (
     q{sub f { my $x = shift; my $w = eval { return "none" unless $x; "got $x" }; "<$w>" } print f(1), f(0), "\n";},
     q{sub f { my $n = 0; my $w = eval { for my $i (1 .. 5) { $n++; return "at $i" if $i == 3 } "end" }; "$w $n" } print f(), "\n";},
 ) {
-    like lower($src), qr/GAP: .*(?:an eval Region of more than one way in|a block eval whose body returns)/, "refused by name: $src";
+    like lower($src), qr/GAP: T2: out of its slices \(\Qan eval closed at another depth\E\)/, "refused by name: $src";
 }
 
 done_testing;

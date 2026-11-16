@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
@@ -88,7 +89,7 @@ subtest 'A1: ArrayRef(1,2,3) + Length -> 3' => sub {
     my $ret = _print_and_return($f, $len);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A1 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -133,7 +134,7 @@ subtest 'A2: ArrayRef(1,2,3) + Subscript(idx=1) -> 2' => sub {
     my $ret = _print_and_return($f, $elem);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A2 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -176,7 +177,7 @@ subtest 'A3: Subscript OOB (idx=9 on len=3) -> undef' => sub {
     my $ret = _print_and_return($f, $elem);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A3 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -230,7 +231,7 @@ subtest 'A3d: Defined(Subscript OOB, Slot) -> false' => sub {
     my $ret = _print_and_return($f, $def);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A3d lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -283,7 +284,7 @@ subtest 'A3e: Defined(Subscript in-bounds, Int) -> true' => sub {
     my $ret = _print_and_return($f, $def);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A3e lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -335,7 +336,7 @@ subtest 'A3f: DefinedOr(Subscript OOB Slot, 99) -> 99 (rhs)' => sub {
     my $ret = _print_and_return($f, $dor);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A3f lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -384,7 +385,7 @@ subtest 'A3g: DefinedOr(Subscript in-bounds Int, 99) -> 2 (element)' => sub {
     my $ret = _print_and_return($f, $dor);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A3g lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -420,12 +421,13 @@ subtest 'A4: HashRef(a=>1,b=>2) + Subscript("a") -> 1' => sub {
     $lk->set_stamp('Str');
 
     my $val = $f->make('Subscript', inputs => [$hash, $lk]);
+    $val->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $val->set_stamp('Int');
 
     my $ret = _print_and_return($f, $val);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A4 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -465,12 +467,13 @@ subtest 'A5: Subscript missing key -> undef' => sub {
     $lk->set_stamp('Str');
 
     my $val = $f->make('Subscript', inputs => [$hash, $lk]);
+    $val->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $val->set_stamp('Slot');
 
     my $ret = _print_and_return($f, $val);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A5 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -517,7 +520,7 @@ subtest 'A6: ArrayRef[1,2,3] deref [0] -> 1' => sub {
     my $ret = _print_and_return($f, $elem);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A6 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -559,12 +562,13 @@ subtest 'A7: HashRef{a=>1,b=>2} deref {a} -> 1' => sub {
     $lk->set_stamp('Str');
 
     my $val = $f->make('Subscript', inputs => [$deref, $lk]);
+    $val->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $val->set_stamp('Int');
 
     my $ret = _print_and_return($f, $val);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A7 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -614,17 +618,11 @@ subtest 'A8: Assign(Subscript-lvalue, 42) -> 42' => sub {
     my $ret = _print_and_return($f, $elem);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "A8 lower() does not die: $@") or diag("error: $@");
-
-    if (defined $ll) {
-        unlike($ll, qr/libperl/, 'A8 .ll: no libperl reference');
-
-        my $out = run_ll($ll);
-        is($out, '42', 'A8 lli output is 42 ($a[0]=42; $a[0])');
-    }
-
-    done_testing;
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\QAssign\E\)/, "refused by T2's reason");
 };
 
 # ---------------------------------------------------------------------------
@@ -649,6 +647,7 @@ subtest 'A9: Assign(Hash-Subscript-lvalue, 99) -> 99' => sub {
 
     # Hash Subscript lvalue
     my $lval = $f->make('Subscript', inputs => [$hash, $wk]);
+    $lval->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $lval->set_stamp('Int');
 
     my $wv = $f->make('Constant', value => '99', const_type => 'integer');
@@ -661,17 +660,11 @@ subtest 'A9: Assign(Hash-Subscript-lvalue, 99) -> 99' => sub {
     my $ret = _print_and_return($f, $val);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "A9 lower() does not die: $@") or diag("error: $@");
-
-    if (defined $ll) {
-        unlike($ll, qr/libperl/, 'A9 .ll: no libperl reference');
-
-        my $out = run_ll($ll);
-        is($out, '99', 'A9 lli output is 99 ($h{k}=99; $h{k})');
-    }
-
-    done_testing;
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\QAssign\E\)/, "refused by T2's reason");
 };
 
 # ---------------------------------------------------------------------------
@@ -727,7 +720,7 @@ subtest 'A10: nested ArrayRef [[1,2],[3,4]] ->[1][0] -> 3' => sub {
     my $ret = _print_and_return($f, $elem);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A10 lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -779,7 +772,7 @@ subtest 'A11: a Slot read discriminates defined from undefined at runtime' => su
         my $ret = _print_and_return($f, $elem);
 
         my $ll;
-        eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+        eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
         ok(!$@, "A11 idx=$idx_val lower() does not die: $@") or diag("error: $@");
         like($ll, qr/icmp ult|call %Slot \@t2_aget\(/, "A11 idx=$idx_val bounds check present (not folded)");
         push @out, run_ll($ll);
@@ -821,7 +814,7 @@ subtest 'A12: canonical Subscript(ArrayRef, idx=1) -> 2' => sub {
     my $ret = _print_and_return($f, $elem);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A12 Subscript(Array) lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -861,12 +854,13 @@ subtest 'A13: canonical Subscript(HashRef, key="a") -> 1' => sub {
     $lk->set_stamp('Str');
 
     my $elem = $f->make('Subscript', inputs => [$hash, $lk]);
+    $elem->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A13 Subscript(Hash) lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -911,7 +905,7 @@ subtest 'A14: canonical PostfixDeref(sigil=@, ArrayRef) deref -> 1' => sub {
     my $ret = _print_and_return($f, $elem);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A14 PostfixDeref(@) lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -952,12 +946,13 @@ subtest 'A15: canonical PostfixDeref(sigil=%, HashRef) deref -> 1' => sub {
     $lk->set_stamp('Str');
 
     my $val = $f->make('Subscript', inputs => [$deref, $lk]);
+    $val->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $val->set_stamp('Int');
 
     my $ret = _print_and_return($f, $val);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A15 PostfixDeref(%) lower() does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -996,7 +991,7 @@ subtest 'A16: canonical ArrayRef(1,2,3) + Length -> 3' => sub {
     my $ret = _print_and_return($f, $len);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A16 canonical ArrayRef + Length does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -1036,7 +1031,7 @@ subtest 'A17: canonical ArrayRef(1,2,3) + Subscript(1) -> 2' => sub {
     my $ret = _print_and_return($f, $elem);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A17 canonical ArrayRef + Subscript does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -1073,12 +1068,13 @@ subtest 'A18: canonical HashRef(a=>1,b=>2) + Subscript("a") -> 1' => sub {
     $lk->set_stamp('Str');
 
     my $elem = $f->make('Subscript', inputs => [$href, $lk]);
+    $elem->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $elem->set_stamp('Int');
 
     my $ret = _print_and_return($f, $elem);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "A18 canonical HashRef + Subscript does not die: $@") or diag("error: $@");
 
     if (defined $ll) {
@@ -1128,19 +1124,11 @@ subtest 'A19: Assign(Subscript-lvalue, 42) emits store and returns 42' => sub {
     my $ret = _print_and_return($f, $store);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "A19 Assign(Subscript-lvalue) lower() does not die: $@")
-        or diag("error: $@");
-
-    if (defined $ll) {
-        unlike($ll, qr/libperl/, 'A19 .ll: no libperl reference');
-        like($ll, qr/store i1 true/, 'A19 .ll: emits slot-defined store');
-
-        my $out = run_ll($ll);
-        is($out, '42', 'A19 lli output is 42 (Assign returns stored value)');
-    }
-
-    done_testing;
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\QAssign\E\)/, "refused by T2's reason");
 };
 
 done_testing;

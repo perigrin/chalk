@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
@@ -57,10 +58,10 @@ my $u = $f->make('Constant', value => undef, const_type => 'undef'); $u->set_sta
 my $r = $f->make_cfg('Return', inputs => [$u]);
 $r->set_control_in($nl);
 
-my $ll = Chalk::Target::LLVM->lower($r, program_mode => 1);
-my ($fh, $path) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-print $fh $ll;
-close $fh;
-is(scalar qx($LLI $path 2>&1), "10\n", "the callee's \$y is its own 7: 7 + 3");
+# T2 REFUSES IT, by its reason: this fixture is the old VarDecl dialect, which
+# only the retired fallback lowered (and whose inliner the collision was in).
+my $ll = eval { Chalk::Target::LLVM->lower(rooted($r), program_mode => 1) };
+ok(!defined $ll, 'T2 lowers no module for it');
+like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 
 done_testing;

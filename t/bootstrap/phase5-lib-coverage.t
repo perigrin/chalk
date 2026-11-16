@@ -36,7 +36,7 @@ else {
         lib/Chalk/Grammar/Rule.pm
         lib/Chalk/MOP/Method.pm
         lib/Chalk/MOP/Class.pm
-        lib/Chalk/IR/Schedule/Dominators.pm
+        lib/Chalk/IR/Schedule/Item.pm
         lib/Chalk/Bootstrap/IR/Optimizer.pm
     );
     @files = grep { -f $_ } @files;

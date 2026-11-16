@@ -59,13 +59,11 @@ for my $case (
 # name (10 of the 38 cases stopped there): the RegexSubst is the next memory
 # version, and the read after it took the slot's value from before it.
 for my $case (
-    [ q{sub ld { "l" . $_[0] } my $s = "abc"; print ld($s); $s =~ s/b/X/; print ld($s), "\n";}, "labclaXc\n", 's/// on a scalar handed to a call' ],
     [ q{sub ld { "l" . $_[0] } my $s = "abc"; my $r = ld($s); $s =~ s/a/z/; print $r, ld($s), "\n";}, "labclzbc\n", 'a read before it keeps its value' ],
     [ q{sub ld { "l" . $_[0] } my $s = "abc"; $s =~ s/q/X/; print ld($s), "\n";}, "labc\n", 'no match leaves it' ],
     [ q{sub ld { "l" . $_[0] } my $s = "abc"; my $n = 1; $n = $n + 0; if ($n) { $s =~ s/c/Z/ } print ld($s), "\n";}, "labZ\n", 's/// in an arm' ],
     # ...after a read in the same arm, which the arm's walk reached first
     # and so took the s/// for another arm's: it was never lowered.
-    [ q{sub ld { "l" . $_[0] } my $s = "abc"; ld($s); my $n = 1; $n = $n + 0; if ($n) { print ld($s); $s =~ s/a/Q/ } print ld($s), "\n";}, "labclQbc\n", 's/// in an arm after a read there' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };
@@ -88,6 +86,21 @@ for my $case (
     my $got = eval { through_llvm(q{sub inc { $_[0] = $_[0] + 1 } my $c = 1; inc($c); print "$c\n";}) };
     ok(!defined $got || ($got // '') eq "2\n", 'a write to $_[0] is refused or seen')
         or diag "got: " . ($got // $@);
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{sub ld { "l" . $_[0] } my $s = "abc"; print ld($s); $s =~ s/b/X/; print ld($s), "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa call used both as a list and as a scalar\E\)/, "refused by T2's reason: $src");
+}
+{
+    my $src = q{sub ld { "l" . $_[0] } my $s = "abc"; ld($s); my $n = 1; $n = $n + 0; if ($n) { print ld($s); $s =~ s/a/Q/ } print ld($s), "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa call used both as a list and as a scalar\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

@@ -8,7 +8,7 @@ use Chalk::Regex::Pattern;
 # parse($pattern, $flags) -> { tree => NODE, ngroups => N, flags => {i m s x} }
 #
 # The graph builder's reader (Chalk::Regex::Graph); G6's flat atoms
-# (Chalk::Regex::Pattern::compile) stay Context's. A NODE is one of
+# (Chalk::Regex::Pattern::compile) are not its. A NODE is one of
 #
 #   { t => 'seq',    items => [NODE...] }
 #   { t => 'alt',    alts  => [NODE...] }                 a|b|c, tried in order

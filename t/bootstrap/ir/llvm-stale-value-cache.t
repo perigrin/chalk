@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted body);
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
@@ -115,9 +116,11 @@ subtest 'pure Add over reassigned PadAccess re-lowers per consumption (C1)' => s
     $vy->set_control_in($vx);
     my $ret = print_and_return($f, $sum, $vz);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, program_mode => 1));
-    is($exit, 0, 'lli exits 0');
-    is($out, '23', 'post-assign consumption sees x=2 (perl: 11+12=23)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my $x = 1; $x = $x + 1; $x = $x + 1; return $x;
@@ -153,9 +156,11 @@ subtest 'repeat scalar rebind increments twice (C1+C3 interaction)' => sub {
     $asg1->set_control_in($vx);
     my $ret = print_and_return($f, $rxF, $asg2);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, program_mode => 1));
-    is($exit, 0, 'lli exits 0');
-    is($out, '3', 'two increments both fire (perl: 3)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my @a = (1,2); my $p = $a[0]; $a[0] = 9; return $a[0];
@@ -186,9 +191,11 @@ subtest 'Subscript read-store-read re-reads the element (C2)' => sub {
     $st->set_control_in($vp);
     my $ret = print_and_return($f, $rd2, $st);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, program_mode => 1));
-    is($exit, 0, 'lli exits 0');
-    is($out, '9', 'read after element store sees the stored value (perl: 9)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my @a = (1,2); my $p = $a[0]; $a[0] = 9; return $p;
@@ -220,9 +227,11 @@ subtest 'pre-store binding keeps its old value (no over-correction)' => sub {
     $st->set_control_in($vp);
     my $ret = print_and_return($f, $rp, $st);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, program_mode => 1));
-    is($exit, 0, 'lli exits 0');
-    is($out, '1', 'value bound before the store keeps the pre-store element (perl: 1)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # my $x = 1; $x += 2; $x += 2; return $x;
@@ -260,9 +269,11 @@ subtest 'repeat compound assign fires twice (C3 behavioral)' => sub {
     $ca1->set_control_in($vd);
     my $ret = print_and_return($f, $ret_pad, $ca2);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, program_mode => 1));
-    is($exit, 0, 'lli exits 0');
-    is($out, '5', 'both += fire (perl: 5)');
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 # class Pt { field $x :param; field $p; field $q;
@@ -276,12 +287,14 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     my $f = Chalk::IR::NodeFactory->new;
 
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('Pt');
-    $cls->declare_field('x', sigil => '$', type => 'Int', attributes => [':param']);
+    my $cls = $mop->declare_class('Pt', is_class => 1);
+    $cls->declare_field('x', sigil => '$', type => 'Int', attributes => [':param'], param_name => 'x');
     $cls->declare_field('p', sigil => '$', type => 'Int', attributes => []);
     $cls->declare_field('q', sigil => '$', type => 'Int', attributes => []);
 
-    my $fa_x_rd1 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
+    # EACH READ AT ITS MEMORY, as B::SoN gives it: the first at MemStart, the
+    # one after the store at the store -- two reads, never one shared value.
+    my $fa_x_rd1 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => [$f->make('MemStart')]);
     $fa_x_rd1->set_stamp('Int');
     my $fa_p_lv = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
     $fa_p_lv->set_stamp('Int');
@@ -293,10 +306,10 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     my $st_x = $f->make('Assign', inputs => [$fa_x_lv, int_const($f, 9)]);
     $st_x->set_stamp('Int');
 
-    my $fa_x_rd2 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []);
+    my $fa_x_rd2 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => [$st_x]);
     $fa_x_rd2->set_stamp('Int');
-    is($fa_x_rd2->id, $fa_x_rd1->id,
-        'precondition: the two field reads hash-cons to one node');
+    isnt($fa_x_rd2->id, $fa_x_rd1->id,
+        'precondition: the read after the store is a node of its own (its memory is the store)');
     my $fa_q_lv = $f->make('FieldAccess', field_index => 2, field_stash => 'Pt', inputs => []);
     $fa_q_lv->set_stamp('Int');
     my $st_q = $f->make('Assign', inputs => [$fa_q_lv, $fa_x_rd2]);
@@ -306,7 +319,7 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     $st_x->set_control_in($st_p);
     $st_q->set_control_in($st_x);
     my $adj = $cls->declare_adjust(graph => Chalk::IR::Graph->new);
-    $adj->graph->merge($_) for ($st_p, $st_x, $st_q);
+    body($adj->graph, $st_p, $st_x, $st_q);
 
     my $fa_p_rd = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
     $fa_p_rd->set_stamp('Int');
@@ -335,7 +348,7 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     # inside the ADJUST body), so the Print hangs off a fresh Start.
     my $ret = print_and_return($f, $sum);
 
-    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower($ret, mop => $mop, program_mode => 1));
+    my ($out, $exit) = run_lli(Chalk::Target::LLVM->lower(rooted($ret, $mop), mop => $mop, program_mode => 1));
     is($exit, 0, 'lli exits 0');
     is($out, '14', 'p keeps the pre-store value, q reads the stored one (perl: 5+9=14)');
 };

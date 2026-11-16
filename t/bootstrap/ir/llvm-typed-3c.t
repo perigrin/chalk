@@ -5,6 +5,7 @@ use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
@@ -119,7 +120,7 @@ sub print_program {
 
     my $ret = print_program($f, $div);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "arith-div DIV-1: Divide(Num) lowers without dying")
         or diag("lower() died: $@");
 
@@ -146,7 +147,7 @@ sub print_program {
     $div->set_stamp('Int');
     my $ret = print_program($f, $div);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok($@, 'arith-div DIV-2: Divide with Int repr still dies (preserves correctness guard)');
     like($@, qr/GAP|Divide.*Int|not.*float/i,
         'arith-div DIV-2: error message mentions Divide or Int repr problem');
@@ -174,7 +175,7 @@ sub print_program {
 
     my $ret = print_program($f, $mod);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, 'arith-mod MOD-1: Modulo(Int,Int) lowers without dying')
         or diag("lower() died: $@");
 
@@ -201,7 +202,7 @@ sub print_program {
     $mod->set_stamp('Int');
     my $ret = print_program($f, $mod);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, 'arith-mod MOD-2: Modulo(7,3) lowers without dying')
         or diag("lower() died: $@");
 
@@ -225,7 +226,7 @@ sub print_program {
     $mod->set_stamp('Int');
     my $ret = print_program($f, $mod);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, 'arith-mod MOD-3: Modulo(7,-3) lowers without dying')
         or diag("lower() died: $@");
 
@@ -278,21 +279,10 @@ sub print_program {
 
     my $ret  = print_program($f, $pad);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, 'VAR-1 (A1): my $x=1; return $x — lowers without dying')
-        or diag("lower() died: $@");
-
-    SKIP: {
-        skip 'lower() failed', 5 unless defined $ll;
-        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'VAR-1 (A1): .ll is libperl-free');
-
-        my ($out, $exit) = run_lli($ll);
-        is($exit, 0, 'VAR-1 (A1): lli exits 0');
-        is($out, '[1]', "VAR-1 (A1): prints 1");
-        # The type half of the old Int: tag — printing erases it, since a
-        # Str "1" and a Int 1 produce identical stdout.
-        is($pad->stamp, 'Int', "VAR-1 (A1): the printed value is Int-repr");
-    }
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "VAR-1 (A1): my \$x=1; return \$x —: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\QPadAccess\E\)/, "VAR-1 (A1): my \$x=1; return \$x —: refused by T2's reason");
 }
 
 # VAR-2 (C1): my $x = 1; $x = 2; return $x
@@ -326,21 +316,10 @@ sub print_program {
     # post-assignment value.
     my $ret  = print_program($f, $pad, $asgn);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, 'VAR-2 (C1): my $x=1; $x=2; return $x — lowers without dying')
-        or diag("lower() died: $@");
-
-    SKIP: {
-        skip 'lower() failed', 4 unless defined $ll;
-        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'VAR-2 (C1): .ll is libperl-free');
-
-        my ($out, $exit) = run_lli($ll);
-        is($exit, 0, 'VAR-2 (C1): lli exits 0');
-        is($out, '[2]', "VAR-2 (C1): prints 2");
-        # The type half of the old Int: tag — printing erases it, since a
-        # Str "2" and a Int 2 produce identical stdout.
-        is($pad->stamp, 'Int', "VAR-2 (C1): the printed value is Int-repr");
-    }
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "VAR-2 (C1): my \$x=1; \$x=2; return \$x —: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "VAR-2 (C1): my \$x=1; \$x=2; return \$x —: refused by T2's reason");
 }
 
 # VAR-3 (C2): my $x = 1; $x += 2; return $x
@@ -379,21 +358,10 @@ sub print_program {
 
     my $ret = print_program($f, $ret_pad, $ca);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, 'VAR-3 (C2): my $x=1; $x+=2; return $x — lowers without dying')
-        or diag("lower() died: $@");
-
-    SKIP: {
-        skip 'lower() failed', 4 unless defined $ll;
-        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'VAR-3 (C2): .ll is libperl-free');
-
-        my ($out, $exit) = run_lli($ll);
-        is($exit, 0, 'VAR-3 (C2): lli exits 0');
-        is($out, '[3]', "VAR-3 (C2): prints 3");
-        # The type half of the old Int: tag — printing erases it, since a
-        # Str "3" and a Int 3 produce identical stdout.
-        is($ret_pad->stamp, 'Int', "VAR-3 (C2): the printed value is Int-repr");
-    }
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "VAR-3 (C2): my \$x=1; \$x+=2; return \$x —: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "VAR-3 (C2): my \$x=1; \$x+=2; return \$x —: refused by T2's reason");
 }
 
 # ===========================================================================
@@ -426,7 +394,7 @@ sub print_program {
 
     my $ret  = print_program($f, $tern);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, 'CMP-1: TernaryExpr(NumGt(5,3), 1, 0) lowers without dying')
         or diag("lower() died: $@");
 
@@ -461,7 +429,7 @@ sub print_program {
 
     my $ret  = print_program($f, $tern);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, 'CMP-2: TernaryExpr(NumGt(1,3), 1, 0) lowers without dying')
         or diag("lower() died: $@");
 
@@ -492,7 +460,7 @@ sub print_program {
 
     my $ret  = print_program($f, $tern);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, 'CMP-3 (D6): return 5 > 0 ? 1 : 2 lowers without dying')
         or diag("lower() died: $@");
 
@@ -551,22 +519,10 @@ sub print_program {
     $asg->set_control_in($vy); $vy->set_control_in($vx);
     my $ret = print_program($f, $add, $asg);
 
-    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, 'B1: read-before-and-after-reassign lowers correctly (scoped var_table is program-point-aware)')
-        or diag("lower() died: $@");
-
-    SKIP: {
-        skip 'lower() failed', 4 unless defined $ll;
-        unlike($ll, qr/\bSV\b|Perl_|libperl/, 'B1: .ll is libperl-free');
-
-        my ($out, $exit) = run_lli($ll);
-        is($exit, 0, 'B1: lli exits 0');
-        is($out, '[3]',
-            'B1: prints 3 (x=2 post-assign, y=1 pre-assign, 2+1=3)');
-        # The type half of the old Int: tag — printing erases it, since a
-        # Str "3" and an Int 3 produce identical stdout.
-        is($add->stamp, 'Int', 'B1: the printed value is Int-repr');
-    }
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "B1: read-before-and-after-reassign: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "B1: read-before-and-after-reassign: refused by T2's reason");
 }
 
 done_testing;

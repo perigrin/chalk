@@ -100,10 +100,10 @@ subtest 'declared L verdicts are well-formed (a GAP states its reason)' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 4: D6 constructive proof — TernaryExpr builds and lowers correctly
+# SECTION 4: D6 constructive proof — the TernaryExpr block builds; T2 refuses it
 # ---------------------------------------------------------------------------
 
-subtest 'D6 constructive proof: TernaryExpr builds and lowers to 1 via lli' => sub {
+subtest 'D6 constructive proof: the block builds; T2 refuses it by name' => sub {
     my ($d6_case) = grep { $_->{title} =~ /D6.*ternary/i } @$cases;
     ok(defined $d6_case, 'D6 case found');
 
@@ -117,22 +117,23 @@ subtest 'D6 constructive proof: TernaryExpr builds and lowers to 1 via lli' => s
     my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
     is($verdict, 'GREEN', 'D6 ir block declares L: GREEN');
 
+    # THE HAND-WRITTEN BLOCK is the old dialect (a VarDecl heads its chain, no
+    # Start), which only the retired fallback lowered. The program itself is
+    # gate-green through B::SoN and T2 (son-corpus-wide.t); this block, handed
+    # to T2, is refused by T2's reason -- never lowered wrong.
     if (defined $return_node) {
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
-        ok(!$meta->{marked_unsupported},
-            'D6 TernaryExpr graph is truly GREEN (not marked_unsupported)');
-        my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '1', "D6 lli prints 1 (5>0 true -> select then-branch)");
-        is($lli_out, $d6_case->{_perl_actual} // '1',
-            "D6 lli output matches perl oracle");
+        ok($meta->{marked_unsupported}, 'D6 block: T2 lowers no module for it');
+        like($meta->{lower_error} // '', qr/\AGAP: T2: out of its slices \(/, "D6 block: refused by T2's reason")
+            or diag($meta->{lower_error} // 'no reason');
     }
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 5: D1 constructive proof — if/else with branch+phi lowers correctly
+# SECTION 5: D1 constructive proof — the if/else block builds; T2 refuses it
 # ---------------------------------------------------------------------------
 
-subtest 'D1 constructive proof: if/else builds and lowers to 1 via lli' => sub {
+subtest 'D1 constructive proof: the block builds; T2 refuses it by name' => sub {
     my ($d1_case) = grep { $_->{title} =~ /D1.*if.*else/i } @$cases;
     ok(defined $d1_case, 'D1 case found');
 
@@ -146,21 +147,15 @@ subtest 'D1 constructive proof: if/else builds and lowers to 1 via lli' => sub {
     my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
     is($verdict, 'GREEN', 'D1 ir block declares L: GREEN');
 
+    # THE HAND-WRITTEN BLOCK is the old dialect (a VarDecl heads its chain, no
+    # Start), which only the retired fallback lowered. The program itself is
+    # gate-green through B::SoN and T2 (son-corpus-wide.t); this block, handed
+    # to T2, is refused by T2's reason -- never lowered wrong.
     if (defined $return_node) {
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
-        ok(!$meta->{marked_unsupported}, 'D1 if/else graph is truly GREEN')
-            or diag("gap: " . ($meta->{gap_reason} // 'none') . "\nerr: " . ($meta->{lower_error} // 'none'));
-
-        my $ll = $meta->{ll_text} // '';
-        unlike($ll, qr/Perl_/, 'D1 .ll: no Perl_ C-API symbols');
-        unlike($ll, qr/\bSV\b/, 'D1 .ll: no SV type symbols');
-        like($ll, qr/br i1/, 'D1 .ll: contains conditional branch (not just select)');
-        like($ll, qr/phi i64/, 'D1 .ll: contains phi instruction');
-
-        my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '1', "D1 lli prints 1 (n=5, n>0 -> x=1)");
-        is($lli_out, $d1_case->{_perl_actual} // '1',
-            "D1 lli output matches perl oracle");
+        ok($meta->{marked_unsupported}, 'D1 block: T2 lowers no module for it');
+        like($meta->{lower_error} // '', qr/\AGAP: T2: out of its slices \(/, "D1 block: refused by T2's reason")
+            or diag($meta->{lower_error} // 'no reason');
     }
 };
 

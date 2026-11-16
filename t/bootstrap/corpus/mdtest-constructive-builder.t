@@ -121,6 +121,7 @@ END_IR
 %nl  = Constant("\n") :Str
 %p   = Print(%co, %nl)
 return %p
+control: %p
 L: GREEN
 END_IR
 
@@ -144,6 +145,7 @@ END_IR
 %nl  = Constant("\n") :Str
 %p   = Print(%co, %nl)
 return %p
+control: %p
 L: GREEN
 END_IR
 
@@ -278,6 +280,7 @@ END_IR
 %nl   = Constant("\n") :Str
 %p    = Print(%co, %nl)
 return %p
+control: %p
 L: GREEN
 END_IR
 
@@ -311,7 +314,7 @@ END_IR
 %nl   = Constant("\n") :Str
 %p    = Print(%co, %nl)
 return %p
-control: %vx -> %ca
+control: %vx -> %ca -> %p
 L: GREEN
 END_IR
 
@@ -319,12 +322,11 @@ END_IR
     ok(defined $return_node, 'CompoundAssign kwarg block builds for lli test');
 
     if (defined $return_node) {
+        # THE BLOCK IS THE OLD VarDecl DIALECT, which only the retired fallback
+        # lowered: T2 refuses it by its reason, never a wrong answer.
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
-        ok(!$meta->{marked_unsupported},
-            'CompoundAssign kwarg (built from block) is not marked_unsupported');
-        my $lli_out = $L->return_values->[0] // '';
-        is($lli_out, '3',
-            'CompoundAssign kwarg ($x=1; $x+=2) -> lli -> Int:3 (type-tagged)');
+        ok($meta->{marked_unsupported}, 'CompoundAssign kwarg block: T2 lowers no module for it');
+        like($meta->{lower_error} // '', qr/\AGAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "CompoundAssign kwarg block: refused by T2's reason");
     }
 }
 

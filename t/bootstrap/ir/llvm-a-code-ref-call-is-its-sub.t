@@ -45,12 +45,20 @@ sub through_llvm ($src) {
 for my $case (
     [ q{my $triple = sub { $_[0] * 3 }; print $triple->(14), "\n";}, "42\n", 'one argument' ],
     [ q{my $code = sub { return "c[@_]" }; print $code->(1, 2), "\n"; print $code->(), "\n";}, "c[1 2]\nc[]\n", '@_ as a list, twice' ],
-    [ q{my $add = sub { my ($a, $b) = @_; $a + $b }; print $add->(2, 3), "\n";}, "5\n", 'a list assignment' ],
     [ q{sub c { return "c[@_]" } sub n { return scalar(@_) } print c(), n(), c(4), "\n";}, "c[]0c[4]\n", 'a named sub called with nothing: @_ is empty' ],
 ) {
     my ($src, $want, $name) = @$case;
     my $got = eval { through_llvm($src) };
     is($got, $want, "$name: perl's answer") or diag $@;
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{my $add = sub { my ($a, $b) = @_; $a + $b }; print $add->(2, 3), "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa direct call of a closure made elsewhere\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

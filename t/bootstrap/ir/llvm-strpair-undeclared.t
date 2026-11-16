@@ -5,6 +5,7 @@ use utf8;
 
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
@@ -82,7 +83,7 @@ subtest 'Str :param field + Int-returning method: %StrPair must be declared (I3)
     my ($ret, $f, $mop) = build_str_param_int_return_graph();
 
     my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower($ret, mop => $mop) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret, $mop), mop => $mop) };
     $err = $@;
 
     ok(!defined $err || !length $err,
@@ -149,7 +150,7 @@ subtest 'Str-returning method: exactly one %StrPair (I3 no double-declare)' => s
     my $ret = $f->make_cfg('Return', inputs => [$call]);
 
     my ($ll, $err);
-    eval { $ll = Chalk::Target::LLVM->lower($ret, mop => $mop) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret, $mop), mop => $mop) };
     $err = $@;
 
     ok(!defined $err || !length $err,

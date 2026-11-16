@@ -5,6 +5,7 @@ use utf8;
 
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted reader);
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
@@ -68,9 +69,22 @@ sub make_print_program {
     return $ret;
 }
 
+# lli_run_status($ret, $mop) -> (stdout and stderr, exit status): a program that may stop.
+sub lli_run_status {
+    my ($ret_node, $mop) = @_;
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret_node, $mop), mop => $mop, program_mode => 1);
+    require File::Temp;
+    my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
+    binmode $fh, ':utf8';
+    print $fh $ll;
+    close $fh;
+    my $out = qx($LLI $f 2>&1);
+    return ($out, $? >> 8);
+}
+
 sub lli_run {
     my ($ret_node, $mop) = @_;
-    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop, program_mode => 1);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret_node, $mop), mop => $mop, program_mode => 1);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -137,7 +151,7 @@ subtest 'Call(dispatch_kind=method, name=greet): $g->greet => 42 (Int)' => sub {
 # Test 2: Call(dispatch_kind='method') on missing method dies loudly
 # ---------------------------------------------------------------------------
 
-subtest 'Call(dispatch_kind=method) on absent method dies loudly' => sub {
+subtest 'Call(dispatch_kind=method) on absent method dies as perl does, at run time' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $body = $f->make('Constant', value => 1, const_type => 'integer');
@@ -162,13 +176,14 @@ subtest 'Call(dispatch_kind=method) on absent method dies loudly' => sub {
     );
     $bad->set_stamp('Int');
 
-    my $ret = $f->make_cfg('Return', inputs => [$bad]);
+    # (printed: a value the program never reads is no part of what T2 builds)
+    my $ret = make_print_program($f, $bad, 'Int');
 
-    my $died = false;
-    eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
-    ok($@, 'lowering dies for Call(method) on absent method');
-    like($@ // '', qr/wave|absent|vtable|method/i,
-        'die message mentions missing method or vtable');
+    # PERL DIES WHEN THE CALL RUNS, naming the method and the class; T2's
+    # module does the same (the retired fallback refused it while lowering).
+    my ($out, $exit) = lli_run_status($ret, $mop);
+    is($exit, 255, 'the call of an absent method stops the program, as perl\'s does');
+    like($out, qr/Can't locate object method "wave" via package "Greeter"/, 'with perl\'s message');
 };
 
 # Branch-review I4 guards: silent-Int defaults and ABI mismatches must die.
@@ -180,6 +195,7 @@ subtest 'guard: a field with NO declared type dies GAP (no silent Int default)' 
     my $mop = Chalk::MOP->new;
     my $cls = $mop->declare_class('Untyped');
     $cls->declare_field('name', sigil => '$', attributes => [':param', ':reader']);
+    reader($cls, 'name');   # (the reader method B::SoN gives the class)
     $mop->seal;
 
     my $val = $f->make('Constant', value => 'cat', const_type => 'string');
@@ -190,13 +206,14 @@ subtest 'guard: a field with NO declared type dies GAP (no silent Int default)' 
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'name',
         class_name => 'Untyped', inputs => [$new_o]);
     $call->set_stamp('Str');
-    my $ret = $f->make_cfg('Return', inputs => [$call]);
+    # (printed: a value the program never reads is no part of what T2 builds)
+    my $ret = make_print_program($f, $call, 'Str');
 
-    eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
+    eval { Chalk::Target::LLVM->lower(rooted($ret, $mop), mop => $mop) };
     like($@, qr/GAP/, 'untyped field dies GAP instead of silently lowering as Int');
 };
 
-subtest 'guard: Call(method) node repr disagreeing with the vtable ABI dies' => sub {
+subtest 'guard: a Call(method) node stamp disagreeing with the method is called at the method\'s type' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $body = $f->make('Constant', value => '42', const_type => 'integer');
@@ -215,11 +232,14 @@ subtest 'guard: Call(method) node repr disagreeing with the vtable ABI dies' => 
     my $call = $f->make('Call', dispatch_kind => 'method', name => 'answer',
         class_name => 'Mismatch', inputs => [$new_o]);
     $call->set_stamp('Str');
-    my $ret = $f->make_cfg('Return', inputs => [$call]);
+    # (printed: a value the program never reads is no part of what T2 builds)
+    my $ret = make_print_program($f, $call, 'Str');
 
-    eval { Chalk::Target::LLVM->lower($ret, mop => $mop) };
-    like($@, qr/GAP|repr|ABI|mismatch/i,
-        'node-vs-registry return-repr mismatch dies loudly');
+    # T2 CALLS AT THE METHOD'S OWN TYPE (a %Slot), whatever the node's stamp
+    # claims: no wrong-ABI call to refuse. The answer is the method's, 42.
+    my ($out, $exit) = lli_run_status($ret, $mop);
+    is($exit, 0, 'a node stamp disagreeing with the method lowers at the method\'s type');
+    is($out, '[42]', 'and prints the method\'s answer');
 };
 
 done_testing;

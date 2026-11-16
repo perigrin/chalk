@@ -33,19 +33,25 @@ sub through_llvm ($src) {
 
 my $H = 'our %h = (k => 0); ';
 for my $case (
-    [ q{for my $i (1..3) { print "[$h{k}]"; local $h{k} = $i; next if $i == 2; print "$h{k} " } print "$h{k}\n";}, 'next if' ],
+    [ q{for my $i (1..3) { print "[$h{k}]"; local $h{k} = $i; next if $i == 2; print "$h{k} " } print "$h{k}\n";}, 'next if', 'a local of an element restored other than once' ],
     [ q{for my $i (1..3) { print "[$h{k}]"; local $h{k} = $i; print "$h{k} "; next } print "$h{k}\n";}, 'a bare next' ],
-    [ q{my $s = ""; for my $i (1..3) { local $h{k} = $i; last if $i == 2; $s .= $h{k} } print "$s $h{k}\n";}, 'last if' ],
-    [ q{for my $i (1..3) { print "[$h{k}]"; local $h{k} = $i; next unless $i != 2; print "$h{k} " } print "$h{k}\n";}, 'next unless' ],
-    [ q{for my $i (1..4) { print "[$h{k}]"; local $h{k} = $i; next if $i > 1 && $i < 4 && print("s"); print "$h{k} " } print "$h{k}\n";}, 'a chained guard' ],
-    [ q{my $i = 0; while ($i < 3) { $i++; print "[$h{k}]"; local $h{k} = $i; next if $i == 2; print "$h{k} " } print "$h{k}\n";}, 'a while loop' ],
-    [ q{for my $i (1..3) { print "[$h{k}]"; local $h{k} = $i; last if $i == 3; next if $i == 1; print "$h{k} " } print "$h{k}\n";}, 'last if, then next if' ],
-    [ q{for my $i (1..4) { print "[$h{k}]"; local $h{k} = $i; next if $i == 1; next if $i == 3; print "$h{k} " } print "$h{k}\n";}, 'two next ifs' ],
-    [ q{for my $i (1..3) { print "[$h{k}]"; local $h{k} = $i; print "$h{k} "; last if $i == 2 } print "$h{k}\n";}, 'a last if ending the body' ],
-    [ q{my %n; for my $i (1..3) { print "[", exists $n{x} ? 1 : 0, "]"; local $n{x} = $i; next if $i == 2; print "$n{x} " } print exists $n{x} ? "x" : "-", "\n";}, 'a new key, then next' ],
+    [ q{my $s = ""; for my $i (1..3) { local $h{k} = $i; last if $i == 2; $s .= $h{k} } print "$s $h{k}\n";}, 'last if', 'a local of an element restored other than once' ],
+    [ q{for my $i (1..3) { print "[$h{k}]"; local $h{k} = $i; next unless $i != 2; print "$h{k} " } print "$h{k}\n";}, 'next unless', 'a local of an element restored other than once' ],
+    [ q{for my $i (1..4) { print "[$h{k}]"; local $h{k} = $i; next if $i > 1 && $i < 4 && print("s"); print "$h{k} " } print "$h{k}\n";}, 'a chained guard', 'a local of an element restored other than once' ],
+    [ q{my $i = 0; while ($i < 3) { $i++; print "[$h{k}]"; local $h{k} = $i; next if $i == 2; print "$h{k} " } print "$h{k}\n";}, 'a while loop', 'a local of an element restored other than once' ],
+    [ q{for my $i (1..3) { print "[$h{k}]"; local $h{k} = $i; last if $i == 3; next if $i == 1; print "$h{k} " } print "$h{k}\n";}, 'last if, then next if', 'a local of an element restored other than once' ],
+    [ q{for my $i (1..4) { print "[$h{k}]"; local $h{k} = $i; next if $i == 1; next if $i == 3; print "$h{k} " } print "$h{k}\n";}, 'two next ifs', 'a local of an element restored other than once' ],
+    [ q{for my $i (1..3) { print "[$h{k}]"; local $h{k} = $i; print "$h{k} "; last if $i == 2 } print "$h{k}\n";}, 'a last if ending the body', 'a local of an element restored other than once' ],
+    [ q{my %n; for my $i (1..3) { print "[", exists $n{x} ? 1 : 0, "]"; local $n{x} = $i; next if $i == 2; print "$n{x} " } print exists $n{x} ? "x" : "-", "\n";}, 'a new key, then next', 'a local of an element restored other than once' ],
 ) {
-    my ($src, $name) = @$case;
+    # A CASE WITH A REASON is one T2 refuses, by exactly that reason (only the
+    # retired fallback lowered it): never a wrong answer. The rest are perl's.
+    my ($src, $name, $why) = @$case;
     my $r = through_llvm($H . $src);
+    if (defined $why) {
+        like(ref $r ? 'lowered' : $r, qr/\AREFUSED lower: GAP: T2: out of its slices \(\Q$why\E\)/, "$name: refused by T2's reason");
+        next;
+    }
     if (!ref $r) { fail "$name: lowered"; diag $r; next }
     is $r->[0], $r->[1], "$name: perl's output";
 }
@@ -55,8 +61,7 @@ for my $src (
     q{for my $i (1..3) { print "[$h{k}]"; local $h{k} = $i; if ($i == 2) { print "two "; next } print "$h{k} " } print "$h{k}\n";},
 ) {
     my $r = through_llvm($H . $src);
-    ok !ref $r ? $r =~ /\AREFUSED (?:load|lower): .*GAP/ : $r->[0] eq $r->[1], 'a next in an arm: right or refused'
-        or diag ref $r ? "got [$r->[0]] want [$r->[1]]" : $r;
+    like(ref $r ? 'lowered' : $r, qr/\AREFUSED lower: GAP: T2: out of its slices \(\Qa local of an element restored other than once\E\)/, 'a next in an arm: refused by T2\'s reason');
 }
 
 done_testing;

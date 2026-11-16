@@ -4,8 +4,9 @@ package Chalk::Regex::Pattern;
 use 5.42.0;
 use utf8;
 
-# G6 FRONT HALF, out of Chalk::Target::LLVM::Context: compile() is pure
-# (pattern + flags -> atoms), the reader of Context's emitter. A construct it
+# G6 FRONT HALF: compile() is pure (pattern + flags -> atoms), written for
+# the retired fallback backend's emitter; Chalk::Regex::Parse reads its
+# escapes and code-block ends with it. A construct it
 # does not read dies GAP -- never a silent wrong match. (The T2 graph builder
 # reads patterns with Chalk::Regex::Parse, into a tree.)
 

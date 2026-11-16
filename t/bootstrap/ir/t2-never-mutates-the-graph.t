@@ -1,5 +1,5 @@
-# ABOUTME: T2 reads B::SoN's graph and never changes it: when T2 falls back,
-# ABOUTME: Context.pm lowers the same graph (a mutated Print once made two GAPs).
+# ABOUTME: T2 reads B::SoN's graph and never changes it: a refused program leaves the graph
+# ABOUTME: as it was for whatever reads it next (a mutated Print once made two GAPs).
 use 5.42.0;
 use Test::More;
 use File::Temp qw(tempfile);

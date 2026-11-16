@@ -73,7 +73,7 @@ for my $src (
 {
     my $src = q{my $m = $ENV{M} // "Text/Wrap.pm"; require $m; print "loaded\n";};
     my $got = eval { through_llvm($src) };
-    like($@, qr/GAP: a require of a name computed at run time/, "refused by name: $src")
+    like($@, qr/GAP: T2: out of its slices \(\Qa require of a file named at run time\E\)/, "refused by name: $src")
         or diag "got: ", $got // $@;
 }
 

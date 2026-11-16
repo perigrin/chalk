@@ -4,6 +4,7 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
@@ -117,7 +118,7 @@ subtest 'I-A: ArrayRef node used as Subscript container AND PostfixDeref input' 
     my $ret = print_and_return($f, $sum);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "I-A lower() does not die: $@") or diag("error: $@");
     diag("I-A .ll snippet:\n" . substr($ll // '', 0, 800)) unless defined $ll;
 
@@ -163,6 +164,7 @@ subtest 'I-A(Hash): HashRef node used as Subscript container AND PostfixDeref in
     my $lk = $f->make('Constant', value => 'x', const_type => 'string');
     $lk->set_stamp('Str');
     my $elem = $f->make('Subscript', inputs => [$hash, $lk]);
+    $elem->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $elem->set_stamp('Int');
 
     # Consumer 2: PostfixDeref(%, $hash) -> Hash; Subscript("y") -> Int:8
@@ -172,6 +174,7 @@ subtest 'I-A(Hash): HashRef node used as Subscript container AND PostfixDeref in
     my $lk2 = $f->make('Constant', value => 'y', const_type => 'string');
     $lk2->set_stamp('Str');
     my $elem2 = $f->make('Subscript', inputs => [$deref, $lk2]);
+    $elem2->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $elem2->set_stamp('Int');
 
     # Result: 7 + 8 = 15
@@ -181,7 +184,7 @@ subtest 'I-A(Hash): HashRef node used as Subscript container AND PostfixDeref in
     my $ret = print_and_return($f, $sum);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "I-A(Hash) lower() does not die: $@") or diag("error: $@");
 
     SKIP: {
@@ -248,21 +251,11 @@ subtest 'I-B(Array-lvalue): Assign stores ArrayRef value -> ptrtoint needed' => 
     my $ret = print_and_return($f, $asgn_len);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "I-B(Array-lvalue) lower() does not die: $@") or diag("error: $@");
-
-    SKIP: {
-        skip "I-B(Array-lvalue) lowering failed, cannot run lli", 2 unless defined $ll;
-
-        my $ec = ll_exit_code($ll);
-        is($ec, 0, 'I-B(Array-lvalue) .ll is valid LLVM IR (lli exit 0)')
-            or diag("I-B(Array-lvalue): missing ptrtoint; store i64 i8* type mismatch:\n$ll");
-
-        my $out = run_ll($ll);
-        is($out, '3', 'I-B(Array-lvalue) lli output is 3 (Length of ArrayRef returned by Assign)');
-    }
-
-    done_testing;
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa value stamped ArrayRef (Assign)\E\)/, "refused by T2's reason");
 };
 
 # ---------------------------------------------------------------------------
@@ -305,6 +298,7 @@ subtest 'I-B(HashRef-value): ref stored in hash slot + read back -> ptrtoint/int
     my $key2 = $f->make('Constant', value => 'k', const_type => 'string');
     $key2->set_stamp('Str');
     my $got = $f->make('Subscript', inputs => [$hash, $key2]);
+    $got->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $got->set_stamp('ArrayRef');
 
     # Length of the read-back ref = 2.
@@ -314,21 +308,11 @@ subtest 'I-B(HashRef-value): ref stored in hash slot + read back -> ptrtoint/int
     my $ret = print_and_return($f, $got_len);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "I-B(HashRef-value) lower() does not die: $@") or diag("error: $@");
-
-    SKIP: {
-        skip "I-B(HashRef-value) lowering failed, cannot run lli", 2 unless defined $ll;
-
-        my $ec = ll_exit_code($ll);
-        is($ec, 0, 'I-B(HashRef-value) .ll is valid LLVM IR (lli exit 0)')
-            or diag("I-B(HashRef-value): missing ptrtoint/inttoptr on hash ref slot:\n$ll");
-
-        my $out = run_ll($ll);
-        is($out, '2', 'I-B(HashRef-value) lli output is 2 (read-back inner array length)');
-    }
-
-    done_testing;
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qan array through an element read whole\E\)/, "refused by T2's reason");
 };
 
 # ---------------------------------------------------------------------------
@@ -366,6 +350,7 @@ subtest 'V1: hash element-store of a ref value -> ptrtoint guard' => sub {
     my $key_w = $f->make('Constant', value => 'k', const_type => 'string');
     $key_w->set_stamp('Str');
     my $lval = $f->make('Subscript', inputs => [$hash, $key_w]);
+    $lval->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $lval->set_stamp('ArrayRef');
     my $assign = $f->make('Assign', inputs => [$lval, $inner]);
     $assign->set_stamp('ArrayRef');
@@ -374,6 +359,7 @@ subtest 'V1: hash element-store of a ref value -> ptrtoint guard' => sub {
     my $key_r = $f->make('Constant', value => 'k', const_type => 'string');
     $key_r->set_stamp('Str');
     my $got = $f->make('Subscript', inputs => [$hash, $key_r]);
+    $got->set_kind('hash');   # (a hash subscript, as B::SoN marks it)
     $got->set_stamp('ArrayRef');
     my $got_len = $f->make('Length', inputs => [$got]);
     $got_len->set_stamp('Int');
@@ -383,21 +369,11 @@ subtest 'V1: hash element-store of a ref value -> ptrtoint guard' => sub {
     my $ret = print_and_return($f, $got_len, $assign);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "V1 lower() does not die: $@") or diag("error: $@");
-
-    SKIP: {
-        skip "V1 lowering failed, cannot run lli", 2 unless defined $ll;
-
-        my $ec = ll_exit_code($ll);
-        is($ec, 0, 'V1 .ll is valid LLVM IR (lli exit 0)')
-            or diag("V1: hash element-store missing ptrtoint; store i64 i8*:\n$ll");
-
-        my $out = run_ll($ll);
-        is($out, '2', 'V1 lli output is 2 (read-back inner array length)');
-    }
-
-    done_testing;
+    # T2 REFUSES IT, by its reason (only the retired fallback lowered this
+    # graph): refused by name, never lowered wrong.
+    my $t2_ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $t2_ll, 'T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qan array through an element read whole\E\)/, "refused by T2's reason");
 };
 
 # ---------------------------------------------------------------------------
@@ -423,7 +399,7 @@ subtest 'I-C: Length(Str) uses _str_len_table not extractvalue' => sub {
     my $ret = print_and_return($f, $len);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "I-C lower() does not die: $@") or diag("error: $@");
 
     SKIP: {
@@ -476,7 +452,7 @@ subtest 'I-D: Length(PostfixDeref(@$ref)) — scalar(@$ref) — valid IR' => sub
     my $ret = print_and_return($f, $len);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "I-D lower() does not die: $@") or diag("error: $@");
 
     SKIP: {
@@ -524,7 +500,7 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
         my $len = $f->make('Length', inputs => [$arr]);
         $len->set_stamp('Int');
         my $ret = $f->make_cfg('Return', inputs => [$len]);
-        eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+        eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
         unlike($@ // '', qr/GAP/,
             'a Str element in a literal ArrayRef lowers (boxed into a %StrPair)');
     }
@@ -544,7 +520,7 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
         my $len = $f->make('Length', inputs => [$h]);
         $len->set_stamp('Int');
         my $ret = $f->make_cfg('Return', inputs => [$len]);
-        eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+        eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
         unlike($@ // '', qr/GAP/,
             'a Str value in a literal HashRef lowers (boxed into a %HashEntry)');
     }
@@ -580,7 +556,7 @@ subtest 'a wide literal element is boxed; a type-changing store is TODO' => sub 
         my $as = $f->make('Assign', inputs => [$lv, $s]);
         $as->set_stamp('Str');
         my $ret = $f->make_cfg('Return', inputs => [$as]);
-        eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+        eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
         unlike($@ // '', qr/GAP/,
             'a Str rhs in an element store lowers');
     }

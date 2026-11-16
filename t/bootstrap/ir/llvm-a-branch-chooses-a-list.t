@@ -41,11 +41,19 @@ sub through_llvm ($src) {
 # Lowered as an array, each arm flattened into one (pvm 077).
 for my $src (
     q{sub two { return (1, 2) } sub pick { my ($p) = @_; my @c = defined $p ? two() : (); return scalar(@c) } print pick(1), " ", pick(undef), "\n";},
-    q{sub f {(1,2)} my @a = @ARGV ? (7) : f(); my @b = !@ARGV ? (7, 8, 9) : f(); print "@a|@b\n";},
 ) {
     my $want = qx($^X -e '$src');
     my $got = eval { through_llvm($src) };
     is($got, $want, "perl's answer for $src") or diag $@;
+}
+
+# A ?: OF A LIST AND A CALL'S LIST in a list assignment is refused by T2, by
+# its reason (the merge is stamped List): never lowered to a wrong answer.
+{
+    my $src = q{sub f {(1,2)} my @a = @ARGV ? (7) : f(); my @b = !@ARGV ? (7, 8, 9) : f(); print "@a|@b\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for $src");
+    like($@, qr/GAP: T2: out of its slices \(a phi stamped List\)/, "refused by T2's reason");
 }
 
 done_testing;

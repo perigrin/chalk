@@ -5,6 +5,7 @@ use utf8;
 
 use Test::More;
 use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
@@ -72,7 +73,7 @@ sub print_returned_value {
 sub lli_run {
     my ($ret_node, $mop, $factory) = @_;
     $ret_node = print_returned_value($factory, $ret_node) if $factory;
-    my $ll = Chalk::Target::LLVM->lower($ret_node, mop => $mop, program_mode => 1);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret_node, $mop), mop => $mop, program_mode => 1);
     require File::Temp;
     my ($fh, $f) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     binmode $fh, ':utf8';
@@ -102,7 +103,7 @@ subtest 'method-simple via MOP registry: $g->greet => 42 (Int)' => sub {
 
     # MOP: class Greeter { method greet { return 42 } }
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('Greeter');
+    my $cls = $mop->declare_class('Greeter', is_class => 1);
     my $m   = $cls->declare_method('greet', graph => Chalk::IR::Graph->new, return_type => 'Int');
     $m->graph->merge($f->make_cfg('Return', inputs => [$body42]));
     $mop->seal;
@@ -151,7 +152,7 @@ subtest 'class-simple via MOP registry: ref($e) => "Empty" (Str)' => sub {
     my $f = Chalk::IR::NodeFactory->new;
 
     my $mop = Chalk::MOP->new;
-    $mop->declare_class('Empty');
+    $mop->declare_class('Empty', is_class => 1);
     $mop->seal;
 
     my $new_e = $f->make('Call', dispatch_kind => 'method', name => 'new',
@@ -201,9 +202,9 @@ subtest 'field-basic via MOP registry: $a->name => "cat" (Str)' => sub {
 
     # MOP: class Animal { field $name :param; method name { return $name } }
     my $mop = Chalk::MOP->new;
-    my $cls = $mop->declare_class('Animal');
+    my $cls = $mop->declare_class('Animal', is_class => 1);
     $cls->declare_field('name', sigil => '$', type => 'Str',
-        attributes => [':param']);
+        attributes => [':param'], param_name => 'name');
     my $m = $cls->declare_method('name', graph => Chalk::IR::Graph->new, return_type => 'Str');
     $m->graph->merge($f->make_cfg('Return', inputs => [$field_read]));
     $mop->seal;

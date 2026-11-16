@@ -73,11 +73,9 @@ for my $case (
     else { like($@, qr/GAP|refused at run time|^lower: /, "$name: refused by name") }
 }
 
-# KNOWN: T2 refuses this (a read waiting across a method call), and Context.pm,
-# the fallback, reads the store: 55 for 15. Not T2's to fix by lowering it
-# wrong; a T2 slice that settles the read takes it from Context.pm.
-TODO: {
-    local $TODO = 'Context.pm reads a store a method made through its invocant';
+# A READ KEPT ACROSS A METHOD THAT STORES through its invocant: T2 answers as
+# perl, 15 (the retired fallback read the store: 55).
+{
     my $src = q{package C { sub new { bless { n => 1 }, shift } sub bump { my $s = shift; $s->{n} = 5; return 0 } }
 my $c = C->new; my $x = $c->{n}; $c->bump; print $x, $c->{n}, "\n";};
     my ($got, $pl) = eval { through_llvm($src, {}) };

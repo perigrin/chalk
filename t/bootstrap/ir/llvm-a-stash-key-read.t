@@ -52,7 +52,6 @@ for my $src (
     qq{use POSIX;\nprint "floor imported: ", (\$main::{"floor"} ? "yes" : "no"), "\\n";\n},
     qq{use POSIX ();\nprint "floor imported: ", (\$main::{"floor"} ? "yes" : "no"), "\\n";\n},
     qq{our \$answer = 42;\nprint "found: [", exists \$::{answer}, "]\\n";\nprint "gone: [", exists \$::{nosuch}, "]\\n";\nmy %stash = %::;\nprint "stash: [", exists \$stash{answer}, "]\\n";\n},
-    qq{our \$answer = 42;\nprint \$::{answer}, "|", defined(\$::{nosuch}) ? 1 : 0, "\\n";\n},
 ) {
     is try_llvm($src), perl_of($src), "as perl: " . ( $src =~ s/\n/ /gr );
 }
@@ -69,5 +68,11 @@ for my $case (
     like try_llvm($src), qr/\AREFUSED lower: GAP: /, "refused: " . ( $src =~ s/\n/ /gr );
     like $Chalk::IR::Serialize::JSON::STASH_CHANGES // '', $why, "...and the loader says why";
 }
+
+# A STASH VALUE READ AS OTHER THAN A TRUTH (a glob, printed) is refused by T2,
+# by its reason (only the retired fallback lowered it): never a wrong answer.
+like try_llvm(qq{our \$answer = 42;\nprint \$::{answer}, "|", defined(\$::{nosuch}) ? 1 : 0, "\\n";\n}),
+    qr/\AREFUSED lower: GAP: T2: out of its slices \(\Qa value of %main:: read as other than a truth (it is perl's, not chalk's)\E\)/,
+    "a value of %main:: printed: refused by T2's reason";
 
 done_testing;

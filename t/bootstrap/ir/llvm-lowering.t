@@ -4,13 +4,14 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
-use lib 'lib';
+use lib 'lib', 't/lib';
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::Add;
 use Chalk::IR::Node::Return;
 use Chalk::Target::LLVM;
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 
@@ -76,7 +77,7 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
-    my $ll = Chalk::Target::LLVM->lower($ret);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret));
 
     ok(defined $ll, 'lower() returns defined text');
     like($ll, qr/define.*\@main/, 'generated .ll contains a main function');
@@ -96,7 +97,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $add->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
-    my $ll = Chalk::Target::LLVM->lower($ret);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret));
 
     unlike($ll, qr/Perl_/,  'generated .ll does not call Perl_ C-API functions');
     unlike($ll, qr/\bSV\b/, 'generated .ll does not mention SV type');
@@ -116,7 +117,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $add->set_stamp('Int');
     my $ret = print_and_return($f, $add);
 
-    my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1);
 
     # Write to temp file and run through lli
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
@@ -155,7 +156,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $add->set_stamp('Num');
     my $ret = print_and_return($f, $add);
 
-    my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1);
 
     my $main = main_body($ll);
     like($main, qr/fadd double/,  'L4b .ll: Num-repr Add emits fadd double');
@@ -188,7 +189,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $add->set_stamp('Int');
     my $ret = print_and_return($f, $add);
 
-    my $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1);
+    my $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1);
 
     my $main = main_body($ll);
     # (checked: perl's integers do not wrap, so past an i64 it stops by name)
@@ -240,7 +241,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     $add->set_stamp('Int');
     my $ret = $f->make_cfg('Return', inputs => [$add]);
 
-    my $generated = Chalk::Target::LLVM->lower($ret);
+    my $generated = Chalk::Target::LLVM->lower(rooted($ret));
 
     # The spike file contains this specific comment; generated output must not
     # simply be the spike file read back.
@@ -267,7 +268,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $ret = print_and_return($f, $and);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "And node lowers without dying (got: $@)");
 
     SKIP: {
@@ -307,7 +308,7 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $ret = print_and_return($f, $or);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "Or node lowers without dying (got: $@)");
 
     SKIP: {
@@ -344,10 +345,11 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $region = $f->make('Region', inputs => []);
     my $phi    = $f->make('Phi', region => $region, values => []);
     $phi->set_stamp('Int');
-    my $ret = $f->make_cfg('Return', inputs => [$phi]);
+    # (printed: an unread Phi is no part of the program T2 builds)
+    my $ret = print_and_return($f, $phi);
 
-    eval { Chalk::Target::LLVM->lower($ret) };
-    like($@, qr/Phi|missing|edge|predecessor|incoming/i,
+    eval { Chalk::Target::LLVM->lower(rooted($ret)) };
+    like($@, qr/GAP: T2: out of its slices \(Phi\)/,
         'Phi with no incoming values dies loudly (adversarial guard)');
 }
 
@@ -420,28 +422,10 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $ret = print_and_return($f, $rx, $if_node);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "If/else node lowers without dying (got: $@)");
-
-    SKIP: {
-        skip 'If/else lowering failed', 5 unless defined $ll;
-
-        unlike($ll, qr/Perl_/, 'If/else .ll: no Perl_ C-API');
-        unlike($ll, qr/\bSV\b/, 'If/else .ll: no SV type');
-        like($ll, qr/br i1/, 'If/else .ll: contains conditional branch');
-        like($ll, qr/phi i64/, 'If/else .ll: contains phi');
-
-        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-        binmode $fh, ':utf8';
-        print $fh $ll;
-        close $fh;
-
-        my $lli_out = qx($LLI $tmp 2>&1);
-        my $exit    = $? >> 8;
-        is($exit, 0, 'If/else .ll: lli exits cleanly');
-        chomp $lli_out;
-        is($lli_out, '1', "If/else .ll: lli output is 1 (n=5, n>0 true -> x=1)");
-    }
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "If/else node: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "If/else node: refused by T2's reason");
 }
 
 # ---------------------------------------------------------------------------
@@ -531,27 +515,10 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $ret = print_and_return($f, $s_phi, $exit_region);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "Loop node lowers without dying (got: $@)");
-
-    SKIP: {
-        skip 'Loop lowering failed', 5 unless defined $ll;
-
-        unlike($ll, qr/Perl_/, 'Loop .ll: no Perl_ C-API');
-        unlike($ll, qr/\bSV\b/, 'Loop .ll: no SV type');
-        like($ll, qr/phi i64/, 'Loop .ll: contains phi instruction');
-
-        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-        binmode $fh, ':utf8';
-        print $fh $ll;
-        close $fh;
-
-        my $lli_out = qx($LLI $tmp 2>&1);
-        my $exit    = $? >> 8;
-        is($exit, 0, 'Loop .ll: lli exits cleanly');
-        chomp $lli_out;
-        is($lli_out, '6', "Loop .ll: lli output is 6 (sum 3+2+1=6)");
-    }
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "Loop node: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "Loop node: refused by T2's reason");
 }
 
 # ---------------------------------------------------------------------------
@@ -619,26 +586,10 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $ret = print_and_return($f, $rx, $if_node);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "B3: one-branch if lowers without dying (got: $@)");
-
-    SKIP: {
-        skip 'B3: one-branch if lowering failed', 4 unless defined $ll;
-
-        unlike($ll, qr/Perl_/, 'B3 .ll: no Perl_ C-API');
-        unlike($ll, qr/\bSV\b/, 'B3 .ll: no SV type');
-
-        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-        binmode $fh, ':utf8';
-        print $fh $ll;
-        close $fh;
-
-        my $lli_out = qx($LLI $tmp 2>&1);
-        my $exit    = $? >> 8;
-        is($exit, 0, 'B3 .ll: lli exits cleanly');
-        chomp $lli_out;
-        is($lli_out, '1', "B3 lli output is 1 (n=5, n>0, then-branch runs: x=1)");
-    }
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "B3: one-branch if: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "B3: one-branch if: refused by T2's reason");
 }
 
 # ---------------------------------------------------------------------------
@@ -708,26 +659,10 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $ret = print_and_return($f, $rx, $if_node);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "B2: Num-typed if/else lowers without dying (got: $@)");
-
-    SKIP: {
-        skip 'B2: Num if/else lowering failed', 4 unless defined $ll;
-
-        unlike($ll, qr/Perl_/, 'B2 .ll: no Perl_ C-API');
-        unlike($ll, qr/\bSV\b/, 'B2 .ll: no SV type');
-
-        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-        binmode $fh, ':utf8';
-        print $fh $ll;
-        close $fh;
-
-        my $lli_out = qx($LLI $tmp 2>&1);
-        my $exit    = $? >> 8;
-        is($exit, 0, 'B2 .ll: lli exits cleanly');
-        chomp $lli_out;
-        is($lli_out, '2.5', "B2 lli output is 2.5 (n=5, n>0 -> x=2.5)");
-    }
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "B2: Num-typed if/else: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "B2: Num-typed if/else: refused by T2's reason");
 }
 
 # ---------------------------------------------------------------------------
@@ -809,26 +744,10 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $ret = print_and_return($f, $rx, $if_node);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "B1: dependent body stmts lower without dying (got: $@)");
-
-    SKIP: {
-        skip 'B1: dependent body lowering failed', 4 unless defined $ll;
-
-        unlike($ll, qr/Perl_/, 'B1 .ll: no Perl_ C-API');
-        unlike($ll, qr/\bSV\b/, 'B1 .ll: no SV type');
-
-        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-        binmode $fh, ':utf8';
-        print $fh $ll;
-        close $fh;
-
-        my $lli_out = qx($LLI $tmp 2>&1);
-        my $exit    = $? >> 8;
-        is($exit, 0, 'B1 .ll: lli exits cleanly');
-        chomp $lli_out;
-        is($lli_out, '12', "B1 lli output is 12 (n=5, t=n+1=6, x=t*2=12)");
-    }
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "B1: dependent body stmts: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "B1: dependent body stmts: refused by T2's reason");
 }
 
 # ---------------------------------------------------------------------------
@@ -931,26 +850,10 @@ ok(Chalk::Target::LLVM->can('lower'),
     my $ret = print_and_return($f, $s_phi, $exit_region);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    ok(!$@, "H3: loop-with-body-comparison lowers without dying (got: $@)");
-
-    SKIP: {
-        skip 'H3: loop-with-body-comparison lowering failed', 4 unless defined $ll;
-
-        unlike($ll, qr/Perl_/, 'H3 .ll: no Perl_ C-API');
-        unlike($ll, qr/\bSV\b/, 'H3 .ll: no SV type');
-
-        my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
-        binmode $fh, ':utf8';
-        print $fh $ll;
-        close $fh;
-
-        my $lli_out = qx($LLI $tmp 2>&1);
-        my $exit    = $? >> 8;
-        is($exit, 0, 'H3 .ll: lli exits cleanly');
-        chomp $lli_out;
-        is($lli_out, '21', "H3 lli output is 21 (n=3: 10+10+1=21)");
-    }
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    # T2 REFUSES IT, by its reason (the old VarDecl dialect, which only the retired fallback lowered).
+    ok(!defined $ll, "H3: loop-with-body-comparison: T2 lowers no module for it");
+    like($@, qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "H3: loop-with-body-comparison: refused by T2's reason");
 }
 
 # ---------------------------------------------------------------------------
@@ -978,10 +881,11 @@ ok(Chalk::Target::LLVM->can('lower'),
     # Corrupt the first input to undef (simulating a missing predecessor wire)
     $phi->inputs->[0] = undef;
 
-    my $ret = $f->make_cfg('Return', inputs => [$phi]);
+    # (printed: an unread Phi is no part of the program T2 builds)
+    my $ret = print_and_return($f, $phi);
 
-    eval { Chalk::Target::LLVM->lower($ret) };
-    like($@, qr/Phi|undef|predecessor|incoming|missing/i,
+    eval { Chalk::Target::LLVM->lower(rooted($ret)) };
+    like($@, qr/GAP: T2: out of its slices \(Phi\)/,
         'H4/H5: Phi with undef incoming value slot dies loudly (predecessor guard)');
 }
 

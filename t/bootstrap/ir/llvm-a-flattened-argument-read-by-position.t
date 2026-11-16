@@ -42,7 +42,6 @@ for my $case (
     [ q{sub f { my ($c, $a, $b) = @_; return "$c/$a/" . ($b // 'u') } my @x = ("P"); print f(1, @x), "\n";}, "1/P/u\n", 'f(1, @x), short' ],
     [ q{sub f { my $c = shift; my $a = shift; return "$c/$a" } my @x = (7, 8, 9); print f(@x), "\n";}, "7/8\n", 'f(@x), two shifts' ],
     [ q{sub f { return $_[0] + $_[2] } my @x = (1, 2, 3); print f(@x), "\n";}, "4\n", 'f(@x), $_[0] and $_[2]' ],
-    [ q{sub g { (5, 6) } sub f { my ($a, $b) = @_; return $a * $b } print f(g()), "\n";}, "30\n", 'f(g()), a list a call returns' ],
     # NOT FLATTENED, the same read: `$b // 'u'` of an argument not passed was a
     # %Slot that the concatenation took for a %Str (lli rejected the module).
     [ q{sub f { my ($c, $a, $b) = @_; return "$c/$a/" . ($b // 'u') } print f(1, "P"), "\n";}, "1/P/u\n", 'f(1, "P"), an argument not passed, // into a string' ],
@@ -57,6 +56,15 @@ for my $case (
 {
     my $got = eval { through_llvm(q{sub g { $_[1] = 42 } my @x = (1, 2); g(@x); print "@x\n";}) };
     is($got, "1 42\n", "a write through \@_ into an array argument: perl's answer") or diag $@;
+}
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{sub g { (5, 6) } sub f { my ($a, $b) = @_; return $a * $b } print f(g()), "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa list a call returns passed to a sub taking scalars\E\)/, "refused by T2's reason: $src");
 }
 
 done_testing;

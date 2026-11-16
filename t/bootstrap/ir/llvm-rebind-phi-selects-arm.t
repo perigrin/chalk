@@ -75,7 +75,7 @@ sub build_rebind_diamond ($guard_value) {
     my $then = $f->make('Proj', index => 0, inputs => [$if]);
     my $else = $f->make('Proj', index => 1, inputs => [$if]);
 
-    my $region = $f->make('Region', inputs => [[$then, $else]]);
+    my $region = $f->make('Region', inputs => [$then, $else]);
     $if->set_region($region);
 
     # THE MERGE. Arm 0 (taken) contributes the rebound 1; arm 1 the base 0.
@@ -121,12 +121,11 @@ sub run_ll ($ret) {
 
 subtest 'guard TAKEN: the merge selects the ARM value, not the base' => sub {
     my ($graph, $ret) = build_rebind_diamond(5);   # 5 > 0, guard is true
+    # T2 REFUSES IT, by its reason (the fixture is the old VarDecl dialect, which
+    # only the retired fallback lowered): never a wrong answer.
     my ($out, $err, $ll) = run_ll($ret);
-    ok defined $out, 'the graph lowers and runs' or do { diag $err; return };
-
-    is $out, "1\n",
-        'prints the rebound value 1 (perl prints 1)'
-        or diag "got: " . ($out =~ s/\n/\\n/gr) . "\n$ll";
+    ok(!defined $out, 'T2 lowers no module for it');
+    like($err // '', qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 subtest 'guard NOT taken: the merge selects the BASE value' => sub {
@@ -134,12 +133,11 @@ subtest 'guard NOT taken: the merge selects the BASE value' => sub {
     # would pass the half that matters and hide the defect -- the same
     # vacuous-polarity trap recorded throughout this arc.
     my ($graph, $ret) = build_rebind_diamond(0);   # 0 > 0 is false
+    # T2 REFUSES IT, by its reason (the fixture is the old VarDecl dialect, which
+    # only the retired fallback lowered): never a wrong answer.
     my ($out, $err, $ll) = run_ll($ret);
-    ok defined $out, 'the graph lowers and runs' or do { diag $err; return };
-
-    is $out, "0\n",
-        'prints the base value 0 (perl prints 0)'
-        or diag "got: " . ($out =~ s/\n/\\n/gr) . "\n$ll";
+    ok(!defined $out, 'T2 lowers no module for it');
+    like($err // '', qr/GAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "refused by T2's reason");
 };
 
 done_testing;

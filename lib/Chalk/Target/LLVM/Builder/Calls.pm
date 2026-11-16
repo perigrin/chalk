@@ -976,6 +976,9 @@ sub func {
     my $g = $sub->graph;
     my $ret = $g->returns->[0];
     out("sub $name has no Return") unless blessed($ret) && $ret->operation eq 'Return';
+    # EXACTLY ONE: a graph's returns are found by a walk of its nodes, in no
+    # fixed order -- of two Returns, "the first" would be either.
+    out("sub $name has more than one Return") if ( grep { blessed($_) && $_->operation eq 'Return' } $g->returns->@* ) > 1;
     # (T1's integer intervals over its body, where the analysis has not run)
     Chalk::IR::Analysis::integer_intervals( $g->returns->@* );
     # A LIST RETURN: B::SoN's Return(list, scalar) -- the list, and what the

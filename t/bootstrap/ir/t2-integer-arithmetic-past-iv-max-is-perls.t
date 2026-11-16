@@ -1,5 +1,5 @@
 # ABOUTME: + - * ++ -- and unary minus on integers through T2 answer as perl at IV_MAX and IV_MIN:
-# ABOUTME: an IV while one fits, a UV past IV_MAX, perl's number past UV_MAX; the fallback refuses by name.
+# ABOUTME: an IV while one fits, a UV past IV_MAX, perl's number past UV_MAX.
 use 5.42.0;
 use Test::More;
 use File::Temp qw(tempfile);
@@ -94,46 +94,6 @@ for my $c ( [ '"9223372036854775807"', '$x + 0', 'SAME' ], [ '"92233720368547758
     my $r = tap("my \$x = \$ENV{CHALK_NO_SUCH} // $v; my \$r = $e; print \"\$r\\n\";\n");
     if ($want eq 'SAME') { is $r->{verdict}, 'SAME', "the string $v: $e as perl" or diag $r->{why} // explain $r }
     else                 { is $r->{verdict}, 'SAME', "the string $v: $e, a UV: as perl" or diag $r->{why} // explain $r }
-}
-
-# THE FALLBACK (Context) IS HELD TO THE SAME: it emitted a wrapping i64 add.
-# Where both operands are literals it refuses while lowering; else the program
-# stops where the exact result leaves an i64.
-{
-    require Chalk::CodeGen::Pipeline;
-    require Chalk::Target::LLVM::Lower;
-    no warnings 'redefine', 'once';
-    local *Chalk::Target::LLVM::Lower::lower_program = sub {
-        $Chalk::Target::LLVM::Lower::PATH = { path => 'fallback', why => 'forced by the test' };
-        return undef;
-    };
-    my $fallback = sub ($src) {
-        my ( $fh, $pl ) = tempfile( SUFFIX => '.pl', UNLINK => 1 );
-        print $fh $src; close $fh;
-        my $json = qx($^X -I$SON -MO=-q,SoN,json,not_package=SoN $pl 2>/dev/null);
-        my $select = sub ($graphs, $mop) { my $g = $graphs->{'main::__PROGRAM__'} or return (); ([ 'main::__PROGRAM__', $g->returns->[0] ]) };
-        my ($units, undef, undef, $err) = eval { Chalk::CodeGen::Pipeline->new->run_detail($json, $select, program_mode => 1) };
-        $err //= $@ if $@;
-        my $u = ( $units // [] )->[0];
-        return { why => $err // $u->{err} } unless !$err && $u && $u->{ok};
-        my ( $lf, $ll ) = tempfile( SUFFIX => '.ll', UNLINK => 1 );
-        print $lf $u->{ll}; close $lf;
-        my $lli = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
-        my $out = qx($lli $ll 2>&1);
-        return { out => $out, exit => $? >> 8, perl => scalar qx($^X $pl) };
-    };
-    my $n = 'my $n = length($ENV{CHALK_NO_SUCH} // "abcd");';
-    my $r = $fallback->("$n my \$r = \$n * 2305843009213693951; print \"\$r\\n\";\n");
-    is $r->{out}, $r->{perl}, 'the fallback: an i64 product as perl' or diag explain $r;
-    $r = $fallback->("$n my \$r = \$n * 2305843009213693952; print \"\$r\\n\";\n");
-    is $r->{exit}, 255, 'the fallback: a product past IV_MAX stops' or diag explain $r;
-    like $r->{out} // '', qr/refused at run time: an integer \+ - \* past what an i64 holds/, 'naming why';
-    $r = $fallback->("$n my \$r = \$n + 9223372036854775804; print \"\$r\\n\";\n");
-    is $r->{exit}, 255, 'the fallback: a sum past IV_MAX stops' or diag explain $r;
-    $r = $fallback->("my \$x = 4611686018427387904; my \$r = \$x * 2; print \"\$r\\n\";\n");
-    like $r->{why} // '', qr/GAP: an integer \+ - \* past what an i64 holds/, 'the fallback: literals past IV_MAX refused by name';
-    $r = $fallback->("print 9223372036854775807 + 1, \"\\n\";\n");
-    like $r->{why} // '', qr/GAP: an integer constant past what an i64 holds/, 'the fallback: a UV constant refused by name';
 }
 
 done_testing;

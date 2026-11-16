@@ -1,5 +1,5 @@
 # ABOUTME: A reference to an element B::SoN takes where it stands (Ref [location, memory]) is
-# ABOUTME: T2's alone: where T2 refuses it, the Context fallback refuses too, never a wrong answer.
+# ABOUTME: T2's: as perl, or where T2 refuses it, refused by T2's reason -- never a wrong answer.
 use 5.42.0;
 use Test::More;
 use File::Temp qw(tempfile);
@@ -22,8 +22,8 @@ sub run ($cmd) {
 }
 
 # lower($src, $edit) -> (the module's text or undef, the path, the reason, the
-# .pl): through B::SoN and chalk's whole pipeline (T2, else the fallback),
-# the wire edited by $edit first.
+# .pl): through B::SoN and chalk's whole pipeline (T2), the wire edited by
+# $edit first.
 sub lower ($src, $edit = undef) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src; close $fh;
@@ -61,8 +61,8 @@ for my $case (
 }
 
 # WHERE T2 REFUSES IT (here: a wire with no site for one that may die, an
-# older B::SoN's), THE FALLBACK REFUSES TOO, by name. It printed "x" with
-# exit 0 where perl dies.
+# older B::SoN's), it is refused by T2's reason. (The retired fallback once
+# printed "x" with exit 0 here, where perl dies.)
 for my $case (
     [ qq{my \@a = (1, 2);\nmy \$p = \\\$a[-5];\nprint "x\\n";\n}, 'a constant index before the start, no site' ],
     [ qq{my \@a = (1, 2);\nmy \$i = -5;\n\$i++ if \@ARGV;\nmy \$p = \\\$a[\$i];\nprint "x\\n";\n}, 'an index not a constant, no site' ],
@@ -70,7 +70,7 @@ for my $case (
     my ($src, $name) = @$case;
     my ($ll, $path, $why) = lower($src, sub ($n) { delete $n->{fields}{$_} for grep { $n->{op} eq 'Ref' } qw(file line) });
     ok(!defined $ll, "$name: refused");
-    like($why // '', qr/GAP: a reference to an element taken where it stands is T2's alone/, "$name: the fallback refuses by name") or diag $why;
+    like($why // '', qr/\AGAP: T2: out of its slices \(/, "$name: refused by T2's reason") or diag $why;
 }
 
 done_testing;

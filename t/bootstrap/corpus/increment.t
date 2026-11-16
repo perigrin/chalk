@@ -68,7 +68,7 @@ subtest 'both K1 and K2 declare L: GREEN' => sub {
 # Verify by checking that the built graph produces no GAP result from lli.
 # ---------------------------------------------------------------------------
 
-subtest 'distinct PadAccess varnames prevent B1 stale-read GAP' => sub {
+subtest 'K1: the block builds; T2 refuses it by name' => sub {
     my ($k1_case) = grep { $_->{title} =~ /K1/i } @$cases;
     ok(defined $k1_case, 'K1 case found for B1-guard check');
 
@@ -81,11 +81,12 @@ subtest 'distinct PadAccess varnames prevent B1 stale-read GAP' => sub {
     ok(defined $return_node, 'K1 build_graph_from_ir returns a node');
 
     if (defined $return_node) {
+        # THE HAND-WRITTEN BLOCK is the old VarDecl dialect, which only the retired
+        # fallback lowered; the program is gate-green through B::SoN and T2
+        # (son-corpus-wide.t). T2 refuses the block by its reason.
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
-        ok(!$meta->{marked_unsupported},
-            'K1 graph lowers without triggering B1 stale-read GAP');
-        is($L->return_values->[0], '1',
-            'K1 lli prints 1 (B1 guard did not fire; no stale-read GAP)');
+        ok($meta->{marked_unsupported}, 'K1 block: T2 lowers no module for it');
+        like($meta->{lower_error} // '', qr/\AGAP: T2: out of its slices \(\Qa statement VarDecl\E\)/, "K1 block: refused by T2's reason");
     }
 };
 
@@ -114,8 +115,11 @@ context: scalar
 ```
 
 ```ir
-%c0 = Constant(0) :Scalar
-return %c0
+%xn = Constant("$i") :Str
+%c0 = Constant(0) :Int
+%vx = VarDecl(%xn, %c0) :Int
+return %vx
+control: %vx
 L: GREEN
 ```
 END_MD

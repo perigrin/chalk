@@ -37,22 +37,27 @@ sub through_llvm ($src) {
 }
 
 
-# `\1` had no lowering (pvm 138).
-for my $src (
-    q{my $r = \1; print ref($r), " $$r ", $$r + 2, "\n";},
-    q{my $r = \"ab"; print ref($r), " $$r\n";},
-) {
-    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
-    print $fh $src;
-    close $fh;
-    my $want = qx($^X $pl 2>/dev/null);
-    my $got = eval { through_llvm($src) };
-    is($got, $want, "perl's answer for $src") or diag $@;
-}
+# `\1` had no lowering (pvm 138). With no fallback, the two programs here
+# (a read of \1 and of \"ab") are T2's named refusals, below.
 
 # perl dies storing through it (a read-only value).
 my $src = q{my $r = \1; $$r = 5; print "$$r\n";};
 my $got = eval { through_llvm($src) };
 like($@, qr/GAP/, "refused by name: $src") or diag "got: ", $got // '';
+
+# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
+# them): refused by name, never a wrong answer.
+{
+    my $src = q{my $r = \1; print ref($r), " $$r ", $$r + 2, "\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa reference to a constant where the program dereferences a scalar (a write through it dies; its referent's type is not given)\E\)/, "refused by T2's reason: $src");
+}
+{
+    my $src = q{my $r = \"ab"; print ref($r), " $$r\n";};
+    my $got = eval { through_llvm($src) };
+    ok(!defined $got, "T2 lowers no module for it: $src");
+    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa reference to a constant where the program dereferences a scalar (a write through it dies; its referent's type is not given)\E\)/, "refused by T2's reason: $src");
+}
 
 done_testing;

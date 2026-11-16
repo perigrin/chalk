@@ -4,7 +4,8 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
@@ -130,7 +131,7 @@ sub run_ll {
 {
     my ($ret) = make_not_bool_str_program(5);
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "CBS1: Coerce(Boolean->Str) truthy-input lowers without dying (err: $@)");
     ok(defined $ll, 'CBS1: lower() returns defined text');
 }
@@ -143,7 +144,7 @@ sub run_ll {
 {
     my ($ret) = make_not_bool_str_program(0);
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "CBS2: Coerce(Boolean->Str) falsy-input lowers without dying (err: $@)");
     ok(defined $ll, 'CBS2: lower() returns defined text');
 }
@@ -155,7 +156,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my ($ret) = make_not_bool_str_program(5);
-    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
+    my $ll  = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1);
 
     my ($exit, $out) = run_ll($ll);
 
@@ -170,7 +171,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my ($ret) = make_not_bool_str_program(0);
-    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
+    my $ll  = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1);
 
     my ($exit, $out) = run_ll($ll);
 
@@ -191,7 +192,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my ($ret, $val) = make_not_bool_str_program(5);
-    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
+    my $ll  = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1);
 
     my ($exit, $out) = run_ll($ll);
 
@@ -210,7 +211,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my ($ret, $val) = make_not_bool_str_program(0);
-    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
+    my $ll  = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1);
 
     my ($exit, $out) = run_ll($ll);
 
@@ -225,7 +226,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my ($ret) = make_not_bool_str_program(5);
-    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
+    my $ll  = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1);
 
     unlike($ll, qr/Perl_/,    'CBS7: false-face Boolean->Str .ll: no Perl_ C-API');
     unlike($ll, qr/\bSV\b/,   'CBS7: false-face Boolean->Str .ll: no SV type');
@@ -237,7 +238,7 @@ sub run_ll {
 # ---------------------------------------------------------------------------
 {
     my ($ret) = make_not_bool_str_program(0);
-    my $ll  = Chalk::Target::LLVM->lower($ret, program_mode => 1);
+    my $ll  = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1);
 
     unlike($ll, qr/Perl_/,    'CBS8: true-face Boolean->Str .ll: no Perl_ C-API');
     unlike($ll, qr/\bSV\b/,   'CBS8: true-face Boolean->Str .ll: no SV type');
@@ -259,7 +260,7 @@ sub run_ll {
     for my $case ([0, 'true-face'], [5, 'false-face']) {
         my ($int_val, $label) = $case->@*;
         my ($r) = make_not_bool_str_program($int_val);
-        my $ll  = Chalk::Target::LLVM->lower($r, program_mode => 1);
+        my $ll  = Chalk::Target::LLVM->lower(rooted($r), program_mode => 1);
 
         # T2 builds one face, "1", and takes 0 or 1 bytes of it by the i1.
         like($ll, qr/\@(?:bool_str_\d+|lit_one) = private unnamed_addr constant \[2 x i8\] c"1\\00"/,
@@ -323,7 +324,7 @@ sub run_ll {
     $ret->set_control_in($print);
 
     my $ll;
-    eval { $ll = Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    eval { $ll = Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
     ok(!$@, "F3A: Not(Boolean) lowers without dying (err: $@)");
 
     SKIP: {
@@ -352,11 +353,19 @@ sub run_ll {
     my $not_node = $f->make('Not', inputs => [$c5]);
     $not_node->set_stamp('Boolean');
 
-    my $ret = $f->make_cfg('Return', inputs => [$not_node]);
+    # (printed: a value the program never reads is no part of what T2 builds)
+    my $str = $f->make('Coerce', inputs => [$not_node], from_repr => 'Boolean', to_repr => 'Str');
+    $str->set_stamp('Str');
+    my $print = $f->make('Print', inputs => [$str]);
+    my $undef = $f->make('Constant', value => undef, const_type => 'undef');
+    $undef->set_stamp('Undef');
+    my $ret = $f->make_cfg('Return', inputs => [$undef]);
+    $ret->set_control_in($print);
 
-    eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
-    like($@, qr/representation/i,
-        'F3B: Not with undef-repr operand dies loudly mentioning representation');
+    my $ll = eval { Chalk::Target::LLVM->lower(rooted($ret), program_mode => 1) };
+    ok(!defined $ll, 'F3B: Not with an unstamped operand: T2 lowers no module for it');
+    like($@, qr/GAP: T2: out of its slices \(\Qa value stamped  (Constant)\E\)/,
+        "F3B: refused by T2's reason, naming the unstamped value");
 }
 
 done_testing;
