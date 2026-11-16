@@ -72,6 +72,24 @@ for my $case (
       'an array and a hash of the loop body\'s own values' ],
     [ q{my @p = (0); for my $i (1 .. 3) { @p = (); if ($i > 1) { push @p, $i } print scalar(@p), "@p\n" }},
       'an array emptied each pass, pushed to in an arm, read after the join' ],
+    # WRITTEN IN PLACE THROUGH A MERGE of its versions (`push @p` where @p is
+    # the loop's merge of it and of `@p = ()`): B::SoN gives the push the
+    # memory it runs at, the version after it, so a count after it reads it
+    # (perl's "1 3| 5", pvm c140; before, "2| 1" was refused by name).
+    [ q{my @p; my $o = ""; for my $pos (0 .. 5) { push @p, $pos if $pos % 2; if (@p > 1) { $o .= "@p|"; @p = () } } print "$o @p\n";},
+      'an array emptied in an arm of a loop body, pushed to through the merge' ],
+    [ q{my @q; for my $i (1 .. 4) { if ($i % 2) { push @q, $i } if (@q > 1) { print "@q\n"; @q = () } }},
+      'an array pushed to in one arm, emptied in another' ],
+    [ q{sub f { my @p; my $out = ""; for my $pos (0 .. 5) { push @p, $pos if $pos % 2; if (@p > 1) { for my $s (@p) { $out .= $s } $out .= "|"; @p = (); } } return "$out @p" } print f(), "\n";},
+      'pvm c140: in a sub, walked before it is emptied' ],
+    [ q{my @p; my $o = ""; for my $pos (0 .. 5) { unshift @p, $pos if $pos % 2; if (@p > 1) { $o .= "@p|"; @p = () } } print "$o @p\n";},
+      'unshift onto the merge' ],
+    [ q{my @p; my $o = ""; for my $pos (0 .. 5) { pop @p if $pos % 2; $o .= scalar(@p); if (@p < 1) { @p = (4, 5) } } print "$o @p\n";},
+      'pop from the merge' ],
+    [ q{my @p; my $o = ""; for my $pos (0 .. 5) { my $x = shift @p; $o .= ($x // 'u') . scalar(@p); if (!@p) { @p = (4, 5) } } print "$o @p\n";},
+      'shift from the merge' ],
+    [ q{my @p = (1, 2, 3); my $o = ""; for my $pos (0 .. 4) { $#p = 0 if $pos % 2; $o .= scalar(@p); if (@p < 2) { @p = (4, 5, 6) } } print "$o @p\n";},
+      'its last index stored through the merge' ],
     # A LIST OF ITS OWN (no variable's) needed in an arm: made there.
     [ q{sub f { my $out = ""; for my $k (qw(x y)) { my @p = grep { $_ ne $k } qw(a b c); next unless @p; for my $q (@p[1 .. $#p]) { $out .= "$k$q " } } $out } print f(), "\n";},
       'a slice walked in an arm' ],
@@ -87,22 +105,6 @@ for my $case (
     is($got->[0], $want->[0], "$name: perl's output");
     is($got->[1], $want->[1], "$name: perl's message");
     is($got->[2], $want->[2], "$name: perl's exit code");
-}
-
-# PUSHED TO THROUGH A MERGE of its versions (`push @p` where @p is the
-# loop's merge of it and of `@p = ()`): B::SoN puts the push on no memory
-# chain, so orders no read after it (the count `@p > 1` reads the loop's memory, before the push) --
-# refused by name, not made at the head (perl's "1 3| 5" read "2| 1").
-for my $case (
-    [ q{my @p; my $o = ""; for my $pos (0 .. 5) { push @p, $pos if $pos % 2; if (@p > 1) { $o .= "@p|"; @p = () } } print "$o @p\n";},
-      'an array emptied in an arm of a loop body, pushed to through the merge' ],
-    [ q{my @q; for my $i (1 .. 4) { if ($i % 2) { push @q, $i } if (@q > 1) { print "@q\n"; @q = () } }},
-      'an array pushed to in one arm, emptied in another' ],
-) {
-    my ($src, $name) = @$case;
-    my ($ll, undef, $why) = lower($src);
-    ok(!defined $ll, "$name: refused");
-    like($why // '', qr/T2: out of its slices \(a write in place to a merge of versions of an array or hash/, "$name: by name") or diag $why;
 }
 
 done_testing;

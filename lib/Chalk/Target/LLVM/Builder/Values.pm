@@ -166,27 +166,26 @@ sub agg_versions {
     # read only -- one written after the join would write that array, or a
     # variable's: not this)
     return undef if $alias && grep { _written($_) } @phis;
-    # WRITTEN IN PLACE THROUGH A MERGE (`push @p, 1` where @p is the loop's
-    # merge of it): B::SoN puts that push on no memory chain -- a count after
-    # it reads the version before it (`@p > 1` made at the loop's head, before
-    # the push: "2| 1" for "1 3| 5"). Refused by name.
+    # WRITTEN IN PLACE THROUGH A REFERENCE TO A MERGE (`\@p`, `\$p[0]` where
+    # @p is the loop's merge of it): nothing orders a read after a write
+    # through it. Refused by name. (A push, splice, shift ... onto the merge
+    # takes the memory it runs at and is the version after: B::SoN orders a
+    # count after it, pvm c140.)
     out('a write in place to a merge of versions of an array or hash (B::SoN orders no read after it)')
         if grep { _written_off_memory($_) } @phis;
     return ( keys %kind )[0];
 }
 
 # _written_off_memory($n) -> some write in place of the aggregate $n is
-# B::SoN puts on no memory chain: a builtin that changes the array it is
-# given first (push, splice, ...) with no memory input -- a read after it
-# is at the version before it. (A store to an element is on the chain: a
-# read after it reads at it.) Or a reference taken to it or an element:
-# written through that, nothing orders a read.
+# on no memory chain: a reference taken to it or an element -- written
+# through that, nothing orders a read. (A store to an element is on the
+# chain, as is a builtin that changes the array it is given first: B::SoN
+# gives each the memory it runs at.)
 sub _written_off_memory {
     my ($n) = @_;
     my $is = sub ($x) { blessed($x) && refaddr($x) == refaddr($n) };
     for my $c (grep { blessed($_) } ( $n->consumers // [] )->@*) {
         my $op = $c->operation;
-        return 1 if $op eq 'Call' && $c->mutates_array && $is->( $c->inputs->[0] ) && !$c->memory_operand;
         return 1 if $op eq 'Ref' && $is->( $c->inputs->[0] );
         return 1 if $op eq 'Subscript' && $is->( $c->inputs->[0] )
             && grep { blessed($_) && $_->operation eq 'Ref' && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($c) } ( $c->consumers // [] )->@*;
