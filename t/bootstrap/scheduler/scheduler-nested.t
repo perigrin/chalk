@@ -123,7 +123,9 @@ sub _form_open_count($sched, $f) {
     my @body_nodes;
     my $returns = $m->graph->returns;
     my $exit = $returns->[0];
-    my $cur = $exit->inputs->[0];
+    # Since 8c6cfe0f a Return carries its control predecessor in control_in;
+    # its inputs[0] is the returned VALUE, which is no chain step.
+    my $cur = $exit->control_in;
     while (defined $cur && ref($cur) && $cur->operation ne 'Start') {
         push @body_nodes, $cur;
         my $next = $cur->can('control_in') ? $cur->control_in : undef;

@@ -94,12 +94,16 @@ sub _parse_first_method($source) {
     my @items = $sched->items->@*;
 
     # Walk the chain manually and check the schedule matches.
+    # The chain is the control chain: since 8c6cfe0f a Return (and every
+    # statement on the chain) carries its control predecessor in control_in,
+    # and inputs hold only values -- a Return's inputs[0] is the value it
+    # returns, not the statement before it.
     my @returns = $method->graph->returns->@*;
     my @expected;
-    my $cur = $returns[0]->inputs->[0];
+    my $cur = $returns[0]->control_in;
     while (defined $cur && $cur->operation ne 'Start') {
         unshift @expected, $cur;
-        $cur = $cur->inputs->[0];
+        $cur = $cur->control_in;
     }
     push @expected, $returns[0];
 
