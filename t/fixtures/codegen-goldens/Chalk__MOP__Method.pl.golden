@@ -1,25 +1,26 @@
 use 5.42.0;
 use utf8;
 use experimental 'class';
-use Chalk::IR::Graph;
-use Chalk::IR::NodeFactory;
-use Chalk::IR::Node::VarDecl;
 class Chalk::MOP::Method {
     field $name :param :reader;
     field $class :param :reader;
     field $params :param :reader = [];
     field $return_type :param :reader = undef;
-    field $graph :param :reader = 'Chalk::IR::Graph'->new();
-    field $factory :param :reader = 'Chalk::IR::NodeFactory'->new();
+    field $graph :param :reader = undef;
     field $body :param :reader = [];
     field $lexical_bindings :param = [];
-    method merge($node) {
-        $graph->merge($node);
-    }
-    method next_cfg_id() {
-        $graph->next_cfg_id();
-    }
     method lexical_bindings() {
         return $lexical_bindings->@*;
+    }
+    method shim_return_type($type) {
+        $return_type = $type;
+        return;
+    }
+    method set_return_type($type) {
+        if (!defined($type)) {
+            die "MOP: return type must be defined\n";
+        }
+        $return_type = $type;
+        return $return_type;
     }
 }

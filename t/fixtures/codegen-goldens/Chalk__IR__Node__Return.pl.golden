@@ -4,10 +4,20 @@ use experimental 'class';
 use Chalk::IR::Node;
 class Chalk::IR::Node::Return :isa(Chalk::IR::Node) {
     field $synthetic :param :reader = false;
+    field $valueless :param :reader = false;
     method operation() {
         'Return';
     }
+    method staleness_kind() {
+        'opaque';
+    }
     method value() {
         return $self->inputs()->[0];
+    }
+    method scalar_value() {
+        return $self->inputs()->[1];
+    }
+    sub identity_kind {
+        'hash_consed';
     }
 }

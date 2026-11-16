@@ -10,8 +10,8 @@ class Chalk::Grammar::Rule {
     method is_terminal_rule() {
         for my $alt ($expressions->@*) {
             for my $symbol ($alt->@*) {
-                return false;
                 if (!$symbol->is_terminal()) {
+                    return false;
                 }
             }
         }

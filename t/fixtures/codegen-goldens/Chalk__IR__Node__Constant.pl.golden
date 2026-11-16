@@ -1,14 +1,33 @@
 use 5.42.0;
 use utf8;
 use experimental 'class';
-use Chalk::IR::Node;
-class Chalk::IR::Node::Constant :isa(Chalk::IR::Node) {
+use Chalk::IR::Value;
+class Chalk::IR::Node::Constant :isa(Chalk::IR::Value) {
     field $value :param :reader;
     field $const_type :param :reader = 'string';
+    field $flags :param :reader = undef;
     method operation() {
         'Constant';
     }
+    method makes_the_same() {
+        return 1;
+    }
+    method staleness_kind() {
+        'opaque';
+    }
     method content_hash() {
-        return join('|', 'Constant', "const_type=$const_type", 'value=' . (defined($value) ? $value : undef));
+        return join('|', 'Constant', "const_type=$const_type", 'value=' . (defined($value) ? $value : 'undef'), defined($flags) ? "flags=$flags" : ());
+    }
+    method const_choices() {
+        return ($const_type // '') =~ /\A(?:string|integer)\z/ ? $value // '' : ();
+    }
+    method makes_a_string() {
+        return ($const_type // '') =~ /\A(?:string|integer)\z/ ? 1 : 0;
+    }
+    method const_pattern() {
+        return ($const_type // '') =~ /\A(?:string|integer)\z/ ? $value // '' : undef;
+    }
+    sub identity_kind {
+        'hash_consed';
     }
 }
