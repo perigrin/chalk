@@ -10,13 +10,17 @@ class Chalk::IR::SubInfo {
     field $scope  :param :reader = 'package';
     field $body   :param :reader = [];
     field $graph  :param :reader = undef;
+    # Did the source declare a signature? `sub f { }` takes any arguments in
+    # @_; `sub f() { }` takes none. Both have no params, so params cannot say.
+    field $has_signature :param :reader = true;
 
     # Content-based ID for use in NodeFactory hash-cons keys.
     # SubInfo objects are not hash-consed themselves, but may appear as
     # inputs inside hash-consed Constructor nodes (e.g., ClassDecl body).
     method id() {
         my $params_str = join(',', map { defined $_ ? "$_" : 'undef' } $params->@*);
-        return "SubInfo:$name:[$params_str]:$scope";
+        my $sig = $has_signature ? "[$params_str]" : 'implicit';
+        return "SubInfo:$name:$sig:$scope";
     }
 
     # No-op: SubInfo does not participate in the use-def chain.

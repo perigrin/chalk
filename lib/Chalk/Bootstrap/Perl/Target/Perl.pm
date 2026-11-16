@@ -253,7 +253,12 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if grep { blessed($_) && $_ isa Chalk::IR::UseInfo } ( $sub->can('body') ? $sub->body : [] )->@*;
         my $name   = $sub->name;
         my $params = $sub->params;
-        my $sig    = '(' . join(', ', $params->@*) . ')';
+        # A sub without a signature takes any arguments in @_; `()` would
+        # make it take none. The MOP says so with the wire's `implicit` record.
+        my $declared = $sub->signature;
+        my $sig = defined $declared && ($declared->{kind} // '') eq 'implicit'
+            ? ''
+            : '(' . join(', ', $params->@*) . ')';
 
         my $prefix = 'sub';
 
@@ -890,7 +895,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        my $sig = '(' . join(', ', $params->@*) . ')';
+        my $sig = $node->has_signature ? '(' . join(', ', $params->@*) . ')' : '';
         my $prefix = $scope eq 'package' ? 'sub' : "$scope sub";
         # Scope aggregate vars: params shadow class-scope aggregate names
         my %saved = %_aggregate_vars;

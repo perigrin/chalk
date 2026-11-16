@@ -211,6 +211,22 @@ class Chalk::Bootstrap::Perl::Actions {
         return $factory->make('Constant', const_type => 'string', value => $value);
     }
 
+    # The MOP::Sub `signature` option for a parsed sub. A sub without a
+    # signature gets the record the producer's wire gives one (B::SoN
+    # _cv_signature): `implicit`, one slurpy @_. A declared signature's
+    # record (its mandatory/optional counts) is not built by this parser,
+    # so none is passed and its `params` stand for it.
+    my sub _signature_opt($sub_info) {
+        return () if $sub_info->has_signature;
+        return (signature => {
+            kind      => 'implicit',
+            mandatory => 0,
+            optional  => 0,
+            slurpy    => '@',
+            params    => [ { index => 0, name => '@_', sigil => '@' } ],
+        });
+    }
+
     # Helper: extract statement arrayref from a Block focus.
     # Block's new (Phase 3a-migration) focus is a hashref { stmts, graph, type }.
     # Legacy callers received an arrayref; this helper normalizes both shapes
@@ -331,6 +347,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 for my $sub (@top_level_subs) {
                     $main->declare_sub($sub->name(),
                         params => $sub->params(),
+                        _signature_opt($sub),
                         graph  => Chalk::IR::Graph->new,   # (its body: the MOP makes none)
                     );
                 }
@@ -802,6 +819,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 } elsif ($item isa Chalk::IR::SubInfo) {
                     $mop_class->declare_sub($item->name(),
                         params => $item->params(),
+                        _signature_opt($item),
                         body   => $item->body(),
                         # (its body: the parser's graph, else an empty one -- the MOP makes none)
                         graph => $item->graph() // Chalk::IR::Graph->new,
@@ -958,6 +976,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my @leaves = _collect_ir_leaves($ctx);
         my $sub_name;
         my @params;
+        my $has_signature = false;
         my @body;
         my $scope = 'package';  # default for bare `sub`
         my $body_graph;
@@ -996,6 +1015,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 if (defined $rule && ($rule eq 'Signature'
                         || $rule eq 'SignatureParams')) {
                     @params = $focus->@*;
+                    $has_signature = true;
                 } else {
                     if (!@body) {
                         @body = $focus->@*;
@@ -1015,11 +1035,12 @@ class Chalk::Bootstrap::Perl::Actions {
         my $graph = $self->_finalize_body_graph($ctx, $fixed_body, $body_graph);
 
         return Chalk::IR::SubInfo->new(
-            name   => $sub_name_val,
-            params => \@param_strs,
-            body   => $fixed_body,
-            scope  => $scope,
-            graph  => $graph,
+            name          => $sub_name_val,
+            params        => \@param_strs,
+            body          => $fixed_body,
+            scope         => $scope,
+            graph         => $graph,
+            has_signature => $has_signature,
         );
     }
 
