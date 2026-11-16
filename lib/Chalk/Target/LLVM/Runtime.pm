@@ -9,8 +9,7 @@ package Chalk::Target::LLVM::Runtime;
 # (0 undef, 1 Int -- an IV, 2 Num -- an NV, 3 Str, 4 a UV past IV_MAX; 5 and
 # up references and the runtime's own) and an i64 payload (an IV's or a UV's
 # bits, a Num's bits, a Str's heap pointer). Numbers print as perl prints them: %.15g, Inf, -Inf, NaN.
-sub prelude { return <<'LL' }
-%Str = type { i8*, i64 }
+sub prelude { return '%Str = type { i8*, i64 }
 %Slot = type { i8, i64 }
 declare i32 @snprintf(i8*, i64, i8*, ...)
 declare i8* @malloc(i64)
@@ -74,7 +73,7 @@ define internal void @t2_frame_pop() {
   %z = call %Slot @t2_apop_d(%Array* %a)
   ret void
 }
-; t2_frame_at(n) -> the index of frame n's package (n up from the innermost), or -1.
+; t2_frame_at(n) -> the index of frame n\'s package (n up from the innermost), or -1.
 define internal i64 @t2_frame_at(i64 %n) {
   %a = call %Array* @t2_frames_get()
   %len = call i64 @t2_alen_d(%Array* %a)
@@ -117,7 +116,7 @@ some:
 none:
   ret %Slot zeroinitializer
 }
-; substr(s, off[, len]): perl's translate_substr_offsets (pp.c), in signed ints --
+; substr(s, off[, len]): perl\'s translate_substr_offsets (pp.c), in signed ints --
 ; a negative offset counts from the end (still before it: clamped, unless the
 ; end is too). The bytes copied, NUL-ended. OUTSIDE THE STRING perl answers
 ; undef with a warning under `use warnings`, which T2 does not know: stopped
@@ -247,8 +246,8 @@ found:
 none:
   ret i64 -1
 }
-; END BLOCKS: the program's, in the order they run (t2_atexit adds one);
-; t2_run_ends runs them once, at every way out -- the main line's end, an
+; END BLOCKS: the program\'s, in the order they run (t2_atexit adds one);
+; t2_run_ends runs them once, at every way out -- the main line\'s end, an
 ; exit, a die (atexit(3) is not run by lli for an exit the program calls).
 @t2_ends = internal global [64 x void ()*] zeroinitializer
 @t2_nends = internal global i64 0
@@ -363,7 +362,7 @@ define internal i64 @t2_str_i64(%Str %s) {
 }
 declare i64 @strtoll(i8*, i8**, i32)
 declare i64 @strtoull(i8*, i8**, i32)
-; A STRING'S NUMBER, perl's way: its leading integer kept whole (strtoll)
+; A STRING\'S NUMBER, perl\'s way: its leading integer kept whole (strtoll)
 ; unless a fraction or exponent follows, else its double.
 define internal %Slot @t2_str_numslot(%Str %s) {
 entry:
@@ -393,11 +392,11 @@ after:
 edged:
   br i1 %edge, label %clamped, label %int
 clamped:
-  ; strtoll's IV_MAX or IV_MIN is the string's or where it clamped one past:
-  ; strtoull reads the same digits, and agrees only on the string's own
-  ; ("9223372036854775807" is an Int, as perl's; through a double it was
-  ; 9.22337203685478e+18). Past IV_MAX and within UV_MAX perl's is a UV
-  ; (grok_number's IS_NUMBER_IN_UV); below IV_MIN, or past UV_MAX, a Num.
+  ; strtoll\'s IV_MAX or IV_MIN is the string\'s or where it clamped one past:
+  ; strtoull reads the same digits, and agrees only on the string\'s own
+  ; ("9223372036854775807" is an Int, as perl\'s; through a double it was
+  ; 9.22337203685478e+18). Past IV_MAX and within UV_MAX perl\'s is a UV
+  ; (grok_number\'s IS_NUMBER_IN_UV); below IV_MIN, or past UV_MAX, a Num.
   %ue = alloca i8*
   call void @t2_set_errno(i32 0)
   %u = call i64 @strtoull(i8* %buf, i8** %ue, i32 10)
@@ -406,7 +405,7 @@ clamped:
 past:
   br i1 %min, label %num, label %uvq
 uvq:
-  ; (strtoull says ERANGE past UV_MAX; within it, its value is the string's)
+  ; (strtoull says ERANGE past UV_MAX; within it, its value is the string\'s)
   %er = call i32 @t2_errno()
   %range = icmp eq i32 %er, 34
   br i1 %range, label %num, label %uv
@@ -444,7 +443,7 @@ undef:
   %z = call %Slot @t2_box_i64(i64 0)
   ret %Slot %z
 ref:
-  ; A REFERENCE AS A NUMBER is its address (perl's refaddr): == compares them.
+  ; A REFERENCE AS A NUMBER is its address (perl\'s refaddr): == compares them.
   %ra = extractvalue %Slot %s, 1
   %rs = call %Slot @t2_box_i64(i64 %ra)
   ret %Slot %rs
@@ -468,7 +467,7 @@ define internal %Slot @t2_box_i64(i64 %v) {
   %s = call %Slot @t2_slot(i8 1, i64 %v)
   ret %Slot %s
 }
-; PERL'S THREE NUMERIC FORMS (sv.h): an IV (tag 1), a UV (tag 4) -- an integer
+; PERL\'S THREE NUMERIC FORMS (sv.h): an IV (tag 1), a UV (tag 4) -- an integer
 ; past IV_MAX, up to UV_MAX, its payload the unsigned bits -- and an NV (tag
 ; 2). A UV is only ever past IV_MAX: an unsigned result within IV_MAX is boxed
 ; an IV, so one value has one form here.
@@ -498,7 +497,7 @@ define internal %Str @t2_u64_str(i64 %v) {
   %r = call %Str @t2_str(i8* %buf, i64 %n)
   ret %Str %r
 }
-; t2_nv_please(d) -> an NV as perl's integer ops read it (SvIV_please,
+; t2_nv_please(d) -> an NV as perl\'s integer ops read it (SvIV_please,
 ; lossless_NV_to_IV): a whole number below 2**53 in size is an IV; any other
 ; stays an NV (past 2**53 its low bits are already lost).
 declare double @llvm.fabs.f64(double)
@@ -518,9 +517,9 @@ nv:
   %sn = call %Slot @t2_box_num(double %d)
   ret %Slot %sn
 }
-; t2_str_dotted(s) -> s's number has a decimal point and no exponent
-; ("1.0", "12.5"): grok_number's IS_NUMBER_IN_UV with IS_NUMBER_NOT_INT, an
-; NV perl's integer ops never read as an integer -- where "1e15" is one.
+; t2_str_dotted(s) -> s\'s number has a decimal point and no exponent
+; ("1.0", "12.5"): grok_number\'s IS_NUMBER_IN_UV with IS_NUMBER_NOT_INT, an
+; NV perl\'s integer ops never read as an integer -- where "1e15" is one.
 define internal i1 @t2_str_dotted(%Str %s) {
 entry:
   %p = extractvalue %Str %s, 0
@@ -588,9 +587,9 @@ yes:
 no:
   ret i1 0
 }
-; t2_arith_num(x) -> x as perl's numeric ops read it (SvIV_please_nomg): an
+; t2_arith_num(x) -> x as perl\'s numeric ops read it (SvIV_please_nomg): an
 ; integer -- an IV (tag 1) or a UV (tag 4) -- where it is one, else an NV (tag
-; 2). An NV a whole number below 2**53 is an integer; a string's own integer
+; 2). An NV a whole number below 2**53 is an integer; a string\'s own integer
 ; is (an IV or a UV, read whole), and so is its number where that is a whole
 ; one below 2**53 ("1e15") but has no decimal point ("1.0" stays an NV);
 ; undef is 0, a reference its address.
@@ -642,8 +641,8 @@ define internal i128 @t2_wide(%Slot %x) {
 }
 ; t2_int_or_nv(r, negexact) -> the exact integer r as perl keeps it: an IV
 ; or a UV within [IV_MIN, UV_MAX]; below IV_MIN with its size within UV_MAX,
-; where negexact (pp_add's, pp_subtract's), -(NV)|r|; else undef (tag 0):
-; perl's NV of its operands' NVs is the caller's to make.
+; where negexact (pp_add\'s, pp_subtract\'s), -(NV)|r|; else undef (tag 0):
+; perl\'s NV of its operands\' NVs is the caller\'s to make.
 define internal %Slot @t2_int_or_nv(i128 %r, i1 %negexact) {
 entry:
   %lo = icmp sge i128 %r, -9223372036854775808
@@ -672,8 +671,8 @@ nv:
 none:
   ret %Slot zeroinitializer
 }
-; t2_cast_iv(d) / t2_cast_uv(d): an NV's integer as perl's SvIV and SvUV
-; read it (cast_iv, cast_uv): truncated; past IV_MAX the UV's bits (so SvIV
+; t2_cast_iv(d) / t2_cast_uv(d): an NV\'s integer as perl\'s SvIV and SvUV
+; read it (cast_iv, cast_uv): truncated; past IV_MAX the UV\'s bits (so SvIV
 ; of 1e20 is -1), below IV_MIN IV_MIN, past UV_MAX UV_MAX, NaN 0.
 define internal i64 @t2_cast_iv(double %d) {
 entry:
@@ -698,14 +697,14 @@ top:
   %r = select i1 %pos, i64 -1, i64 0
   ret i64 %r
 }
-; (cast_uv's bits are cast_iv's: below 0 it is (UV)(IV)d, past UV_MAX UV_MAX)
+; (cast_uv\'s bits are cast_iv\'s: below 0 it is (UV)(IV)d, past UV_MAX UV_MAX)
 define internal i64 @t2_cast_uv(double %d) {
   %u = call i64 @t2_cast_iv(double %d)
   ret i64 %u
 }
 ; t2_cstr(s): s as a NUL-terminated C string (a copy).
-; t2_ftdir(path): perl's -d -- 1 a directory, '' something else, undef nothing.
-; t2_chdir(path): perl's chdir -- 1, or ''.
+; t2_ftdir(path): perl\'s -d -- 1 a directory, \'\' something else, undef nothing.
+; t2_chdir(path): perl\'s chdir -- 1, or \'\'.
 declare i8* @opendir(i8*)
 declare i32 @closedir(i8*)
 declare i32 @access(i8*, i32)
@@ -757,7 +756,7 @@ no:
   ret %Slot %es
 }
 @t2_empty = private unnamed_addr constant [1 x i8] c"\00"
-; t2_slot_int(x) / t2_slot_rand(x): perl's int and rand of a slot.
+; t2_slot_int(x) / t2_slot_rand(x): perl\'s int and rand of a slot.
 declare double @llvm.trunc.f64(double)
 declare i32 @rand()
 ; (pp_int: an integer -- an NV or a string perl reads as one too -- is
@@ -806,7 +805,7 @@ nf:
   %sc = call %Slot @t2_box_num(double %ce)
   ret %Slot %sc
 }
-; t2_slot_abs(x): perl's abs (pp_abs) -- of an integer (an NV or a string
+; t2_slot_abs(x): perl\'s abs (pp_abs) -- of an integer (an NV or a string
 ; perl reads as one too) its size, an IV or a UV (abs(IV_MIN) is a UV); of
 ; any other NV its fabs; undef 0.
 define internal %Slot @t2_slot_abs(%Slot %s) {
@@ -899,7 +898,7 @@ die:
   call void @t2_die_unwind(%Str %m)
   ret i64 0
 ok:
-  ; (IV_MIN % -1 is 0, as perl's: srem would overflow)
+  ; (IV_MIN % -1 is 0, as perl\'s: srem would overflow)
   %m1 = icmp eq i64 %y, -1
   %y1 = select i1 %m1, i64 1, i64 %y
   %r = srem i64 %x, %y1
@@ -912,9 +911,9 @@ ok:
   %res = select i1 %fix, i64 %r2, i64 %r
   ret i64 %res
 }
-; t2_slot_mod(x, y, msg, n): perl's % (pp_modulo) on what the operands hold:
+; t2_slot_mod(x, y, msg, n): perl\'s % (pp_modulo) on what the operands hold:
 ; integers (an IV, a UV, an NV that is one below 2**64 truncated) by their
-; sizes in UVs, the result's sign the right side's -- a UV where it is past
+; sizes in UVs, the result\'s sign the right side\'s -- a UV where it is past
 ; IV_MAX; a right side past UV_MAX in size, or a left one where the right
 ; is not, by fmod. Zero dies, naming where.
 declare double @fmod(double, double)
@@ -1001,7 +1000,7 @@ dbl_l:
   %dr = select i1 %Rvalid, double %rf, double %ru
   br label %dbl
 dbl_r:
-  ; (the right past UV_MAX: the left's NV as it is)
+  ; (the right past UV_MAX: the left\'s NV as it is)
   %xa = call double @t2_slot_num(%Slot %x0)
   %xan = fcmp olt double %xa, 0.0
   %xaa = call double @llvm.fabs.f64(double %xa)
@@ -1029,9 +1028,9 @@ die:
   call void @t2_die_unwind(%Str %m)
   ret %Slot zeroinitializer
 }
-; t2_slot_div(x, y, msg, n): perl's / (pp_divide): two integers' exact
+; t2_slot_div(x, y, msg, n): perl\'s / (pp_divide): two integers\' exact
 ; quotient where the left is past 2**53 in size (where an NV would lose it)
-; -- an IV or a UV, or an NV where it is below IV_MIN -- else the NVs'
+; -- an IV or a UV, or an NV where it is below IV_MIN -- else the NVs\'
 ; quotient. Zero dies, naming where.
 define internal %Slot @t2_slot_div(%Slot %x0, %Slot %y0, i8* %msg, i64 %n) {
 entry:
@@ -1084,7 +1083,7 @@ die:
   call void @t2_die_unwind(%Str %m)
   ret %Slot zeroinitializer
 }
-; PERL'S ++ AND --. A string of letters then digits, starting with a letter,
+; PERL\'S ++ AND --. A string of letters then digits, starting with a letter,
 ; increments by magic ("az" -> "ba", "Zz" -> "AAa", "a9" -> "b0"); any other
 ; string, and -- always, go by its number -- an Int when it is a whole one.
 define internal i1 @t2_is_magic(%Str %s) {
@@ -1096,7 +1095,7 @@ entry:
 first:
   %c0 = load i8, i8* %p
   %l0 = call i1 @t2_is_letter(i8 %c0)
-  ; (perl's /^[a-zA-Z]*[0-9]*$/: no letters at all is magic too -- "007"++ is "008")
+  ; (perl\'s /^[a-zA-Z]*[0-9]*$/: no letters at all is magic too -- "007"++ is "008")
   %g0 = icmp uge i8 %c0, 48
   %e0 = icmp ule i8 %c0, 57
   %d0 = and i1 %g0, %e0
@@ -1173,18 +1172,18 @@ carry:
   %done = icmp slt i64 %im1, 0
   br i1 %done, label %grow, label %loop
 grow:
-  ; carried off the front: a new first character of the first's kind
+  ; carried off the front: a new first character of the first\'s kind
   %f = load i8, i8* %dst
   %fA = icmp eq i8 %f, 65
   %f0 = icmp eq i8 %f, 48
   %lead0 = select i1 %fA, i8 65, i8 97
-  %lead = select i1 %f0, i8 49, i8 %lead0   ; (a digit's is 1: "99"++ is "100")
+  %lead = select i1 %f0, i8 49, i8 %lead0   ; (a digit\'s is 1: "99"++ is "100")
   store i8 %lead, i8* %buf
   %n2 = add i64 %n, 1
   %g = call %Str @t2_str(i8* %buf, i64 %n2)
   ret %Str %g
 }
-; (perl's ++ and -- (sv.c's inc and dec): a value perl reads as an integer
+; (perl\'s ++ and -- (sv.c\'s inc and dec): a value perl reads as an integer
 ; steps as one -- IV_MAX ++ is a UV, UV_MAX ++ the NV 2**64, IV_MIN -- an
 ; NV; anything else its NV)
 define internal %Slot @t2_slot_step(%Slot %s, i64 %by, i1 %magic) {
@@ -1270,8 +1269,8 @@ ref:
   %da = sitofp i64 %v to double
   ret double %da
 }
-; t2_slot_i64(s) -> perl's SvIV of s: an IV's own; a UV's bits (SvIV of
-; 9223372036854775808 is IV_MIN, as perl's); an NV's cast_iv; a string's
+; t2_slot_i64(s) -> perl\'s SvIV of s: an IV\'s own; a UV\'s bits (SvIV of
+; 9223372036854775808 is IV_MIN, as perl\'s); an NV\'s cast_iv; a string\'s
 ; integer read whole.
 define internal i64 @t2_slot_i64(%Slot %s0) {
 entry:
@@ -1288,11 +1287,11 @@ nv:
   ret i64 %i
 }
 declare { i64, i1 } @llvm.umul.with.overflow.i64(i64, i64)
-; PERL'S ARITHMETIC ON TWO SCALARS (pp_add, pp_subtract, pp_multiply): each
+; PERL\'S ARITHMETIC ON TWO SCALARS (pp_add, pp_subtract, pp_multiply): each
 ; operand read as an integer where perl reads one (t2_arith_num); two
 ; integers give the exact result while it fits an IV or a UV -- a sum or a
-; difference below IV_MIN, within UV_MAX in size, is that size's NV, negated
-; -- else, as for anything else, the operands' NVs' result.
+; difference below IV_MIN, within UV_MAX in size, is that size\'s NV, negated
+; -- else, as for anything else, the operands\' NVs\' result.
 define internal %Slot @t2_slot_add(%Slot %x0, %Slot %y0) {
 entry:
   %x = call %Slot @t2_arith_num(%Slot %x0)
@@ -1347,8 +1346,8 @@ nums:
   %sn = call %Slot @t2_box_num(double %d)
   ret %Slot %sn
 }
-; -x, perl's (pp_negate): an integer's negation (-IV_MIN is a UV, - of a UV
-; past 2**63 an NV), an NV's (-0.0 prints 0); a string that begins with a
+; -x, perl\'s (pp_negate): an integer\'s negation (-IV_MIN is a UV, - of a UV
+; past 2**63 an NV), an NV\'s (-0.0 prints 0); a string that begins with a
 ; letter or _ gets a "-", one with a "+" (or a lone "-") its sign turned;
 ; "-" then a digit or "." is a number, read as an integer where perl reads
 ; one. "-" then anything else hangs on whether perl reads it as a number
@@ -1448,7 +1447,7 @@ define internal %Slot @t2_kind_of_ref(%Slot %x) {
   %b = call %Slot @t2_box_str(%Str %s)
   ret %Slot %b
 }
-; (a product past what an IV or a UV holds is its operands' NVs' product, either sign)
+; (a product past what an IV or a UV holds is its operands\' NVs\' product, either sign)
 define internal %Slot @t2_slot_mul(%Slot %x0, %Slot %y0) {
 entry:
   %x = call %Slot @t2_arith_num(%Slot %x0)
@@ -1512,7 +1511,7 @@ ref:
 }
 @fmt_ref = private unnamed_addr constant [12 x i8] c"%.*s(0x%lx)\00"
 @lit_eqhash = private unnamed_addr constant [6 x i8] c"=HASH\00"
-; t2_ref_str(r) -> perl's string of a reference: HASH(0x...), ARRAY(0x...),
+; t2_ref_str(r) -> perl\'s string of a reference: HASH(0x...), ARRAY(0x...),
 ; or Class=HASH(0x...) for an object.
 define internal %Str @t2_ref_str(%Slot %s) {
 entry:
@@ -1556,7 +1555,7 @@ fmt:
 }
 
 ; %Array: { len, cap, elements } -- a `my @a`, its elements %Slot.
-; (field 4: the class a bless gave it, undef until -- an array's or a hash's)
+; (field 4: the class a bless gave it, undef until -- an array\'s or a hash\'s)
 %Array = type { i64, i64, %Slot*, %Meta*, %Slot }
 declare i8* @realloc(i8*, i64)
 declare i8* @memmove(i8*, i8*, i64)
@@ -1605,7 +1604,7 @@ loop:
   br i1 %more, label %body, label %done
 body:
   %p = getelementptr %Slot, %Slot* %els, i64 %i
-  store %Slot { i8 0, i64 1 }, %Slot* %p   ; (absent: perl's hole)
+  store %Slot { i8 0, i64 1 }, %Slot* %p   ; (absent: perl\'s hole)
   %i1 = add i64 %i, 1
   br label %loop
 done:
@@ -1706,9 +1705,9 @@ look:
 no:
   ret i1 false
 }
-; A TIED ARRAY'S are its class's EXISTS and STORESIZE (n + 1); a negative
-; index counts back from its FETCHSIZE, as perl's does. Both are reached through
-; the container's metaobject (slots 18 and 19).
+; A TIED ARRAY\'S are its class\'s EXISTS and STORESIZE (n + 1); a negative
+; index counts back from its FETCHSIZE, as perl\'s does. Both are reached through
+; the container\'s metaobject (slots 18 and 19).
 @lit_tm_storesize = private unnamed_addr constant [10 x i8] c"STORESIZE\00"
 define internal i1 @t2_tie_aexists(%Array* %a, i64 %i) {
 entry:
@@ -1917,8 +1916,8 @@ ref:
   ret i1 1
 }
 ; A HASH REFERENCE is a %Slot of tag 5 whose payload is an %Array of its
-; pairs, key (a boxed Str) then value, in insertion order (perl's own order
-; is not promised; keys/each are not this slice's).
+; pairs, key (a boxed Str) then value, in insertion order (perl\'s own order
+; is not promised; keys/each are not this slice\'s).
 declare i32 @memcmp(i8*, i8*, i64)
 @msg_notahash = private unnamed_addr constant [75 x i8] c"chalk: refused at run time: a hash element read through no HASH reference\0A\00"
 @lit_hash = private unnamed_addr constant [5 x i8] c"HASH\00"
@@ -1948,7 +1947,7 @@ define internal void @t2_refscalar() {
   call void @t2_stop(i8* getelementptr ([62 x i8], [62 x i8]* @msg_refstr, i64 0, i64 0), i64 61)
   unreachable
 }
-; A HASH'S %Array: element 0 is the class a bless gave it (undef until),
+; A HASH\'S %Array: element 0 is the class a bless gave it (undef until),
 ; then key, value pairs.
 define internal %Slot @t2_hnew() {
   %a = call %Array* @t2_new_array()
@@ -1970,7 +1969,7 @@ yes:
   %a = inttoptr i64 %v to %Array*
   ret %Array* %a
 }
-; t2_hfind(a, k) -> the index of k's key slot, or -1.
+; t2_hfind(a, k) -> the index of k\'s key slot, or -1.
 define internal i64 @t2_hfind(%Array* %a, %Str %k) {
 entry:
   %n = call i64 @t2_alen(%Array* %a)
@@ -2058,7 +2057,7 @@ table:
 none:
   ret %Slot zeroinitializer
 }
-; A SCALAR OR CODE REFERENCE'S CLASS: no header to hold it, so a table keyed
+; A SCALAR OR CODE REFERENCE\'S CLASS: no header to hold it, so a table keyed
 ; by its address (t2_addr_key).
 @t2_blessings = internal global %Slot zeroinitializer
 define internal %Str @t2_addr_key(%Slot %s) {
@@ -2068,20 +2067,20 @@ define internal %Str @t2_addr_key(%Slot %s) {
   ret %Str %k
 }
 ; A SCALAR REFERENCE (`\$x`) is a %Slot of tag 9 whose payload is the
-; variable's heap cell.
+; variable\'s heap cell.
 define internal %Slot @t2_sref(%Slot* %c) {
   %i = ptrtoint %Slot* %c to i64
   %s = call %Slot @t2_slot(i8 9, i64 %i)
   ret %Slot %s
 }
-@lit_sc_undef = private unnamed_addr constant [51 x i8] c"Can't use an undefined value as a SCALAR reference\00"
+@lit_sc_undef = private unnamed_addr constant [51 x i8] c"Can\'t use an undefined value as a SCALAR reference\00"
 @lit_sc_not = private unnamed_addr constant [23 x i8] c"Not a SCALAR reference\00"
-@lit_sc_str0 = private unnamed_addr constant [20 x i8] c"Can't use string (\22\00"
+@lit_sc_str0 = private unnamed_addr constant [20 x i8] c"Can\'t use string (\22\00"
 @lit_sc_str1 = private unnamed_addr constant [46 x i8] c"\22) as a SCALAR ref while \22strict refs\22 in use\00"
 @lit_sc_more = private unnamed_addr constant [5 x i8] c"\22...\00"
 @msg_symref = private unnamed_addr constant [65 x i8] c"chalk: refused at run time: a string as a reference (no strict)\0A\00"
 ; t2_sderef_cell(r, strict, at, n) -> the cell r refers to; null after
-; perl's die (what r is named), a stop for a name without strict refs.
+; perl\'s die (what r is named), a stop for a name without strict refs.
 define internal %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n, i8* %pk, i64 %pkn) {
 entry:
   %t = extractvalue %Slot %r, 0
@@ -2137,9 +2136,9 @@ die:
 none:
   ret %Slot* null
 }
-; THE PROGRAM'S PACKAGE SCALARS BY NAME ("main::x" -> a SCALAR reference to its
+; THE PROGRAM\'S PACKAGE SCALARS BY NAME ("main::x" -> a SCALAR reference to its
 ; global), for a string used as a reference without strict refs; one no one
-; named is made on first use, as perl's. t2_symtab_init (the printer's) fills it.
+; named is made on first use, as perl\'s. t2_symtab_init (the printer\'s) fills it.
 @t2_symtab = internal global %Slot zeroinitializer
 @t2_symtab_ready = internal global i1 0
 @lit_colons = private unnamed_addr constant [3 x i8] c"::\00"
@@ -2261,7 +2260,7 @@ st:
 done:
   ret void
 }
-; t2_reftype(s) -> perl's ref(): an object's class, HASH, or "" for no reference.
+; t2_reftype(s) -> perl\'s ref(): an object\'s class, HASH, or "" for no reference.
 define internal %Str @t2_reftype(%Slot %s) {
 entry:
   %c = call %Slot @t2_class_of(%Slot %s)
@@ -2302,11 +2301,11 @@ none:
 }
 @t2_stashes = internal global %Slot zeroinitializer
 @lit_isa = private unnamed_addr constant [5 x i8] c"@ISA\00"
-@lit_cm = private unnamed_addr constant [20 x i8] c"Can't call method \22\00"
+@lit_cm = private unnamed_addr constant [20 x i8] c"Can\'t call method \22\00"
 @lit_undefv = private unnamed_addr constant [24 x i8] c"\22 on an undefined value\00"
 @lit_unbl = private unnamed_addr constant [25 x i8] c"\22 on unblessed reference\00"
 @lit_nopkg = private unnamed_addr constant [40 x i8] c"\22 without a package or object reference\00"
-@lit_lom = private unnamed_addr constant [29 x i8] c"Can't locate object method \22\00"
+@lit_lom = private unnamed_addr constant [29 x i8] c"Can\'t locate object method \22\00"
 @lit_via = private unnamed_addr constant [16 x i8] c"\22 via package \22\00"
 @lit_q = private unnamed_addr constant [2 x i8] c"\22\00"
 @lit_forgot = private unnamed_addr constant [32 x i8] c"\22 (perhaps you forgot to load \22\00"
@@ -2325,14 +2324,14 @@ make:
 have:
   ret %Slot %t
 }
-@t2_want = internal global i1 0   ; the caller's context: 1 a list
+@t2_want = internal global i1 0   ; the caller\'s context: 1 a list
 @t2_argc = internal global i32 0
 @t2_argvp = internal global i8** null
 @t2_ARGV = internal global %Array* null
 define internal void @t2_save_args(i32 %c, i8** %v) {
   store i32 %c, i32* @t2_argc
   store i8** %v, i8*** @t2_argvp
-  ; perl's $@ starts "" (defined)
+  ; perl\'s $@ starts "" (defined)
   %e = call %Str @t2_str(i8* null, i64 0)
   %es = call %Slot @t2_box_str(%Str %e)
   store %Slot %es, %Slot* @t2_err
@@ -2375,7 +2374,7 @@ define internal %Slot @t2_aref(%Array* %a) {
   ret %Slot %s
 }
 ; t2_aderef_r(s) -> for an element read through it: the array s refers to; an
-; undef s reads as an empty one (perl's makes it), anything else stops.
+; undef s reads as an empty one (perl\'s makes it), anything else stops.
 define internal %Array* @t2_aderef_r(%Slot %s) {
 entry:
   %t = extractvalue %Slot %s, 0
@@ -2403,12 +2402,12 @@ yes:
 }
 ; t2_aderef_whole(s, strict, at, n) -> for the WHOLE array read through s
 ; where B::SoN says perl may die (`@$x > 0`, `"@$x"`, `my @c = @$x`): the
-; array s refers to; an undef s dies under strict refs ("Can't use an
+; array s refers to; an undef s dies under strict refs ("Can\'t use an
 ; undefined value as an ARRAY reference at FILE line N.") and reads as an
 ; empty one without (perl leaves it undef); another reference dies ("Not an
 ; ARRAY reference"); a string dies under strict refs, and without it names a
 ; package array: a stop. After a die an eval catches, an empty array.
-@lit_av_undef = private unnamed_addr constant [51 x i8] c"Can't use an undefined value as an ARRAY reference\00"
+@lit_av_undef = private unnamed_addr constant [51 x i8] c"Can\'t use an undefined value as an ARRAY reference\00"
 @lit_av_not = private unnamed_addr constant [23 x i8] c"Not an ARRAY reference\00"
 @lit_av_str1 = private unnamed_addr constant [46 x i8] c"\22) as an ARRAY ref while \22strict refs\22 in use\00"
 define internal %Array* @t2_aderef_whole(%Slot %s, i1 %strict, i8* %at, i64 %n) {
@@ -2466,12 +2465,12 @@ die:
 }
 ; t2_hderef_whole(s, strict, at, n) -> for the WHOLE hash read through s
 ; where B::SoN says perl may die (`my %c = %$h`, `%$h ? 1 : 0`): s, a hash
-; reference; an undef s dies under strict refs ("Can't use an undefined value
+; reference; an undef s dies under strict refs ("Can\'t use an undefined value
 ; as a HASH reference at FILE line N.") and is read as an empty one without;
 ; another reference dies ("Not a HASH reference"); a string dies under strict
 ; refs, and without it names a package hash: a stop. After a die an eval
 ; catches, undef.
-@lit_hv_undef = private unnamed_addr constant [49 x i8] c"Can't use an undefined value as a HASH reference\00"
+@lit_hv_undef = private unnamed_addr constant [49 x i8] c"Can\'t use an undefined value as a HASH reference\00"
 @lit_hv_not = private unnamed_addr constant [21 x i8] c"Not a HASH reference\00"
 @lit_hv_str1 = private unnamed_addr constant [44 x i8] c"\22) as a HASH ref while \22strict refs\22 in use\00"
 define internal %Slot @t2_hderef_whole(%Slot %s, i1 %strict, i8* %at, i64 %n) {
@@ -2523,7 +2522,7 @@ die:
   ret %Slot zeroinitializer
 }
 @msg_oneof = private unnamed_addr constant [88 x i8] c"chalk: refused at run time: a list of other than one value passed as one argument (T2)\0A\00"
-; t2_one_of(a) -> a's one element; a stop when it has another number.
+; t2_one_of(a) -> a\'s one element; a stop when it has another number.
 define internal %Slot @t2_one_of(%Array* %a) {
 entry:
   %n = call i64 @t2_alen(%Array* %a)
@@ -2548,9 +2547,9 @@ list:
 one:
   ret %Slot %v
 }
-; CLOSURES: a captured variable's storage on the heap; a code value (tag 8)
+; CLOSURES: a captured variable\'s storage on the heap; a code value (tag 8)
 ; points at {its function, its cells}.
-; A LITERAL'S CELL, READ-ONLY (`\0`, `\"x"`: perl's reference is to the
+; A LITERAL\'S CELL, READ-ONLY (`\0`, `\"x"`: perl\'s reference is to the
 ; constant itself, one per site): one of a pool, a store through which dies.
 @t2_ro_pool = internal global [256 x %Slot] zeroinitializer
 define internal i1 @t2_is_ro(%Slot* %c) {
@@ -2622,7 +2621,7 @@ define internal %Slot** @t2_code_env(%Slot %s) {
   %e = load %Slot**, %Slot*** %pe
   ret %Slot** %e
 }
-; t2_die(msg, at): perl's uncaught die -- the message to STDERR, `at` (" at
+; t2_die(msg, at): perl\'s uncaught die -- the message to STDERR, `at` (" at
 ; FILE line N.\n") after it unless it ends in a newline; exit 255.
 @lit_died = private unnamed_addr constant [5 x i8] c"Died\00"
 define internal %Str @t2_die_msg(%Str %m, %Str %at) {
@@ -2648,7 +2647,7 @@ addat:
 done:
   ret %Str %m
 }
-; t2_die(msg): the __DIE__ handler first (t2_die_hook), then perl's uncaught die.
+; t2_die(msg): the __DIE__ handler first (t2_die_hook), then perl\'s uncaught die.
 define internal void @t2_die(%Str %m0) {
   %m = call %Str @t2_die_hook(%Str %m0)
   call void @t2_die_raw(%Str %m)
@@ -2698,8 +2697,8 @@ exit:
   call void @t2_die_raw(%Str %m)
   unreachable
 }
-; THE HANDLER TABLE (%SIG): @t2_sig holds %SIG's hash where the program uses
-; %SIG -- its metaobject Chalk::Impl::SIG's instance, which holds the
+; THE HANDLER TABLE (%SIG): @t2_sig holds %SIG\'s hash where the program uses
+; %SIG -- its metaobject Chalk::Impl::SIG\'s instance, which holds the
 ; handlers -- else nothing, and no handler is ever set. warn and die ask it.
 @t2_sig = internal global %Slot zeroinitializer
 @t2_hooking = internal global i1 0
@@ -2715,7 +2714,7 @@ define internal void @t2_sig_set(%Slot %h) {
 }
 ; t2_sig_handler(name) -> the code value %SIG holds for name, or undef where
 ; none is set (no %SIG, undef, "", DEFAULT, IGNORE -- which for __WARN__ and
-; __DIE__ is perl's default too). A sub named by a string: a stop.
+; __DIE__ is perl\'s default too). A sub named by a string: a stop.
 define internal %Slot @t2_sig_handler(%Str %k) {
 entry:
   %h = load %Slot, %Slot* @t2_sig
@@ -2764,10 +2763,10 @@ define internal void @t2_call_handler(%Slot %c, %Str %m) {
   store i1 %w, i1* @t2_want
   ret void
 }
-; t2_warn(msg, at) -> 1: perl's warn -- its message (" at FILE line N.\n",
+; t2_warn(msg, at) -> 1: perl\'s warn -- its message (" at FILE line N.\n",
 ; the site B::SoN gives the warn, added where it does not end in a newline)
-; to its __WARN__ handler, else to STDERR. An empty message (perl's is $@'s,
-; or "Warning: something's wrong"): a stop.
+; to its __WARN__ handler, else to STDERR. An empty message (perl\'s is $@\'s,
+; or "Warning: something\'s wrong"): a stop.
 define internal %Slot @t2_warn(%Str %m0, %Str %at) {
 entry:
   %n = extractvalue %Str %m0, 1
@@ -2804,7 +2803,7 @@ done:
   ret %Slot %one
 }
 ; t2_die_hook(msg) -> the message a die dies with: its __DIE__ handler is
-; called with it first (not again while it runs, as perl's); a handler that
+; called with it first (not again while it runs, as perl\'s); a handler that
 ; dies (an eval open: the dying flag) makes its own message the one.
 define internal %Str @t2_die_hook(%Str %m) {
 entry:
@@ -2855,7 +2854,7 @@ body:
 done:
   ret void
 }
-; t2_slot_length(s) -> perl's length of a scalar: undef for undef.
+; t2_slot_length(s) -> perl\'s length of a scalar: undef for undef.
 define internal %Slot @t2_slot_length(%Slot %s) {
 entry:
   %t = extractvalue %Slot %s, 0
@@ -2889,7 +2888,7 @@ loop:
 body:
   %sp = getelementptr i8, i8* %p, i64 %i
   %c = load i8, i8* %sp
-  ; A BYTE PAST ASCII: perl's case of it depends on how it was read -- a stop.
+  ; A BYTE PAST ASCII: perl\'s case of it depends on how it was read -- a stop.
   %high = icmp slt i8 %c, 0
   br i1 %high, label %past, label %ascii
 past:
@@ -2927,7 +2926,7 @@ done:
   %out = call %Str @t2_str(i8* %buf, i64 %n)
   ret %Str %out
 }
-; t2_strcmp(x, y) -> perl's cmp: -1, 0 or 1, bytewise, a prefix first.
+; t2_strcmp(x, y) -> perl\'s cmp: -1, 0 or 1, bytewise, a prefix first.
 define internal i64 @t2_strcmp(%Str %x, %Str %y) {
 entry:
   %xp = extractvalue %Str %x, 0
@@ -2954,7 +2953,7 @@ gt:
 eq:
   ret i64 0
 }
-; t2_stash(c) -> c's stash, made empty if c has none yet.
+; t2_stash(c) -> c\'s stash, made empty if c has none yet.
 define internal %Slot @t2_stash(%Str %c) {
 entry:
   %t = call %Slot @t2_stash_table()
@@ -2969,7 +2968,7 @@ make:
 ok:
   ret %Slot %s
 }
-; t2_mop_isa_arr(class) -> class's @ISA, the array lookup walks; made empty
+; t2_mop_isa_arr(class) -> class\'s @ISA, the array lookup walks; made empty
 ; (and stored) when the class has none yet.
 define internal %Array* @t2_mop_isa_arr(%Str %c) {
 entry:
@@ -3006,7 +3005,7 @@ define internal %Str @t2_isa_key() {
   %k = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_isa, i64 0, i64 0), i64 4)
   ret %Str %k
 }
-; t2_mop_isa(class, parent): push parent onto class's @ISA.
+; t2_mop_isa(class, parent): push parent onto class\'s @ISA.
 define internal void @t2_mop_isa(%Str %c, %Str %p) {
 entry:
   %t = call %Slot @t2_stash_table()
@@ -3038,9 +3037,9 @@ define internal void @t2_mop_def(%Str %c, %Str %m, i8* %f) {
   call void @t2_hset(%Slot %s, %Str %m, %Slot %fs)
   ret void
 }
-; t2_sub_find(package, name, " at FILE line N.\n") -> the code the package's
+; t2_sub_find(package, name, " at FILE line N.\n") -> the code the package\'s
 ; stash holds under name -- a sub stored into the glob at run time (no @ISA:
-; a call by name is no method call) -- or perl's die, "Undefined subroutine
+; a call by name is no method call) -- or perl\'s die, "Undefined subroutine
 ; &package::name called at ...", unwinding (t2_nomethod is called instead).
 @lit_undefsub = private unnamed_addr constant [23 x i8] c"Undefined subroutine &\00"
 @lit_called = private unnamed_addr constant [8 x i8] c" called\00"
@@ -3072,7 +3071,7 @@ none:
   call void @t2_die_unwind(%Str %full)
   ret i8* bitcast (%Slot (%Array*)* @t2_nomethod to i8*)
 }
-; t2_mfind1(class, m, skip) -> m's code in class (unless skip) or, depth first,
+; t2_mfind1(class, m, skip) -> m\'s code in class (unless skip) or, depth first,
 ; its @ISA; null.
 define internal i8* @t2_mfind1(%Str %c, %Str %m, i1 %skip) {
 entry:
@@ -3121,7 +3120,7 @@ next:
 none:
   ret i8* null
 }
-; UNIVERSAL: perl's stash at the root of every method lookup, holding isa,
+; UNIVERSAL: perl\'s stash at the root of every method lookup, holding isa,
 ; can, DOES and VERSION. t2_universal_setup makes it.
 @lit_universal = private unnamed_addr constant [10 x i8] c"UNIVERSAL\00"
 @lit_u_isa = private unnamed_addr constant [4 x i8] c"isa\00"
@@ -3144,7 +3143,7 @@ define internal void @t2_universal_setup() {
   call void @t2_mop_def(%Str %u, %Str %v, i8* bitcast (%Slot (%Array*)* @t2_u_version_w to i8*))
   ret void
 }
-; t2_mfind_u(class, m, skip) -> as t2_mfind1, and failing that UNIVERSAL's.
+; t2_mfind_u(class, m, skip) -> as t2_mfind1, and failing that UNIVERSAL\'s.
 define internal i8* @t2_mfind_u(%Str %c, %Str %m, i1 %skip) {
 entry:
   %r = call i8* @t2_mfind1(%Str %c, %Str %m, i1 %skip)
@@ -3157,7 +3156,7 @@ root:
   %ru = call i8* @t2_mfind1(%Str %u, %Str %m, i1 0)
   ret i8* %ru
 }
-; t2_inv_class(inv) -> an object's class, or a class name (t2_mresolve checked it).
+; t2_inv_class(inv) -> an object\'s class, or a class name (t2_mresolve checked it).
 define internal %Str @t2_inv_class(%Slot %inv) {
 entry:
   %t = extractvalue %Slot %inv, 0
@@ -3213,7 +3212,7 @@ yes:
 no:
   ret i1 0
 }
-; t2_bool(b) -> perl's true (1) or false (the empty string).
+; t2_bool(b) -> perl\'s true (1) or false (the empty string).
 define internal %Slot @t2_bool(i1 %b) {
 entry:
   br i1 %b, label %t, label %f
@@ -3238,7 +3237,7 @@ entry:
   %rn = call %Slot @t2_list_of(%Slot %r, i1 %w)
   ret %Slot %rn
 }
-; t2_qr_match(re, subject) -> what a qr value's matcher gives: [start, end,
+; t2_qr_match(re, subject) -> what a qr value\'s matcher gives: [start, end,
 ; groups...] or undef. A value of no class Regexp is a pattern built at run
 ; time: there is no graph of it -- stopped.
 @lit_regexp = private unnamed_addr constant [7 x i8] c"Regexp\00"
@@ -3304,14 +3303,14 @@ entry:
   %r = call %Slot %f(%Array* %args)
   ret %Slot %r
 }
-; t2_unloaded_w: an unloaded sub's stash entry (can() finds it by name). Never
+; t2_unloaded_w: an unloaded sub\'s stash entry (can() finds it by name). Never
 ; called: a program that may call what can() hands back is refused.
 define internal %Slot @t2_unloaded_w(%Array* %args) {
 entry:
   unreachable
 }
 ; UNIVERSAL::can: the method as a code value, or undef. (A list context gets a
-; list, as a sub's wrapper gives: "[", A->can("x"), "]" read past its end.)
+; list, as a sub\'s wrapper gives: "[", A->can("x"), "]" read past its end.)
 define internal %Slot @t2_u_can_w(%Array* %args) {
 entry:
   %w = load i1, i1* @t2_want
@@ -3338,9 +3337,9 @@ code:
 @lit_vnodef = private unnamed_addr constant [19 x i8] c" does not define $\00"
 @lit_vnodef2 = private unnamed_addr constant [32 x i8] c"::VERSION--version check failed\00"
 @lit_vneither = private unnamed_addr constant [59 x i8] c" defines neither package nor VERSION--version check failed\00"
-; the call site t2_mresolve last saw (" at FILE line N.\n"): a UNIVERSAL method's die names it
+; the call site t2_mresolve last saw (" at FILE line N.\n"): a UNIVERSAL method\'s die names it
 @t2_call_at = internal global %Str zeroinitializer
-; t2_mop_var(class, global): class's $VERSION is that global (VERSION reads it by the class's name).
+; t2_mop_var(class, global): class\'s $VERSION is that global (VERSION reads it by the class\'s name).
 define internal void @t2_mop_var(%Str %c, %Slot* %g) {
   %s = call %Slot @t2_stash(%Str %c)
   %k = call %Str @t2_str(i8* getelementptr ([9 x i8], [9 x i8]* @lit_vkey, i64 0, i64 0), i64 8)
@@ -3349,7 +3348,7 @@ define internal void @t2_mop_var(%Str %c, %Slot* %g) {
   call void @t2_hset(%Slot %s, %Str %k, %Slot %gs)
   ret void
 }
-; t2_vnum(version) -> perl's number for it: decimal ("1.10" is 1.1), or dotted
+; t2_vnum(version) -> perl\'s number for it: decimal ("1.10" is 1.1), or dotted
 ; ("1.2.3", "v1.2": each part a thousandth of the one before).
 define internal double @t2_vnum(%Str %s) {
 entry:
@@ -3417,8 +3416,8 @@ end:
   %r = fadd double %acc, %add2
   ret double %r
 }
-; UNIVERSAL::VERSION: the class's own $VERSION; with a wanted version,
-; perl's check, dying as perl does where it fails.
+; UNIVERSAL::VERSION: the class\'s own $VERSION; with a wanted version,
+; perl\'s check, dying as perl does where it fails.
 define internal %Slot @t2_u_version_w(%Array* %args) {
 entry:
   %w = load i1, i1* @t2_want
@@ -3503,12 +3502,12 @@ die:
 @lit_tm_tiearray = private unnamed_addr constant [9 x i8] c"TIEARRAY\00"
 @lit_tm_tiehash = private unnamed_addr constant [8 x i8] c"TIEHASH\00"
 @lit_tm_tiescalar = private unnamed_addr constant [10 x i8] c"TIESCALAR\00"
-; THE CONTAINER PROTOCOL (perigrin: a tie swaps a container's metaobject).
-; Every %Array -- an array, or a hash's pairs -- points at a metaobject:
-; a vtable of its operations and a datum (a tie's object). The default's
-; entries are the runtime's own functions (t2_aget_d, ...); t2_aget and the
-; rest look the operation up there. A tie's entries call the object's
-; methods; the other kind's entries stay the default's.
+; THE CONTAINER PROTOCOL (perigrin: a tie swaps a container\'s metaobject).
+; Every %Array -- an array, or a hash\'s pairs -- points at a metaobject:
+; a vtable of its operations and a datum (a tie\'s object). The default\'s
+; entries are the runtime\'s own functions (t2_aget_d, ...); t2_aget and the
+; rest look the operation up there. A tie\'s entries call the object\'s
+; methods; the other kind\'s entries stay the default\'s.
 %Meta = type { i8**, %Slot }
 @t2_vt_default = internal global [20 x i8*] [
   i8* bitcast (%Slot (%Array*, i64)* @t2_aget_d to i8*),
@@ -3600,10 +3599,10 @@ die:
 ]
 @t2_meta_default = internal global %Meta { i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_default, i64 0, i64 0), %Slot zeroinitializer }
 ; @_ IS AN ARRAY OF ALIASES (perigrin): each element the call puts there is
-; the caller's own -- a SCALAR REFERENCE (tag 9) to its variable, or to a
+; the caller\'s own -- a SCALAR REFERENCE (tag 9) to its variable, or to a
 ; fresh cell (a temporary, or what the callee pushes); an ELEMENT ALIAS (tag
-; 10) of an array's or a hash's element, found where it is read or written,
-; as perl's deferred element is; or a value as it is, READ-ONLY (a literal:
+; 10) of an array\'s or a hash\'s element, found where it is read or written,
+; as perl\'s deferred element is; or a value as it is, READ-ONLY (a literal:
 ; perl dies on a store). Its metaobject reads through the alias and stores
 ; there; what moves an element (shift, pop, splice) moves the alias.
 %Elv = type { i8, %Slot, %Slot }
@@ -3632,8 +3631,8 @@ die:
 @t2_meta_alias = internal global %Meta { i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_alias, i64 0, i64 0), %Slot zeroinitializer }
 ; A HASH OF CELLS (one an element reference was taken of, `\$h{k}`): each
 ; value boxed in a heap cell (t2_hcells), read and stored through it, as an
-; array of aliases' elements are. Its pairs are a plain %Array (the array
-; entries the default's); its hash entries go through the cells. A delete
+; array of aliases\' elements are. Its pairs are a plain %Array (the array
+; entries the default\'s); its hash entries go through the cells. A delete
 ; takes the pair out (a reference keeps the cell); a store of a key not there
 ; makes a new cell; a whole assign truncates the pairs first (new cells).
 @t2_vt_hcells = internal global [20 x i8*] [
@@ -3672,9 +3671,9 @@ define internal i1 @t2_is_args(%Array* %a) {
   %y = icmp eq %Meta* %m, @t2_meta_alias
   ret i1 %y
 }
-; t2_elv(kind, container, key) -> an element alias: kind 0 an array's (the
-; container's payload the %Array*, the key its index -- one from the end
-; fixed now, as perl's is the element there at the call), 1 a hash's.
+; t2_elv(kind, container, key) -> an element alias: kind 0 an array\'s (the
+; container\'s payload the %Array*, the key its index -- one from the end
+; fixed now, as perl\'s is the element there at the call), 1 a hash\'s.
 define internal %Slot @t2_elv(i8 %k, %Slot %c, %Slot %key) {
   %m = call i8* @malloc(i64 48)
   %e = bitcast i8* %m to %Elv*
@@ -3741,7 +3740,7 @@ own:
 @lit_ro = private unnamed_addr constant [44 x i8] c"Modification of a read-only value attempted\00"
 ; t2_alias_store(raw, v, at) -> stored where the alias points (true); false
 ; where raw is no alias -- an absent element (made a fresh cell by the
-; caller); perl's die on a read-only value.
+; caller); perl\'s die on a read-only value.
 define internal i1 @t2_alias_store(%Slot %r, %Slot %v, i8* %at, i64 %atn) {
 entry:
   %t = extractvalue %Slot %r, 0
@@ -3895,8 +3894,8 @@ define internal void @t2_apush_alias(%Array* %a, %Slot %r) {
   call void @t2_apush_d(%Array* %a, %Slot %r)
   ret void
 }
-; t2_aappend_alias(args, s): each element of s aliased on @_ -- an @_'s own
-; aliases handed on as they are (`f(@_)`), another array's elements each
+; t2_aappend_alias(args, s): each element of s aliased on @_ -- an @_\'s own
+; aliases handed on as they are (`f(@_)`), another array\'s elements each
 ; an element alias.
 define internal void @t2_aappend_alias(%Array* %d, %Array* %s) {
 entry:
@@ -3923,16 +3922,16 @@ next:
 done:
   ret void
 }
-; ELEMENT REFERENCES (`\$a[i]`, `\(@a)`): perl's element is a scalar of its
+; ELEMENT REFERENCES (`\$a[i]`, `\(@a)`): perl\'s element is a scalar of its
 ; own, which a reference keeps past a grow, a shift, a refill. An array one is
 ; taken of becomes AN ARRAY OF ALIASES, as @_ is (its metaobject
 ; t2_meta_alias): each element boxed in a heap cell (t2_acells), read and
 ; stored through it; what moves an element (shift, unshift) moves its cell, a
-; refill makes new ones. The reference is the cell's (tag 9), as `\$x` is.
+; refill makes new ones. The reference is the cell\'s (tag 9), as `\$x` is.
 @msg_eref_tied = private unnamed_addr constant [71 x i8] c"chalk: refused at run time: a reference to an element of a tied array\0A\00"
 @msg_eref_ro = private unnamed_addr constant [65 x i8] c"chalk: refused at run time: a reference to a read-only argument\0A\00"
-; t2_acells(a): a's elements each boxed in a cell (once; an @_ is already).
-; A tied array's elements are its class's: stopped.
+; t2_acells(a): a\'s elements each boxed in a cell (once; an @_ is already).
+; A tied array\'s elements are its class\'s: stopped.
 define internal void @t2_acells(%Array* %a) {
 entry:
   %m = call %Meta* @t2_meta(%Array* %a)
@@ -3976,11 +3975,11 @@ mark:
 done:
   ret void
 }
-; t2_aelem_ref(a, i, at) -> a reference to a's element i (one from the end
-; for i < 0; perl's die before the start, naming at -- an eval's to catch:
+; t2_aelem_ref(a, i, at) -> a reference to a\'s element i (one from the end
+; for i < 0; perl\'s die before the start, naming at -- an eval\'s to catch:
 ; undef comes back, dying; past the end the array grown to it). Of an @_,
-; the caller's own: its variable's cell, its element's (an element alias
-; resolved -- an array's, or a hash's: t2_helem_ref -- and kept so); a
+; the caller\'s own: its variable\'s cell, its element\'s (an element alias
+; resolved -- an array\'s, or a hash\'s: t2_helem_ref -- and kept so); a
 ; literal there is read-only (stopped: a store through it would die in perl).
 define internal %Slot @t2_aelem_ref(%Array* %a, i64 %i, i8* %at, i64 %atn) {
 entry:
@@ -4058,8 +4057,8 @@ ro:
   unreachable
 }
 ; t2_alias_of(r) -> what @_ holds for a read through an element reference r:
-; the reference itself, the element's cell. One of no element (a foreach
-; alias's guard over a hole is undef) is stopped: perl's would make it.
+; the reference itself, the element\'s cell. One of no element (a foreach
+; alias\'s guard over a hole is undef) is stopped: perl\'s would make it.
 @msg_alias_none = private unnamed_addr constant [68 x i8] c"chalk: refused at run time: an alias of an array element not there\0A\00"
 define internal %Slot @t2_alias_of(%Slot %r) {
 entry:
@@ -4092,10 +4091,10 @@ done:
   ret %Array* %r
 }
 ; HASH ELEMENT REFERENCES (`\$h{k}`): the hash made one of cells
-; (t2_meta_hcells), the reference the element's cell (tag 9), as `\$x` is.
+; (t2_meta_hcells), the reference the element\'s cell (tag 9), as `\$x` is.
 @msg_href_tied = private unnamed_addr constant [70 x i8] c"chalk: refused at run time: a reference to an element of a tied hash\0A\00"
-; t2_hcells(h): h's values each boxed in a cell (once). A tied hash's (or a
-; MOP object's, %SIG's) elements are its class's: stopped.
+; t2_hcells(h): h\'s values each boxed in a cell (once). A tied hash\'s (or a
+; MOP object\'s, %SIG\'s) elements are its class\'s: stopped.
 define internal void @t2_hcells(%Slot %h) {
 entry:
   %a = call %Array* @t2_harr(%Slot %h)
@@ -4131,8 +4130,8 @@ mark:
 done:
   ret void
 }
-; t2_helem_ref(h, k) -> a reference to h's element k: its cell, the key made
-; (undef) where it is not there, as perl's `\$h{k}` makes it.
+; t2_helem_ref(h, k) -> a reference to h\'s element k: its cell, the key made
+; (undef) where it is not there, as perl\'s `\$h{k}` makes it.
 define internal %Slot @t2_helem_ref(%Slot %h, %Str %k) {
 entry:
   call void @t2_hcells(%Slot %h)
@@ -4290,7 +4289,7 @@ define internal void @t2_aunshiftl(%Array* %p0, %Array* %p1) {
   call void %fn(%Array* %p0, %Array* %p1)
   ret void
 }
-; (a read through undef is undef, as perl's -- which makes the hash; a write
+; (a read through undef is undef, as perl\'s -- which makes the hash; a write
 ; through one B::SoN spells as the hash made first)
 define internal %Slot @t2_hget(%Slot %p0, %Str %p1) {
 entry:
@@ -4369,7 +4368,7 @@ define internal void @t2_hfroma(%Slot %p0, %Array* %p1) {
   call void %fn(%Slot %p0, %Array* %p1)
   ret void
 }
-; t2_tie_obj(a) -> the object a tied container's metaobject holds
+; t2_tie_obj(a) -> the object a tied container\'s metaobject holds
 define internal %Slot @t2_tie_obj(%Array* %a) {
   %m = call %Meta* @t2_meta(%Array* %a)
   %dp = getelementptr %Meta, %Meta* %m, i32 0, i32 1
@@ -4668,7 +4667,7 @@ body:
 end:
   ret void
 }
-; t2_tie(a, vt, class, args, ctor) -> the object ctor (TIEARRAY/TIEHASH) made; a now points at a tie's metaobject holding it
+; t2_tie(a, vt, class, args, ctor) -> the object ctor (TIEARRAY/TIEHASH) made; a now points at a tie\'s metaobject holding it
 define internal %Slot @t2_tie(%Array* %a, i8** %vt, %Slot %cls, %Array* %rest, %Str %ctor) {
   %args = call %Array* @t2_new_array()
   call void @t2_apush(%Array* %args, %Slot %cls)
@@ -4688,8 +4687,8 @@ define internal %Slot @t2_tie(%Array* %a, i8** %vt, %Slot %cls, %Array* %rest, %
   store %Meta* %m, %Meta** %mp
   ret %Slot %o
 }
-; t2_own_meta(a) -> the metaobject a's own elements are read by: the default,
-; or an array of aliases' (one an element reference was taken of) -- a tie's
+; t2_own_meta(a) -> the metaobject a\'s own elements are read by: the default,
+; or an array of aliases\' (one an element reference was taken of) -- a tie\'s
 ; keeps it after its own (bytes 32..39), for untie to put back.
 define internal %Meta* @t2_own_meta(%Array* %a) {
 entry:
@@ -4727,7 +4726,7 @@ define internal %Slot @t2_tie_hash(%Slot %h, %Slot %cls, %Array* %rest) {
   %r = call %Slot @t2_tie(%Array* %a, i8** getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_tiehash, i64 0, i64 0), %Slot %cls, %Array* %rest, %Str %c)
   ret %Slot %r
 }
-; t2_tie_scalar(cls, rest) -> cls's TIESCALAR(cls, rest...): a tied scalar's
+; t2_tie_scalar(cls, rest) -> cls\'s TIESCALAR(cls, rest...): a tied scalar\'s
 ; object (Analysis made its reads FETCH on it).
 define internal %Slot @t2_tie_scalar(%Slot %cls, %Array* %rest) {
   %args = call %Array* @t2_new_array()
@@ -4737,7 +4736,7 @@ define internal %Slot @t2_tie_scalar(%Slot %cls, %Array* %rest) {
   %o = call %Slot @t2_tie_call(%Array* %args, %Str %c)
   ret %Slot %o
 }
-; t2_tied(a) -> the tie's object, or undef where a has the default metaobject
+; t2_tied(a) -> the tie\'s object, or undef where a has the default metaobject
 define internal %Slot @t2_tied(%Array* %a) {
 entry:
   %m = call %Meta* @t2_meta(%Array* %a)
@@ -4745,7 +4744,7 @@ entry:
   %da = icmp eq %Meta* %m, @t2_meta_alias   ; (@_ is no tie)
   %vp = getelementptr %Meta, %Meta* %m, i32 0, i32 0
   %vt = load i8**, i8*** %vp
-  %dm = icmp eq i8** %vt, getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_mophash, i64 0, i64 0)   ; (nor a MOP object's)
+  %dm = icmp eq i8** %vt, getelementptr ([20 x i8*], [20 x i8*]* @t2_vt_mophash, i64 0, i64 0)   ; (nor a MOP object\'s)
   %dh = icmp eq %Meta* %m, @t2_meta_hcells   ; (nor a hash of cells)
   %d1 = or i1 %d0, %da
   %d2 = or i1 %d1, %dh
@@ -4757,9 +4756,9 @@ yes:
   %o = call %Slot @t2_tie_obj(%Array* %a)
   ret %Slot %o
 }
-; t2_mop_hash(h, o): h's metaobject is the MOP object o (a special
-; container's, Chalk::Impl::*): each access a call of o's method by the
-; protocol's name. No tie: tied is false.
+; t2_mop_hash(h, o): h\'s metaobject is the MOP object o (a special
+; container\'s, Chalk::Impl::*): each access a call of o\'s method by the
+; protocol\'s name. No tie: tied is false.
 define internal void @t2_mop_hash(%Slot %h, %Slot %o) {
   %a = call %Array* @t2_harr(%Slot %h)
   %mm = call i8* @malloc(i64 32)
@@ -4773,8 +4772,8 @@ define internal void @t2_mop_hash(%Slot %h, %Slot %o) {
   ret void
 }
 ; t2_untie(a): a back to its own metaobject (its own elements, untouched by
-; the tie: the default's, or an array of aliases' -- t2_own_meta)
-; (a MOP object's container -- %SIG -- is no tie: untie leaves it as it is, as perl's)
+; the tie: the default\'s, or an array of aliases\' -- t2_own_meta)
+; (a MOP object\'s container -- %SIG -- is no tie: untie leaves it as it is, as perl\'s)
 define internal void @t2_untie(%Array* %a) {
 entry:
   %m = call %Meta* @t2_meta(%Array* %a)
@@ -4816,7 +4815,7 @@ define internal void @t2_untie_h(%Slot %h) {
   call void @t2_untie(%Array* %a)
   ret void
 }
-; t2_args_from(a, k) -> a fresh array of a's elements from k on (a slurpy's copy).
+; t2_args_from(a, k) -> a fresh array of a\'s elements from k on (a slurpy\'s copy).
 define internal %Array* @t2_args_from(%Array* %a, i64 %k) {
 entry:
   %r = call %Array* @t2_new_array()
@@ -4834,7 +4833,7 @@ body:
 done:
   ret %Array* %r
 }
-; t2_args_pairs(a, n): a signature's slurpy hash takes pairs -- an odd count
+; t2_args_pairs(a, n): a signature\'s slurpy hash takes pairs -- an odd count
 ; past n is a stop (perl dies: "Odd name/value argument").
 define internal void @t2_args_pairs(%Array* %a, i64 %n) {
 entry:
@@ -4849,13 +4848,13 @@ stop:
 fine:
   ret void
 }
-; t2_arity(a, off, min, max, name) -> true where a signature takes a's count
-; past its first off (a method's invocant) -- max -1: no most; else perl's
-; die, naming the sub and where it was called (@t2_call_at: a method call's
+; t2_arity(a, off, min, max, name) -> true where a signature takes a\'s count
+; past its first off (a method\'s invocant) -- max -1: no most; else perl\'s
+; die, naming the sub and where it was called (@t2_call_at: a method call\'s
 ; site), false.
-@lit_ar_few = private unnamed_addr constant [35 x i8] c"Too few arguments for subroutine '\00"
-@lit_ar_many = private unnamed_addr constant [36 x i8] c"Too many arguments for subroutine '\00"
-@lit_ar_got = private unnamed_addr constant [8 x i8] c"' (got \00"
+@lit_ar_few = private unnamed_addr constant [35 x i8] c"Too few arguments for subroutine \'\00"
+@lit_ar_many = private unnamed_addr constant [36 x i8] c"Too many arguments for subroutine \'\00"
+@lit_ar_got = private unnamed_addr constant [8 x i8] c"\' (got \00"
 @lit_ar_exp = private unnamed_addr constant [12 x i8] c"; expected \00"
 @lit_ar_least = private unnamed_addr constant [10 x i8] c"at least \00"
 @lit_ar_most = private unnamed_addr constant [9 x i8] c"at most \00"
@@ -4901,7 +4900,7 @@ die:
   call void @t2_die_unwind(%Str %m)
   ret i1 0
 }
-; t2_args_min(a, n): a signature's arity -- at least n arguments, else a stop.
+; t2_args_min(a, n): a signature\'s arity -- at least n arguments, else a stop.
 define internal void @t2_args_min(%Array* %a, i64 %n) {
 entry:
   %got = call i64 @t2_alen(%Array* %a)
@@ -4913,7 +4912,7 @@ bad:
 fine:
   ret void
 }
-; t2_args_max(a, n): a signature's arity -- at most n arguments, else a stop.
+; t2_args_max(a, n): a signature\'s arity -- at most n arguments, else a stop.
 define internal void @t2_args_max(%Array* %a, i64 %n) {
 entry:
   %got = call i64 @t2_alen(%Array* %a)
@@ -4925,7 +4924,7 @@ bad:
 fine:
   ret void
 }
-; t2_slot_ncmp(x, y) -> perl's <=> (do_ncmp): -1, 0, 1, or 2 where an NV is
+; t2_slot_ncmp(x, y) -> perl\'s <=> (do_ncmp): -1, 0, 1, or 2 where an NV is
 ; NaN. Two integers (as perl reads them: t2_arith_num) exactly -- an IV and
 ; a UV, past 2**53 too, where a double cannot tell them apart -- else their NVs.
 define internal i64 @t2_slot_ncmp(%Slot %x0, %Slot %y0) {
@@ -4957,7 +4956,7 @@ nums:
   %r = select i1 %gt, i64 1, i64 %l
   ret i64 %r
 }
-; t2_slot_numcmp(x, y, op) -> perl's numeric comparison op of two scalars, on
+; t2_slot_numcmp(x, y, op) -> perl\'s numeric comparison op of two scalars, on
 ; t2_slot_ncmp: 0 ==, 1 !=, 2 <, 3 >, 4 <=, 5 >= (a NaN false, but != true).
 define internal i1 @t2_slot_numcmp(%Slot %x, %Slot %y, i64 %op) {
 entry:
@@ -4986,8 +4985,8 @@ r4:
 r5:
   ret i1 %ge
 }
-; t2_cmp(x, y, num) -> perl's cmp (by string) or <=> (by number): -1, 0, 1
-; (a NaN 0, where perl's sort is undefined).
+; t2_cmp(x, y, num) -> perl\'s cmp (by string) or <=> (by number): -1, 0, 1
+; (a NaN 0, where perl\'s sort is undefined).
 define internal i64 @t2_cmp(%Slot %x, %Slot %y, i1 %num) {
 entry:
   br i1 %num, label %n, label %s
@@ -5006,7 +5005,7 @@ s:
   %c2 = select i1 %pos, i64 1, i64 %c1
   ret i64 %c2
 }
-; t2_hderef_r(r) -> the hash r holds, read whole; undef an empty hash (perl's
+; t2_hderef_r(r) -> the hash r holds, read whole; undef an empty hash (perl\'s
 ; rvalue +(undef)->%*). What is not a hash stops at its first access.
 define internal %Slot @t2_hderef_r(%Slot %r) {
 entry:
@@ -5019,8 +5018,8 @@ empty:
 as:
   ret %Slot %r
 }
-; t2_asort(a, num, desc) -> a new list of a's elements in order (stable, as
-; perl's mergesort is).
+; t2_asort(a, num, desc) -> a new list of a\'s elements in order (stable, as
+; perl\'s mergesort is).
 define internal %Array* @t2_asort(%Array* %a, i1 %num, i1 %desc) {
 entry:
   %r = call %Array* @t2_new_array()
@@ -5058,7 +5057,7 @@ placed:
 done:
   ret %Array* %r
 }
-; t2_asort_by(a, f, ga, gb) -> a new list of a's elements in the order f
+; t2_asort_by(a, f, ga, gb) -> a new list of a\'s elements in the order f
 ; gives: for each pair $a (ga) and $b (gb) are set, f called, and a number
 ; above 0 puts $a after $b (stable). $a and $b are as they were after.
 @t2_cmp_env = internal global %Array* null
@@ -5091,9 +5090,9 @@ ok:
   %n = call double @t2_slot_num(%Slot %c)
   ret double %n
 }
-; t2_asort_by(a, env, f, ga, gb) -> a new list of a's elements in the order
-; f gives, compared as perl's sort compares (pp_sort.c, ported: t2_msort) --
-; the same pairs in the same order, so a comparator's effects are perl's.
+; t2_asort_by(a, env, f, ga, gb) -> a new list of a\'s elements in the order
+; f gives, compared as perl\'s sort compares (pp_sort.c, ported: t2_msort) --
+; the same pairs in the same order, so a comparator\'s effects are perl\'s.
 ; $a, $b, the env and the comparator are as they were after.
 define internal %Array* @t2_asort_by(%Array* %a, %Array* %env, %Slot ()* %f, %Slot* %ga, %Slot* %gb) {
 entry:
@@ -5121,7 +5120,7 @@ entry:
   store %Array* %oe, %Array** @t2_cmp_env
   ret %Array* %r
 }
-; ---- perl's sort, ported to C (pp_sort.c's dynprep and merge) and compiled ----
+; ---- perl\'s sort, ported to C (pp_sort.c\'s dynprep and merge) and compiled ----
 
 %struct.off_runs = type { i64, i64 }
 %struct.__jmp_buf_tag = type { [8 x i64], i32, %struct.__sigset_t }
@@ -5884,7 +5883,7 @@ attributes #12 = { nounwind }
 attributes #13 = { nounwind returns_twice }
 
 
-; t2_ghash(g) / t2_garray(g): the file's hash or array a global holds, made
+; t2_ghash(g) / t2_garray(g): the file\'s hash or array a global holds, made
 ; the first time any function reaches it.
 define internal %Slot @t2_ghash(%Slot* %g) {
 entry:
@@ -5916,7 +5915,7 @@ done:
   %r = inttoptr i64 %p to %Array*
   ret %Array* %r
 }
-; t2_arev(a) -> a new list of a's elements, last first.
+; t2_arev(a) -> a new list of a\'s elements, last first.
 define internal %Array* @t2_arev(%Array* %a) {
 entry:
   %r = call %Array* @t2_new_array()
@@ -5936,7 +5935,7 @@ done:
 }
 ; WHOLE ASSIGN IN PLACE (`@a = LIST`, `%h = LIST` on the container a tie or a
 ; reference names): the list copied first -- it may read the aggregate --
-; then, for a tied one, perl's calls; for any other, cleared and refilled.
+; then, for a tied one, perl\'s calls; for any other, cleared and refilled.
 @lit_tm_extend = private unnamed_addr constant [7 x i8] c"EXTEND\00"
 define internal void @t2_aassign(%Array* %a, %Array* %l) {
 entry:
@@ -5989,20 +5988,20 @@ entry:
   %d = or i1 %d0, %dh
   br i1 %d, label %plain, label %tied
 plain:
-  ; (element 0 is the hash's class: kept)
+  ; (element 0 is the hash\'s class: kept)
   %lp = getelementptr %Array, %Array* %a, i32 0, i32 0
   store i64 1, i64* %lp
   call void @t2_hfroma(%Slot %h, %Array* %c)
   ret void
 tied:
-  ; (a tie's hfroma is CLEAR, then STORE each pair)
+  ; (a tie\'s hfroma is CLEAR, then STORE each pair)
   call void @t2_hfroma(%Slot %h, %Array* %c)
   ret void
 }
-; t2_mresolve(invocant, method, " at FILE line N.\n", start, mode) -> the method's code,
-; looked up from (mode 0) the invocant's class, (1) start, a qualified name's
-; package, or (2) start's @ISA, a SUPER:: call's; where perl dies (no class,
-; no method), a die naming that class, and t2_nomethod's code.
+; t2_mresolve(invocant, method, " at FILE line N.\n", start, mode) -> the method\'s code,
+; looked up from (mode 0) the invocant\'s class, (1) start, a qualified name\'s
+; package, or (2) start\'s @ISA, a SUPER:: call\'s; where perl dies (no class,
+; no method), a die naming that class, and t2_nomethod\'s code.
 define internal i8* @t2_mresolve(%Slot %inv, %Str %m, %Str %at, %Str %start, i8 %mode) {
 entry:
   store %Str %at, %Str* @t2_call_at
@@ -6101,7 +6100,7 @@ define internal i1 @t2_hexists_d(%Slot %h, %Str %k) {
   %e = icmp sge i64 %i, 0
   ret i1 %e
 }
-; t2_hdelete(h, k) -> k's value (undef if none), its pair taken out.
+; t2_hdelete(h, k) -> k\'s value (undef if none), its pair taken out.
 define internal %Slot @t2_hdelete_d(%Slot %h, %Str %k) {
 entry:
   %a = call %Array* @t2_harr(%Slot %h)
@@ -6161,7 +6160,7 @@ define internal i64 @t2_hcount_d(%Slot %h) {
   %c = sdiv i64 %p, 2
   ret i64 %c
 }
-; t2_hpick(h, from) -> every other element of the hash's pairs from index
+; t2_hpick(h, from) -> every other element of the hash\'s pairs from index
 ; from: 1 its keys, 2 its values.
 define internal %Array* @t2_hpick(%Slot %h, i64 %from) {
 entry:
@@ -6181,8 +6180,8 @@ body:
 done:
   ret %Array* %r
 }
-; t2_aslice(a, ix) -> a new list of a's elements at the indices ix holds, in
-; their order: from the end where negative, undef outside the array -- perl's
+; t2_aslice(a, ix) -> a new list of a\'s elements at the indices ix holds, in
+; their order: from the end where negative, undef outside the array -- perl\'s
 ; aslice read (it makes no element).
 define internal %Array* @t2_aslice(%Array* %a, %Array* %ix) {
 entry:
@@ -6231,10 +6230,10 @@ done:
   ret %Array* %r
 }
 ; t2_glob(pat) -> glob PAT in a list: the files it matches, through libc
-; glob(3) with File::Glob's flags (NOSORT 4 | BRACE 1024 | NOMAGIC 2048 |
+; glob(3) with File::Glob\'s flags (NOSORT 4 | BRACE 1024 | NOMAGIC 2048 |
 ; TILDE 4096: the pattern itself where it has no metacharacters), sorted as
-; perl sorts them (case aside, then bytes). A brace's alternatives perl
-; keeps in their order, each sorted: not this sort -- a stop. glob_t's gl_pathc at 0, gl_pathv
+; perl sorts them (case aside, then bytes). A brace\'s alternatives perl
+; keeps in their order, each sorted: not this sort -- a stop. glob_t\'s gl_pathc at 0, gl_pathv
 ; at 8 (x86-64), its 72 bytes allocated as 128. A pattern with whitespace is
 ; several patterns to perl: a stop too.
 declare i32 @glob(i8*, i32, i8*, i8*)
@@ -6321,7 +6320,7 @@ done:
   ret %Array* %r
 }
 ; t2_qx(cmd) -> qx`CMD` / readpipe in scalar context: the command run by
-; libc popen, all it printed read back. T2's prints are write(2)s, never
+; libc popen, all it printed read back. T2\'s prints are write(2)s, never
 ; buffered, so nothing waits to be flushed before the fork. Its exit status
 ; ($?) is not kept.
 declare i8* @popen(i8*, i8*)
@@ -6368,8 +6367,8 @@ out:
   %s = call %Str @t2_str(i8* %ob, i64 %ol)
   ret %Str %s
 }
-; t2_localtime_tm(t, now) -> libc's localtime_r of t (of time(NULL) where
-; now): a struct tm, its first nine ints perl's nine fields in order.
+; t2_localtime_tm(t, now) -> libc\'s localtime_r of t (of time(NULL) where
+; now): a struct tm, its first nine ints perl\'s nine fields in order.
 declare i64 @time(i64*)
 declare i8* @localtime_r(i64*, i8*)
 declare i64 @strftime(i8*, i64, i8*, i8*)
@@ -6414,7 +6413,7 @@ body:
 done:
   ret %Array* %r
 }
-; t2_localtime_str(t, now) -> localtime in scalar context: ctime(3)'s text
+; t2_localtime_str(t, now) -> localtime in scalar context: ctime(3)\'s text
 ; without its newline, "Thu Sep  9 01:46:40 1999".
 define internal %Str @t2_localtime_str(i64 %t, i1 %now) {
 entry:
@@ -6425,7 +6424,7 @@ entry:
   ret %Str %s
 }
 ; t2_range(lo, hi) -> a new list of the integers lo to hi (none when hi < lo):
-; perl's range of numbers.
+; perl\'s range of numbers.
 define internal %Array* @t2_range(i64 %lo, i64 %hi) {
 entry:
   %r = call %Array* @t2_new_array()
@@ -6444,7 +6443,7 @@ body:
 done:
   ret %Array* %r
 }
-; ---- PERL'S RANGE OF TWO SCALARS (pp_flop). On numbers where a bound
+; ---- PERL\'S RANGE OF TWO SCALARS (pp_flop). On numbers where a bound
 ; holds one, is defined and no string, or where the left looks like a number
 ; (not starting "0") or is undef while the right is defined -- and the right
 ; is undef or looks like one; else on strings: the left, magic-incremented,
@@ -6511,7 +6510,7 @@ next:
 done:
   ret i64 %i
 }
-; t2_lln(s) -> 1 where perl's looks_like_number says s is a number (spaces,
+; t2_lln(s) -> 1 where perl\'s looks_like_number says s is a number (spaces,
 ; a sign, digits with a point or a point and digits, an exponent, spaces),
 ; 0 where it is not -- 2 where T2 does not tell: an Inf or a NaN, "0 but true".
 @lit_0bt = private unnamed_addr constant [11 x i8] c"0 but true\00"
@@ -6576,7 +6575,7 @@ no:
 unsure:
   ret i8 2
 }
-; t2_streq_c(a, b) -> C's strcmp(a, b) == 0: equal up to a NUL in both (perl's
+; t2_streq_c(a, b) -> C\'s strcmp(a, b) == 0: equal up to a NUL in both (perl\'s
 ; strEQ, as pp_flop asks it).
 define internal i1 @t2_streq_c(%Str %a, %Str %b) {
 entry:
@@ -6656,7 +6655,7 @@ num:
   %hi = fcmp ogt double %dr, 0x43E0000000000000
   %lo2 = and i1 %lo, %okl
   %hi2 = and i1 %hi, %okr
-  ; (and a right bound that is a UV: past IV_MAX, pp_flop's die)
+  ; (and a right bound that is a UV: past IV_MAX, pp_flop\'s die)
   %ruv = icmp eq i8 %tr, 4
   %hi3 = or i1 %hi2, %ruv
   %big = or i1 %lo2, %hi3
@@ -6696,8 +6695,8 @@ inc:
 sdone:
   ret %Array* %out
 }
-; t2_hslice(h, keys) -> a new list of h's values at the keys, in their order,
-; undef for a missing one -- perl's hslice read.
+; t2_hslice(h, keys) -> a new list of h\'s values at the keys, in their order,
+; undef for a missing one -- perl\'s hslice read.
 define internal %Array* @t2_hslice(%Slot %h, %Array* %keys) {
 entry:
   %n = call i64 @t2_alen(%Array* %keys)
@@ -6764,7 +6763,7 @@ put:
 }
 ; ---- builtins of one value: chr, ord, time, reverse of a string, x, -e, sprintf ----
 @msg_chr = private unnamed_addr constant [56 x i8] c"chr of other than a byte (0..255): stopped (chalk, T2)\0A\00"
-; chr(n): the string of one byte n. Past a byte perl's is a character: stopped.
+; chr(n): the string of one byte n. Past a byte perl\'s is a character: stopped.
 define internal %Str @t2_chr(%Slot %v) {
 entry:
   %n = call i64 @t2_slot_i64(%Slot %v)
@@ -6784,7 +6783,7 @@ ok:
   %r = call %Str @t2_str(i8* %buf, i64 1)
   ret %Str %r
 }
-; pack's C of v: its byte, wrapped to 0..255 as pack wraps it (-1 is 255).
+; pack\'s C of v: its byte, wrapped to 0..255 as pack wraps it (-1 is 255).
 define internal %Str @t2_pack_c(%Slot %v) {
   %n = call i64 @t2_bit_uv(%Slot %v)
   %b = and i64 %n, 255
@@ -6806,12 +6805,12 @@ some:
   %r = zext i8 %c to i64
   ret i64 %r
 }
-; (time(3) is declared with t2_localtime_tm's)
+; (time(3) is declared with t2_localtime_tm\'s)
 define internal i64 @t2_time() {
   %t = call i64 @time(i64* null)
   ret i64 %t
 }
-; reverse in scalar context: the string's bytes, last first.
+; reverse in scalar context: the string\'s bytes, last first.
 define internal %Str @t2_strrev(%Str %s) {
 entry:
   %p = extractvalue %Str %s, 0
@@ -6865,7 +6864,7 @@ done:
   %r = call %Str @t2_str(i8* %buf, i64 %tot)
   ret %Str %r
 }
-; (LIST) x n: a new list of n copies of the list's elements.
+; (LIST) x n: a new list of n copies of the list\'s elements.
 define internal %Array* @t2_arepeat(%Array* %a, i64 %k) {
 entry:
   %r = call %Array* @t2_new_array()
@@ -6895,7 +6894,7 @@ no:
   %u = call %Slot @t2_slot(i8 0, i64 0)
   ret %Slot %u
 }
-; t2_fmt(spec, kind, width, precision, v): one conversion of sprintf, by C's
+; t2_fmt(spec, kind, width, precision, v): one conversion of sprintf, by C\'s
 ; snprintf: spec is "%<flags>*.*<conv>" (kind 0 an integer, 1 a number, 2 a
 ; string) or "%<flags>*c" (kind 3, a character).
 define internal %Str @t2_fmt(%Str %spec, i64 %kind, i64 %w, i64 %p, %Slot %v) {
@@ -6945,11 +6944,11 @@ chr:
   %rc = call %Str @t2_str(i8* %bc, i64 %nc64)
   ret %Str %rc
 }
-; t2_pow(l, r): perl's ** (pp_pow). Two integers (as perl reads them), the
+; t2_pow(l, r): perl\'s ** (pp_pow). Two integers (as perl reads them), the
 ; power not below 0: a base a power of 2 is a number, as pow() gives; one
 ; whose result surely fits 64 bits (its bits times the power at most 64) an
 ; integer by multiplying -- a UV past IV_MAX, a negative one past IV_MIN an
-; NV. Anything else pow()'s number.
+; NV. Anything else pow()\'s number.
 declare double @llvm.pow.f64(double, double)
 declare i64 @llvm.ctlz.i64(i64, i1)
 define internal %Slot @t2_pow(%Slot %l0, %Slot %r0) {
@@ -7019,13 +7018,13 @@ float:
   %fs = call %Slot @t2_box_num(double %f)
   ret %Slot %fs
 }
-; t2_hexoct(s, oct, warn) -> perl's hex (oct false) or oct of a string
+; t2_hexoct(s, oct, warn) -> perl\'s hex (oct false) or oct of a string
 ; (pp_oct; grok_hex, grok_oct, grok_bin): oct skips leading space, then a
 ; "0", then "x" is hex, "b" binary, "o" octal (octal anyway); hex takes an
 ; "x" or "0x". Digits of the base, an "_" before each, until the first that
 ; is not one. A UV (past IV_MAX, a UV). Past UV_MAX perl warns and gives an
 ; NV; where the program enables warnings, a character that is not a digit
-; (of octal's, an 8 or a 9), or a value past 32 bits, warns too -- each
+; (of octal\'s, an 8 or a 9), or a value past 32 bits, warns too -- each
 ; stopped by name, not guessed.
 @msg_hexoct = private unnamed_addr constant [83 x i8] c"a hex or oct past UV_MAX, or one perl warns of (warnings on): stopped (chalk, T2)\0A\00"
 define internal %Slot @t2_hexoct(%Str %s, i1 %oct, i1 %warn) {
@@ -7119,7 +7118,7 @@ take:
   br i1 %ov, label %stop, label %loop
 bad:
   ; (a character that is not a digit ends it: perl warns of it where warnings
-  ; are on -- of octal's only an 8 or a 9)
+  ; are on -- of octal\'s only an 8 or a 9)
   %bc0 = icmp uge i8 %c, 48
   %bc1 = icmp ule i8 %c, 57
   %bdig = and i1 %bc0, %bc1
@@ -7141,7 +7140,7 @@ stop:
   unreachable
 }
 declare { i64, i1 } @llvm.uadd.with.overflow.i64(i64, i64)
-; t2_digit_of(c, base) -> c's value as a digit of base (2, 8, 16), or -1.
+; t2_digit_of(c, base) -> c\'s value as a digit of base (2, 8, 16), or -1.
 define internal i64 @t2_digit_of(i8 %c, i64 %base) {
 entry:
   %d0 = icmp uge i8 %c, 48
@@ -7161,21 +7160,21 @@ entry:
   %r = select i1 %lt, i64 %v, i64 -1
   ret i64 %r
 }
-; ---- perl's bitwise operators (pp_bit_and & co.) ----
-; t2_bit_uv(v): a value's bits as perl's SvUV reads them (no `use
-; integer`): an IV's own (as a UV: -1 is UV_MAX), a UV's, an NV's cast_uv,
-; a string's integer read whole (9007199254740993 kept its 3).
+; ---- perl\'s bitwise operators (pp_bit_and & co.) ----
+; t2_bit_uv(v): a value\'s bits as perl\'s SvUV reads them (no `use
+; integer`): an IV\'s own (as a UV: -1 is UV_MAX), a UV\'s, an NV\'s cast_uv,
+; a string\'s integer read whole (9007199254740993 kept its 3).
 define internal i64 @t2_bit_uv(%Slot %v0) {
   %r = call i64 @t2_slot_i64(%Slot %v0)
   ret i64 %r
 }
-; t2_bit_num(r, inner) -> a bitwise op's result: perl's UV (past IV_MAX, a UV).
+; t2_bit_num(r, inner) -> a bitwise op\'s result: perl\'s UV (past IV_MAX, a UV).
 define internal %Slot @t2_bit_num(i64 %r, i1 %inner) {
   %s = call %Slot @t2_box_uv(i64 %r)
   ret %Slot %s
 }
 ; t2_bitop(a, b, op, mode, inner): op 0 &, 1 |, 2 ^, 3 ~ (b unused). Mode
-; 1 on numbers, 2 on strings' bytes, 0 perl's choice: bytes where every
+; 1 on numbers, 2 on strings\' bytes, 0 perl\'s choice: bytes where every
 ; operand is a string (tag 3), numbers otherwise.
 define internal %Slot @t2_bitop(%Slot %a, %Slot %b, i64 %op, i64 %mode, i1 %inner) {
 entry:
@@ -7262,7 +7261,7 @@ done:
   %rb = call %Slot @t2_box_str(%Str %rs)
   ret %Slot %rb
 }
-; t2_bit_numeric(a, b, fa, fb, op) -> perl's choice (t2_bitop's mode 0)
+; t2_bit_numeric(a, b, fa, fb, op) -> perl\'s choice (t2_bitop\'s mode 0)
 ; is on numbers: an operand is not a string (tag 3), or is one an op before
 ; made a number (fa, fb) -- ~ (op 3) reads a alone.
 define internal i1 @t2_bit_numeric(%Slot %a, %Slot %b, i1 %fa, i1 %fb, i64 %op) {
@@ -7287,7 +7286,7 @@ define internal i1 @t2_bit_numified(i1 %was, i1 %num, %Slot %x) {
   %r = or i1 %was, %now
   ret i1 %r
 }
-; t2_bitop_made(a, b, fa, fb, op, inner): t2_bitop's perl's choice, where
+; t2_bitop_made(a, b, fa, fb, op, inner): t2_bitop\'s perl\'s choice, where
 ; an operand a string an op before made a number (fa, fb) is a number.
 define internal %Slot @t2_bitop_made(%Slot %a, %Slot %b, i1 %fa, i1 %fb, i64 %op, i1 %inner) {
   %f = or i1 %fa, %fb
@@ -7295,7 +7294,7 @@ define internal %Slot @t2_bitop_made(%Slot %a, %Slot %b, i1 %fa, i1 %fb, i64 %op
   %r = call %Slot @t2_bitop(%Slot %a, %Slot %b, i64 %op, i64 %mode, i1 %inner)
   ret %Slot %r
 }
-; t2_shift(a, n, left, inner): perl's << and >> on a UV: a negative count
+; t2_shift(a, n, left, inner): perl\'s << and >> on a UV: a negative count
 ; shifts the other way, one of 64 or more gives 0.
 define internal %Slot @t2_shift(%Slot %a, %Slot %b, i1 %left, i1 %inner) {
 entry:
@@ -7316,8 +7315,8 @@ entry:
 }
 ; ---- IN-MEMORY HANDLES: open(my $fh, "<", \"...") reads the string; open(my
 ; $fh, ">", \my $buf) writes into $buf. A handle is { i8* data, i64 len, i64
-; pos, %Slot* target } (malloc'd), held in a %Slot (tag 1, its address);
-; undef where none is open. DATA is one, on the program's __DATA__ text.
+; pos, %Slot* target } (malloc\'d), held in a %Slot (tag 1, its address);
+; undef where none is open. DATA is one, on the program\'s __DATA__ text.
 %Fh = type { i8*, i64, i64, %Slot* }
 declare i8* @memchr(i8*, i32, i64)
 @t2_selected = internal global %Slot zeroinitializer
@@ -7449,11 +7448,11 @@ yes:
   ret i1 1
 }
 ; a print to a handle: appended to its scalar -- true; to one not open for
-; writing (closed, never opened, open for reading), nothing -- false, as perl's.
+; writing (closed, never opened, open for reading), nothing -- false, as perl\'s.
 @msg_fh_undef = private unnamed_addr constant [65 x i8] c"a print to an undefined handle (perl dies): stopped (chalk, T2)\0A\00"
 define internal i1 @t2_fh_print(%Slot %h, %Str %s) {
 entry:
-  ; (to a `my $fh` never opened -- undef -- perl dies: "Can't use an
+  ; (to a `my $fh` never opened -- undef -- perl dies: "Can\'t use an
   ; undefined value as a symbol reference")
   %ht = extractvalue %Slot %h, 0
   %undef = icmp eq i8 %ht, 0
@@ -7511,7 +7510,7 @@ fh:
   ret i1 %ok
 }
 ; select(h, used): h the selected handle (undef STDOUT); the one before
-; handed back -- STDOUT's name, or (where it is used) a stop where it was a
+; handed back -- STDOUT\'s name, or (where it is used) a stop where it was a
 ; handle.
 define internal %Slot @t2_select(%Slot %h, i1 %used) {
 entry:
@@ -7559,7 +7558,7 @@ stop:
 }
 ; ---- formats (formline) ----
 declare i8* @memset(i8*, i32, i64)
-; t2_form_field(v, w, right): a format's @<<< (or @>>>) field: v up to its
+; t2_form_field(v, w, right): a format\'s @<<< (or @>>>) field: v up to its
 ; first newline, cut to w, padded with spaces to w (on the left if right).
 define internal %Str @t2_form_field(%Slot %v, i64 %w, i1 %right) {
 entry:
@@ -7586,7 +7585,7 @@ entry:
   %r = call %Str @t2_str(i8* %buf, i64 %w)
   ret %Str %r
 }
-; t2_rtrim(s): s without its trailing spaces (a format line's, as formline chops them).
+; t2_rtrim(s): s without its trailing spaces (a format line\'s, as formline chops them).
 define internal %Str @t2_rtrim(%Str %s) {
 entry:
   %p = extractvalue %Str %s, 0
@@ -7624,7 +7623,7 @@ no:
   ret i1 0
 }
 @msg_dyn = private unnamed_addr constant [76 x i8] c"a method named at run time by other than a plain name: stopped (chalk, T2)\0A\00"
-; t2_dyn_name(m): `$o->$m`'s name -- a string with no package in it; a code
+; t2_dyn_name(m): `$o->$m`\'s name -- a string with no package in it; a code
 ; value (perl calls it) or a qualified name, a stop.
 define internal %Str @t2_dyn_name(%Slot %m) {
 entry:
@@ -7676,7 +7675,7 @@ define internal %Str @t2_chomp(%Str %s, i1 %chop) {
   %r = call %Str @t2_str(i8* %p, i64 %m)
   ret %Str %r
 }
-; ---- each: a hash's iterator, by its address ----
+; ---- each: a hash\'s iterator, by its address ----
 @t2_iters = internal global %Slot zeroinitializer
 define internal %Array* @t2_each(%Slot %h) {
 entry:
@@ -7704,6 +7703,6 @@ next:
   call void @t2_hset(%Slot %tb, %Str %k, %Slot %ns)
   ret %Array* %r
 }
-LL
+' }
 
 1;
