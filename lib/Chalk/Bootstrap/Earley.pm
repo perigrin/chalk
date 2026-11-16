@@ -77,8 +77,12 @@ class Chalk::Bootstrap::Earley {
     field %leo_items;
 
     # Items already processed at the position being processed:
-    # $_processed[$core_id][$origin] is true once the agenda has handled
-    # that item at $_processed_pos. A derivation that reaches such an item
+    # $_processed[$core_id][$rel_dist] is true once the agenda has handled
+    # that item at $_processed_pos (rel_dist = pos - origin, as in the
+    # chart). Indexed by origin instead, the row of every item predicted
+    # near the current position is as long as the position, and building
+    # and freeing those rows at each position is quadratic in input length.
+    # A derivation that reaches such an item
     # afterwards is "late": its value was already reified (if complete) or
     # scanned/advanced (if not), so merging it raw into the chart would
     # either mix a raw value into a reified one or drop it. Late
@@ -89,7 +93,7 @@ class Chalk::Bootstrap::Earley {
     field $_processed_pos = -1;
 
     # Late derivations waiting on the agenda at the position being
-    # processed: $_late[$core_id][$origin] is the semiring sum of the late
+    # processed: $_late[$core_id][$rel_dist] is the semiring sum of the late
     # derivations of that item that have arrived since the agenda last
     # processed it. The item has exactly one agenda entry, [$core_id,
     # $origin, true], while the slot is defined; a further late derivation
@@ -361,7 +365,7 @@ class Chalk::Bootstrap::Earley {
         return false unless $pos == $_processed_pos;
         my $slot = $_processed[$core_id];
         return false unless defined $slot;
-        return $slot->[$origin] ? true : false;
+        return $slot->[$pos - $origin] ? true : false;
     }
 
     # Queue a late derivation of ($core_id, $origin) at the position being
@@ -371,14 +375,15 @@ class Chalk::Bootstrap::Earley {
     # rather than once per derivation.
     method _queue_late($agenda, $core_id, $origin, $value) {
         my $slot = ($_late[$core_id] //= []);
-        my $pending = $slot->[$origin];
+        my $rd = $_processed_pos - $origin;
+        my $pending = $slot->[$rd];
         if (!defined $pending) {
-            $slot->[$origin] = $value;
+            $slot->[$rd] = $value;
             push $agenda->@*, [$core_id, $origin, true];
             return;
         }
         try {
-            $slot->[$origin] = $semiring->add(
+            $slot->[$rd] = $semiring->add(
                 $self->_force($pending), $self->_force($value));
         } catch ($e) {
             my $rn = $core_index->rule_name_for($core_id);
@@ -386,6 +391,9 @@ class Chalk::Bootstrap::Earley {
                 . "(origin=$origin, pos=$_processed_pos): $e";
         }
     }
+
+    # The processed table of the last position handled (for testing)
+    method processed_table() { return \@_processed; }
 
     # Report the chart origin dimension type (for testing)
     method chart_origin_type() { return 'ARRAY'; }
@@ -665,19 +673,19 @@ class Chalk::Bootstrap::Earley {
                     # Derivations that arrived after this item was processed
                     # (see @_processed), summed (see @_late). Process their
                     # sum alone, and free the slot for later arrivals.
-                    $value = $_late[$core_id][$origin];
-                    $_late[$core_id][$origin] = undef;
+                    $value = $_late[$core_id][$pos - $origin];
+                    $_late[$core_id][$pos - $origin] = undef;
                 } else {
                     # Skip if already processed (2D array avoids pack + hash lookup)
                     # Uses explicit if-block instead of postfix next-if for XS
                     # codegen compatibility (postfix next-if with && falls to eval_pv)
                     my $p_slot = $_processed[$core_id];
                     if (defined $p_slot) {
-                        my $already = $p_slot->[$origin];
+                        my $already = $p_slot->[$pos - $origin];
                         next if $already;
                     }
                     $_processed[$core_id] //= [];
-                    $_processed[$core_id][$origin] = true;
+                    $_processed[$core_id][$pos - $origin] = true;
 
                     # Read value from chart (may have been updated by a merge since
                     # this entry was pushed to the agenda)
