@@ -4402,7 +4402,7 @@ sub _build_T2_BinOp {
     # field $left :param :reader = undef
     my $undef_left = do {
         my $df = Chalk::IR::NodeFactory->new;
-        $df->make('Constant', value => 'undef', const_type => 'string');
+        $df->make('Constant', value => 'undef', const_type => 'undef');
     };
     $binop_cls->declare_field('$left',
         sigil         => '$',
@@ -4415,7 +4415,7 @@ sub _build_T2_BinOp {
     # field $right :param :reader = undef
     my $undef_right = do {
         my $df = Chalk::IR::NodeFactory->new;
-        $df->make('Constant', value => 'undef', const_type => 'string');
+        $df->make('Constant', value => 'undef', const_type => 'undef');
     };
     $binop_cls->declare_field('$right',
         sigil         => '$',
@@ -4670,7 +4670,7 @@ sub _build_T2_Symbol {
     # field $quantifier :param :reader = undef
     my $undef_q = do {
         my $df = Chalk::IR::NodeFactory->new;
-        $df->make('Constant', value => 'undef', const_type => 'string');
+        $df->make('Constant', value => 'undef', const_type => 'undef');
     };
     $cls->declare_field('$quantifier',
         sigil         => '$',
@@ -4818,7 +4818,7 @@ sub _build_T2_Rule {
     my $sym_not_term = $itr_factory->make('Not', inputs => [$not_op, $sym_is_term]);
 
     # Return(false) — inside If.then_stmts
-    my $ret_false_const = $itr_factory->make('Constant', value => 'false', const_type => 'string');
+    my $ret_false_const = $itr_factory->make('Constant', value => 'false', const_type => 'bool');
     my $ret_false = $itr_factory->make_cfg('Return', inputs => [$ret_false_const]);
 
     # If node: inputs[0]=placeholder (will be inner_loop), inputs[1]=condition
@@ -4860,7 +4860,7 @@ sub _build_T2_Rule {
     $outer_loop->set_region($outer_region);
 
     # Return(true) — main chain exit after outer loop
-    my $ret_true_const = $itr_factory->make('Constant', value => 'true', const_type => 'string');
+    my $ret_true_const = $itr_factory->make('Constant', value => 'true', const_type => 'bool');
     my $ret_true = $itr_factory->make_cfg('Return', inputs => [$ret_true_const]);
     $ret_true->set_control_in($outer_region);
 
