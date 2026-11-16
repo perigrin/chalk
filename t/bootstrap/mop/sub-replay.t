@@ -54,7 +54,10 @@ subtest 'sub metadata survives the replay' => sub {
     my $s = sub_named($mop, 'main', 'f');
     ok defined $s, 'sub f present' or return;
     ok $s->uses_args, 'uses_args is true for a shift-using callee';
-    is_deeply $s->params, [], 'params replayed';
+    # A signature-less sub is exactly `sub f(@_)`: one implicit slurpy, which
+    # the producer records (perl5-son b244916) so that it is not conflated
+    # with `sub f()`, arity zero.
+    is_deeply $s->params, ['@_'], 'params replayed: the implicit @_';
 
     my $mop2 = mop_for('sub g { 42 } print g(), "\n";', 'meta2');
     my $s2 = sub_named($mop2, 'main', 'g');
