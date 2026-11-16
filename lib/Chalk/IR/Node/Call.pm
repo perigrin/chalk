@@ -293,6 +293,52 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
         return @ops >= $n ? 1 : 0;
     }
 
+    # builtin_kind -> what it does, among the builtins of its family or
+    # column (BuiltinTable's kind: 'is_directory' for -d, 'piece' for
+    # substr, 'takes_first' for shift, 'opens' for open ...), or undef.
+    method builtin_kind() { return $self->is_builtin ? Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'kind' ) : undef }
+
+    # reads_call_stack -> true for caller: the site of a call N frames up.
+    method reads_call_stack() { return $self->_fact('call_stack') }
+
+    # gives_match_offset -> true for pos: where the last m//g on a variable
+    # left off (an lvalue: where the next starts).
+    method gives_match_offset() { return $self->_fact('match_offset') }
+
+    # quotes_metacharacters -> true for quotemeta: its string, every regex
+    # metacharacter backslashed.
+    method quotes_metacharacters() { return $self->_fact('quotes_meta') }
+
+    # ends_program -> true for exit: the program ends, nothing after it runs.
+    method ends_program() { return $self->_fact('exits') }
+
+    # does_nothing_unthreaded -> true for lock: without threads a no-op, its
+    # value its operand.
+    method does_nothing_unthreaded() { return $self->_fact('unthreaded_noop') }
+
+    # splits_a_string -> true for split: a string's fields, a list.
+    method splits_a_string() { return $self->_fact('splits') }
+
+    # gives_local_time -> true for localtime: a time's nine fields, or its text.
+    method gives_local_time() { return $self->_fact('local_time') }
+
+    # loads_a_file -> true for require: a file compiled in, entered in %INC.
+    method loads_a_file() { return $self->_fact('loads_file') }
+
+    # advances_iterator -> true for each: a hash's next pair, its iterator moved on.
+    method advances_iterator() { return $self->_fact('advances_iterator') }
+
+    # defaults_to_topic -> true for a builtin that, given no operand, is of $_.
+    method defaults_to_topic() { return $self->_fact('topic_default') }
+
+    # numeral_base -> the base a numeral is read in: 16 for hex, 8 for oct
+    # (or the base its prefix names); else undef.
+    method numeral_base() { return $self->is_builtin ? Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'numeral_base' ) : undef }
+
+    # _fact($column) -> 1 where the builtin this calls has a true fact in
+    # BuiltinTable's column, else 0 (a call of a sub: 0).
+    method _fact($column) { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, $column ) ? 1 : 0 }
+
     # makes_a_string -> a builtin that returns a string makes one.
     method makes_a_string() { return $self->returns_string }
 }

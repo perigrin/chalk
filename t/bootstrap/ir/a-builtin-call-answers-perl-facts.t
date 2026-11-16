@@ -174,6 +174,73 @@ subtest 'changes_state: it changes state a later read sees' => sub {
     ok( !sub_call( 'direct', 'chdir' )->changes_state, 'a sub named chdir is not the builtin' );
 };
 
+subtest 'builtin_kind: what it does, among its family (or the builtins of its column)' => sub {
+    my %want = (
+        # path
+        ftdir => 'is_directory', ftis => 'is_present', chdir => 'changes_directory', require => 'loads_file',
+        # substring
+        substr => 'piece', index => 'position',
+        # object
+        bless => 'blesses', blessed => 'class_name', reftype_of_ref => 'referent_kind',
+        # list
+        join => 'joined', unpack => 'unpacked', glob => 'file_names', each => 'next_pair',
+        # scalar
+        chr => 'character', ord => 'code_point', time => 'epoch_seconds', reverse => 'reversed',
+        sprintf => 'formatted', lock => 'operand', prototype => 'prototype_of', pack => 'packed', formline => 'format_line',
+        # an array's end
+        shift => 'takes_first', pop => 'takes_last', push => 'adds_last', unshift => 'adds_first', set_arylen => 'sets_last_index',
+        # a list's order
+        sort => 'sorted',
+        # a handle's
+        open => 'opens', close => 'closes', eof => 'at_end', readline => 'reads_lines',
+        select => 'selects_output', sselect => 'waits_for_handles',
+        # a tie's
+        tie => 'binds', tied => 'tied_object', untie => 'unbinds',
+    );
+    is( builtin($_)->builtin_kind, $want{$_}, "$_: $want{$_}" ) for sort keys %want;
+    is( builtin('lc')->builtin_kind, undef, 'lc: none (case_change says)' );
+    is( builtin('int')->builtin_kind, undef, 'int: none (number_kind says)' );
+    is( sub_call( 'direct', 'open' )->builtin_kind, undef, 'a sub named open: none' );
+    my %kinds;
+    for ( sort keys %want ) { my $fam = builtin($_)->builtin_family // ''; ok( !$kinds{$fam}{ $want{$_} }++, "$_: one of its family's kinds" ) }
+    # A KIND SAYS WHAT A BUILTIN DOES, not which it is: none is a builtin's name.
+    require Pod::Functions;
+    my %perlfunc = map { ( $_ => 1 ) } keys %Pod::Functions::Type, Chalk::Grammar::Perl::BuiltinTable::names();
+    is_deeply( [ grep { $perlfunc{$_} } sort values %want ], [], 'no kind is the name of a builtin' );
+};
+
+subtest 'a fact true of one builtin a backend asks about' => sub {
+    my @facts = (
+        [ reads_call_stack         => 'caller',    'the call stack: the site of a call N frames up' ],
+        [ gives_match_offset       => 'pos',       'where the last m//g on a variable left off' ],
+        [ quotes_metacharacters    => 'quotemeta', 'its string with every regex metacharacter backslashed' ],
+        [ ends_program             => 'exit',      'the program ends, with a status' ],
+        [ does_nothing_unthreaded  => 'lock',      'without threads, nothing: its value its operand' ],
+        [ splits_a_string          => 'split',     'a string\'s fields, between a pattern\'s matches' ],
+        [ gives_local_time         => 'localtime', 'a time\'s nine fields, or its text' ],
+        [ loads_a_file             => 'require',   'a file compiled in, entered in %INC' ],
+        [ advances_iterator        => 'each',      'a hash\'s next pair, by its iterator' ],
+    );
+    for my $f (@facts) {
+        my ( $m, $name, $what ) = @$f;
+        ok( builtin($name)->$m, "$m: $name ($what)" );
+        ok( !builtin($_)->$m, "$m: not $_" ) for grep { $_ ne $name } qw(caller pos quotemeta exit lock split localtime require each keys);
+        ok( !sub_call( 'direct', $name )->$m, "$m: not a sub named $name" );
+    }
+};
+
+subtest 'defaults_to_topic: of no operand, of $_' => sub {
+    ok( builtin($_)->defaults_to_topic, "$_ of nothing is of \$_" ) for qw(int abs hex oct chr ord lc uc length quotemeta);
+    ok( !builtin($_)->defaults_to_topic, "$_ is not" ) for qw(rand time shift push);
+    ok( !sub_call( 'direct', 'int' )->defaults_to_topic, 'a sub named int is not the builtin' );
+};
+
+subtest 'numeral_base: the base a numeral is read in' => sub {
+    is( builtin('hex')->numeral_base, 16, 'hex: 16' );
+    is( builtin('oct')->numeral_base, 8,  'oct: 8 (or 16, 2 by its prefix)' );
+    is( builtin('int')->numeral_base, undef, 'int: none' );
+};
+
 subtest 'is_perls_own: a name perl gives its own meaning, by sigil' => sub {
     my $e = sub ($sigil, $symbol) { $f->make('EntryDef', sigil => $sigil, symbol => $symbol, package => 'main') };
     ok( $e->( '$', $_ )->is_perls_own, "\$$_ is perl's" ) for qw(ENV INC ARGV STDIN STDOUT STDERR 0 AUTOLOAD);

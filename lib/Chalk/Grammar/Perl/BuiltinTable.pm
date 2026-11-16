@@ -167,10 +167,103 @@ class Chalk::Grammar::Perl::BuiltinTable {
         # IT CHANGES STATE A LATER READ SEES: chdir the working directory
         # (the next -d's), require %INC and the subs it compiles in.
         changes_state => { map { ( $_ => 1 ) } qw(chdir require) },
+
+        # WHAT IT DOES, among the builtins of its family (or, for one of no
+        # family, of the column it shares: a handle's operation, a tie
+        # function, an array's end, a list's order) -- one each, so a backend
+        # tells them apart by what they do. (The number family's is
+        # number_kind, the case functions' case_change.)
+        #   path       -d PATH is it a directory, -e PATH is anything there, chdir
+        #              the working directory changed, require a file loaded
+        #   substring  substr a piece of the string, index the position of one
+        #   object     bless a reference blessed into a class, blessed the
+        #              class it was, `ref \$x` the kind of thing $x holds
+        #   list       join its LIST joined into a string, unpack the values a
+        #              template reads, glob the names of the files a pattern
+        #              matches, each a hash's next key and value
+        #   scalar     chr the character of a number, ord the number of a
+        #              character, time the seconds since the epoch, reverse
+        #              (in scalar context) its LIST's string reversed, sprintf
+        #              its LIST formatted, lock its operand, prototype a
+        #              sub's, pack the string a template makes of its LIST,
+        #              formline its LIST formatted into the accumulator
+        #   an array's end: shift takes its first, pop its last; push adds
+        #              its LIST last, unshift first; `$#a = N` (B::SoN's
+        #              set_arylen) sets its last index
+        #   a list's order: sort its LIST sorted (reverse's, reversed)
+        #   a handle's: open opens one, close closes it, eof is it at its end,
+        #              readline reads its lines, select selects the default
+        #              output handle, four-argument select waits for handles
+        #              ready
+        #   a tie's: tie binds a variable to a class's object, tied that
+        #              object, untie unbinds it
+        kind => {
+            ftdir => 'is_directory', ftis => 'is_present', chdir => 'changes_directory', require => 'loads_file',
+            substr => 'piece', index => 'position',
+            bless => 'blesses', blessed => 'class_name', reftype_of_ref => 'referent_kind',
+            join => 'joined', unpack => 'unpacked', glob => 'file_names', each => 'next_pair',
+            chr => 'character', ord => 'code_point', time => 'epoch_seconds', reverse => 'reversed',
+            sprintf => 'formatted', lock => 'operand', prototype => 'prototype_of', pack => 'packed',
+            formline => 'format_line',
+            shift => 'takes_first', pop => 'takes_last', push => 'adds_last', unshift => 'adds_first',
+            set_arylen => 'sets_last_index',
+            sort => 'sorted',
+            open => 'opens', close => 'closes', eof => 'at_end', readline => 'reads_lines',
+            select => 'selects_output', sselect => 'waits_for_handles',
+            tie => 'binds', tied => 'tied_object', untie => 'unbinds',
+        },
+
+        # ITS VALUE IS OF THE CALL STACK: caller's, the package, file and line
+        # of the call N frames up -- each call of a sub pushes its site.
+        call_stack => { caller => 1 },
+
+        # ITS VALUE IS WHERE THE LAST m//g ON A VARIABLE LEFT OFF (perlfunc's
+        # pos), and an lvalue: a store to it sets where the next one starts.
+        match_offset => { pos => 1 },
+
+        # ITS STRING WITH EVERY REGEX METACHARACTER BACKSLASHED (quotemeta):
+        # in a pattern, a literal.
+        quotes_meta => { quotemeta => 1 },
+
+        # THE PROGRAM ENDS, with a status (perlfunc's exit, 0 where none is
+        # given): nothing after it runs.
+        exits => { exit => 1 },
+
+        # WITHOUT THREADS IT DOES NOTHING (perlfunc's lock: "a no-op on
+        # systems without threads"); its value is its operand.
+        unthreaded_noop => { lock => 1 },
+
+        # A STRING'S FIELDS (perlfunc's split), between its pattern's
+        # matches: a list, their count in scalar context.
+        splits => { split => 1 },
+
+        # A TIME'S NINE FIELDS in list context, its text (ctime's) in scalar
+        # context (perlfunc's localtime), now where it is given none.
+        local_time => { localtime => 1 },
+
+        # A FILE COMPILED IN (perlfunc's require), entered in %INC: its
+        # name's file, of a module's name.
+        loads_file => { require => 1 },
+
+        # A HASH'S NEXT PAIR, BY ITS ITERATOR (perlfunc's each), which it
+        # moves on: keys and values start it over (resets_iterator).
+        advances_iterator => { each => 1 },
+
+        # OF NO OPERAND, OF $_ (perlfunc: "If EXPR is omitted, uses $_").
+        # Not rand, whose is 1. Not every such builtin is listed -- the ones
+        # a backend asks about are.
+        topic_default => { map { ( $_ => 1 ) } qw(abs chr cos exp hex int lc lcfirst length log oct ord quotemeta sqrt uc ucfirst) },
+
+        # THE BASE A NUMERAL IS READ IN: hex's 16; oct's 8, or 16, 2 or 8 by
+        # its prefix (0x, 0b, 0o).
+        numeral_base => { hex => 16, oct => 8 },
     );
     while ( my ( $col, $rows ) = splice @COLUMNS, 0, 2 ) {
         $FACTS{$_}{$col} = $rows->{$_} for keys $rows->%*;
     }
+
+    # names() -> every builtin a fact is held of, by the name B::SoN gives it.
+    sub names() { return sort keys %FACTS }
 
     # fact($builtin, $column) -> the builtin's fact in that column, or undef.
     sub fact($name, $column) {
