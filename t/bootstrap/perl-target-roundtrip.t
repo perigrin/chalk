@@ -99,6 +99,15 @@ my @cases = (
           "    }\n",
           "}\n"),
       q{my $h = RT4::h(); $h =~ s/([^ -~])/sprintf('<%02x>', ord $1)/ge; print $h, "|", RT4::d(0), "\n"; eval { RT4::d(1) }; print "[$@]\n";} ],
+    [ 'the strings undef, true and false stay strings; the keywords stay keywords',
+      join('', "class RT8 {\n",
+          "    sub s() { return 'undef' }\n",
+          "    sub st() { return 'true' . '/' . 'false' }\n",
+          "    sub ku() { return defined(undef) ? 'def' : 'undef-kw' }\n",
+          "    sub kt() { return true ? 'T' : 'F' }\n",
+          "    sub kf() { return false ? 'T' : 'F' }\n",
+          "}\n"),
+      q{print join(',', RT8::s(), RT8::st(), RT8::ku(), RT8::kt(), RT8::kf()), "\n";} ],
 );
 
 for my $case (@cases) {

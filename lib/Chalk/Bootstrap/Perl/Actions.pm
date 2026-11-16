@@ -211,6 +211,13 @@ class Chalk::Bootstrap::Perl::Actions {
         return $factory->make('Constant', const_type => 'string', value => $value);
     }
 
+    # The keyword literal `undef`, `true` or `false`. The value keeps the
+    # keyword's spelling; the const_type says it is not a string.
+    my sub _make_keyword_const($factory, $word) {
+        return $factory->make('Constant',
+            const_type => $word eq 'undef' ? 'undef' : 'bool', value => $word);
+    }
+
     # The MOP::Sub `signature` option for a parsed sub. A sub without a
     # signature gets the record the producer's wire gives one (B::SoN
     # _cv_signature): `implicit`, one slurpy @_. A declared signature's
@@ -485,7 +492,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # (e.g., in tests or early-parse contexts without scope tracking).
         my $control = $ctx->control_head // $factory->make('Start');
         my $ret = $factory->make_cfg('Return',
-            inputs => [$value // _make_const($factory, 'undef')],
+            inputs => [$value // _make_keyword_const($factory, 'undef')],
         );
         $ret->set_control_in($control);
         return $ret;
@@ -1529,9 +1536,11 @@ class Chalk::Bootstrap::Perl::Actions {
         # Handle undef/true/false literals by scanned text
         my $text = $ctx->scanned_text();
         $text =~ s/^\s+|\s+$//g;
-        if ($text eq 'undef' || $text eq 'true' || $text eq 'false') {
-            return _make_const($factory, $text);
-        }
+        # The keywords, typed as the rest of the IR types them (Analysis's
+        # `undef` Constant, the loop's `bool` true): as `string` Constants
+        # they were the same node as the strings 'undef', 'true', 'false'.
+        return _make_keyword_const($factory, $text)
+            if $text eq 'undef' || $text eq 'true' || $text eq 'false';
         return undef;
     }
 

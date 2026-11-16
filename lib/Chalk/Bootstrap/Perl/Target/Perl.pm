@@ -1060,9 +1060,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($val =~ /^-?[0-9]+(?:\.[0-9]+)?$/) {
                 return $val;
             }
-            # Boolean/special values
-            if ($val eq 'true' || $val eq 'false' || $val eq 'undef') {
-                return $val;
+            # The keywords. The string 'undef' is a string.
+            return 'undef' if $ct eq 'undef';
+            if ($ct eq 'bool') {
+                return $val eq 'true' || $val eq 'false' ? $val
+                    : die "GAP: a bool Constant spelled '$val' has no Perl literal\n";
             }
             # Regex literals — emit bare (not quoted)
             if ($ct eq 'regex') {
