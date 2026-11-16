@@ -533,16 +533,24 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return $self->_emit_expr($node);
     }
 
+    # A signature's params shadow class-scope names: a `$x` param is a
+    # scalar here, and a `%opts` / `@rest` param is an aggregate, whose
+    # element is `$opts{k}`, not the `$opts->{k}` of a scalar holding a ref.
+    method _scope_params($params) {
+        for my $pname ($params->@*) {
+            if ($pname =~ /^\$(.+)/) {
+                delete $_aggregate_vars{$1};
+            } elsif ($pname =~ /^([\@\%])(.+)/) {
+                $_aggregate_vars{$2} = $1;
+            }
+        }
+    }
+
     # Scope aggregate vars from a MOP method/sub's params + lexical
     # bindings. The legacy _scope_body_vars walks a body arrayref;
     # the MOP-driven path uses the method's lexical bindings list.
     method _scope_body_vars_mop($params, $method) {
-        for my $p ($params->@*) {
-            my $pname = $p;
-            if ($pname =~ /^\$(.+)/) {
-                delete $_aggregate_vars{$1};
-            }
-        }
+        $self->_scope_params($params);
         # Walk the method's graph to find VarDecls (same approach the
         # legacy synthesis uses, just driven by MOP graph instead of
         # the synthesized body arrayref).
@@ -938,13 +946,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # VarDecl aggregate names.
     # $params: plain strings from MethodInfo/SubInfo.
     method _scope_body_vars($params, $body) {
-        # Params shadow: $reachable param means $reachable is a scalar here
-        for my $p ($params->@*) {
-            my $pname = $p;
-            if ($pname =~ /^\$(.+)/) {
-                delete $_aggregate_vars{$1};
-            }
-        }
+        $self->_scope_params($params);
         # Add body-local aggregate VarDecls and ListAssigns
         for my $item ($body->@*) {
             if ($item isa Chalk::IR::Node::VarDecl) {

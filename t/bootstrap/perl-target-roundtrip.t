@@ -156,6 +156,11 @@ my @cases = (
           "    }\n",
           "}\n"),
       q{print "before\n"; print RT11::v(1), "\n"; RT11::r('x');} ],
+    [ 'a hash signature parameter is subscripted as a hash',
+      join('', "class RT10 {\n",
+          "    method c(\$k, %opts) { return \$opts{\$k} // 'none' }\n",
+          "}\n"),
+      q{my $o = RT10->new; print $o->c('a', a => 1), $o->c('b', a => 1), "\n";} ],
 );
 
 for my $case (@cases) {
