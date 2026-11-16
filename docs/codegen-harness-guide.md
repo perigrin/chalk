@@ -55,12 +55,10 @@ The runner sets `CHALK_G7_TEST=hostval` for itself so the `host.md` H3 case
 For each case that is **not** a declared GAP, the gate asserts three things and
 only counts the case as `gate-green` when **all three** hold:
 
-1. **behavior** — the case source is run two ways and the type-tagged results
-   must be byte-equal:
-   - **perl oracle**: source run under perl 5.42, result printed as a canonical
-     type tag (`Int:5`, `Bool:1`, `Bool:` for false, `Str:hi`, `Num:3.5`,
-     `Undef:`, `Slot:` for bounds-checked element reads). The tag rule lives in
-     `t/lib/Chalk/CodeGen/Harness/TypeTag.pm`.
+1. **behavior** — the case source is a program, run two ways, and what it
+   prints must be byte-equal:
+   - **perl oracle**: the program run under perl 5.42; its stdout is the
+     expected output (a case's `stdout:` line declares it).
    - **lli**: the case source goes through B::SoN (`-MO=SoN,json`), the JSON IR
      is loaded (`Chalk::IR::Serialize::JSON::from_json`), lowered
      (`Chalk::Target::LLVM->lower`), and the `.ll` is run under `lli`. Its
@@ -294,7 +292,6 @@ $PERL script/print-gap-map.pl
 - `t/bootstrap/corpus/son-corpus-wide.t` — the authoritative gate.
 - `t/corpus/mdtest/*.md` — the idiom corpus (one file per topic).
 - `t/lib/Chalk/CodeGen/Harness/MdtestCorpus.pm` — corpus parser + shape check.
-- `t/lib/Chalk/CodeGen/Harness/TypeTag.pm` — the type-tag oracle rule.
 - `script/print-gap-map.pl` + `t/fixtures/codegen-harness/gap-map.json` — fixed
   hand-graph snapshot.
 - `docs/plans/2026-06-07-mdtest-corpus-format-draft.md` — the corpus format spec.

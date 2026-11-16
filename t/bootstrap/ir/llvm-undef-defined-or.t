@@ -228,8 +228,7 @@ subtest 'U3: DefinedOr(Undef :undef, Int) => right operand via lli' => sub {
 # channel a program does not have — so there is nothing to convert them into.
 # A program's undef is observed by printing it, which U1 now does.
 #
-# If TypeTag survives for other consumers, its Undef entry belongs in a TypeTag
-# unit test, not here.
+# TypeTag itself has since been deleted: it had no consumer left.
 #
 # ---------------------------------------------------------------------------
 # U5: REMOVED — same reason, one layer down.
