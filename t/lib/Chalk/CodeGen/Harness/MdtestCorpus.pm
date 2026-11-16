@@ -9,6 +9,7 @@ use Carp         qw(croak);
 use File::Temp   qw(tempfile);
 use Scalar::Util qw(blessed);
 use JSON::PP;
+use Chalk::CodeGen::Harness::Deviation ();
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
@@ -394,7 +395,7 @@ sub parse_l_verdict_from_ir {
     return 'GREEN';
 }
 
-# parse_deviation_from_ir($ir_block) -> { reason, expected } or undef
+# parse_deviation_from_ir($ir_block) -> { ground, reason, expected } or undef
 #
 # A DEVIATES case produces output that is LEGAL PERL but not byte-identical to
 # what `perl` prints. Its contract is STRICTER than GREEN, not looser: the case
@@ -420,11 +421,25 @@ sub parse_l_verdict_from_ir {
 # cases a static compiler may legitimately deviate on. The declared string is
 # the only mechanism that covers the whole class.
 #
-# THE RULE THAT DECIDES WHAT MAY USE THIS (perigrin): a deviation is legitimate
-# when static compilation CANNOT do what `perl` does, and illegitimate when
-# chalk simply HAS NOT YET. Both fields below are mandatory because that
-# distinction lives in the reason: a deviation with nothing to check against,
-# or with no stated justification, is a defect wearing a legitimising label.
+# THE RULE THAT DECIDES WHAT MAY USE THIS (perigrin; widened 2026-11-16). A
+# deviation is legitimate on one of TWO GROUNDS, and its reason names which:
+#
+#   (a) cannot:   static compilation CANNOT do what `perl` does;
+#   (b) correct:  chalk's answer is PROVABLY CORRECT where perl's is an
+#                 artifact of its implementation. perl's IV/UV/NV forms are an
+#                 implementation detail, not language semantics, and the
+#                 abstraction leaks (the literal and 2**53 + 1 above). Three
+#                 conditions: the reason STATES THE PROOF -- what makes chalk's
+#                 answer correct ("the exact value of the expression; perl
+#                 prints a rounded double"); the deviation is NEVER LESS EXACT
+#                 OR LESS CONSISTENT than perl, only more; and "chalk HAS NOT
+#                 YET" is still illegitimate.
+#
+# A deviation where chalk simply HAS NOT YET is neither. Both fields below are
+# mandatory because that distinction lives in the reason: a deviation with
+# nothing to check against, or with no stated ground and justification, is a
+# defect wearing a legitimising label. The grounds, and the census's
+# declared deviations, are Chalk::CodeGen::Harness::Deviation's.
 sub parse_deviation_from_ir {
     my ($class, $ir_block) = @_;
     return undef unless defined $ir_block;
@@ -437,6 +452,8 @@ sub parse_deviation_from_ir {
         die "corpus: L: DEVIATES needs a reason naming the Perl-level "
           . "guarantee that permits the deviation -- got: $line\n"
             unless defined $reason && $reason =~ /\S/;
+        my ($ground, $proof) = eval { Chalk::CodeGen::Harness::Deviation::ground_of($reason) };
+        die "corpus: L: DEVIATES: $@" unless defined $ground;
 
         my ($expected) = $line =~ /\bexpected=(.*)$/;
         die "corpus: L: DEVIATES needs expected=<output>; without it the case "
@@ -444,7 +461,7 @@ sub parse_deviation_from_ir {
           . "-- got: $line\n"
             unless defined $expected && $expected =~ /\S/;
 
-        return { reason => $reason, expected => $expected };
+        return { ground => $ground, reason => $proof, expected => $expected };
     }
     return undef;
 }

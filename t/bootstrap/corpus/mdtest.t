@@ -61,7 +61,9 @@ my %KNOWN_WORKLIST = map { $_ => 1 } (
     # declaration was hiding a miscompile, not an absence" -- and it is right:
     # a GAP claims the case does not compile. It is not a DEVIATES case either,
     # since chalk COULD produce the exact answer; that verdict is for output a
-    # static compiler cannot match.
+    # static compiler cannot match (cannot:), or where chalk's answer is the
+    # provably exact one and perl's an artifact (correct:) -- here perl's is
+    # the exact one (Chalk::CodeGen::Harness::Deviation).
     #
     # So it is TODO here and red on the gate, which is the honest shape for a
     # known defect with a named cause. See

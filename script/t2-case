@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
-# ABOUTME: t2-case ID...  -- each pvm-corpus case through T2 alone: SAME, DIFFERS or
-# ABOUTME: REFUSED (T2's reason). ID is file:N (adjacency-02_variables:3) or the census's cNNN.
+# ABOUTME: t2-case ID...  -- each pvm-corpus case through T2 alone: SAME, DIFFERS, DEVIATES
+# ABOUTME: (declared: t/data/census-deviations.tsv) or REFUSED. ID is file:N or the census's cNNN.
 use v5.42.0;
 use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../t/lib";
@@ -13,6 +13,6 @@ for my $id (@ARGV) {
     my $r = run_case($c);
     say join "\t", $r->{verdict}, "$c->{id} ($c->{cid})", $r->{why} // '';
     if ($r->{verdict} eq 'DIFFERS') { print "  got:  $r->{got}  want: $r->{want}" }
-    $bad++ unless $r->{verdict} eq 'SAME';
+    $bad++ unless $r->{verdict} =~ /\A(?:SAME|DEVIATES)\z/;   # (a declared deviation passes, counted apart)
 }
 exit($bad ? 1 : 0);

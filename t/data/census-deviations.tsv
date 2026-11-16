@@ -1,0 +1,19 @@
+# ABOUTME: Census cases whose output legitimately deviates from perl's, each with its
+# ABOUTME: ground, reason and the exact output chalk must print (Harness::Deviation).
+#
+# A case here passes only if chalk prints `expected` exactly, and the census
+# (script/t2-case, the LLVM round-trip census) counts it DEVIATES -- never SAME
+# or ROUNDTRIP. The rule (perigrin, 2026-11-16) is in
+# t/lib/Chalk/CodeGen/Harness/Deviation.pm and
+# docs/plans/2026-09-04-legal-deviation-a-third-verdict.md: the ground is
+#   cannot   static compilation cannot do what perl does, or
+#   correct  chalk's answer is provably correct where perl's is an artifact of
+#            its implementation -- the reason states the proof, and the
+#            deviation is never less exact or less consistent than perl.
+# "chalk has not yet" is neither.
+#
+# One case per line, tab-separated:
+#   id (file:N, as script/t2-case names it)  ground  reason  expected
+# expected is the whole stdout, with \n, \t and \\ escaped.
+#
+# (No census case deviates today.)

@@ -29,10 +29,18 @@ use Chalk::CodeGen::Harness::MdtestCorpus;
 # STRING for the same VALUE. `DEVIATES` records exactly that, and its contract
 # is STRICTER than GREEN rather than looser -- see the subtests.
 #
-# THE RULE THAT DECIDES WHAT MAY USE IT (perigrin): a deviation is legitimate
-# when static compilation CANNOT do what perl does, and illegitimate when chalk
-# simply HAS NOT YET. The second kind is a defect wearing a legitimising label,
-# and the reason string is where that distinction is made explicit.
+# THE RULE THAT DECIDES WHAT MAY USE IT (perigrin; widened 2026-11-16). A
+# deviation is legitimate on one of two grounds, and its reason names which:
+#
+#   cannot:   static compilation CANNOT do what perl does;
+#   correct:  chalk's answer is PROVABLY CORRECT where perl's is an artifact
+#             of its implementation (IV/UV/NV forms are perl's implementation,
+#             not the language's, and they leak). The reason states the proof;
+#             the deviation is never less exact or less consistent than perl,
+#             only more.
+#
+# "chalk HAS NOT YET" is neither: a defect wearing a legitimising label. The
+# reason string is where that distinction is made explicit.
 # ---------------------------------------------------------------------------
 
 sub verdict ($ir) {
@@ -47,12 +55,12 @@ subtest 'the existing two verdicts still parse' => sub {
 };
 
 subtest 'DEVIATES parses as its own verdict' => sub {
-    my $ir = qq{%a = Start()\nL: DEVIATES(Perl does not specify IV vs NV) expected=9.00719925474099e+15\n};
+    my $ir = qq{%a = Start()\nL: DEVIATES(cannot: Perl does not specify IV vs NV) expected=9.00719925474099e+15\n};
     is verdict($ir), 'DEVIATES', 'DEVIATES is not folded into GREEN or GAP';
 };
 
 subtest 'DEVIATES carries a reason and an expected string' => sub {
-    my $ir = qq{%a = Start()\nL: DEVIATES(hash order is randomised per process) expected=b,a,c\n};
+    my $ir = qq{%a = Start()\nL: DEVIATES(cannot: hash order is randomised per process) expected=b,a,c\n};
     my $d = Chalk::CodeGen::Harness::MdtestCorpus->parse_deviation_from_ir($ir);
 
     ok defined $d, 'a DEVIATES line yields a deviation record';
@@ -65,7 +73,7 @@ subtest 'a DEVIATES line without an expected string is REJECTED' => sub {
     # human wrote down. Without `expected=` there is nothing to check against,
     # and the case would silently accept any output at all -- strictly worse
     # than GREEN. That must be an error, not a default.
-    my $ir = qq{%a = Start()\nL: DEVIATES(some reason)\n};
+    my $ir = qq{%a = Start()\nL: DEVIATES(cannot: some reason)\n};
     my $err = do {
         local $@;
         eval { Chalk::CodeGen::Harness::MdtestCorpus->parse_deviation_from_ir($ir) };
@@ -87,6 +95,46 @@ subtest 'a DEVIATES line without a reason is REJECTED' => sub {
     };
     like $err, qr/reason/i,
         'a DEVIATES with an empty reason dies naming what is missing';
+};
+
+subtest 'a DEVIATES reason must name its ground' => sub {
+    # The two grounds are different claims and are checked differently: a
+    # `cannot:` says what static compilation cannot know; a `correct:` states
+    # the proof that chalk's output is the exact one. A reason that names
+    # neither leaves "has not yet" undistinguished, so it cannot be legal.
+    my $err = do {
+        local $@;
+        eval { Chalk::CodeGen::Harness::MdtestCorpus->parse_deviation_from_ir(
+            qq{%a = Start()\nL: DEVIATES(Perl does not specify IV vs NV) expected=x\n}) };
+        $@;
+    };
+    like $err, qr/ground.*cannot:.*correct:/s, 'a reason with no ground dies naming the two';
+
+    $err = do {
+        local $@;
+        eval { Chalk::CodeGen::Harness::MdtestCorpus->parse_deviation_from_ir(
+            qq{%a = Start()\nL: DEVIATES(later: chalk has not yet) expected=x\n}) };
+        $@;
+    };
+    like $err, qr/ground/, 'an unknown ground dies';
+
+    $err = do {
+        local $@;
+        eval { Chalk::CodeGen::Harness::MdtestCorpus->parse_deviation_from_ir(
+            qq{%a = Start()\nL: DEVIATES(correct: ) expected=x\n}) };
+        $@;
+    };
+    like $err, qr/proof|reason/i, 'a ground with no proof stated dies';
+
+    my $d = Chalk::CodeGen::Harness::MdtestCorpus->parse_deviation_from_ir(
+        qq{%a = Start()\nL: DEVIATES(correct: the exact value; perl prints a rounded double) expected=1000000000000000\n});
+    is $d->{ground}, 'correct', 'the ground is extracted';
+    is $d->{reason}, 'the exact value; perl prints a rounded double', 'the reason is the proof, after the ground';
+    is $d->{expected}, '1000000000000000', 'expected as before';
+
+    $d = Chalk::CodeGen::Harness::MdtestCorpus->parse_deviation_from_ir(
+        qq{%a = Start()\nL: DEVIATES(cannot: hash order is randomised per process) expected=b,a,c\n});
+    is $d->{ground}, 'cannot', 'cannot: is the other ground';
 };
 
 subtest 'parse_deviation_from_ir returns undef for the other verdicts' => sub {
