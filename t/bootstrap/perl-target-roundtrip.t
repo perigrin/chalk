@@ -81,6 +81,13 @@ my @cases = (
           "    sub or_die(\$x) { return \$x || die 'none' }\n",
           "}\n"),
       q{print RT2c::last_arg(1, 2), '|', RT2c::mid_arg(1, 2), '|', RT2c::or_die(3), "\n"; eval { RT2c::or_die(0) }; print $@;} ],
+    [ 'a ternary with an empty-list arm keeps both arms',
+      join('', "class RT3 {\n",
+          "    sub g(\$v) { return \$v ? 'x' : () }\n",
+          "    sub h(\$v) { return \$v ? () : 'y' }\n",
+          "    sub e() { my \@a = (); return scalar(\@a) }\n",
+          "}\n"),
+      q{my @r = RT3::g(0); my @s = RT3::g(1); my @t = RT3::h(1); my @u = RT3::h(0); print scalar(@r), scalar(@s), scalar(@t), scalar(@u), RT3::e(), "\n";} ],
 );
 
 for my $case (@cases) {

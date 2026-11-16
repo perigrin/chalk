@@ -1955,6 +1955,10 @@ class Chalk::Bootstrap::Perl::Actions {
             return $val if $val isa Chalk::IR::Node;
             return $val if ref($val) eq 'ARRAY';
         }
+        # `()` is the empty list, a value: `$c ? 'x' : ()` has three operands.
+        # Returning nothing here made the ternary drop to its condition.
+        return $ctx->factory->make('ExpressionList', inputs => [[]])
+            if ($ctx->scanned_text() // '') =~ /\A\s*\(\s*\)\s*\z/;
         return undef;
     }
 

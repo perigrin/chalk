@@ -820,8 +820,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             # ExpressionList in statement position — emit as a parenthesized
             # list expression. Used by ($a, $b, $c) tuple expressions at the
             # statement level (rare; usually wraps as a Call argument).
-            my @items = $node->items->@*;
-            return '(' . join(', ', map { $self->_emit_expr($_) } @items) . ');';
+            return $self->_emit_expr($node) . ';';
         }
 
         # Every IR node type must have an explicit handler above. If we reach
@@ -1103,6 +1102,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::TernaryExpr)       { return $self->_emit_ternary_expr($node); }
         if ($node isa Chalk::IR::Node::StructRef)         { return $self->_emit_struct_ref_expr($node); }
         if ($node isa Chalk::IR::Node::StructFieldAccess) { return $self->_emit_field_access_expr($node); }
+        if ($node isa Chalk::IR::Node::ExpressionList) {
+            return '(' . join(', ', $self->_emit_operand_list($node->items->@*)) . ')';
+        }
 
         return $self->_emit_node($node);
     }
