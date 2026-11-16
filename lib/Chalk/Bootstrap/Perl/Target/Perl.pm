@@ -61,6 +61,35 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     # when the variable was declared as %hash.  Keys are bare names (no sigil).
     field %_aggregate_vars;
 
+    # Perl's operator precedence (perlop), tightest first, as numbers: the
+    # IR is a tree and keeps no parentheses, so the emitter puts back exactly
+    # the ones the tree's shape needs. [precedence, associativity].
+    my %PREC_TERM   = (term => 240, arrow => 230, unary => 200, bind => 190,
+                       named_unary => 150, ternary => 60, assign => 50,
+                       comma => 40, list_op => 35, not => 30);
+    my %BINOP_PREC = (
+        '**' => [210, 'right'],
+        (map { $_ => [180, 'left'] } '*', '/', '%', 'x'),
+        (map { $_ => [170, 'left'] } '+', '-', '.'),
+        (map { $_ => [160, 'left'] } '<<', '>>'),
+        'isa' => [140, 'none'],
+        (map { $_ => [130, 'none'] } '<', '>', '<=', '>=', 'lt', 'gt', 'le', 'ge'),
+        (map { $_ => [120, 'none'] } '==', '!=', '<=>', 'eq', 'ne', 'cmp'),
+        (map { $_ => [110, 'left'] } '&', '&.'),
+        (map { $_ => [100, 'left'] } '|', '^', '|.', '^.'),
+        '&&' => [90, 'left'],
+        (map { $_ => [80, 'left'] } '||', '//', '^^'),
+        (map { $_ => [70, 'none'] } '..', '...'),
+        (map { $_ => [50, 'right'] } '=', '+=', '-=', '*=', '/=', '.=', '//=',
+             '||=', '&&=', '%=', '**=', 'x=', '|=', '&=', '^=', '<<=', '>>='),
+        ',' => [40, 'left'],
+        'and' => [20, 'left'],
+        (map { $_ => [10, 'left'] } 'or', 'xor'),
+    );
+    # Builtins emitted in list-operator form (no parentheses round the args).
+    my %LIST_FORM_BUILTINS = map { $_ => 1 }
+        qw(push unshift die return print say warn);
+
     # Set struct schemas for StructRef/FieldAccess lowering.
     method set_struct_schemas($schemas) {
         $_struct_schemas = $schemas;
@@ -963,12 +992,12 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node->can('synthetic') && $node->synthetic) {
             return defined $value ? $self->_emit_expr($value) . ";" : undef;
         }
-        return "return " . $self->_emit_expr($value) . ";";
+        return "return " . $self->_emit_operand($value, $PREC_TERM{comma}, true) . ";";
     }
 
     method _emit_die_call($node) {
         my $args = $node->value;
-        my @arg_strs = map { $self->_emit_expr($_) } $args->@*;
+        my @arg_strs = $self->_emit_operand_list($args->@*);
         return "die " . join(', ', @arg_strs) . ";";
     }
 
@@ -1161,7 +1190,69 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             }
             return '()';
         }
-        return $self->_emit_expr($init);
+        return $self->_emit_operand($init, $PREC_TERM{assign}, true);
+    }
+
+    # The precedence of the text _emit_expr gives for $node.
+    method _prec($node) {
+        return $PREC_TERM{term} unless blessed($node);
+        if ($node isa Chalk::IR::Node::Constant) {
+            my $v = $node->value() // '';
+            # A negative literal is a unary minus: (-2) ** 2 is not -2 ** 2.
+            return $v =~ /^-/ && ($node->const_type // '') ne 'variable'
+                ? $PREC_TERM{unary} : $PREC_TERM{term};
+        }
+        if ($node isa Chalk::IR::Node::BinOp) {
+            my $op = $node->inputs()->[0]->value();
+            my $p = $BINOP_PREC{$op} // die "GAP: no precedence for binary operator '$op'\n";
+            return $p->[0];
+        }
+        if ($node isa Chalk::IR::Node::UnaryOp) {
+            my $op = $node->inputs()->[0]->value();
+            return $PREC_TERM{not}         if $op eq 'not';
+            return $PREC_TERM{named_unary} if $op =~ /^-[a-zA-Z]$/;
+            return $PREC_TERM{unary};
+        }
+        return $PREC_TERM{bind}
+            if $node isa Chalk::IR::Node::RegexMatch
+            || $node isa Chalk::IR::Node::RegexSubst;
+        return $PREC_TERM{ternary} if $node isa Chalk::IR::Node::TernaryExpr;
+        return $PREC_TERM{assign}  if $node isa Chalk::IR::Node::CompoundAssign;
+        if ($node isa Chalk::IR::Node::VarDecl
+                || $node isa Chalk::IR::Node::ListAssign) {
+            return defined $node->init() ? $PREC_TERM{assign} : $PREC_TERM{term};
+        }
+        if ($node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'builtin') {
+            my $name = $node->inputs()->[0]->value();
+            my $args = $node->inputs()->[1];
+            return $PREC_TERM{list_op}
+                if $LIST_FORM_BUILTINS{$name}
+                || ($args->@* && $args->[0] isa Chalk::IR::Node::AnonSub);
+            return $PREC_TERM{term};
+        }
+        return $PREC_TERM{term};
+    }
+
+    # Emit $node where the surrounding syntax needs it to bind at least as
+    # tightly as $min, parenthesizing it when it does not. A rightward list
+    # operator (`map {...} @x`, `die 'x'`) takes everything to its right, so
+    # it is low precedence only when something follows it: $rightmost says
+    # nothing does, and then it is a term (`$a || die 'x'`, `join ' ', map ...`).
+    method _emit_operand($node, $min, $rightmost = false) {
+        my $code = $self->_emit_expr($node);
+        my $p = $self->_prec($node);
+        $p = $PREC_TERM{term} if $rightmost && $p == $PREC_TERM{list_op};
+        return $p < $min ? "($code)" : $code;
+    }
+
+    # Emit a comma list's items: each binds tighter than `,`; only the last
+    # is rightmost.
+    method _emit_operand_list(@items) {
+        my @out;
+        for my $i (0 .. $#items) {
+            push @out, $self->_emit_operand($items[$i], $PREC_TERM{assign}, $i == $#items);
+        }
+        return @out;
     }
 
     method _emit_binary_expr($node) {
@@ -1169,34 +1260,27 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $left  = $node->inputs()->[1];
         my $right = $node->inputs()->[2];
 
-        # Parenthesize ternary sub-expressions to preserve precedence.
-        # Without parens, `ternary . $x` parses as `cond ? a : (b . $x)`
-        # because `.` binds tighter than `?:`.
-        my $left_expr  = $self->_emit_expr($left);
-        my $right_expr = $self->_emit_expr($right);
-        $left_expr  = "($left_expr)"  if $left  isa Chalk::IR::Node::TernaryExpr;
-        $right_expr = "($right_expr)" if $right isa Chalk::IR::Node::TernaryExpr;
-
-        return "$left_expr $op $right_expr";
+        my ($p, $assoc) = ($BINOP_PREC{$op}
+            // die "GAP: no precedence for binary operator '$op'\n")->@*;
+        my $left_min  = $assoc eq 'left'  ? $p : $p + 1;
+        my $right_min = $assoc eq 'right' ? $p : $p + 1;
+        return $self->_emit_operand($left, $left_min) . " $op "
+             . $self->_emit_operand($right, $right_min, true);
     }
 
     method _emit_unary_expr($node) {
         my $op      = $node->inputs()->[0]->value();
         my $operand = $node->inputs()->[1];
 
-        # Parenthesize compound operands to preserve precedence
-        # (e.g., unless desugars to !cond, and !$a && $b != !($a && $b))
-        my $needs_parens = ($operand isa Chalk::IR::Node::BinOp)
-            || ($operand isa Chalk::IR::Node::TernaryExpr);
-
-        my $expr = $self->_emit_expr($operand);
-        if ($needs_parens) {
-            $expr = "($expr)";
-        }
-
+        # The operand binds at least as tightly as the operator (unless
+        # desugars to !cond, and !$a && $b is not !($a && $b)).
         if ($op eq 'not') {
-            return "not $expr";
+            return "not " . $self->_emit_operand($operand, $PREC_TERM{not}, true);
         }
+        my $min = $op =~ /^-[a-zA-Z]$/ ? $PREC_TERM{named_unary} + 1 : $PREC_TERM{unary};
+        my $expr = $self->_emit_operand($operand, $min, true);
+        # A filetest takes a space; `- -$x` must not become `--$x`.
+        return "$op $expr" if $op =~ /^-[a-zA-Z]$/ || ($op =~ /[-+]$/ && $expr =~ /^[-+]/);
         return "$op$expr";
     }
 
@@ -1205,7 +1289,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $target = $node->inputs()->[1];
         my $value  = $node->inputs()->[2];
 
-        return $self->_emit_expr($target) . " $op " . $self->_emit_expr($value);
+        return $self->_emit_operand($target, $PREC_TERM{assign} + 1) . " $op "
+             . $self->_emit_operand($value, $PREC_TERM{assign}, true);
     }
 
     method _emit_method_call_expr($node) {
@@ -1213,8 +1298,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $method_name = $node->inputs()->[1]->value();
         my $args        = $node->inputs()->[2];
 
-        my $inv = defined $invocant ? $self->_emit_expr($invocant) : '$self';
-        my @arg_strs = map { $self->_emit_expr($_) } $args->@*;
+        my $inv = defined $invocant
+            ? $self->_emit_operand($invocant, $PREC_TERM{arrow}) : '$self';
+        my @arg_strs = $self->_emit_operand_list($args->@*);
         return "$inv->$method_name(" . join(', ', @arg_strs) . ")";
     }
 
@@ -1264,7 +1350,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             }
         }
 
-        my $tgt = defined $target ? $self->_emit_expr($target) : '$self';
+        my $tgt = defined $target
+            ? $self->_emit_operand($target, $PREC_TERM{arrow}) : '$self';
 
         # Direct hash/array element: if the target is a $ variable whose name
         # was declared with % or @ sigil, emit direct subscript (no arrow).
@@ -1309,7 +1396,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $target = $node->inputs()->[0];
         my $sigil  = $node->inputs()->[1]->value();
 
-        my $tgt = defined $target ? $self->_emit_expr($target) : '$self';
+        my $tgt = defined $target
+            ? $self->_emit_operand($target, $PREC_TERM{arrow}) : '$self';
         return "$tgt\->${sigil}*";
     }
 
@@ -1318,9 +1406,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $true_expr  = $node->inputs()->[1];
         my $false_expr = $node->inputs()->[2];
 
-        return $self->_emit_expr($cond) . " ? "
-             . $self->_emit_expr($true_expr) . " : "
-             . $self->_emit_expr($false_expr);
+        return $self->_emit_operand($cond, $PREC_TERM{ternary} + 1) . " ? "
+             . $self->_emit_operand($true_expr, $PREC_TERM{assign}) . " : "
+             . $self->_emit_operand($false_expr, $PREC_TERM{ternary}, true);
     }
 
     method _emit_hash_ref_expr($node) {
@@ -1328,7 +1416,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if (!$pairs->@*) {
             return '{}';
         }
-        my @strs = map { $self->_emit_expr($_) } $pairs->@*;
+        my @strs = $self->_emit_operand_list($pairs->@*);
         return '{ ' . join(', ', @strs) . ' }';
     }
 
@@ -1370,7 +1458,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if (!$elements->@*) {
             return '[]';
         }
-        my @strs = map { $self->_emit_expr($_) } $elements->@*;
+        my @strs = $self->_emit_operand_list($elements->@*);
         return '[' . join(', ', @strs) . ']';
     }
 
@@ -1397,7 +1485,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $pattern = $node->inputs()->[1];
 
         my $pat_val = $pattern->value();
-        return $self->_emit_expr($target) . " =~ $pat_val";
+        return $self->_emit_operand($target, $PREC_TERM{bind}) . " =~ $pat_val";
     }
 
     method _emit_regex_subst($node) {
@@ -1406,7 +1494,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $replacement = $node->inputs()->[2]->value();
         my $flags       = $node->inputs()->[3]->value();
 
-        return $self->_emit_expr($target) . " =~ s/$pattern/$replacement/$flags";
+        return $self->_emit_operand($target, $PREC_TERM{bind}) . " =~ s/$pattern/$replacement/$flags";
     }
 
     method _emit_builtin_call($node) {
@@ -1430,12 +1518,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return "$name $block_str";
         }
 
-        my @arg_strs = map { $self->_emit_expr($_) } $args->@*;
+        my @arg_strs = $self->_emit_operand_list($args->@*);
 
         # Some builtins use list syntax (no parens)
-        if ($name eq 'push' || $name eq 'unshift' || $name eq 'die'
-                || $name eq 'return' || $name eq 'print' || $name eq 'say'
-                || $name eq 'warn') {
+        if ($LIST_FORM_BUILTINS{$name}) {
             return "$name " . join(', ', @arg_strs);
         }
 
