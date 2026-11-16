@@ -117,7 +117,14 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     # Treating these nodes as opaque leaves prevents walker leakage of inner
     # types or call_symbols into outer callers.
     # NOTE: Must stay in sync with the identical predicate in TypeInferenceActions.pm.
+    #
+    # A COMPLETION, not a partial item: the node must carry the rule it
+    # completed. The partial items between a rule's symbols (an
+    # ExpressionList and its left operand, say) carry a `valid` TI tag too;
+    # pruning at them (fc4524ef) hid every argument but the last from the
+    # collectors, so `push(@a, 1)` reached the signature check as (Int).
     my $is_completed_sub_expr = sub ($n) {
+        return false unless defined $n->rule();
         my $type = $n->annotations()->{type};
         return false unless defined $type && ref($type) eq 'HASH';
         return exists $type->{valid} && !exists $type->{item_types};
