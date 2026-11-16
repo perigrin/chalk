@@ -976,6 +976,8 @@ sub func {
     my $g = $sub->graph;
     my $ret = $g->returns->[0];
     out("sub $name has no Return") unless blessed($ret) && $ret->operation eq 'Return';
+    # (T1's integer intervals over its body, where the analysis has not run)
+    Chalk::IR::Analysis::integer_intervals( $g->returns->@* );
     # A LIST RETURN: B::SoN's Return(list, scalar) -- the list, and what the
     # sub gives in scalar context (its last, a count, undef). The caller's
     # context (@t2_want, set before the call) picks one.

@@ -192,7 +192,8 @@ ok(Chalk::Target::LLVM->can('lower'),
 
     my $main = main_body($ll);
     # (checked: perl's integers do not wrap, so past an i64 it stops by name)
-    like($main, qr/= call i64 \@t2_int_add\(i64 %/, 'L4c .ll: Int-repr Add stays an i64 add, checked');
+    # (2 + 4: T1's intervals prove 6, an IV -- a plain add i64 is perl's)
+    like($main, qr/= add i64 %v\d+, %v\d+/, 'L4c .ll: Int-repr Add stays an i64 add, proven an IV');
     unlike($main, qr/fadd double/, 'L4c .ll: no fadd double for the Int Add');
     unlike($main, qr/sitofp/,      'L4c .ll: no sitofp for all-Int arithmetic');
 

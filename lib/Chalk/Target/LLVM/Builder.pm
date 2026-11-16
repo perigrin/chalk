@@ -26,6 +26,7 @@ use Chalk::Regex::Graph;   # a constant regex as its own graph
 use Chalk::MOP::Sub;
 require Chalk::IR::Serialize::JSON;
 use Chalk::IR::Graph;   # program_nodes, own_nodes, component: whose nodes are whose
+require Chalk::IR::Analysis;   # integer_intervals, int_is_iv: T1's integer intervals
 
 use Scalar::Util qw(blessed refaddr);
 
@@ -61,6 +62,10 @@ sub build {
                : out('no way back to Start from ' . $start->operation);
     }
     $b->{ret} = $ret;
+    # T1'S INTEGER INTERVALS, which an integer + - * asks before it is an i64
+    # op (Chalk::IR::Analysis::integer_intervals: run in T1; here where it has
+    # not, a graph made without it).
+    Chalk::IR::Analysis::integer_intervals($ret);
     # (THE PROGRAM'S Return, for what asks of the whole program: in a sub,
     # {ret} is the sub's -- a question asked there first saw only the sub)
     $b->{root_ret} = $ret;

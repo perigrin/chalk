@@ -6,8 +6,9 @@ use utf8;
 package Chalk::Target::LLVM::Runtime;
 
 # The runtime a slice-1 module calls: %Str is { i8*, i64 }; %Slot is a tag
-# (0 undef, 1 Int, 2 Num, 3 Str) and an i64 payload (a Num's bits, a Str's
-# heap pointer). Numbers print as perl prints them: %.15g, Inf, -Inf, NaN.
+# (0 undef, 1 Int -- an IV, 2 Num -- an NV, 3 Str, 4 a UV past IV_MAX; 5 and
+# up references and the runtime's own) and an i64 payload (an IV's or a UV's
+# bits, a Num's bits, a Str's heap pointer). Numbers print as perl prints them: %.15g, Inf, -Inf, NaN.
 sub prelude { return <<'LL' }
 %Str = type { i8*, i64 }
 %Slot = type { i8, i64 }
@@ -395,20 +396,23 @@ clamped:
   ; strtoll's IV_MAX or IV_MIN is the string's or where it clamped one past:
   ; strtoull reads the same digits, and agrees only on the string's own
   ; ("9223372036854775807" is an Int, as perl's; through a double it was
-  ; 9.22337203685478e+18). Past IV_MAX and within UV_MAX perl's is a UV,
-  ; which T2 has not: stopped. Below IV_MIN, or past UV_MAX, a Num.
-  %u = call i64 @strtoull(i8* %buf, i8** null, i32 10)
+  ; 9.22337203685478e+18). Past IV_MAX and within UV_MAX perl's is a UV
+  ; (grok_number's IS_NUMBER_IN_UV); below IV_MIN, or past UV_MAX, a Num.
+  %ue = alloca i8*
+  call void @t2_set_errno(i32 0)
+  %u = call i64 @strtoull(i8* %buf, i8** %ue, i32 10)
   %own = icmp eq i64 %u, %i
   br i1 %own, label %int, label %past
 past:
   br i1 %min, label %num, label %uvq
 uvq:
-  %ud = call double @strtod(i8* %buf, i8** null)
-  %inuv = fcmp ole double %ud, 18446744073709551616.0
-  br i1 %inuv, label %uv, label %num
+  ; (strtoull says ERANGE past UV_MAX; within it, its value is the string's)
+  %er = call i32 @t2_errno()
+  %range = icmp eq i32 %er, 34
+  br i1 %range, label %num, label %uv
 uv:
-  call void @t2_stop_uv()
-  unreachable
+  %su = call %Slot @t2_box_uv(i64 %u)
+  ret %Slot %su
 int:
   %si = call %Slot @t2_box_i64(i64 %i)
   ret %Slot %si
@@ -422,6 +426,7 @@ entry:
   %t = extractvalue %Slot %s, 0
   switch i8 %t, label %undef [ i8 1, label %same
                                i8 2, label %same
+                               i8 4, label %same
                                i8 3, label %str
                                i8 5, label %ref
                                i8 6, label %ref
@@ -462,6 +467,241 @@ define internal %Slot @t2_slot(i8 %t, i64 %v) {
 define internal %Slot @t2_box_i64(i64 %v) {
   %s = call %Slot @t2_slot(i8 1, i64 %v)
   ret %Slot %s
+}
+; PERL'S THREE NUMERIC FORMS (sv.h): an IV (tag 1), a UV (tag 4) -- an integer
+; past IV_MAX, up to UV_MAX, its payload the unsigned bits -- and an NV (tag
+; 2). A UV is only ever past IV_MAX: an unsigned result within IV_MAX is boxed
+; an IV, so one value has one form here.
+define internal %Slot @t2_box_uv(i64 %u) {
+  %big = icmp slt i64 %u, 0
+  %t = select i1 %big, i8 4, i8 1
+  %s = call %Slot @t2_slot(i8 %t, i64 %u)
+  ret %Slot %s
+}
+declare i32* @__errno_location()
+define internal i32 @t2_errno() {
+  %p = call i32* @__errno_location()
+  %e = load i32, i32* %p
+  ret i32 %e
+}
+define internal void @t2_set_errno(i32 %e) {
+  %p = call i32* @__errno_location()
+  store i32 %e, i32* %p
+  ret void
+}
+@fmt_u = private unnamed_addr constant [4 x i8] c"%lu\00"
+define internal %Str @t2_u64_str(i64 %v) {
+  %buf = call i8* @malloc(i64 24)
+  %f = getelementptr [4 x i8], [4 x i8]* @fmt_u, i64 0, i64 0
+  %n32 = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %buf, i64 24, i8* %f, i64 %v)
+  %n = sext i32 %n32 to i64
+  %r = call %Str @t2_str(i8* %buf, i64 %n)
+  ret %Str %r
+}
+; t2_nv_please(d) -> an NV as perl's integer ops read it (SvIV_please,
+; lossless_NV_to_IV): a whole number below 2**53 in size is an IV; any other
+; stays an NV (past 2**53 its low bits are already lost).
+declare double @llvm.fabs.f64(double)
+define internal %Slot @t2_nv_please(double %d) {
+entry:
+  %a = call double @llvm.fabs.f64(double %d)
+  %small = fcmp olt double %a, 9007199254740992.0
+  %t = call double @llvm.trunc.f64(double %d)
+  %whole = fcmp oeq double %t, %d
+  %int = and i1 %small, %whole
+  br i1 %int, label %iv, label %nv
+iv:
+  %i = fptosi double %d to i64
+  %si = call %Slot @t2_box_i64(i64 %i)
+  ret %Slot %si
+nv:
+  %sn = call %Slot @t2_box_num(double %d)
+  ret %Slot %sn
+}
+; t2_str_dotted(s) -> s's number has a decimal point and no exponent
+; ("1.0", "12.5"): grok_number's IS_NUMBER_IN_UV with IS_NUMBER_NOT_INT, an
+; NV perl's integer ops never read as an integer -- where "1e15" is one.
+define internal i1 @t2_str_dotted(%Str %s) {
+entry:
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  br label %ws
+ws:
+  %i0 = phi i64 [ 0, %entry ], [ %i0n, %wsn ]
+  %e0 = icmp sge i64 %i0, %n
+  br i1 %e0, label %no, label %wsc
+wsc:
+  %c0p = getelementptr i8, i8* %p, i64 %i0
+  %c0 = load i8, i8* %c0p
+  %sp = icmp eq i8 %c0, 32
+  %t1 = icmp uge i8 %c0, 9
+  %t2 = icmp ule i8 %c0, 13
+  %ctl = and i1 %t1, %t2
+  %white = or i1 %sp, %ctl
+  %plus = icmp eq i8 %c0, 43
+  %minus = icmp eq i8 %c0, 45
+  %sign = or i1 %plus, %minus
+  %skip = or i1 %white, %sign
+  br i1 %skip, label %wsn, label %dig
+wsn:
+  %i0n = add i64 %i0, 1
+  br label %ws
+dig:
+  %i1 = phi i64 [ %i0, %wsc ], [ %i1n, %dign ]
+  %e1 = icmp sge i64 %i1, %n
+  br i1 %e1, label %no, label %digc
+digc:
+  %c1p = getelementptr i8, i8* %p, i64 %i1
+  %c1 = load i8, i8* %c1p
+  %d1a = icmp uge i8 %c1, 48
+  %d1b = icmp ule i8 %c1, 57
+  %d1 = and i1 %d1a, %d1b
+  br i1 %d1, label %dign, label %dot
+dign:
+  %i1n = add i64 %i1, 1
+  br label %dig
+dot:
+  %isdot = icmp eq i8 %c1, 46
+  br i1 %isdot, label %frac, label %no
+frac:
+  %i2 = phi i64 [ %i1, %dot ], [ %i2n, %fracn ]
+  %i2n = add i64 %i2, 1
+  %e2 = icmp sge i64 %i2n, %n
+  br i1 %e2, label %yes, label %fracc
+fracc:
+  %c2p = getelementptr i8, i8* %p, i64 %i2n
+  %c2 = load i8, i8* %c2p
+  %d2a = icmp uge i8 %c2, 48
+  %d2b = icmp ule i8 %c2, 57
+  %d2 = and i1 %d2a, %d2b
+  br i1 %d2, label %fracn, label %exp
+fracn:
+  br label %frac
+exp:
+  %le = icmp eq i8 %c2, 101
+  %ue = icmp eq i8 %c2, 69
+  %ise = or i1 %le, %ue
+  %r = xor i1 %ise, true
+  ret i1 %r
+yes:
+  ret i1 1
+no:
+  ret i1 0
+}
+; t2_arith_num(x) -> x as perl's numeric ops read it (SvIV_please_nomg): an
+; integer -- an IV (tag 1) or a UV (tag 4) -- where it is one, else an NV (tag
+; 2). An NV a whole number below 2**53 is an integer; a string's own integer
+; is (an IV or a UV, read whole), and so is its number where that is a whole
+; one below 2**53 ("1e15") but has no decimal point ("1.0" stays an NV);
+; undef is 0, a reference its address.
+define internal %Slot @t2_arith_num(%Slot %s) {
+entry:
+  %t = extractvalue %Slot %s, 0
+  switch i8 %t, label %other [ i8 1, label %same
+                               i8 4, label %same
+                               i8 2, label %num
+                               i8 3, label %str ]
+same:
+  ret %Slot %s
+num:
+  %v = extractvalue %Slot %s, 1
+  %d = bitcast i64 %v to double
+  %rn = call %Slot @t2_nv_please(double %d)
+  ret %Slot %rn
+str:
+  %n = call %Slot @t2_slot_numify(%Slot %s)
+  %nt = extractvalue %Slot %n, 0
+  %isnv = icmp eq i8 %nt, 2
+  br i1 %isnv, label %strnv, label %strint
+strint:
+  ret %Slot %n
+strnv:
+  %pv = extractvalue %Slot %s, 1
+  %pp = inttoptr i64 %pv to %Str*
+  %sv = load %Str, %Str* %pp
+  %dotted = call i1 @t2_str_dotted(%Str %sv)
+  br i1 %dotted, label %strint, label %please
+please:
+  %nb = extractvalue %Slot %n, 1
+  %nd = bitcast i64 %nb to double
+  %rs = call %Slot @t2_nv_please(double %nd)
+  ret %Slot %rs
+other:
+  %o = call %Slot @t2_slot_numify(%Slot %s)
+  ret %Slot %o
+}
+; t2_wide(x) -> an integer x (tag 1 or 4) exactly, in 128 bits.
+define internal i128 @t2_wide(%Slot %x) {
+  %t = extractvalue %Slot %x, 0
+  %v = extractvalue %Slot %x, 1
+  %isu = icmp eq i8 %t, 4
+  %z = zext i64 %v to i128
+  %s = sext i64 %v to i128
+  %r = select i1 %isu, i128 %z, i128 %s
+  ret i128 %r
+}
+; t2_int_or_nv(r, negexact) -> the exact integer r as perl keeps it: an IV
+; or a UV within [IV_MIN, UV_MAX]; below IV_MIN with its size within UV_MAX,
+; where negexact (pp_add's, pp_subtract's), -(NV)|r|; else undef (tag 0):
+; perl's NV of its operands' NVs is the caller's to make.
+define internal %Slot @t2_int_or_nv(i128 %r, i1 %negexact) {
+entry:
+  %lo = icmp sge i128 %r, -9223372036854775808
+  %hi = icmp sle i128 %r, 18446744073709551615
+  %in = and i1 %lo, %hi
+  br i1 %in, label %int, label %out
+int:
+  %b = trunc i128 %r to i64
+  %big = icmp sgt i128 %r, 9223372036854775807
+  %t = select i1 %big, i8 4, i8 1
+  %s = call %Slot @t2_slot(i8 %t, i64 %b)
+  ret %Slot %s
+out:
+  %neg = icmp slt i128 %r, 0
+  %mag = sub i128 0, %r
+  %fits = icmp sle i128 %mag, 18446744073709551615
+  %nf = and i1 %neg, %fits
+  %use = and i1 %nf, %negexact
+  br i1 %use, label %nv, label %none
+nv:
+  %m = trunc i128 %mag to i64
+  %md = uitofp i64 %m to double
+  %d = fneg double %md
+  %sn = call %Slot @t2_box_num(double %d)
+  ret %Slot %sn
+none:
+  ret %Slot zeroinitializer
+}
+; t2_cast_iv(d) / t2_cast_uv(d): an NV's integer as perl's SvIV and SvUV
+; read it (cast_iv, cast_uv): truncated; past IV_MAX the UV's bits (so SvIV
+; of 1e20 is -1), below IV_MIN IV_MIN, past UV_MAX UV_MAX, NaN 0.
+define internal i64 @t2_cast_iv(double %d) {
+entry:
+  %ltiv = fcmp olt double %d, 9223372036854775808.0
+  br i1 %ltiv, label %iv, label %uvq
+iv:
+  %ltmin = fcmp olt double %d, -9223372036854775808.0
+  br i1 %ltmin, label %min, label %cast
+min:
+  ret i64 -9223372036854775808
+cast:
+  %i = fptosi double %d to i64
+  ret i64 %i
+uvq:
+  %ltuv = fcmp olt double %d, 18446744073709551616.0
+  br i1 %ltuv, label %uv, label %top
+uv:
+  %u = fptoui double %d to i64
+  ret i64 %u
+top:
+  %pos = fcmp ogt double %d, 0.0
+  %r = select i1 %pos, i64 -1, i64 0
+  ret i64 %r
+}
+; (cast_uv's bits are cast_iv's: below 0 it is (UV)(IV)d, past UV_MAX UV_MAX)
+define internal i64 @t2_cast_uv(double %d) {
+  %u = call i64 @t2_cast_iv(double %d)
+  ret i64 %u
 }
 ; t2_cstr(s): s as a NUL-terminated C string (a copy).
 ; t2_ftdir(path): perl's -d -- 1 a directory, '' something else, undef nothing.
@@ -520,11 +760,73 @@ no:
 ; t2_slot_int(x) / t2_slot_rand(x): perl's int and rand of a slot.
 declare double @llvm.trunc.f64(double)
 declare i32 @rand()
+; (pp_int: an integer -- an NV or a string perl reads as one too -- is
+; itself; an NV truncated is an IV or a UV while one holds it, else its
+; floor or ceiling; Inf and NaN themselves)
+declare double @llvm.floor.f64(double)
+declare double @llvm.ceil.f64(double)
 define internal %Slot @t2_slot_int(%Slot %s) {
-  %d = call double @t2_slot_num(%Slot %s)
-  %t = call double @llvm.trunc.f64(double %d)
-  %r = call %Slot @t2_box_num(double %t)
+entry:
+  %x = call %Slot @t2_arith_num(%Slot %s)
+  %tx = extractvalue %Slot %x, 0
+  %isnv = icmp eq i8 %tx, 2
+  br i1 %isnv, label %nv, label %same
+same:
+  ret %Slot %x
+nv:
+  %d = call double @t2_slot_num(%Slot %x)
+  %a = call double @llvm.fabs.f64(double %d)
+  %fin = fcmp olt double %a, 0x7FF0000000000000
+  br i1 %fin, label %finite, label %keep
+keep:
+  ret %Slot %x
+finite:
+  %pos = fcmp oge double %d, 0.0
+  br i1 %pos, label %p, label %n
+p:
+  %puv = fcmp olt double %d, 18446744073709551616.0
+  br i1 %puv, label %pu, label %pf
+pu:
+  %u = fptoui double %d to i64
+  %su = call %Slot @t2_box_uv(i64 %u)
+  ret %Slot %su
+pf:
+  %fl = call double @llvm.floor.f64(double %d)
+  %sf = call %Slot @t2_box_num(double %fl)
+  ret %Slot %sf
+n:
+  %niv = fcmp ogt double %d, -9223372036854775808.0
+  br i1 %niv, label %ni, label %nf
+ni:
+  %i = fptosi double %d to i64
+  %si = call %Slot @t2_box_i64(i64 %i)
+  ret %Slot %si
+nf:
+  %ce = call double @llvm.ceil.f64(double %d)
+  %sc = call %Slot @t2_box_num(double %ce)
+  ret %Slot %sc
+}
+; t2_slot_abs(x): perl's abs (pp_abs) -- of an integer (an NV or a string
+; perl reads as one too) its size, an IV or a UV (abs(IV_MIN) is a UV); of
+; any other NV its fabs; undef 0.
+define internal %Slot @t2_slot_abs(%Slot %s) {
+entry:
+  %x = call %Slot @t2_arith_num(%Slot %s)
+  %tx = extractvalue %Slot %x, 0
+  %isnv = icmp eq i8 %tx, 2
+  br i1 %isnv, label %nv, label %int
+int:
+  %w = call i128 @t2_wide(%Slot %x)
+  %neg = icmp slt i128 %w, 0
+  %m = sub i128 0, %w
+  %a = select i1 %neg, i128 %m, i128 %w
+  %r = call %Slot @t2_int_or_nv(i128 %a, i1 0)
   ret %Slot %r
+nv:
+  %d = call double @t2_slot_num(%Slot %x)
+  %f = call double @llvm.fabs.f64(double %d)
+  %sf = call %Slot @t2_box_num(double %f)
+  ret %Slot %sf
 }
 define internal %Slot @t2_slot_rand(%Slot %s) {
   %x = call double @t2_slot_num(%Slot %s)
@@ -597,7 +899,10 @@ die:
   call void @t2_die_unwind(%Str %m)
   ret i64 0
 ok:
-  %r = srem i64 %x, %y
+  ; (IV_MIN % -1 is 0, as perl's: srem would overflow)
+  %m1 = icmp eq i64 %y, -1
+  %y1 = select i1 %m1, i64 1, i64 %y
+  %r = srem i64 %x, %y1
   %rnz = icmp ne i64 %r, 0
   %rneg = icmp slt i64 %r, 0
   %yneg = icmp slt i64 %y, 0
@@ -606,6 +911,178 @@ ok:
   %r2 = add i64 %r, %y
   %res = select i1 %fix, i64 %r2, i64 %r
   ret i64 %res
+}
+; t2_slot_mod(x, y, msg, n): perl's % (pp_modulo) on what the operands hold:
+; integers (an IV, a UV, an NV that is one below 2**64 truncated) by their
+; sizes in UVs, the result's sign the right side's -- a UV where it is past
+; IV_MAX; a right side past UV_MAX in size, or a left one where the right
+; is not, by fmod. Zero dies, naming where.
+declare double @fmod(double, double)
+define internal %Slot @t2_slot_mod(%Slot %x0, %Slot %y0, i8* %msg, i64 %n) {
+entry:
+  %y = call %Slot @t2_arith_num(%Slot %y0)
+  %ty = extractvalue %Slot %y, 0
+  %yv = extractvalue %Slot %y, 1
+  %ynv = icmp eq i8 %ty, 2
+  br i1 %ynv, label %rnv, label %rint
+rint:
+  %yuv = icmp eq i8 %ty, 4
+  %yneg0 = icmp slt i64 %yv, 0
+  %ynotuv = xor i1 %yuv, true
+  %rneg = and i1 %yneg0, %ynotuv
+  %ymag = sub i64 0, %yv
+  %right = select i1 %rneg, i64 %ymag, i64 %yv
+  br label %left
+rnv:
+  %yd0 = bitcast i64 %yv to double
+  %rnegd = fcmp olt double %yd0, 0.0
+  %ydn = fneg double %yd0
+  %yd = select i1 %rnegd, double %ydn, double %yd0
+  %yin = fcmp olt double %yd, 18446744073709551616.0
+  %ydu = fptoui double %yd to i64
+  %rightd = select i1 %yin, i64 %ydu, i64 0
+  br i1 %yin, label %left, label %dbl_r
+left:
+  %R = phi i64 [ %right, %rint ], [ %rightd, %rnv ]
+  %RN = phi i1 [ %rneg, %rint ], [ %rnegd, %rnv ]
+  %Rvalid = phi i1 [ false, %rint ], [ true, %rnv ]
+  %Rd = phi double [ 0.0, %rint ], [ %yd, %rnv ]
+  %x = call %Slot @t2_arith_num(%Slot %x0)
+  %tx = extractvalue %Slot %x, 0
+  %xv = extractvalue %Slot %x, 1
+  %xnv = icmp eq i8 %tx, 2
+  br i1 %xnv, label %lnv, label %lint
+lint:
+  %xuv = icmp eq i8 %tx, 4
+  %xneg0 = icmp slt i64 %xv, 0
+  %xnotuv = xor i1 %xuv, true
+  %lneg = and i1 %xneg0, %xnotuv
+  %xmag = sub i64 0, %xv
+  %L = select i1 %lneg, i64 %xmag, i64 %xv
+  br label %ints
+lnv:
+  %xd0 = bitcast i64 %xv to double
+  %lnegd = fcmp olt double %xd0, 0.0
+  %xdn = fneg double %xd0
+  %xd = select i1 %lnegd, double %xdn, double %xd0
+  %xin = fcmp olt double %xd, 18446744073709551616.0
+  br i1 %xin, label %lnvint, label %dbl_l
+lnvint:
+  %Ld = fptoui double %xd to i64
+  br label %ints
+ints:
+  %LL = phi i64 [ %L, %lint ], [ %Ld, %lnvint ]
+  %LN = phi i1 [ %lneg, %lint ], [ %lnegd, %lnvint ]
+  %z = icmp eq i64 %R, 0
+  br i1 %z, label %die, label %idiv
+idiv:
+  %a0 = urem i64 %LL, %R
+  %diff = xor i1 %LN, %RN
+  %anz = icmp ne i64 %a0, 0
+  %fix = and i1 %diff, %anz
+  %a1 = sub i64 %R, %a0
+  %ans = select i1 %fix, i64 %a1, i64 %a0
+  br i1 %RN, label %ineg, label %ipos
+ipos:
+  %sp = call %Slot @t2_box_uv(i64 %ans)
+  ret %Slot %sp
+ineg:
+  %wa = zext i64 %ans to i128
+  %wn = sub i128 0, %wa
+  %sn = call %Slot @t2_int_or_nv(i128 %wn, i1 1)
+  ret %Slot %sn
+dbl_l:
+  ; (the left past UV_MAX, the right within it: both floored to whole numbers)
+  %xf = fadd double %xd, 0.5
+  %dl = call double @llvm.floor.f64(double %xf)
+  %rf0 = fadd double %Rd, 0.5
+  %rf = call double @llvm.floor.f64(double %rf0)
+  %ru = uitofp i64 %R to double
+  %dr = select i1 %Rvalid, double %rf, double %ru
+  br label %dbl
+dbl_r:
+  ; (the right past UV_MAX: the left's NV as it is)
+  %xa = call double @t2_slot_num(%Slot %x0)
+  %xan = fcmp olt double %xa, 0.0
+  %xaa = call double @llvm.fabs.f64(double %xa)
+  br label %dbl
+dbl:
+  %DL = phi double [ %dl, %dbl_l ], [ %xaa, %dbl_r ]
+  %DR = phi double [ %dr, %dbl_l ], [ %yd, %dbl_r ]
+  %DLN = phi i1 [ %lnegd, %dbl_l ], [ %xan, %dbl_r ]
+  %DRN = phi i1 [ %RN, %dbl_l ], [ %rnegd, %dbl_r ]
+  %dz = fcmp oeq double %DR, 0.0
+  br i1 %dz, label %die, label %ddiv
+ddiv:
+  %f0 = call double @fmod(double %DL, double %DR)
+  %ddiff = xor i1 %DLN, %DRN
+  %fnz = fcmp une double %f0, 0.0
+  %dfix = and i1 %ddiff, %fnz
+  %f1 = fsub double %DR, %f0
+  %f2 = select i1 %dfix, double %f1, double %f0
+  %f3 = fneg double %f2
+  %f = select i1 %DRN, double %f3, double %f2
+  %sf = call %Slot @t2_box_num(double %f)
+  ret %Slot %sf
+die:
+  %m = call %Str @t2_str(i8* %msg, i64 %n)
+  call void @t2_die_unwind(%Str %m)
+  ret %Slot zeroinitializer
+}
+; t2_slot_div(x, y, msg, n): perl's / (pp_divide): two integers' exact
+; quotient where the left is past 2**53 in size (where an NV would lose it)
+; -- an IV or a UV, or an NV where it is below IV_MIN -- else the NVs'
+; quotient. Zero dies, naming where.
+define internal %Slot @t2_slot_div(%Slot %x0, %Slot %y0, i8* %msg, i64 %n) {
+entry:
+  %y = call %Slot @t2_arith_num(%Slot %y0)
+  %x = call %Slot @t2_arith_num(%Slot %x0)
+  %tx = extractvalue %Slot %x, 0
+  %ty = extractvalue %Slot %y, 0
+  %nx = icmp eq i8 %tx, 2
+  %ny = icmp eq i8 %ty, 2
+  %either = or i1 %nx, %ny
+  br i1 %either, label %nums, label %ints
+ints:
+  %wx = call i128 @t2_wide(%Slot %x)
+  %wy = call i128 @t2_wide(%Slot %y)
+  %xneg = icmp slt i128 %wx, 0
+  %yneg = icmp slt i128 %wy, 0
+  %mx0 = sub i128 0, %wx
+  %my0 = sub i128 0, %wy
+  %mx = select i1 %xneg, i128 %mx0, i128 %wx
+  %my = select i1 %yneg, i128 %my0, i128 %wy
+  %L = trunc i128 %mx to i64
+  %R = trunc i128 %my to i64
+  %z = icmp eq i64 %R, 0
+  br i1 %z, label %die, label %try
+try:
+  %ge = icmp uge i64 %L, %R
+  %big = icmp ugt i64 %L, 9007199254740992
+  %go = and i1 %ge, %big
+  br i1 %go, label %idiv, label %nums
+idiv:
+  %rem = urem i64 %L, %R
+  %exact = icmp eq i64 %rem, 0
+  br i1 %exact, label %iq, label %nums
+iq:
+  %q = udiv i64 %L, %R
+  %wq = zext i64 %q to i128
+  %sgn = xor i1 %xneg, %yneg
+  %nq = sub i128 0, %wq
+  %rq = select i1 %sgn, i128 %nq, i128 %wq
+  %sq = call %Slot @t2_int_or_nv(i128 %rq, i1 1)
+  ret %Slot %sq
+nums:
+  %dx = call double @t2_slot_num(%Slot %x)
+  %dy = call double @t2_slot_num(%Slot %y)
+  %d = call double @t2_div(double %dx, double %dy, i8* %msg, i64 %n)
+  %sd = call %Slot @t2_box_num(double %d)
+  ret %Slot %sd
+die:
+  %m = call %Str @t2_str(i8* %msg, i64 %n)
+  call void @t2_die_unwind(%Str %m)
+  ret %Slot zeroinitializer
 }
 ; PERL'S ++ AND --. A string of letters then digits, starting with a letter,
 ; increments by magic ("az" -> "ba", "Zz" -> "AAa", "a9" -> "b0"); any other
@@ -707,47 +1184,31 @@ grow:
   %g = call %Str @t2_str(i8* %buf, i64 %n2)
   ret %Str %g
 }
-define internal %Slot @t2_num_slot(double %d) {
-entry:
-  %i = fptosi double %d to i64
-  %back = sitofp i64 %i to double
-  %whole = fcmp oeq double %back, %d
-  %small = fcmp olt double %d, 0x43E0000000000000
-  %big = fcmp ogt double %d, 0xC3E0000000000000
-  %fits0 = and i1 %small, %big
-  %fits = and i1 %whole, %fits0
-  br i1 %fits, label %int, label %num
-int:
-  %si = call %Slot @t2_box_i64(i64 %i)
-  ret %Slot %si
-num:
-  %sn = call %Slot @t2_box_num(double %d)
-  ret %Slot %sn
-}
+; (perl's ++ and -- (sv.c's inc and dec): a value perl reads as an integer
+; steps as one -- IV_MAX ++ is a UV, UV_MAX ++ the NV 2**64, IV_MIN -- an
+; NV; anything else its NV)
 define internal %Slot @t2_slot_step(%Slot %s, i64 %by, i1 %magic) {
 entry:
   %t = extractvalue %Slot %s, 0
-  switch i8 %t, label %undef [ i8 1, label %int
-                               i8 2, label %num
-                               i8 3, label %str ]
+  %isstr = icmp eq i8 %t, 3
+  br i1 %isstr, label %str, label %numeric
+numeric:
+  %x = call %Slot @t2_arith_num(%Slot %s)
+  %tx = extractvalue %Slot %x, 0
+  %isnv = icmp eq i8 %tx, 2
+  br i1 %isnv, label %num, label %int
 int:
-  %v = extractvalue %Slot %s, 1
-  %r = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %v, i64 %by)
-  %ov = extractvalue { i64, i1 } %r, 1
-  br i1 %ov, label %over, label %intok
-over:
-  ; (++ past IV_MAX is perl's UV; -- past IV_MIN its number)
-  %up = icmp sgt i64 %by, 0
-  br i1 %up, label %uv, label %num
-uv:
-  call void @t2_stop_uv()
-  unreachable
+  %w = call i128 @t2_wide(%Slot %x)
+  %wby = sext i64 %by to i128
+  %r = add i128 %w, %wby
+  %si = call %Slot @t2_int_or_nv(i128 %r, i1 1)
+  %st = extractvalue %Slot %si, 0
+  %fell = icmp eq i8 %st, 0
+  br i1 %fell, label %num, label %intok
 intok:
-  %rv = extractvalue { i64, i1 } %r, 0
-  %si = call %Slot @t2_box_i64(i64 %rv)
   ret %Slot %si
 num:
-  %d = call double @t2_slot_num(%Slot %s)
+  %d = call double @t2_slot_num(%Slot %x)
   %dby = sitofp i64 %by to double
   %dr = fadd double %d, %dby
   %sn = call %Slot @t2_box_num(double %dr)
@@ -758,20 +1219,11 @@ str:
   %sv = load %Str, %Str* %pp
   %ism = call i1 @t2_is_magic(%Str %sv)
   %domagic = and i1 %ism, %magic
-  br i1 %domagic, label %magicinc, label %strnum
+  br i1 %domagic, label %magicinc, label %numeric
 magicinc:
   %ms = call %Str @t2_str_magic_inc(%Str %sv)
   %mslot = call %Slot @t2_box_str(%Str %ms)
   ret %Slot %mslot
-strnum:
-  %sd = call double @t2_str_num(%Str %sv)
-  %sby = sitofp i64 %by to double
-  %sr = fadd double %sd, %sby
-  %ss = call %Slot @t2_num_slot(double %sr)
-  ret %Slot %ss
-undef:
-  %su = call %Slot @t2_box_i64(i64 %by)
-  ret %Slot %su
 }
 define internal %Slot @t2_slot_inc(%Slot %s) {
   %r = call %Slot @t2_slot_step(%Slot %s, i64 1, i1 1)
@@ -791,6 +1243,7 @@ entry:
   %t = extractvalue %Slot %s, 0
   %v = extractvalue %Slot %s, 1
   switch i8 %t, label %undef [ i8 1, label %int
+                               i8 4, label %uv
                                i8 2, label %num
                                i8 3, label %str
                                i8 5, label %ref
@@ -800,6 +1253,9 @@ entry:
 int:
   %di = sitofp i64 %v to double
   ret double %di
+uv:
+  %du = uitofp i64 %v to double
+  ret double %du
 num:
   %dn = bitcast i64 %v to double
   ret double %dn
@@ -814,86 +1270,49 @@ ref:
   %da = sitofp i64 %v to double
   ret double %da
 }
-define internal i64 @t2_slot_i64(%Slot %s) {
+; t2_slot_i64(s) -> perl's SvIV of s: an IV's own; a UV's bits (SvIV of
+; 9223372036854775808 is IV_MIN, as perl's); an NV's cast_iv; a string's
+; integer read whole.
+define internal i64 @t2_slot_i64(%Slot %s0) {
 entry:
+  %s = call %Slot @t2_slot_numify(%Slot %s0)
   %t = extractvalue %Slot %s, 0
-  %isint = icmp eq i8 %t, 1
-  br i1 %isint, label %int, label %other
-int:
   %v = extractvalue %Slot %s, 1
+  %isnv = icmp eq i8 %t, 2
+  br i1 %isnv, label %nv, label %int
+int:
   ret i64 %v
-other:
-  %d = call double @t2_slot_num(%Slot %s)
-  %i = fptosi double %d to i64
+nv:
+  %d = bitcast i64 %v to double
+  %i = call i64 @t2_cast_iv(double %d)
   ret i64 %i
 }
-; PERL'S ARITHMETIC ON TWO SCALARS (pp_add, pp_subtract, pp_multiply): two
-; Ints give an Int while the exact result fits an IV; past IV_MAX and within
-; UV_MAX perl's is a UV, which T2 has not -- stopped, never wrapped; beyond
-; either end the operands' numbers' (a Num), as for anything else.
-declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
-declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
-declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.umul.with.overflow.i64(i64, i64)
-@msg_int_uv = private unnamed_addr constant [77 x i8] c"an integer result past IV_MAX (a UV, which T2 has not): stopped (chalk, T2)\0A\00"
-@msg_int_i64 = private unnamed_addr constant [98 x i8] c"an integer + - * past what an i64 holds (perl makes a UV or a number of it): stopped (chalk, T2)\0A\00"
-define internal void @t2_stop_uv() {
-  call void @t2_stop(i8* getelementptr ([77 x i8], [77 x i8]* @msg_int_uv, i64 0, i64 0), i64 76)
-  unreachable
-}
-; t2_int_over(wrapped, ovf) -> wrapped, or stopped where it overflowed: an
-; i64's + - * (T2 typed it Int) past what one holds.
-define internal i64 @t2_int_over({ i64, i1 } %r) {
+; PERL'S ARITHMETIC ON TWO SCALARS (pp_add, pp_subtract, pp_multiply): each
+; operand read as an integer where perl reads one (t2_arith_num); two
+; integers give the exact result while it fits an IV or a UV -- a sum or a
+; difference below IV_MIN, within UV_MAX in size, is that size's NV, negated
+; -- else, as for anything else, the operands' NVs' result.
+define internal %Slot @t2_slot_add(%Slot %x0, %Slot %y0) {
 entry:
-  %ov = extractvalue { i64, i1 } %r, 1
-  br i1 %ov, label %stop, label %ok
-stop:
-  call void @t2_stop(i8* getelementptr ([98 x i8], [98 x i8]* @msg_int_i64, i64 0, i64 0), i64 97)
-  unreachable
-ok:
-  %v = extractvalue { i64, i1 } %r, 0
-  ret i64 %v
-}
-define internal i64 @t2_int_add(i64 %x, i64 %y) {
-  %r = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %x, i64 %y)
-  %v = call i64 @t2_int_over({ i64, i1 } %r)
-  ret i64 %v
-}
-define internal i64 @t2_int_sub(i64 %x, i64 %y) {
-  %r = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %x, i64 %y)
-  %v = call i64 @t2_int_over({ i64, i1 } %r)
-  ret i64 %v
-}
-define internal i64 @t2_int_mul(i64 %x, i64 %y) {
-  %r = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %x, i64 %y)
-  %v = call i64 @t2_int_over({ i64, i1 } %r)
-  ret i64 %v
-}
-define internal %Slot @t2_slot_add(%Slot %x, %Slot %y) {
-entry:
+  %x = call %Slot @t2_arith_num(%Slot %x0)
+  %y = call %Slot @t2_arith_num(%Slot %y0)
   %tx = extractvalue %Slot %x, 0
   %ty = extractvalue %Slot %y, 0
-  %ix = icmp eq i8 %tx, 1
-  %iy = icmp eq i8 %ty, 1
-  %both = and i1 %ix, %iy
-  br i1 %both, label %ints, label %nums
+  %nx = icmp eq i8 %tx, 2
+  %ny = icmp eq i8 %ty, 2
+  %either = or i1 %nx, %ny
+  br i1 %either, label %nums, label %ints
 ints:
-  %vx = extractvalue %Slot %x, 1
-  %vy = extractvalue %Slot %y, 1
-  %r = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %vx, i64 %vy)
-  %ov = extractvalue { i64, i1 } %r, 1
-  br i1 %ov, label %over, label %int
-over:
-  ; (past IV_MAX the exact result is within UV_MAX: a UV; below IV_MIN a Num)
-  %up = icmp sge i64 %vx, 0
-  br i1 %up, label %uv, label %nums
-uv:
-  call void @t2_stop_uv()
-  unreachable
+  %wx = call i128 @t2_wide(%Slot %x)
+  %wy = call i128 @t2_wide(%Slot %y)
+  %r = add i128 %wx, %wy
+  %s = call %Slot @t2_int_or_nv(i128 %r, i1 1)
+  %st = extractvalue %Slot %s, 0
+  %fell = icmp eq i8 %st, 0
+  br i1 %fell, label %nums, label %int
 int:
-  %v = extractvalue { i64, i1 } %r, 0
-  %si = call %Slot @t2_box_i64(i64 %v)
-  ret %Slot %si
+  ret %Slot %s
 nums:
   %dx = call double @t2_slot_num(%Slot %x)
   %dy = call double @t2_slot_num(%Slot %y)
@@ -901,31 +1320,26 @@ nums:
   %sn = call %Slot @t2_box_num(double %d)
   ret %Slot %sn
 }
-define internal %Slot @t2_slot_sub(%Slot %x, %Slot %y) {
+define internal %Slot @t2_slot_sub(%Slot %x0, %Slot %y0) {
 entry:
+  %x = call %Slot @t2_arith_num(%Slot %x0)
+  %y = call %Slot @t2_arith_num(%Slot %y0)
   %tx = extractvalue %Slot %x, 0
   %ty = extractvalue %Slot %y, 0
-  %ix = icmp eq i8 %tx, 1
-  %iy = icmp eq i8 %ty, 1
-  %both = and i1 %ix, %iy
-  br i1 %both, label %ints, label %nums
+  %nx = icmp eq i8 %tx, 2
+  %ny = icmp eq i8 %ty, 2
+  %either = or i1 %nx, %ny
+  br i1 %either, label %nums, label %ints
 ints:
-  %vx = extractvalue %Slot %x, 1
-  %vy = extractvalue %Slot %y, 1
-  %r = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %vx, i64 %vy)
-  %ov = extractvalue { i64, i1 } %r, 1
-  br i1 %ov, label %over, label %int
-over:
-  ; (past IV_MAX the exact result is within UV_MAX: a UV; below IV_MIN a Num)
-  %up = icmp sge i64 %vx, 0
-  br i1 %up, label %uv, label %nums
-uv:
-  call void @t2_stop_uv()
-  unreachable
+  %wx = call i128 @t2_wide(%Slot %x)
+  %wy = call i128 @t2_wide(%Slot %y)
+  %r = sub i128 %wx, %wy
+  %s = call %Slot @t2_int_or_nv(i128 %r, i1 1)
+  %st = extractvalue %Slot %s, 0
+  %fell = icmp eq i8 %st, 0
+  br i1 %fell, label %nums, label %int
 int:
-  %v = extractvalue { i64, i1 } %r, 0
-  %si = call %Slot @t2_box_i64(i64 %v)
-  ret %Slot %si
+  ret %Slot %s
 nums:
   %dx = call double @t2_slot_num(%Slot %x)
   %dy = call double @t2_slot_num(%Slot %y)
@@ -933,19 +1347,42 @@ nums:
   %sn = call %Slot @t2_box_num(double %d)
   ret %Slot %sn
 }
-; -x, perl's (pp_negate): a number 0 - x (so -0.0 is 0); a string that begins
-; with a letter or _ gets a "-", one with a "+" (or a lone "-") its sign turned;
-; "-" then a digit or "." is a number. "-" then anything else hangs on whether
-; perl reads it as a number ("-inf" does, "-abc" does not): stopped, not guessed.
+; -x, perl's (pp_negate): an integer's negation (-IV_MIN is a UV, - of a UV
+; past 2**63 an NV), an NV's (-0.0 prints 0); a string that begins with a
+; letter or _ gets a "-", one with a "+" (or a lone "-") its sign turned;
+; "-" then a digit or "." is a number, read as an integer where perl reads
+; one. "-" then anything else hangs on whether perl reads it as a number
+; ("-inf" does, "-abc" does not): stopped, not guessed.
 @lit_neg_stop = private unnamed_addr constant [50 x i8] c"unary minus of a \22-\22 string: stopped (chalk, T2)\0A\00"
 define internal %Slot @t2_slot_neg(%Slot %x) {
 entry:
   %t = extractvalue %Slot %x, 0
   %isstr = icmp eq i8 %t, 3
-  br i1 %isstr, label %str, label %num
+  br i1 %isstr, label %str, label %notstr
+notstr:
+  ; (an NV perl has not read as an integer is negated as one)
+  %isnv = icmp eq i8 %t, 2
+  br i1 %isnv, label %nv, label %num
+nv:
+  %nb = extractvalue %Slot %x, 1
+  %nd = bitcast i64 %nb to double
+  %nn = fneg double %nd
+  %ns = call %Slot @t2_box_num(double %nn)
+  ret %Slot %ns
 num:
-  %z = call %Slot @t2_box_i64(i64 0)
-  %r = call %Slot @t2_slot_sub(%Slot %z, %Slot %x)
+  %a = call %Slot @t2_arith_num(%Slot %x)
+  %at = extractvalue %Slot %a, 0
+  %anv = icmp eq i8 %at, 2
+  br i1 %anv, label %anum, label %aint
+anum:
+  %ad = call double @t2_slot_num(%Slot %a)
+  %an = fneg double %ad
+  %as = call %Slot @t2_box_num(double %an)
+  ret %Slot %as
+aint:
+  %w = call i128 @t2_wide(%Slot %a)
+  %r0 = sub i128 0, %w
+  %r = call %Slot @t2_int_or_nv(i128 %r0, i1 1)
   ret %Slot %r
 str:
   %s = call %Str @t2_slot_str(%Slot %x)
@@ -1011,42 +1448,27 @@ define internal %Slot @t2_kind_of_ref(%Slot %x) {
   %b = call %Slot @t2_box_str(%Str %s)
   ret %Slot %b
 }
-define internal %Slot @t2_slot_mul(%Slot %x, %Slot %y) {
+; (a product past what an IV or a UV holds is its operands' NVs' product, either sign)
+define internal %Slot @t2_slot_mul(%Slot %x0, %Slot %y0) {
 entry:
+  %x = call %Slot @t2_arith_num(%Slot %x0)
+  %y = call %Slot @t2_arith_num(%Slot %y0)
   %tx = extractvalue %Slot %x, 0
   %ty = extractvalue %Slot %y, 0
-  %ix = icmp eq i8 %tx, 1
-  %iy = icmp eq i8 %ty, 1
-  %both = and i1 %ix, %iy
-  br i1 %both, label %ints, label %nums
+  %nx = icmp eq i8 %tx, 2
+  %ny = icmp eq i8 %ty, 2
+  %either = or i1 %nx, %ny
+  br i1 %either, label %nums, label %ints
 ints:
-  %vx = extractvalue %Slot %x, 1
-  %vy = extractvalue %Slot %y, 1
-  %r = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %vx, i64 %vy)
-  %ov = extractvalue { i64, i1 } %r, 1
-  br i1 %ov, label %over, label %int
-over:
-  ; (a positive product within UV_MAX is a UV; a larger one, or a negative
-  ; one below IV_MIN, a Num)
-  %nx = icmp slt i64 %vx, 0
-  %ny = icmp slt i64 %vy, 0
-  %neg = xor i1 %nx, %ny
-  br i1 %neg, label %nums, label %mag
-mag:
-  %mx = sub i64 0, %vx
-  %my = sub i64 0, %vy
-  %ax = select i1 %nx, i64 %mx, i64 %vx
-  %ay = select i1 %ny, i64 %my, i64 %vy
-  %u = call { i64, i1 } @llvm.umul.with.overflow.i64(i64 %ax, i64 %ay)
-  %uo = extractvalue { i64, i1 } %u, 1
-  br i1 %uo, label %nums, label %uv
-uv:
-  call void @t2_stop_uv()
-  unreachable
+  %wx = call i128 @t2_wide(%Slot %x)
+  %wy = call i128 @t2_wide(%Slot %y)
+  %r = mul i128 %wx, %wy
+  %s = call %Slot @t2_int_or_nv(i128 %r, i1 0)
+  %st = extractvalue %Slot %s, 0
+  %fell = icmp eq i8 %st, 0
+  br i1 %fell, label %nums, label %int
 int:
-  %v = extractvalue { i64, i1 } %r, 0
-  %si = call %Slot @t2_box_i64(i64 %v)
-  ret %Slot %si
+  ret %Slot %s
 nums:
   %dx = call double @t2_slot_num(%Slot %x)
   %dy = call double @t2_slot_num(%Slot %y)
@@ -1060,6 +1482,7 @@ entry:
   %t = extractvalue %Slot %s, 0
   %v = extractvalue %Slot %s, 1
   switch i8 %t, label %undef [ i8 1, label %int
+                               i8 4, label %uv
                                i8 2, label %num
                                i8 3, label %str
                                i8 5, label %ref
@@ -1069,6 +1492,9 @@ entry:
 int:
   %si = call %Str @t2_i64_str(i64 %v)
   ret %Str %si
+uv:
+  %su = call %Str @t2_u64_str(i64 %v)
+  ret %Str %su
 num:
   %dn = bitcast i64 %v to double
   %sn = call %Str @t2_num_str(double %dn)
@@ -1466,6 +1892,7 @@ entry:
   %t = extractvalue %Slot %s, 0
   %v = extractvalue %Slot %s, 1
   switch i8 %t, label %undef [ i8 1, label %int
+                               i8 4, label %int
                                i8 2, label %num
                                i8 3, label %str
                                i8 5, label %ref
@@ -4498,23 +4925,24 @@ bad:
 fine:
   ret void
 }
-; t2_cmp(x, y, num) -> perl's cmp (by string) or <=> (by number): -1, 0, 1.
-define internal i64 @t2_cmp(%Slot %x, %Slot %y, i1 %num) {
+; t2_slot_ncmp(x, y) -> perl's <=> (do_ncmp): -1, 0, 1, or 2 where an NV is
+; NaN. Two integers (as perl reads them: t2_arith_num) exactly -- an IV and
+; a UV, past 2**53 too, where a double cannot tell them apart -- else their NVs.
+define internal i64 @t2_slot_ncmp(%Slot %x0, %Slot %y0) {
 entry:
-  br i1 %num, label %n, label %s
-n:
-  ; (two Ints compared as integers: past 2**53 a double cannot tell them apart)
+  %y = call %Slot @t2_arith_num(%Slot %y0)
+  %x = call %Slot @t2_arith_num(%Slot %x0)
   %tx = extractvalue %Slot %x, 0
   %ty = extractvalue %Slot %y, 0
-  %ix = icmp eq i8 %tx, 1
-  %iy = icmp eq i8 %ty, 1
-  %both = and i1 %ix, %iy
-  br i1 %both, label %ints, label %nums
+  %nx = icmp eq i8 %tx, 2
+  %ny = icmp eq i8 %ty, 2
+  %either = or i1 %nx, %ny
+  br i1 %either, label %nums, label %ints
 ints:
-  %vx = extractvalue %Slot %x, 1
-  %vy = extractvalue %Slot %y, 1
-  %ilt = icmp slt i64 %vx, %vy
-  %igt = icmp sgt i64 %vx, %vy
+  %wx = call i128 @t2_wide(%Slot %x)
+  %wy = call i128 @t2_wide(%Slot %y)
+  %ilt = icmp slt i128 %wx, %wy
+  %igt = icmp sgt i128 %wx, %wy
   %il = select i1 %ilt, i64 -1, i64 0
   %ir = select i1 %igt, i64 1, i64 %il
   ret i64 %ir
@@ -4523,9 +4951,51 @@ nums:
   %dy = call double @t2_slot_num(%Slot %y)
   %lt = fcmp olt double %dx, %dy
   %gt = fcmp ogt double %dx, %dy
-  %l = select i1 %lt, i64 -1, i64 0
+  %eq = fcmp oeq double %dx, %dy
+  %u = select i1 %eq, i64 0, i64 2
+  %l = select i1 %lt, i64 -1, i64 %u
   %r = select i1 %gt, i64 1, i64 %l
   ret i64 %r
+}
+; t2_slot_numcmp(x, y, op) -> perl's numeric comparison op of two scalars, on
+; t2_slot_ncmp: 0 ==, 1 !=, 2 <, 3 >, 4 <=, 5 >= (a NaN false, but != true).
+define internal i1 @t2_slot_numcmp(%Slot %x, %Slot %y, i64 %op) {
+entry:
+  %c = call i64 @t2_slot_ncmp(%Slot %x, %Slot %y)
+  %eq = icmp eq i64 %c, 0
+  %lt = icmp eq i64 %c, -1
+  %gt = icmp eq i64 %c, 1
+  %ne = xor i1 %eq, true
+  %le = or i1 %lt, %eq
+  %ge = or i1 %gt, %eq
+  switch i64 %op, label %r0 [ i64 1, label %r1
+                              i64 2, label %r2
+                              i64 3, label %r3
+                              i64 4, label %r4
+                              i64 5, label %r5 ]
+r0:
+  ret i1 %eq
+r1:
+  ret i1 %ne
+r2:
+  ret i1 %lt
+r3:
+  ret i1 %gt
+r4:
+  ret i1 %le
+r5:
+  ret i1 %ge
+}
+; t2_cmp(x, y, num) -> perl's cmp (by string) or <=> (by number): -1, 0, 1
+; (a NaN 0, where perl's sort is undefined).
+define internal i64 @t2_cmp(%Slot %x, %Slot %y, i1 %num) {
+entry:
+  br i1 %num, label %n, label %s
+n:
+  %cn = call i64 @t2_slot_ncmp(%Slot %x, %Slot %y)
+  %nan = icmp eq i64 %cn, 2
+  %c0 = select i1 %nan, i64 0, i64 %cn
+  ret i64 %c0
 s:
   %sx = call %Str @t2_slot_str(%Slot %x)
   %sy = call %Str @t2_slot_str(%Slot %y)
@@ -5967,8 +6437,10 @@ loop:
 body:
   %v = call %Slot @t2_box_i64(i64 %i)
   call void @t2_apush(%Array* %r, %Slot %v)
+  ; (the last at IV_MAX: one past it is no IV)
+  %last = icmp eq i64 %i, %hi
   %i2 = add i64 %i, 1
-  br label %loop
+  br i1 %last, label %done, label %loop
 done:
   ret %Array* %r
 }
@@ -6184,7 +6656,10 @@ num:
   %hi = fcmp ogt double %dr, 0x43E0000000000000
   %lo2 = and i1 %lo, %okl
   %hi2 = and i1 %hi, %okr
-  %big = or i1 %lo2, %hi2
+  ; (and a right bound that is a UV: past IV_MAX, pp_flop's die)
+  %ruv = icmp eq i8 %tr, 4
+  %hi3 = or i1 %hi2, %ruv
+  %big = or i1 %lo2, %hi3
   br i1 %big, label %toobig, label %ints
 toobig:
   call void @t2_stop(i8* getelementptr ([59 x i8], [59 x i8]* @msg_range_big, i64 0, i64 0), i64 58)
@@ -6470,47 +6945,34 @@ chr:
   %rc = call %Str @t2_str(i8* %bc, i64 %nc64)
   ret %Str %rc
 }
-; t2_pow(l, r): perl's ** (pp_pow). An integer to a power not below 0:
-; a base a power of 2 is a number, as pow() gives; one whose result surely
-; fits 64 bits (its bits times the power at most 64) an integer by
-; multiplying -- past what an i64 holds, a UV T2 has not: stopped. Anything
-; else pow()'s number.
+; t2_pow(l, r): perl's ** (pp_pow). Two integers (as perl reads them), the
+; power not below 0: a base a power of 2 is a number, as pow() gives; one
+; whose result surely fits 64 bits (its bits times the power at most 64) an
+; integer by multiplying -- a UV past IV_MAX, a negative one past IV_MIN an
+; NV. Anything else pow()'s number.
 declare double @llvm.pow.f64(double, double)
-declare double @llvm.fabs.f64(double)
 declare i64 @llvm.ctlz.i64(i64, i1)
-@msg_pow_uv = private unnamed_addr constant [51 x i8] c"an ** past what an i64 holds: stopped (chalk, T2)\0A\00"
-define internal i1 @t2_is_int_num(%Slot %v) {
+define internal %Slot @t2_pow(%Slot %l0, %Slot %r0) {
 entry:
-  %t = extractvalue %Slot %v, 0
-  %isint = icmp eq i8 %t, 1
-  br i1 %isint, label %yes, label %other
-yes:
-  ret i1 1
-other:
-  %undef = icmp eq i8 %t, 0
-  br i1 %undef, label %no, label %num
-num:
-  %d = call double @t2_slot_num(%Slot %v)
-  %tr = call double @llvm.trunc.f64(double %d)
-  %whole = fcmp oeq double %d, %tr
-  %a = call double @llvm.fabs.f64(double %d)
-  %small = fcmp olt double %a, 9007199254740992.0
-  %r = and i1 %whole, %small
-  ret i1 %r
-no:
-  ret i1 0
-}
-define internal %Slot @t2_pow(%Slot %l, %Slot %r) {
-entry:
-  %li = call i1 @t2_is_int_num(%Slot %l)
-  %ri = call i1 @t2_is_int_num(%Slot %r)
-  %both = and i1 %li, %ri
-  br i1 %both, label %ints, label %float
+  %r = call %Slot @t2_arith_num(%Slot %r0)
+  %l = call %Slot @t2_arith_num(%Slot %l0)
+  %rt = extractvalue %Slot %r, 0
+  %lt = extractvalue %Slot %l, 0
+  %rn = icmp eq i8 %rt, 2
+  %ln = icmp eq i8 %lt, 2
+  %either = or i1 %rn, %ln
+  br i1 %either, label %float, label %ints
 ints:
-  %p = call i64 @t2_slot_i64(%Slot %r)
-  %b = call i64 @t2_slot_i64(%Slot %l)
-  %pneg = icmp slt i64 %p, 0
-  %bneg = icmp slt i64 %b, 0
+  %p = extractvalue %Slot %r, 1
+  %b = extractvalue %Slot %l, 1
+  %ruv = icmp eq i8 %rt, 4
+  %luv = icmp eq i8 %lt, 4
+  %pneg0 = icmp slt i64 %p, 0
+  %rnotuv = xor i1 %ruv, true
+  %pneg = and i1 %pneg0, %rnotuv
+  %bneg0 = icmp slt i64 %b, 0
+  %lnotuv = xor i1 %luv, true
+  %bneg = and i1 %bneg0, %lnotuv
   %bn = sub i64 0, %b
   %bu = select i1 %bneg, i64 %bn, i64 %b
   %bm1 = sub i64 %bu, 1
@@ -6543,21 +7005,13 @@ done:
   %negres = and i1 %bneg, %isodd
   br i1 %negres, label %neg, label %pos
 pos:
-  %big = icmp slt i64 %acc, 0
-  br i1 %big, label %stop, label %posok
-posok:
-  %ps = call %Slot @t2_box_i64(i64 %acc)
+  %ps = call %Slot @t2_box_uv(i64 %acc)
   ret %Slot %ps
 neg:
-  %na = sub i64 0, %acc
-  %nbig = icmp sgt i64 %na, 0
-  br i1 %nbig, label %stop, label %negok
-negok:
-  %ns = call %Slot @t2_box_i64(i64 %na)
+  %wa = zext i64 %acc to i128
+  %wn = sub i128 0, %wa
+  %ns = call %Slot @t2_int_or_nv(i128 %wn, i1 1)
   ret %Slot %ns
-stop:
-  call void @t2_stop(i8* getelementptr ([51 x i8], [51 x i8]* @msg_pow_uv, i64 0, i64 0), i64 50)
-  unreachable
 float:
   %ld = call double @t2_slot_num(%Slot %l)
   %rd = call double @t2_slot_num(%Slot %r)
@@ -6565,49 +7019,159 @@ float:
   %fs = call %Slot @t2_box_num(double %f)
   ret %Slot %fs
 }
-; ---- perl's bitwise operators (pp_bit_and & co.) ----
-; t2_bit_uv(v): a value's bits as perl's UV reads them: an integer's own, a
-; number's (or a string's number) truncated -- past what an i64 holds, stopped.
-@msg_bit_big = private unnamed_addr constant [73 x i8] c"a bitwise operand or result past what an i64 holds: stopped (chalk, T2)\0A\00"
-define internal i64 @t2_bit_uv(%Slot %v0) {
+; t2_hexoct(s, oct, warn) -> perl's hex (oct false) or oct of a string
+; (pp_oct; grok_hex, grok_oct, grok_bin): oct skips leading space, then a
+; "0", then "x" is hex, "b" binary, "o" octal (octal anyway); hex takes an
+; "x" or "0x". Digits of the base, an "_" before each, until the first that
+; is not one. A UV (past IV_MAX, a UV). Past UV_MAX perl warns and gives an
+; NV; where the program enables warnings, a character that is not a digit
+; (of octal's, an 8 or a 9), or a value past 32 bits, warns too -- each
+; stopped by name, not guessed.
+@msg_hexoct = private unnamed_addr constant [83 x i8] c"a hex or oct past UV_MAX, or one perl warns of (warnings on): stopped (chalk, T2)\0A\00"
+define internal %Slot @t2_hexoct(%Str %s, i1 %oct, i1 %warn) {
 entry:
-  ; (a string numified as perl does: an integer string read whole, not
-  ; through a double -- 9007199254740993 kept its 3)
-  %v = call %Slot @t2_slot_numify(%Slot %v0)
-  %t = extractvalue %Slot %v, 0
-  %isint = icmp eq i8 %t, 1
-  br i1 %isint, label %int, label %num
-int:
-  %i = extractvalue %Slot %v, 1
-  ret i64 %i
-num:
-  %d = call double @t2_slot_num(%Slot %v)
-  %hi = fcmp oge double %d, 9223372036854775807.0
-  %lo = fcmp olt double %d, -9223372036854775807.0
-  %nan = fcmp uno double %d, %d
-  %b1 = or i1 %hi, %lo
-  %bad = or i1 %b1, %nan
-  br i1 %bad, label %stop, label %ok
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  br i1 %oct, label %ows, label %hexpre
+ows:
+  %i0 = phi i64 [ 0, %entry ], [ %i0n, %owsn ]
+  %e0 = icmp sge i64 %i0, %n
+  br i1 %e0, label %oz, label %owsc
+owsc:
+  %c0p = getelementptr i8, i8* %p, i64 %i0
+  %c0 = load i8, i8* %c0p
+  %sp = icmp eq i8 %c0, 32
+  %t1 = icmp uge i8 %c0, 9
+  %t2 = icmp ule i8 %c0, 13
+  %ctl = and i1 %t1, %t2
+  %white = or i1 %sp, %ctl
+  br i1 %white, label %owsn, label %oz
+owsn:
+  %i0n = add i64 %i0, 1
+  br label %ows
+oz:
+  %i1 = phi i64 [ %i0, %ows ], [ %i0, %owsc ]
+  %c1 = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %i1)
+  %z1 = icmp eq i8 %c1, 48
+  %i1z = add i64 %i1, 1
+  %i2 = select i1 %z1, i64 %i1z, i64 %i1
+  %c2 = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %i2)
+  %c2l = or i8 %c2, 32
+  %isx = icmp eq i8 %c2l, 120
+  %isb = icmp eq i8 %c2l, 98
+  %iso = icmp eq i8 %c2l, 111
+  %i2n = add i64 %i2, 1
+  %pre = or i1 %isx, %isb
+  %pre2 = or i1 %pre, %iso
+  %i3 = select i1 %pre2, i64 %i2n, i64 %i2
+  %b0 = select i1 %isb, i64 2, i64 8
+  %ob = select i1 %isx, i64 16, i64 %b0
+  br label %digits
+hexpre:
+  %h0 = call i8 @t2_byte_at(i8* %p, i64 %n, i64 0)
+  %h1 = call i8 @t2_byte_at(i8* %p, i64 %n, i64 1)
+  %h0l = or i8 %h0, 32
+  %h1l = or i8 %h1, 32
+  %hx0 = icmp eq i8 %h0l, 120
+  %hz = icmp eq i8 %h0, 48
+  %hx1 = icmp eq i8 %h1l, 120
+  %h01 = and i1 %hz, %hx1
+  %hs1 = select i1 %hx0, i64 1, i64 0
+  %hs = select i1 %h01, i64 2, i64 %hs1
+  br label %digits
+digits:
+  %start = phi i64 [ %i3, %oz ], [ %hs, %hexpre ]
+  %base = phi i64 [ %ob, %oz ], [ 16, %hexpre ]
+  br label %loop
+loop:
+  %i = phi i64 [ %start, %digits ], [ %inext, %take ]
+  %acc = phi i64 [ 0, %digits ], [ %acc2, %take ]
+  %end = icmp sge i64 %i, %n
+  br i1 %end, label %done, label %look
+look:
+  %c = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %i)
+  %d = call i64 @t2_digit_of(i8 %c, i64 %base)
+  %ok = icmp sge i64 %d, 0
+  br i1 %ok, label %take0, label %under
+under:
+  %isu = icmp eq i8 %c, 95
+  %ip1 = add i64 %i, 1
+  %cn = call i8 @t2_byte_at(i8* %p, i64 %n, i64 %ip1)
+  %dn = call i64 @t2_digit_of(i8 %cn, i64 %base)
+  %okn = icmp sge i64 %dn, 0
+  %uok = and i1 %isu, %okn
+  br i1 %uok, label %take1, label %bad
+take0:
+  br label %take
+take1:
+  br label %take
+take:
+  %dd = phi i64 [ %d, %take0 ], [ %dn, %take1 ]
+  %adv = phi i64 [ 1, %take0 ], [ 2, %take1 ]
+  %inext = add i64 %i, %adv
+  %r = call { i64, i1 } @llvm.umul.with.overflow.i64(i64 %acc, i64 %base)
+  %m = extractvalue { i64, i1 } %r, 0
+  %o1 = extractvalue { i64, i1 } %r, 1
+  %a = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %m, i64 %dd)
+  %acc2 = extractvalue { i64, i1 } %a, 0
+  %o2 = extractvalue { i64, i1 } %a, 1
+  %ov = or i1 %o1, %o2
+  br i1 %ov, label %stop, label %loop
+bad:
+  ; (a character that is not a digit ends it: perl warns of it where warnings
+  ; are on -- of octal's only an 8 or a 9)
+  %bc0 = icmp uge i8 %c, 48
+  %bc1 = icmp ule i8 %c, 57
+  %bdig = and i1 %bc0, %bc1
+  %b8 = icmp eq i64 %base, 8
+  %quiet = xor i1 %bdig, true
+  %oquiet = and i1 %b8, %quiet
+  %loud = xor i1 %oquiet, true
+  %wl = and i1 %warn, %loud
+  br i1 %wl, label %stop, label %done
+done:
+  %big = icmp ugt i64 %acc, 4294967295
+  %wbig = and i1 %big, %warn
+  br i1 %wbig, label %stop, label %ret
+ret:
+  %rs = call %Slot @t2_box_uv(i64 %acc)
+  ret %Slot %rs
 stop:
-  call void @t2_stop(i8* getelementptr ([73 x i8], [73 x i8]* @msg_bit_big, i64 0, i64 0), i64 72)
+  call void @t2_stop(i8* getelementptr ([83 x i8], [83 x i8]* @msg_hexoct, i64 0, i64 0), i64 82)
   unreachable
-ok:
-  %r = fptosi double %d to i64
+}
+declare { i64, i1 } @llvm.uadd.with.overflow.i64(i64, i64)
+; t2_digit_of(c, base) -> c's value as a digit of base (2, 8, 16), or -1.
+define internal i64 @t2_digit_of(i8 %c, i64 %base) {
+entry:
+  %d0 = icmp uge i8 %c, 48
+  %d1 = icmp ule i8 %c, 57
+  %dig = and i1 %d0, %d1
+  %lc = or i8 %c, 32
+  %l0 = icmp uge i8 %lc, 97
+  %l1 = icmp ule i8 %lc, 102
+  %let = and i1 %l0, %l1
+  %cz = zext i8 %c to i64
+  %lz = zext i8 %lc to i64
+  %vd = sub i64 %cz, 48
+  %vl = sub i64 %lz, 87
+  %v0 = select i1 %let, i64 %vl, i64 -1
+  %v = select i1 %dig, i64 %vd, i64 %v0
+  %lt = icmp ult i64 %v, %base
+  %r = select i1 %lt, i64 %v, i64 -1
   ret i64 %r
 }
-; t2_bit_num(r, inner) -> r as an Int; past IV_MAX (a UV perl prints whole)
-; stopped, unless only another bitwise op reads it (inner).
+; ---- perl's bitwise operators (pp_bit_and & co.) ----
+; t2_bit_uv(v): a value's bits as perl's SvUV reads them (no `use
+; integer`): an IV's own (as a UV: -1 is UV_MAX), a UV's, an NV's cast_uv,
+; a string's integer read whole (9007199254740993 kept its 3).
+define internal i64 @t2_bit_uv(%Slot %v0) {
+  %r = call i64 @t2_slot_i64(%Slot %v0)
+  ret i64 %r
+}
+; t2_bit_num(r, inner) -> a bitwise op's result: perl's UV (past IV_MAX, a UV).
 define internal %Slot @t2_bit_num(i64 %r, i1 %inner) {
-entry:
-  %neg = icmp slt i64 %r, 0
-  %out = xor i1 %inner, 1
-  %bad = and i1 %neg, %out
-  br i1 %bad, label %stop, label %ok
-stop:
-  call void @t2_stop(i8* getelementptr ([73 x i8], [73 x i8]* @msg_bit_big, i64 0, i64 0), i64 72)
-  unreachable
-ok:
-  %s = call %Slot @t2_box_i64(i64 %r)
+  %s = call %Slot @t2_box_uv(i64 %r)
   ret %Slot %s
 }
 ; t2_bitop(a, b, op, mode, inner): op 0 &, 1 |, 2 ^, 3 ~ (b unused). Mode

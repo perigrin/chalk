@@ -319,6 +319,409 @@ sub narrow_return_type ($meta, $type) {
     return $meta->set_return_type($type);
 }
 
+# ============================================================================
+# INTEGER INTERVALS -- range analysis over the program's integer values.
+#
+# WHAT IT ANSWERS. For each value T1 stamps Int, an interval [lo, hi] that
+# holds perl's value of it, or none (nothing proven). A target holding an
+# integer in a machine word asks here before it uses a plain word op: perl's
+# integers do not wrap -- past IV_MAX an integer + - * is a UV, past UV_MAX an
+# NV (pp_add, pp_subtract, pp_multiply) -- so a word op is perl's only where
+# the interval proves the result an IV. Anywhere else the target takes the
+# general path that makes perl's IV, UV or NV.
+#
+# WHERE IT LIVES (docs/plans/2026-08-31-t2-is-a-narrowing-analysis.md, "SSA
+# does most of the work for intervals"): "this value is in 0..255" is
+# target-independent, so it is T1's; each value is defined once, so an
+# interval attaches to the DEFINITION and no later mutation invalidates it.
+# Loop-carried values need a widening at the Phi -- one known place.
+#
+# THE DOMAIN. lo and hi are Math::BigInt, undef for -inf / +inf; a node not
+# modelled has no interval (anything). A value past [IV_MIN, UV_MAX] is an NV
+# in perl, and an NV's arithmetic rounds: where an operation may be done in
+# NVs, a bound is kept only where it and every operand bound it may have come
+# from are within 2**53 in size (an NV holds those exactly, and rounding is
+# monotone); any other goes to infinity.
+#
+# THE ALGORITHM. Round-robin to a post-fixpoint, widening a loop Phi's bound
+# to infinity the second time it moves; then a few narrowing rounds, each
+# taking a node's new interval only where it lies within the old. A loop's
+# test bounds its Phi for the nodes evaluated only in its body (the loop is
+# entered only where the test held): `$i < $n` gives $i <= hi($n) - 1 there,
+# which is what keeps a counter's `$i + 1` an IV. Sound throughout: nothing is
+# guessed, a node it cannot model is anything.
+# ============================================================================
+use Hash::Util::FieldHash qw(fieldhash);
+require Math::BigInt;
+fieldhash my %INTERVAL;    # node => [lo, hi]
+fieldhash my %ANALYSED;    # Return node => 1: its program's nodes analysed
+
+my $IV_MIN = Math::BigInt->new('-9223372036854775808');
+my $IV_MAX = Math::BigInt->new('9223372036854775807');
+my $UV_MAX = Math::BigInt->new('18446744073709551615');
+my $EXACT  = Math::BigInt->new('9007199254740992');    # 2**53
+
+# int_interval($node) -> ($lo, $hi) perl's value of $node lies in (each a
+# Math::BigInt, undef for unbounded), or () where nothing is proven.
+sub int_interval ($node) {
+    my $iv = $INTERVAL{$node} // return ();
+    return ( $iv->[0], $iv->[1] );
+}
+
+# int_within($node, $lo, $hi) -> true where $node's interval is proven
+# within [$lo, $hi] (decimal strings or Math::BigInt).
+sub int_within ($node, $lo, $hi) {
+    my ( $a, $b ) = int_interval($node) or return 0;
+    return 0 unless defined $a && defined $b;
+    return $a >= Math::BigInt->new($lo) && $b <= Math::BigInt->new($hi) ? 1 : 0;
+}
+
+# int_is_iv($node) -> true where $node is proven an IV (within [IV_MIN, IV_MAX]).
+sub int_is_iv ($node) { return int_within( $node, $IV_MIN, $IV_MAX ) }
+
+# integer_intervals(@returns): the analysis, over every node of the programs
+# the Returns end (Chalk::IR::Graph::program_nodes: callees included). A
+# Return already analysed is not again.
+sub integer_intervals (@returns) {
+    my @todo = grep { blessed($_) && !$ANALYSED{$_} } @returns;
+    return unless @todo;
+    my ( %seen, @nodes );
+    for my $r (@todo) {
+        push @nodes, grep { !$seen{ refaddr($_) }++ } Chalk::IR::Graph::program_nodes($r);
+    }
+    $ANALYSED{$_} = 1 for grep { $_->operation eq 'Return' } @nodes;
+    # (inputs before their users, roughly: program_nodes walks back from the Return)
+    my @vals = reverse grep { _iv_modelled($_) } @nodes;
+    my %modelled = map { ( refaddr($_) => 1 ) } @vals;
+    my $st = { iv => {}, modelled => \%modelled, guard => {}, body => {} };
+    my %moved;
+    my $done = 0;
+    for my $round ( 1 .. 100 ) {
+        my $changed = 0;
+        for my $n (@vals) {
+            my $new = _iv_transfer( $n, $st );
+            my $old = $st->{iv}{ refaddr($n) };
+            if ( defined $old && defined $new && _iv_loop_phi($n) && ( $moved{ refaddr($n) } // 0 ) >= 2 ) {
+                $new = [ ( defined $new->[0] && defined $old->[0] && $new->[0] >= $old->[0] ) ? $old->[0] : undef,
+                         ( defined $new->[1] && defined $old->[1] && $new->[1] <= $old->[1] ) ? $old->[1] : undef ];
+            }
+            next if _iv_eq( $old, $new );
+            $st->{iv}{ refaddr($n) } = $new;
+            $moved{ refaddr($n) }++;
+            $changed = 1;
+        }
+        unless ($changed) { $done = 1; last }
+    }
+    # (no post-fixpoint in its rounds: nothing is proven)
+    return unless $done;
+    for ( 1 .. 4 ) {
+        for my $n (@vals) {
+            my $new = _iv_transfer( $n, $st );
+            my $old = $st->{iv}{ refaddr($n) };
+            $st->{iv}{ refaddr($n) } = $new if defined $new && _iv_within( $new, $old );
+        }
+    }
+    for my $n (@vals) {
+        my $iv = $st->{iv}{ refaddr($n) } // next;
+        $INTERVAL{$n} = $iv;
+    }
+    return;
+}
+
+# _iv_modelled($n) -> the analysis has a rule for $n: an integer constant,
+# and + - * unary minus ++ -- % a merge a coercion & length count over
+# values T1 stamps Int.
+my %IV_OPS = map { ( $_ => 1 ) } qw(Add Subtract Multiply Negate Increment Decrement Modulo Phi Coerce BitAnd Length Count);
+sub _iv_modelled ($n) {
+    return 0 unless blessed($n) && $n->isa('Chalk::IR::Node');
+    my $op = $n->operation;
+    return defined _iv_const($n) ? 1 : 0 if $op eq 'Constant';
+    return 0 unless $IV_OPS{$op} && ( $n->stamp // '' ) eq 'Int';    # static type
+    return 0 if $op eq 'Phi' && ( $n->is_memory || $n->inputs->@* < 1 );
+    return 1;
+}
+
+# _iv_const($n) -> an integer Constant's value (Math::BigInt), else undef.
+sub _iv_const ($n) {
+    return undef unless blessed($n) && $n->operation eq 'Constant' && ( $n->const_type // '' ) eq 'integer';
+    my $v = $n->value // return undef;
+    return undef unless $v =~ /\A[-+]?\d+\z/;
+    return Math::BigInt->new($v);
+}
+
+sub _iv_loop_phi ($n) {
+    return $n->operation eq 'Phi' && blessed( $n->region ) && $n->region->operation eq 'Loop';
+}
+
+# _iv_of($n, $st) -> $n's interval now: [lo, hi], undef (bottom: none yet)
+# for a modelled node not yet reached, [undef, undef] for one not modelled.
+sub _iv_of ( $n, $st ) {
+    return [ undef, undef ] unless blessed($n) && $st->{modelled}{ refaddr($n) };
+    return $st->{iv}{ refaddr($n) };
+}
+
+sub _iv_eq ( $x, $y ) {
+    return !defined $x && !defined $y unless defined $x && defined $y;
+    for my $i ( 0, 1 ) {
+        return 0 if defined $x->[$i] != defined $y->[$i];
+        return 0 if defined $x->[$i] && $x->[$i] != $y->[$i];
+    }
+    return 1;
+}
+
+# _iv_within($x, $y) -> interval $x lies within $y (undef $y: nothing to lie in).
+sub _iv_within ( $x, $y ) {
+    return 0 unless defined $x && defined $y;
+    return 0 if defined $y->[0] && ( !defined $x->[0] || $x->[0] < $y->[0] );
+    return 0 if defined $y->[1] && ( !defined $x->[1] || $x->[1] > $y->[1] );
+    return 1;
+}
+
+sub _iv_in_exact ($iv) {
+    return defined $iv->[0] && defined $iv->[1] && $iv->[0] >= $IV_MIN && $iv->[1] <= $UV_MAX;
+}
+
+# _iv_round($r, @operands) -> $r, its bounds made safe where the operation
+# may be done in NVs: an operand or the result may be past [IV_MIN, UV_MAX].
+sub _iv_round ( $r, @in ) {
+    return $r unless grep { !_iv_in_exact($_) } $r, @in;
+    my $big = grep { defined $_ && $_->copy->babs > $EXACT } map { @$_ } @in;
+    return [ map { defined $_ && !$big && $_->copy->babs <= $EXACT ? $_ : undef } @$r ];
+}
+
+# _iv_mul($a, $b) -> a bound product, undef standing for an infinity of the
+# sign given: ($v, $sign) pairs. 0 times anything is 0.
+sub _iv_corner ( $x, $xs, $y, $ys ) {
+    return [ Math::BigInt->bzero, 0 ] if ( defined $x && $x->is_zero ) || ( defined $y && $y->is_zero );
+    return [ $x * $y, 0 ] if defined $x && defined $y;
+    my $sx = defined $x ? ( $x->is_neg ? -1 : 1 ) : $xs;
+    my $sy = defined $y ? ( $y->is_neg ? -1 : 1 ) : $ys;
+    return [ undef, $sx * $sy ];
+}
+
+sub _iv_arith ( $op, $x, $y ) {
+    my $add = sub ( $a, $b ) { defined $a && defined $b ? $a + $b : undef };
+    return [ $add->( $x->[0], $y->[0] ), $add->( $x->[1], $y->[1] ) ] if $op eq 'Add';
+    if ( $op eq 'Subtract' ) {
+        return [ ( defined $x->[0] && defined $y->[1] ) ? $x->[0] - $y->[1] : undef,
+                 ( defined $x->[1] && defined $y->[0] ) ? $x->[1] - $y->[0] : undef ];
+    }
+    # Multiply: the four corners, an infinite one by its sign.
+    my @c = map { my ( $xv, $xs ) = @$_; map { _iv_corner( $xv, $xs, @$_ ) } [ $y->[0], -1 ], [ $y->[1], 1 ] } [ $x->[0], -1 ], [ $x->[1], 1 ];
+    my ( $lo, $hi ) = ( 'none', 'none' );
+    for my $c (@c) {
+        my ( $v, $s ) = @$c;
+        if ( defined $v ) {
+            $lo = $v if !ref($lo) && $lo eq 'none' || ref($lo) && $v < $lo;
+            $hi = $v if !ref($hi) && $hi eq 'none' || ref($hi) && $v > $hi;
+        }
+        else { $lo = 'ninf' if $s < 0; $hi = 'pinf' if $s > 0 }
+    }
+    return [ ref($lo) ? $lo : undef, ref($hi) ? $hi : undef ];
+}
+
+sub _iv_transfer ( $n, $st ) {
+    my $op = $n->operation;
+    if ( $op eq 'Constant' ) { my $v = _iv_const($n); return [ $v, $v->copy ] }
+    if ( $op eq 'Phi' ) {
+        my @in = map { _iv_of( $_, $st ) } grep { blessed($_) } $n->inputs->@*;
+        @in = grep { defined } @in;
+        return undef unless @in;
+        my ( $lo, $hi ) = @{ shift @in };
+        for my $i (@in) {
+            $lo = defined $lo && defined $i->[0] ? ( $i->[0] < $lo ? $i->[0] : $lo ) : undef;
+            $hi = defined $hi && defined $i->[1] ? ( $i->[1] > $hi ? $i->[1] : $hi ) : undef;
+        }
+        # (a loop's accumulator, bounded by the loop's trips: _iv_trip_cap)
+        if ( _iv_loop_phi($n) && ( my $cap = _iv_trip_cap( $n, $st ) ) ) {
+            $lo = $cap->[0] if !defined $lo || $cap->[0] > $lo;
+            $hi = $cap->[1] if !defined $hi || $cap->[1] < $hi;
+        }
+        return [ $lo, $hi ];
+    }
+    my @x = map { _iv_operand( $n, $_, $st ) } grep { blessed($_) } $n->inputs->@[ 0 .. ( $op =~ /\A(?:Add|Subtract|Multiply|Modulo|BitAnd)\z/ ? 1 : 0 ) ];
+    if ( $op =~ /\A(?:Add|Subtract|Multiply)\z/ ) {
+        return undef if grep { !defined } @x[ 0, 1 ];
+        return _iv_round( _iv_arith( $op, @x[ 0, 1 ] ), @x[ 0, 1 ] );
+    }
+    if ( $op eq 'Negate' || $op eq 'Increment' || $op eq 'Decrement' ) {
+        my $x = $x[0] // return undef;
+        my $r = $op eq 'Negate' ? _iv_arith( 'Subtract', [ Math::BigInt->bzero, Math::BigInt->bzero ], $x )
+              : _iv_arith( 'Add', $x, [ ( Math::BigInt->new( $op eq 'Increment' ? 1 : -1 ) ) x 2 ] );
+        return _iv_round( $r, $x );
+    }
+    if ( $op eq 'Coerce' ) {
+        my $in = $n->inputs->[0];
+        return [ undef, undef ] unless blessed($in) && ( $in->stamp // '' ) eq 'Int';    # static type
+        return $x[0];
+    }
+    if ( $op eq 'Modulo' ) {
+        # (pp_modulo: the result's size below the right side's, its sign the right side's)
+        my $r = $x[1] // return undef;
+        return [ undef, undef ] unless defined $r->[0] && defined $r->[1];
+        return [ Math::BigInt->bzero, $r->[1] - 1 ] if $r->[0] > 0;
+        return [ $r->[0] + 1, Math::BigInt->bzero ] if $r->[1] < 0;
+        my $m = $r->[0]->copy->babs > $r->[1]->copy->babs ? $r->[0]->copy->babs : $r->[1]->copy->babs;
+        return [ -( $m - 1 ), $m - 1 ];
+    }
+    if ( $op eq 'BitAnd' ) {
+        # (& with an integer constant not below 0 is on numbers: at most it)
+        return [ undef, undef ] if ( $n->can('flavor') ? $n->flavor // '' : '' ) eq 'string';
+        my ($c) = grep { defined && !$_->is_neg && $_ <= $IV_MAX } map { _iv_const( _iv_uncoerce($_) ) } $n->inputs->@[ 0, 1 ];
+        return defined $c ? [ Math::BigInt->bzero, $c ] : [ undef, undef ];
+    }
+    return [ Math::BigInt->bzero, $IV_MAX->copy ] if $op eq 'Length';
+    return [ Math::BigInt->new(-1), $IV_MAX->copy ] if $op eq 'Count';
+    return [ undef, undef ];
+}
+
+# _iv_step($phi, $st) -> where a loop Phi's back edge is the Phi plus or
+# minus one value (an Add, a Subtract, a ++ or a --), that value's interval
+# as the body sees it, signed as it moves the Phi; else undef.
+sub _iv_step ( $p, $st ) {
+    my $v = $p->inputs->[1];
+    return undef unless blessed($v) && $st->{modelled}{ refaddr($v) };
+    my $op = $v->operation;
+    if ( $op eq 'Increment' || $op eq 'Decrement' ) {
+        return undef unless blessed( $v->inputs->[0] ) && refaddr( _iv_uncoerce( $v->inputs->[0] ) ) == refaddr($p);
+        my $one = Math::BigInt->new( $op eq 'Increment' ? 1 : -1 );
+        return [ $one, $one->copy ];
+    }
+    return undef unless $op eq 'Add' || $op eq 'Subtract';
+    my ( $a, $b ) = $v->inputs->@[ 0, 1 ];
+    my $d;
+    if    ( blessed($a) && refaddr( _iv_uncoerce($a) ) == refaddr($p) ) { $d = $b }
+    elsif ( $op eq 'Add' && blessed($b) && refaddr( _iv_uncoerce($b) ) == refaddr($p) ) { $d = $a }
+    else  { return undef }
+    my $iv = _iv_operand( $v, $d, $st ) // return undef;
+    return undef unless defined $iv->[0] && defined $iv->[1];
+    return $op eq 'Add' ? $iv : [ -$iv->[1], -$iv->[0] ];
+}
+
+# _iv_trip_cap($phi, $st) -> bounds on a loop Phi from the loop's trips, or
+# undef. A counter of the loop -- a Phi its test bounds above in the body,
+# from a known start, each pass up by at least 1 -- bounds the passes: the
+# i-th back edge leaves a counter of at least start + i * step that passed
+# the test, so there are at most (bound - start) / step + 1 of them. A Phi
+# each pass moves by a value of known interval then stays within its start
+# plus that many of them. Kept only within [IV_MIN, UV_MAX], where every
+# pass's value is exact.
+sub _iv_trip_cap ( $p, $st ) {
+    my $L = $p->region;
+    my $d = _iv_step( $p, $st ) // return undef;
+    my $a0 = _iv_of( $p->inputs->[0], $st ) // return undef;
+    return undef unless defined $a0->[0] && defined $a0->[1];
+    my $trips;
+    for my $c ( grep { $_->operation eq 'Phi' && blessed( $_->region ) && refaddr( $_->region ) == refaddr($L) && !$_->is_memory } ( $L->consumers // [] )->@* ) {
+        next unless $st->{modelled}{ refaddr($c) };
+        my $g = _iv_guard( $L, $c, $st ) // next;
+        next unless defined $g->[1];
+        my $k = _iv_step( $c, $st ) // next;
+        next unless $k->[0] >= 1;
+        my $c0 = _iv_of( $c->inputs->[0], $st ) // next;
+        next unless defined $c0->[0];
+        my $t = $g->[1] < $c0->[0] ? Math::BigInt->bzero : ( $g->[1] - $c0->[0] ) / $k->[0] + 1;
+        $trips = $t if !defined $trips || $t < $trips;
+    }
+    return undef unless defined $trips;
+    my $z = Math::BigInt->bzero;
+    my $cap = [ $a0->[0] + $trips * ( $d->[0] < $z ? $d->[0] : $z ), $a0->[1] + $trips * ( $d->[1] > $z ? $d->[1] : $z ) ];
+    return _iv_in_exact($cap) ? $cap : undef;
+}
+
+sub _iv_uncoerce ($n) {
+    $n = $n->inputs->[0] while blessed($n) && $n->operation eq 'Coerce' && blessed( $n->inputs->[0] );
+    return $n;
+}
+
+# _iv_operand($user, $x, $st) -> $x's interval as $user sees it: a loop's
+# Phi, where $user is evaluated only in the loop's body, within its test.
+sub _iv_operand ( $user, $x, $st ) {
+    my $iv = _iv_of( $x, $st ) // return undef;
+    my $p = _iv_uncoerce($x);
+    return $iv unless blessed($p) && _iv_loop_phi($p);
+    my $L = $p->region;
+    my $g = _iv_guard( $L, $p, $st ) // return $iv;
+    return $iv unless _iv_in_body( $user, $L, $st );
+    my ( $lo, $hi ) = @$iv;
+    $lo = $g->[0] if defined $g->[0] && ( !defined $lo || $g->[0] > $lo );
+    $hi = $g->[1] if defined $g->[1] && ( !defined $hi || $g->[1] < $hi );
+    return [ $lo, $hi ];
+}
+
+# _iv_guard($Loop, $phi, $st) -> the bounds the loop's test puts on $phi in
+# its body ([lo, hi], either undef), or undef where it puts none: the test
+# is the one node pinned on the Loop, a numeric comparison (perhaps under a
+# not) of $phi with a value of known interval.
+my %IV_CMP = ( NumLt => 'lt', NumLe => 'le', NumGt => 'gt', NumGe => 'ge' );
+my %IV_FLIP = ( lt => 'gt', le => 'ge', gt => 'lt', ge => 'le' );
+my %IV_NOT = ( lt => 'ge', le => 'gt', gt => 'le', ge => 'lt' );
+sub _iv_guard ( $L, $p, $st ) {
+    my @pinned = grep { $_->operation !~ /\A(?:Phi|Proj)\z/ } $L->successors;
+    return undef unless @pinned == 1;
+    my $t = $pinned[0];
+    my $neg = 0;
+    while ( $t->operation eq 'Not' && blessed( $t->inputs->[0] ) ) { $neg = !$neg; $t = $t->inputs->[0] }
+    my $c = $IV_CMP{ $t->operation } // return undef;
+    $c = $IV_NOT{$c} if $neg;
+    my ( $a, $b ) = map { _iv_uncoerce($_) } $t->inputs->@[ 0, 1 ];
+    my $other;
+    if    ( blessed($a) && refaddr($a) == refaddr($p) ) { $other = $t->inputs->[1] }
+    elsif ( blessed($b) && refaddr($b) == refaddr($p) ) { $other = $t->inputs->[0]; $c = $IV_FLIP{$c} }
+    else  { return undef }
+    # (the other side: a value of known interval, perl's number of it -- an
+    # Int, or a Coerce of one)
+    my $o = _iv_uncoerce($other);
+    return undef unless blessed($o) && ( ( $o->stamp // '' ) eq 'Int' || defined _iv_const($o) );    # static type
+    my $ov = _iv_of( $o, $st ) // return undef;
+    # phi < o: phi <= hi(o) - 1; phi <= o: hi(o); phi > o: lo(o) + 1; phi >= o: lo(o)
+    return [ undef, defined $ov->[1] ? $ov->[1] - 1 : undef ] if $c eq 'lt';
+    return [ undef, defined $ov->[1] ? $ov->[1]->copy : undef ] if $c eq 'le';
+    return [ defined $ov->[0] ? $ov->[0] + 1 : undef, undef ] if $c eq 'gt';
+    return [ defined $ov->[0] ? $ov->[0]->copy : undef, undef ];
+}
+
+# _iv_in_body($n, $Loop, $st) -> $n is evaluated only in the loop's body: each
+# node taking its value is a loop Phi's back edge, a node pinned in the body,
+# or itself one evaluated only in the body (a cycle through the body is).
+sub _iv_in_body ( $n, $L, $st ) {
+    my $memo = $st->{body}{ refaddr($L) } //= {};
+    my $k = refaddr($n);
+    return $memo->{$k} if exists $memo->{$k};
+    $memo->{$k} = 1;    # (coinductive: a cycle stays in the body)
+    my $ok = 1;
+    my %seen;
+    for my $c ( grep { blessed($_) && !$seen{ refaddr($_) }++ } ( $n->consumers // [] )->@* ) {
+        my @pos = grep { blessed( $c->inputs->[$_] ) && refaddr( $c->inputs->[$_] ) == $k } 0 .. $c->inputs->$#*;
+        my $m = $c->can('memory_operand') ? $c->memory_operand : undef;
+        pop @pos if @pos && blessed($m) && refaddr($m) == $k;
+        next unless @pos;
+        if ( $c->operation eq 'Phi' && blessed( $c->region ) && refaddr( $c->region ) == refaddr($L) ) {
+            $ok = 0 if grep { $_ != 1 } @pos;
+        }
+        elsif ( $c->can('control_in') && blessed( $c->control_in ) ) {
+            $ok = 0 unless _iv_ctl_in_body( $c->control_in, $L );
+        }
+        elsif ( $c->operation =~ /\A(?:Loop|Region|If|Proj|Return)\z/ ) { $ok = 0 }
+        else { $ok = 0 unless _iv_in_body( $c, $L, $st ) }
+        last unless $ok;
+    }
+    return $memo->{$k} = $ok;
+}
+
+# _iv_ctl_in_body($ctl, $Loop) -> control $ctl is within the loop's body:
+# back up its chain to the loop's body Proj, not to the Loop itself.
+sub _iv_ctl_in_body ( $x, $L ) {
+    for ( 1 .. 100_000 ) {
+        return 0 unless blessed($x);
+        my $op = $x->operation;
+        return 1 if $op eq 'Proj' && blessed( $x->inputs->[0] ) && refaddr( $x->inputs->[0] ) == refaddr($L) && $x->index == 0;
+        return 0 if refaddr($x) == refaddr($L) || $op eq 'Start';
+        $x = $op =~ /\A(?:Region|Proj|Loop)\z/ ? $x->inputs->[0] : $x->can('control_in') ? $x->control_in : undef;
+    }
+    return 0;
+}
+
 sub hydrate ($class, $graphs, $classes = undef) {
     my %graphs = %$graphs;
 
@@ -691,6 +1094,10 @@ sub infer ($class, $graphs) {
     # happen before it can be turned on.
     #
     _assert_value_nodes_are_typed(\%graphs);
+
+    # INTEGER INTERVALS, last: over the graphs as typed, once every stamp has
+    # settled (the analysis models what T1 stamps Int).
+    integer_intervals( map { $_->returns->@* } grep { $_ } values %graphs );
 
     # The graph set IS the result. $mop is not returned alongside it -- it was
     # attached to every graph above, so a caller wanting the MOP asks a graph

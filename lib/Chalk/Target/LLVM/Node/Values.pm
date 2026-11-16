@@ -36,6 +36,36 @@ class Chalk::Target::LLVM::Node::Cmp :isa(Chalk::Target::LLVM::Node) {
         return "$nm = $o $t " . $in[0]->name . ', ' . $in[1]->name;
     }
 }
+# A UV constant (past IV_MAX): its bits, boxed (tag 4).
+class Chalk::Target::LLVM::Node::ConstUV :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = call %Slot @t2_box_uv(i64 ' . $self->attr->{value} . ')' }
+}
+# A numeric comparison of two scalars, as perl's (do_ncmp): exactly.
+class Chalk::Target::LLVM::Node::SlotNumCmp :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my %op = (eq => 0, ne => 1, lt => 2, gt => 3, le => 4, ge => 5);
+        return $self->name . ' = call i1 @t2_slot_numcmp(' . $self->_args( $self->inputs->@* ) . ', i64 ' . $op{ $self->attr->{op} } . ')';
+    }
+}
+class Chalk::Target::LLVM::Node::SlotMod :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call %Slot @t2_slot_mod(' . $self->_args($self->inputs->@*) . ', ' . $self->_cstr($a{msg}, $a{id}) . ')';
+    }
+}
+class Chalk::Target::LLVM::Node::SlotDiv :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call %Slot @t2_slot_div(' . $self->_args($self->inputs->@*) . ', ' . $self->_cstr($a{msg}, $a{id}) . ')';
+    }
+}
+class Chalk::Target::LLVM::Node::AbsOf :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_slot_abs') } }
+class Chalk::Target::LLVM::Node::HexOct :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . ' = call %Slot @t2_hexoct(' . $self->_args($self->inputs->@*) . ', i1 ' . ( $a{oct} ? 1 : 0 ) . ', i1 ' . ( $a{warn} ? 1 : 0 ) . ')';
+    }
+}
 class Chalk::Target::LLVM::Node::Undef :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { $self->name . ' = call %Slot @t2_slot(i8 0, i64 0)' }
 }
@@ -43,7 +73,6 @@ class Chalk::Target::LLVM::Node::Numify :isa(Chalk::Target::LLVM::Node) { method
 class Chalk::Target::LLVM::Node::IntOf :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_slot_int') } }
 class Chalk::Target::LLVM::Node::Rand :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_slot_rand') } }
 class Chalk::Target::LLVM::Node::SlotStep :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_slot_' . $self->attr->{op}) } }
-class Chalk::Target::LLVM::Node::IntArith :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i64 @t2_int_' . $self->attr->{op}) } }
 class Chalk::Target::LLVM::Node::SlotArith :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_slot_' . $self->attr->{op}) } }
 class Chalk::Target::LLVM::Node::Mod :isa(Chalk::Target::LLVM::Node) {
     method to_ll () {

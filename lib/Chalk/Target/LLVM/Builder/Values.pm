@@ -21,13 +21,14 @@ my %CMP    = (NumLt => 'lt', NumGt => 'gt', NumLe => 'le', NumGe => 'ge', NumEq 
 #             follows its context -- caller, keys, sort, localtime, readline --
 #             is type_of's own case):
 #               %Slot   may be undef or either kind of number: substr outside
-#                       its string, int and rand, -d, chdir, reftype, a shift or
+#                       its string, int, rand, abs, hex and oct (a UV too), -d, chdir, reftype, a shift or
 #                       pop, an object (bless; blessed's class or undef), -e
 #               i64     require's 1, index's position
 #               %Array* a list always: unpack's, glob's, each's
 #               %Str    join's string
 #   value     the emitter of its value (a builtin made elsewhere -- an array's,
 #             a hash's, a handle's -- is in array_value, hash_value, io_value)
+#   node      number_value's: the T2 op that makes it
 #   in_place  where B::SoN pins it, T2 makes its value where it stands (walk):
 #             'passed' -- a read it waits on also settled before a later store
 #             -- or 'value'
@@ -42,7 +43,10 @@ our %T2_BUILTIN = (
     ftdir    => { type => '%Slot', value => 'path_value' },
     chdir    => { type => '%Slot', value => 'path_value', in_place => 'value' },
     require  => { type => 'i64',   value => 'path_value', in_place => 'value' },
-    ( map { ( $_ => { type => '%Slot', value => 'number_value' } ) } qw(int rand) ),
+    int      => { type => '%Slot', value => 'number_value', node => 'IntOf' },
+    rand     => { type => '%Slot', value => 'number_value', node => 'Rand' },
+    abs      => { type => '%Slot', value => 'number_value', node => 'AbsOf' },
+    ( map { ( $_ => { type => '%Slot', value => 'number_value', node => 'HexOct' } ) } qw(hex oct) ),
     substr   => { type => '%Slot', value => 'substr_value' },
     index    => { type => 'i64',   value => 'substr_value' },
     ftis     => { type => '%Slot', value => 'builtin_value' },
@@ -107,6 +111,7 @@ sub phi_type {
         }
         out("a phi stamped $st");
     }
+    return $b->number_phi_type( $phi, $st ) if $st eq 'Int' || $st eq 'Num';
     return $SCALAR{$st} // out("a phi stamped $st");
 }
 
@@ -121,6 +126,29 @@ sub _way_into_returned_list {
     return 1 if grep { $_->operation eq 'Return' && $_->inputs->@* == 2 && refaddr( $_->inputs->[0] ) == refaddr($phi) } @uses;
     return 0 unless ( $phi->stamp // '' ) =~ /\A(?:List|Array)\z/ && !$phi->is_memory && @uses;   # static type
     return !grep { !( $_->operation eq 'Phi' && !$_->is_memory && _way_into_returned_list($_, $seen) ) } @uses;
+}
+
+# number_phi_type($Phi, $stamp) -> a merge of numbers' T2 type. Of Ints: an
+# i64 where T1's intervals prove it an IV, or where every way in is an i64
+# (or a truth) -- else a %Slot: a way in may be a UV or an NV (an i64 wrapped
+# it). Of Nums: a %Slot where a way in is one (an integer perl keeps -- 1e15
+# * 10 -- a double printed as a number), else a double. A loop's merge is
+# typed before its back edge is: the merge a way in reaches back to is taken
+# as its stamp's machine type while it is being typed, and a type found so
+# is not kept (a %Slot found reaching back is: it only widens).
+sub number_phi_type {
+    my ($b, $phi, $st) = @_;
+    my $k = refaddr($phi);
+    return $b->{phi_ty}{$k} if exists $b->{phi_ty}{$k};
+    if ( $b->{phi_busy}{$k} ) { $b->{phi_prov}++; return $SCALAR{$st} }
+    local $b->{phi_busy}{$k} = 1;
+    my $prov = $b->{phi_prov} // 0;
+    my @in = grep { blessed($_) } $phi->inputs->@*;
+    my $t = $st eq 'Int'
+        ? ( Chalk::IR::Analysis::int_is_iv($phi) || !grep { $b->type_of($_) !~ /\A(?:i64|i1)\z/ } @in ) ? 'i64' : '%Slot'
+        : ( grep { $b->type_of($_) =~ /\A%(?:Slot|Str)\z/ } @in ) ? '%Slot' : 'double';
+    $b->{phi_ty}{$k} = $t if $t eq '%Slot' || ( $b->{phi_prov} // 0 ) == $prov;
+    return $t;
 }
 
 # _eval_want_of($Phi) -> the context of the eval whose value $Phi is (B::SoN's
@@ -331,9 +359,28 @@ sub type_of {
     return '%Slot' if $op eq 'Call' && $v->is_tie_builtin;
     return '%Str' if $op eq 'RefType';
     return $b->print_to_handle($v) ? '%Slot' : 'i64' if $op eq 'Print';   # (1, or undef where the handle is not open for writing)
+    # -X OF WHAT A %Slot OR A %Str HOLDS is an IV, a UV or an NV by what it
+    # holds at run time (-IV_MIN is a UV): through a double it lost the
+    # integer. Of an i64, an i64 where T1's intervals prove it an IV (not
+    # -IV_MIN); else a %Slot.
+    if ( $op eq 'Negate' ) {
+        my $t = $b->type_of( $v->inputs->[0] );
+        return '%Slot' if $t =~ /\A%(?:Slot|Str)\z/;
+        return Chalk::IR::Analysis::int_is_iv($v) ? 'i64' : '%Slot' if $t eq 'i64' || ( $v->stamp // '' ) eq 'Int';   # static type
+    }
+    # A UV CONSTANT (past IV_MAX, a UV perl folded) is a %Slot's UV.
+    return '%Slot' if $op eq 'Constant' && defined _uv_constant($v);
+    # % OF WHAT IS NOT AN i64 (a UV, an NV, a string) is pp_modulo's, at run time.
+    return '%Slot' if $op eq 'Modulo' && grep { $b->type_of($_) ne 'i64' } $b->num_operands($v);
+    # / OF AN INTEGER THAT MAY BE PAST 2**53 (an i64, what a %Slot holds) may be
+    # perl's exact integer quotient (pp_divide), at run time; of a double it is
+    # the doubles' (a double is an integer to perl only below 2**53).
+    # (an i64 T1's intervals prove within 2**53 in size divides as a double)
+    return '%Slot' if $op eq 'Divide' && $b->type_of( ( $b->num_operands($v) )[0] ) ne 'double'
+        && !( $b->type_of( ( $b->num_operands($v) )[0] ) eq 'i64' && Chalk::IR::Analysis::int_within( ( $b->num_operands($v) )[0], '-9007199254740992', '9007199254740992' ) );
     # ARITHMETIC ON A %Slot is perl's: Ints stay Ints until they overflow. Done
     # as doubles (T1 may say Num), fact(20) lost its digits.
-    return '%Slot' if $ARITH{$op} && grep { $b->type_of($_) eq '%Slot' } $v->inputs->@[0, 1];
+    return $b->arith_type($v) if $ARITH{$op};
     # NUMIFYING A SCALAR OR A STRING is perl's: an Int stays one, an integer
     # string is parsed whole -- through a double, 9007199254740993 lost its 3.
     return '%Slot' if $op eq 'Coerce' && ( $v->stamp // '' ) eq 'Num' # static type
@@ -365,6 +412,65 @@ sub type_of {
     my $st = $v->stamp // ''; # static type
     return '%Slot' if $st =~ /\AMaybe\[/;   # T or undef: a %Slot
     return $SCALAR{$st} // out("a value stamped $st ($op)");
+}
+
+# _uv_constant($Constant) -> where it is an integer past IV_MAX and within
+# UV_MAX (a UV perl folded), its bits as a signed i64's decimal; else undef.
+sub _uv_constant {
+    my ($v) = @_;
+    return undef unless $v->operation eq 'Constant' && ( $v->const_type // '' ) eq 'integer';
+    my $c = $v->value // return undef;
+    return undef unless $c =~ /\A\+?0*(\d+)\z/;
+    my $d = $1;
+    return undef if length $d < 19 || length $d == 19 && $d le '9223372036854775807';
+    return undef if length $d > 20 || length $d == 20 && $d gt '18446744073709551615';
+    require Math::BigInt;
+    return '' . ( Math::BigInt->new($d) - Math::BigInt->new('18446744073709551616') );
+}
+
+# arith_type($Add) -> the T2 type of a + - * (pp_add, pp_subtract,
+# pp_multiply: two integers -- an NV a whole number below 2**53 is one -- give
+# an IV or a UV while the exact result fits one, else an NV):
+#   %Slot   an operand a %Slot or a %Str (what it holds decides, at run
+#           time); two i64s whose result T1's intervals do not prove an IV;
+#           a double perl may read as an integer (1e15 * 10 is the IV
+#           10000000000000000, printed whole)
+#   i64     two i64s whose result T1's intervals prove an IV: an add i64 is
+#           perl's, exactly
+#   double  a double and an operand perl never reads as an integer (a
+#           constant that is no whole number): the doubles' result is perl's
+sub arith_type {
+    my ($b, $v) = @_;
+    my @in = $b->num_operands($v);
+    my @t = map { $b->type_of($_) } @in;
+    return '%Slot' if grep { $_ ne 'i64' && $_ ne 'double' && $_ ne 'i1' } @t;
+    return Chalk::IR::Analysis::int_is_iv($v) ? 'i64' : '%Slot' unless grep { $_ eq 'double' } @t;
+    return ( grep { _not_whole_constant($_) } @in ) ? 'double' : '%Slot';
+}
+
+# num_operands($op) -> a numeric op's two operands under B::SoN's numeric
+# Coerces (to Int, to Num): the op reads each as perl does -- an IV, a UV or
+# an NV by what it holds -- where through the Coerce an i64 past 2**53 was
+# made a double first, and lost its low bits ((IV_MIN) / -1 printed
+# 9.22337203685478e+18 for 9223372036854775808).
+sub num_operands {
+    my ($b, $v) = @_;
+    return map {
+        my $n = $_;
+        $n = $n->inputs->[0] while blessed($n) && $n->operation eq 'Coerce' && ( $n->stamp // '' ) =~ /\A(?:Int|Num)\z/ && blessed( $n->inputs->[0] );   # static type
+        $n
+    } $v->inputs->@[0, 1];
+}
+
+# _not_whole_constant($n) -> a numeric constant that is no whole number (0.5).
+sub _not_whole_constant {
+    my ($n) = @_;
+    $n = $n->inputs->[0] while blessed($n) && $n->operation eq 'Coerce' && blessed( $n->inputs->[0] );
+    return 0 unless blessed($n) && $n->operation eq 'Constant' && defined $n->value;
+    my $c = $n->value;
+    return 0 unless $c =~ /\A\s*[-+]?(?:\d+\.?\d*(?:[eE][-+]?\d+)?|\.\d+(?:[eE][-+]?\d+)?)\s*\z/;
+    my $d = 0 + $c;
+    return $d == $d && $d != int($d) ? 1 : 0;
 }
 
 # value($t1) -> the T2 node for a T1 value, built once.
@@ -607,12 +713,17 @@ sub _value {
     }
     if ($op eq 'Constant') {
         my $c = $v->value;
+        # AN INTEGER PAST IV_MAX (a UV perl folded, `~5`, `9223372036854775807 + 1`)
+        # is a UV: printed as an i64 it wrapped (-6 for 18446744073709551610).
+        if ( defined( my $u = _uv_constant($v) ) ) {
+            return $b->as( $b->emit(op => 'ConstUV', type => '%Slot', attr => { value => $u }), $ty );
+        }
         return $b->emit(op => 'Undef', type => '%Slot') if $ty eq '%Slot';
-        # AN INTEGER PAST WHAT AN i64 HOLDS (a UV perl folded, `~5`): printed as
-        # an i64 it wrapped (-6 for 18446744073709551610).
-        if ($ty eq 'i64' && defined $c && $c =~ /\A\+?(\d+)\z/) {
-            ( my $d = $1 ) =~ s/\A0+(?=\d)//;
-            out('an integer constant past what an i64 holds') if length $d > 19 || length $d == 19 && $d gt '9223372036854775807';
+        # (one past what a UV holds, or below IV_MIN, typed an integer: no i64 holds it)
+        if ($ty eq 'i64' && defined $c && $c =~ /\A[-+]?\d+\z/) {
+            require Math::BigInt;
+            my $d = Math::BigInt->new($c);
+            out('an integer constant past what an i64 holds') if $d > Math::BigInt->new('9223372036854775807') || $d < Math::BigInt->new('-9223372036854775808');
         }
         return $b->emit(op => 'Const', type => $ty, attr => { value => $c }) if $ty ne '%Str';
         $b->{strs}{$c} //= scalar keys $b->{strs}->%*;
@@ -635,24 +746,42 @@ sub _value {
     if ($op eq 'Divide') {
         # A DIVISION T1 TYPED Int is T1's error (7/2 is 3.5): not truncated here.
         out('a Divide typed Int') if $ty eq 'i64';
-        # PERL DIVIDES AS NUMBERS and dies on a zero divisor, naming where.
+        # PERL DIVIDES AS NUMBERS and dies on a zero divisor, naming where --
+        # but two integers whose quotient is exact, the left past 2**53, as
+        # integers (pp_divide): that is t2_slot_div's, at run time.
         my $msg = "Illegal division by zero at " . ( $v->can('file') && $v->file // '-' )
                  . " line " . ( $v->can('line') && $v->line // 0 ) . ".\n";
         $b->{strs}{$msg} //= scalar keys $b->{strs}->%*;
+        if ( $ty eq '%Slot' ) {
+            my $q = $b->emit(op => 'SlotDiv', type => '%Slot',
+                inputs => [ map { $b->as($b->value($_), '%Slot') } $b->num_operands($v) ],
+                attr => { msg => $msg, id => $b->{strs}{$msg} });
+            $b->after_call;
+            return $q;
+        }
         my $q = $b->emit(op => 'Div', type => 'double',
-            inputs => [ map { $b->as($b->value($_), 'double') } $v->inputs->@[0, 1] ],
+            inputs => [ map { $b->as($b->value($_), 'double') } $b->num_operands($v) ],
             attr => { msg => $msg, id => $b->{strs}{$msg} });
         $b->after_call;   # (a zero divisor is a die: an eval's to catch)
         return $b->as($q, $ty);
     }
     if ($op eq 'Modulo') {
         # PERL'S % IS OF INTEGERS, its sign the right side's, and dies on zero.
-        out('a % not typed Int') unless $ty eq 'i64';
+        # Of what a %Slot holds -- a UV, an NV past what an i64 holds -- on UVs
+        # or by fmod, as pp_modulo, at run time.
+        out('a % not typed Int') unless $ty eq 'i64' || $ty eq '%Slot';
         my $msg = "Illegal modulus zero at " . ( $v->can('file') && $v->file // '-' )
                  . " line " . ( $v->can('line') && $v->line // 0 ) . ".\n";
         $b->{strs}{$msg} //= scalar keys $b->{strs}->%*;
+        if ( $ty eq '%Slot' ) {
+            my $r = $b->emit(op => 'SlotMod', type => '%Slot',
+                inputs => [ map { $b->as($b->value($_), '%Slot') } $b->num_operands($v) ],
+                attr => { msg => $msg, id => $b->{strs}{$msg} });
+            $b->after_call;
+            return $r;
+        }
         my $r = $b->emit(op => 'Mod', type => 'i64',
-            inputs => [ map { $b->as($b->value($_), 'i64') } $v->inputs->@[0, 1] ],
+            inputs => [ map { $b->as($b->value($_), 'i64') } $b->num_operands($v) ],
             attr => { msg => $msg, id => $b->{strs}{$msg} });
         $b->after_call;   # (a zero modulus is a die: an eval's to catch)
         return $r;
@@ -661,32 +790,44 @@ sub _value {
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'reftype_of_ref') {
         return $b->as( $b->emit(op => 'KindOfRef', type => '%Slot', inputs => [ $b->as( $b->value( $v->inputs->[0] ), '%Slot' ) ]), $ty );
     }
-    # -x: perl's, on the value it has at run time (t2_slot_neg).
+    # -x: perl's, on the value it has at run time (t2_slot_neg) -- of an i64
+    # T1's intervals prove is not IV_MIN (whose negation is a UV), sub i64 0, x.
     if ($op eq 'Negate') {
+        return $b->emit(op => 'Arith', type => 'i64', attr => { op => 'sub' },
+            inputs => [ $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }), $b->as( $b->value( $v->inputs->[0] ), 'i64' ) ])
+            if $ty eq 'i64';
         return $b->as( $b->emit(op => 'SlotNeg', type => '%Slot', inputs => [ $b->as( $b->value( $v->inputs->[0] ), '%Slot' ) ]), $ty );
     }
     if (my $a = $ARITH{$op}) {
         if ($ty eq '%Slot') {
             return $b->emit(op => 'SlotArith', type => '%Slot', attr => { op => $a },
-                inputs => [ map { $b->as($b->value($_), '%Slot') } $v->inputs->@[0, 1] ]);
+                inputs => [ map { $b->as($b->value($_), '%Slot') } $b->num_operands($v) ]);
         }
-        my @in = map { $b->as($b->value($_), $ty) } $v->inputs->@[0, 1];
-        # PERL'S INTEGERS DO NOT WRAP: past what an i64 holds its result is a
-        # UV or a number, which an Int-typed value cannot be -- stopped by
-        # name where it overflows (4611686018427387904 * 2 printed
-        # -9223372036854775808 for 9223372036854775808).
-        return $b->emit(op => 'IntArith', type => 'i64', inputs => \@in, attr => { op => $a }) if $ty eq 'i64';
+        # (an i64 op only where T1's intervals prove the result an IV, a
+        # double op only on a number perl never reads as an integer: arith_type)
+        my @in = map { $b->as($b->value($_), $ty) } $b->num_operands($v);
         return $b->emit(op => 'Arith', type => $ty, inputs => \@in, attr => { op => $a });
     }
+    # PERL'S NUMERIC COMPARISONS (do_ncmp): two i64s as integers; i64s and
+    # doubles as doubles (exact: a double is an integer to perl only below
+    # 2**53, where an i64 converts exactly). What a %Slot or a %Str holds --
+    # an IV, a UV, an NV, a string -- at run time, exactly: as doubles,
+    # 9223372036854775807 == 9223372036854775806.
     if (my $c = $CMP{$op}) {
-        my @in = map { $b->value($_) } $v->inputs->@[0, 1];
+        my @in = map { $b->value($_) } $b->num_operands($v);
+        return $b->emit(op => 'SlotNumCmp', type => 'i1', inputs => [ map { $b->as($_, '%Slot') } @in ], attr => { op => $c })
+            if grep { $_->type =~ /\A%(?:Slot|Str)\z/ } @in;
         my $t = ( grep { $_->type ne 'i64' } @in ) ? 'double' : 'i64';
         return $b->emit(op => 'Cmp', type => 'i1', inputs => [ map { $b->as($_, $t) } @in ], attr => { op => $c });
     }
     # <=>: -1, 0 or 1, as (x > y) - (x < y).
     # shortcut: a NaN operand gives 0, perl's undef; return a %Slot if a NaN program needs it.
     if ($op eq 'NumCmp') {
-        my @in = map { $b->value($_) } $v->inputs->@[0, 1];
+        my @in = map { $b->value($_) } $b->num_operands($v);
+        if ( grep { $_->type =~ /\A%(?:Slot|Str)\z/ } @in ) {
+            my ($gt, $lt) = map { my $c = $_; $b->as($b->emit(op => 'SlotNumCmp', type => 'i1', inputs => [ map { $b->as($_, '%Slot') } @in ], attr => { op => $c }), 'i64') } qw(gt lt);
+            return $b->as($b->emit(op => 'Arith', type => 'i64', inputs => [ $gt, $lt ], attr => { op => 'sub' }), $ty);
+        }
         my $t = ( grep { $_->type ne 'i64' } @in ) ? 'double' : 'i64';
         my ($gt, $lt) = map { my $c = $_; $b->as($b->emit(op => 'Cmp', type => 'i1', inputs => [ map { $b->as($_, $t) } @in ], attr => { op => $c }), 'i64') } qw(gt lt);
         return $b->as($b->emit(op => 'Arith', type => 'i64', inputs => [ $gt, $lt ], attr => { op => 'sub' }), $ty);
@@ -842,14 +983,24 @@ sub path_value {
     return $b->as( $b->emit(op => $v->name eq 'ftdir' ? 'FtDir' : 'Chdir', type => '%Slot', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty );
 }
 
-# int(X): X's number truncated toward zero. rand(X): a number in [0, X),
-# X 1 when absent or 0 (perl's), from libc's generator -- not perl's.
+# int(X): X's integer (pp_int: an IV or a UV while one holds it). rand(X):
+# a number in [0, X), X 1 when absent or 0 (perl's), from libc's generator --
+# not perl's. abs(X): pp_abs's. hex(X), oct(X): pp_oct's, a UV past IV_MAX.
 sub number_value {
     my ($b, $v, $ty) = @_;
+    my $name = $v->name;
     my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
-    out('an int of no argument (of $_)') if $v->name eq 'int' && !@a;
+    out("a $name of no argument (of \$_)") if $name ne 'rand' && !@a;
+    out("a $name of a list") if @a && _is_list( $a[0] );
+    my $node = t2_builtin( $v, 'node' );
+    if ( $node eq 'HexOct' ) {
+        my $s = $b->as( $b->value( $a[0] ), '%Str' );
+        out("a $name where a string goes past ASCII") if $b->past_ascii;
+        return $b->as( $b->emit(op => 'HexOct', type => '%Slot', inputs => [$s],
+            attr => { oct => $name eq 'oct', warn => $Chalk::IR::Serialize::JSON::USED_MODULES{warnings} ? 1 : 0 }), $ty );
+    }
     my $x = @a ? $b->as( $b->value( $a[0] ), '%Slot' ) : $b->emit(op => 'Undef', type => '%Slot');
-    return $b->as( $b->emit(op => $v->name eq 'int' ? 'IntOf' : 'Rand', type => '%Slot', inputs => [$x]), $ty );
+    return $b->as( $b->emit(op => $node, type => '%Slot', inputs => [$x]), $ty );
 }
 
 # substr($s, $off, $len) READ (not an lvalue: B::SoN pins a store): from

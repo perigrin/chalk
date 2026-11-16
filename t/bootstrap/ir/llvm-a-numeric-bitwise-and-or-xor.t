@@ -64,12 +64,11 @@ for my $src (
 }
 
 # PAST AN i64: perl's result is unsigned (18446744073709551615 for -1 & -1),
-# which an Int cannot hold. Where no operand proves it small the program
-# stops (exit 255) rather than print a negative number.
+# a UV -- which T2's scalar holds: perl's number, never a negative one.
 {
     my $src = q{my $x = -1; print $x & -1, "\n";};
     my $got = eval { through_llvm($src) };
-    ok(!defined $got && $@ =~ /GAP:|lli exited 255/, "stopped, not another number: $src") or diag $got // $@;
+    is($got, "18446744073709551615\n", "a UV, perl's: $src") or diag $@;
 }
 
 done_testing;
