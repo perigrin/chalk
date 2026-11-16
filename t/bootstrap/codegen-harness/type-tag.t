@@ -1,5 +1,5 @@
-# ABOUTME: Pins the canonical type-tag contract and verifies all four tag-emitting sites agree.
-# ABOUTME: Round-trip test: perl-oracle tag == lli-emit tag for Boolean/Int/Num/Str; LLVM prefix pinning.
+# ABOUTME: Pins the canonical type-tag contract in Chalk::CodeGen::Harness::TypeTag.
+# ABOUTME: infer_tag (declared values) and tag_live_value (live values) rules, one site each.
 use 5.42.0;
 use utf8;
 
@@ -14,7 +14,6 @@ binmode STDERR, ':utf8';
 
 use Chalk::CodeGen::Harness::TypeTag;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
 
 # ---------------------------------------------------------------------------
 # SECTION 1 -- infer_tag canonical rules (declared-string tagging)
@@ -147,193 +146,33 @@ subtest 'tag_live_value: finite values unchanged after non-finite fix' => sub {
 };
 
 # ---------------------------------------------------------------------------
-# SECTION 3 -- LLVM canonical prefix pinning
+# SECTIONS 3 AND 4: REMOVED -- they pinned the return-value type-tag epilogue,
+# which a9adbfe7 deleted on purpose.
+#
+# Section 3 pinned TypeTag::llvm_prefixes against "the LLVM.pm hard-coded
+# strings" -- the epilogue's printf formats (`Int:%lld\n`, `Bool:1\n`, ...).
+# Those constants no longer exist in the backend, so the table pinned nothing
+# but itself, and it is gone with them.
+#
+# Section 4 lowered a bare `return 1 + 2` (and Num/Boolean siblings), ran it
+# under lli, and read the tagged value back off stdout. That IS the epilogue:
+# a program has no channel that hands its return value to a harness, and since
+# a9adbfe7 such a graph correctly prints nothing. A program's value is observed
+# by printing it, which the llvm-* tests do (Print(Coerce(value -> Str))), the
+# same conversion llvm-undef-defined-or.t made for its U4/U5.
+#
+# ---------------------------------------------------------------------------
+# SECTION 5 -- infer_tag has one site
 # ---------------------------------------------------------------------------
 #
-# The LLVM backend bakes tag-prefix strings into LLVM IR constants. Those must
-# match TypeTag's canonical prefixes exactly, or the perl-oracle and lli tags
-# will diverge. This test reads TypeTag's constant table and checks it matches
-# the LLVM.pm hard-coded strings directly.
+# This section used to compare MdtestCorpus::_infer_tag against
+# TypeTag::infer_tag. cdefd9f8 deleted _infer_tag on purpose (the corpus runs
+# cases as programs and asserts stdout, so it no longer tags a declared
+# return value), leaving TypeTag::infer_tag the only site. The representative
+# inputs stay pinned against it.
 # ---------------------------------------------------------------------------
 
-subtest 'LLVM prefix table: Int repr matches LLVM.pm constant' => sub {
-    my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    is( $prefixes->{Int}{perl_tag_prefix}, 'Int:',          'Int perl_tag_prefix is "Int:"' );
-    is( $prefixes->{Int}{llvm_fmt_c},      'Int:%lld\0A\00',  'Int llvm_fmt_c matches LLVM.pm constant' );
-};
-
-subtest 'LLVM prefix table: Num repr matches LLVM.pm constant' => sub {
-    my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    is( $prefixes->{Num}{perl_tag_prefix}, 'Num:',          'Num perl_tag_prefix is "Num:"' );
-    is( $prefixes->{Num}{llvm_fmt_c},      'Num:%g\0A\00',  'Num llvm_fmt_c matches LLVM.pm constant' );
-};
-
-subtest 'LLVM prefix table: Boolean repr matches LLVM.pm constants' => sub {
-    my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    is( $prefixes->{Boolean}{perl_tag_prefix_true},  'Bool:1',         'Boolean true prefix is "Bool:1"' );
-    is( $prefixes->{Boolean}{perl_tag_prefix_false}, 'Bool:',          'Boolean false prefix is "Bool:"' );
-    is( $prefixes->{Boolean}{llvm_true_c},           'Bool:1\0A\00',   'Boolean true llvm_true_c matches LLVM.pm' );
-    is( $prefixes->{Boolean}{llvm_false_c},          'Bool:\0A\00',    'Boolean false llvm_false_c matches LLVM.pm' );
-};
-
-subtest 'LLVM prefix table: Str repr matches LLVM.pm constant' => sub {
-    my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    is( $prefixes->{Str}{perl_tag_prefix}, 'Str:',          'Str perl_tag_prefix is "Str:"' );
-    is( $prefixes->{Str}{llvm_fmt_c},      'Str:%s\0A\00',  'Str llvm_fmt_c matches LLVM.pm constant' );
-};
-
-# ---------------------------------------------------------------------------
-# SECTION 4 -- round-trip agreement (perl-oracle == lli-emit), requires lli
-# ---------------------------------------------------------------------------
-#
-# For each representation (Boolean/Int/Num), build a minimal SoN Return graph,
-# lower it to LLVM IR, run through lli, and assert the output tag prefix matches
-# what TypeTag says the perl oracle would emit.
-# ---------------------------------------------------------------------------
-
-my $HAS_LLI = -x $LLI;
-
-if ($HAS_LLI) {
-    require Chalk::IR::NodeFactory;
-    require Chalk::IR::Node::Constant;
-    require Chalk::IR::Node::Add;
-    require Chalk::IR::Node::NumEq;
-    require Chalk::Target::LLVM;
-}
-
-sub _make_factory { return Chalk::IR::NodeFactory->new }
-
-sub _run_lli {
-    my ($ll_text) = @_;
-    require File::Temp;
-    my ( $fh, $tmp ) = File::Temp::tempfile( SUFFIX => '.ll', UNLINK => 1 );
-    print $fh $ll_text;
-    close $fh;
-    my $out  = qx($LLI $tmp 2>&1);
-    my $exit = $? >> 8;
-    chomp $out;
-    return ( $out, $exit );
-}
-
-subtest 'round-trip: Int repr (1+2=3) lli tag == TypeTag prefix' => sub {
-    unless ($HAS_LLI) {
-        plan skip_all => 'lli not found';
-        return;
-    }
-    my $f   = _make_factory();
-    my $c1  = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c1->set_stamp('Int');
-    my $c2  = $f->make( 'Constant', value => '2', const_type => 'integer' );
-    $c2->set_stamp('Int');
-    my $add = $f->make( 'Add', inputs => [ $c1, $c2 ] );
-    $add->set_stamp('Int');
-    my $ret = $f->make_cfg( 'Return', inputs => [$add] );
-
-    my $ll           = Chalk::Target::LLVM->lower($ret);
-    my ($out, $exit) = _run_lli($ll);
-
-    is( $exit, 0,       'lli exits 0 for Int graph' );
-    is( $out,  'Int:3', 'lli output is Int:3 for 1+2' );
-
-    my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    like( $out, qr/^\Q$prefixes->{Int}{perl_tag_prefix}\E/, 'lli output starts with canonical Int: prefix' );
-
-    # Cross-check: tag_live_value(3) produces matching prefix.
-    my $perl_tag      = Chalk::CodeGen::Harness::TypeTag::tag_live_value(3);
-    my ($lli_prefix)  = $out      =~ /^([^:]+:)/;
-    my ($perl_prefix) = $perl_tag =~ /^([^:]+:)/;
-    is( $lli_prefix, $perl_prefix, 'lli prefix matches perl-oracle prefix for Int' );
-};
-
-subtest 'round-trip: Num repr (1.5) lli tag == TypeTag prefix' => sub {
-    unless ($HAS_LLI) {
-        plan skip_all => 'lli not found';
-        return;
-    }
-    my $f   = _make_factory();
-    my $c   = $f->make( 'Constant', value => '1.5', const_type => 'float' );
-    $c->set_stamp('Num');
-    my $ret = $f->make_cfg( 'Return', inputs => [$c] );
-
-    my $ll           = Chalk::Target::LLVM->lower($ret);
-    my ($out, $exit) = _run_lli($ll);
-
-    is( $exit, 0, 'lli exits 0 for Num graph' );
-    my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    like( $out, qr/^\Q$prefixes->{Num}{perl_tag_prefix}\E/, 'lli output starts with canonical Num: prefix' );
-
-    my $perl_tag      = Chalk::CodeGen::Harness::TypeTag::tag_live_value(1.5);
-    my ($lli_prefix)  = $out      =~ /^([^:]+:)/;
-    my ($perl_prefix) = $perl_tag =~ /^([^:]+:)/;
-    is( $lli_prefix, $perl_prefix, 'lli prefix matches perl-oracle prefix for Num' );
-};
-
-subtest 'round-trip: Boolean repr true (1 == 1) lli tag == TypeTag prefix' => sub {
-    unless ($HAS_LLI) {
-        plan skip_all => 'lli not found';
-        return;
-    }
-    my $f  = _make_factory();
-    my $c1 = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c1->set_stamp('Int');
-    my $c2 = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c2->set_stamp('Int');
-    my $eq = $f->make( 'NumEq', inputs => [ $c1, $c2 ] );
-    $eq->set_stamp('Boolean');
-    my $ret = $f->make_cfg( 'Return', inputs => [$eq] );
-
-    my $ll           = Chalk::Target::LLVM->lower($ret);
-    my ($out, $exit) = _run_lli($ll);
-
-    is( $exit, 0, 'lli exits 0 for Boolean-true graph' );
-    my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    is( $out, $prefixes->{Boolean}{perl_tag_prefix_true}, 'lli output is Bool:1 (canonical Boolean-true tag)' );
-
-    my $perl_tag = Chalk::CodeGen::Harness::TypeTag::tag_live_value( 1 == 1 );
-    is( $perl_tag, 'Bool:1',  'perl oracle tags bool-true as Bool:1' );
-    is( $out,      $perl_tag, 'lli tag == perl-oracle tag for Boolean true' );
-};
-
-subtest 'round-trip: Boolean repr false (1 == 2) lli tag == TypeTag prefix' => sub {
-    unless ($HAS_LLI) {
-        plan skip_all => 'lli not found';
-        return;
-    }
-    my $f  = _make_factory();
-    my $c1 = $f->make( 'Constant', value => '1', const_type => 'integer' );
-    $c1->set_stamp('Int');
-    my $c2 = $f->make( 'Constant', value => '2', const_type => 'integer' );
-    $c2->set_stamp('Int');
-    my $eq = $f->make( 'NumEq', inputs => [ $c1, $c2 ] );
-    $eq->set_stamp('Boolean');
-    my $ret = $f->make_cfg( 'Return', inputs => [$eq] );
-
-    my $ll           = Chalk::Target::LLVM->lower($ret);
-    my ($out, $exit) = _run_lli($ll);
-
-    is( $exit, 0, 'lli exits 0 for Boolean-false graph' );
-    my $prefixes = Chalk::CodeGen::Harness::TypeTag::llvm_prefixes();
-    is( $out, $prefixes->{Boolean}{perl_tag_prefix_false}, 'lli output is Bool: (canonical Boolean-false tag)' );
-
-    my $perl_tag = Chalk::CodeGen::Harness::TypeTag::tag_live_value( 1 == 2 );
-    is( $perl_tag, 'Bool:',   'perl oracle tags bool-false as Bool:' );
-    is( $out,      $perl_tag, 'lli tag == perl-oracle tag for Boolean false' );
-};
-
-# ---------------------------------------------------------------------------
-# SECTION 5 -- site-agreement: both test-side tag sites produce equal output
-# ---------------------------------------------------------------------------
-#
-# For each representative input, verify that MdtestCorpus::_infer_tag and
-# TypeTag::infer_tag produce equal output. This documents that the refactor
-# is behavior-preserving. (LLVMGapMap, the third site, was retired into the
-# mdtest corpus once all topic files landed — per the decided corpus spec,
-# docs/plans/2026-06-07-mdtest-corpus-format-draft.md.)
-# ---------------------------------------------------------------------------
-
-subtest 'site agreement: infer_tag variants agree on representative inputs' => sub {
-    require Chalk::CodeGen::Harness::MdtestCorpus;
-
+subtest 'infer_tag: representative inputs' => sub {
     my @cases = (
         [ undef,    'Undef:',   'undef'             ],
         [ '',       'Str:',     'empty string'      ],
@@ -351,14 +190,10 @@ subtest 'site agreement: infer_tag variants agree on representative inputs' => s
     );
 
     for my $case (@cases) {
-        my ($input, $expected, $label) = @$case;
+        my ($input, $expected, $label) = $case->@*;
         my $display = defined $input ? "'$input'" : 'undef';
-
-        my $tt  = Chalk::CodeGen::Harness::TypeTag::infer_tag($input);
-        my $mc  = Chalk::CodeGen::Harness::MdtestCorpus::_infer_tag($input);
-
-        is( $tt,  $expected, "TypeTag::infer_tag($display) == '$expected'" );
-        is( $mc,  $expected, "MdtestCorpus::_infer_tag agrees for $label" );
+        is( Chalk::CodeGen::Harness::TypeTag::infer_tag($input), $expected,
+            "TypeTag::infer_tag($display) == '$expected' ($label)" );
     }
 };
 

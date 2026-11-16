@@ -1,5 +1,5 @@
 # ABOUTME: Canonical type-tag contract for the typed-compare oracle (G2+).
-# ABOUTME: Single source of truth for infer_tag, tag_live_value, and LLVM prefix constants.
+# ABOUTME: Single source of truth for infer_tag, tag_live_value and the oracle fragment.
 package Chalk::CodeGen::Harness::TypeTag;
 
 use 5.42.0;
@@ -123,65 +123,6 @@ if (is_bool($_result)) {
     print "Str:$_result\n";
 }
 END_FRAGMENT
-}
-
-# ---------------------------------------------------------------------------
-# llvm_prefixes() -> \%prefixes
-#
-# Returns the canonical tag-prefix table for each supported IR representation.
-# The LLVM backend hard-codes these strings into LLVM IR constants; this table
-# pins them equal to the perl-oracle prefixes so divergence is caught by test.
-#
-# Each entry:
-#   Int:
-#     perl_tag_prefix => 'Int:'
-#     llvm_fmt_c      => 'Int:%lld\0A\00'   (LLVM c"..." syntax, 10 bytes; %lld reads the full i64)
-#   Num:
-#     perl_tag_prefix => 'Num:'
-#     llvm_fmt_c      => 'Num:%g\0A\00'   (8 bytes)
-#   Bool:
-#     perl_tag_prefix_true  => 'Bool:1'
-#     perl_tag_prefix_false => 'Bool:'
-#     llvm_true_c           => 'Bool:1\0A\00'   (8 bytes)
-#     llvm_false_c          => 'Bool:\0A\00'    (7 bytes)
-#   Str:
-#     perl_tag_prefix => 'Str:'
-#     llvm_fmt_c      => 'Str:%s\0A\00'   (8 bytes)
-# ---------------------------------------------------------------------------
-sub llvm_prefixes {
-    return {
-        Int => {
-            perl_tag_prefix => 'Int:',
-            llvm_fmt_c      => 'Int:%lld\0A\00',
-        },
-        Num => {
-            perl_tag_prefix => 'Num:',
-            llvm_fmt_c      => 'Num:%g\0A\00',
-        },
-        Boolean => {
-            perl_tag_prefix_true  => 'Bool:1',
-            perl_tag_prefix_false => 'Bool:',
-            llvm_true_c           => 'Bool:1\0A\00',
-            llvm_false_c          => 'Bool:\0A\00',
-        },
-        Str => {
-            perl_tag_prefix => 'Str:',
-            llvm_fmt_c      => 'Str:%s\0A\00',
-        },
-        Undef => {
-            perl_tag_prefix => 'Undef:',
-            llvm_fmt_c      => 'Undef:\0A\00',
-        },
-        # Slot: tagged-scalar {i1 defined, i64 payload} from array/hash element reads.
-        # The LLVM epilogue branches on the defined-bit: Int:<n> if defined, Undef: if not.
-        # G4 (Array/Hash) uses this representation for bounds-checked reads.
-        Slot => {
-            perl_tag_prefix_int   => 'Int:',
-            perl_tag_prefix_undef => 'Undef:',
-            llvm_fmt_int_c        => 'Int:%lld\0A\00',
-            llvm_fmt_undef_c      => 'Undef:\0A\00',
-        },
-    };
 }
 
 1;
