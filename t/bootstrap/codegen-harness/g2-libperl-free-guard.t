@@ -24,6 +24,22 @@ use Chalk::IR::Node::Return;
 # After G.2: the guard lives in LLVMDriver (or MdtestCorpus) so ANY GREEN
 # is automatically checked regardless of which .t file invokes it.
 
+# The synthetic corpus case the guard tests run: a PROGRAM, as every corpus
+# case has been since cdefd9f8 (a `return:`-only behavior block is an
+# "unmigrated case" FAIL) and 5318e0b1 (TypedInvariant requires a Return's
+# control_in). The fragment form these cases had -- `do { 42 }`,
+# `return: Int:42`, a Return with no effect chain -- failed for those reasons
+# before the libperl guard was ever consulted.
+my $PRINT_42_IR = <<'END_IR';
+%start = Start()
+%c = Constant(42) :Int
+%co = Coerce(%c : Int -> Str) :Str
+%p = Print(%co)
+return %p
+control: %start -> %p
+L: GREEN
+END_IR
+
 # Test 1: a clean .ll (no libperl symbols) passes the guard (must stay GREEN).
 subtest 'clean .ll passes libperl-free guard' => sub {
     my $fac = Chalk::IR::NodeFactory->new;
@@ -52,7 +68,7 @@ subtest 'GREEN .ll with libperl symbol fails the guard' => sub {
         # Simulate: lowering succeeded, lli accepted the output (exit 0),
         # but the .ll contains a libperl symbol (Perl_sv_2mortal).
         my $L = Chalk::CodeGen::Harness::BehaviorRecord->new(
-            return_values     => ['Int:42'],
+            return_values     => ['42'],
             wantarray_context => 'scalar',
             stdout            => '',
             stderr            => '',
@@ -71,13 +87,13 @@ subtest 'GREEN .ll with libperl symbol fails the guard' => sub {
 
     my $case = {
         title        => 'synthetic-libperl-leak-test',
-        source       => 'do { 42 }',
-        behavior     => "return: Int:42\ncontext: scalar\n",
-        ir           => "%c = Constant(42) :Int\nreturn %c\nL: GREEN\n",
+        source       => "use 5.42.0;\nprint 42;\n",
+        behavior     => "stdout: 42\ncontext: scalar\n",
+        ir           => $PRINT_42_IR,
         source_pos   => undef,
         behavior_pos => undef,
         ir_pos       => undef,
-        _perl_actual => 'Int:42',
+        _perl_actual => '42',
     };
 
     my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
@@ -108,7 +124,7 @@ subtest 'GREEN .ll with SV/HV only inside string-constant payload must PASS guar
         # Simulate: lowering succeeded with a string literal "an SV in a HV".
         # The .ll text has the string as a global constant — no actual libperl call.
         my $L = Chalk::CodeGen::Harness::BehaviorRecord->new(
-            return_values     => ['Int:42'],
+            return_values     => ['42'],
             wantarray_context => 'scalar',
             stdout            => '',
             stderr            => '',
@@ -138,13 +154,13 @@ subtest 'GREEN .ll with SV/HV only inside string-constant payload must PASS guar
 
     my $case = {
         title        => 'synthetic-str-const-sv-hv-test',
-        source       => 'do { 42 }',
-        behavior     => "return: Int:42\ncontext: scalar\n",
-        ir           => "%c = Constant(42) :Int\nreturn %c\nL: GREEN\n",
+        source       => "use 5.42.0;\nprint 42;\n",
+        behavior     => "stdout: 42\ncontext: scalar\n",
+        ir           => $PRINT_42_IR,
         source_pos   => undef,
         behavior_pos => undef,
         ir_pos       => undef,
-        _perl_actual => 'Int:42',
+        _perl_actual => '42',
     };
 
     my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
@@ -176,7 +192,7 @@ subtest 'CG2: libperl global name on constant-only line caught after payload-onl
     local *Chalk::CodeGen::Harness::LLVMDriver::run = sub {
         my ($class, $return_node, $opts) = @_;
         my $L = Chalk::CodeGen::Harness::BehaviorRecord->new(
-            return_values     => ['Int:42'],
+            return_values     => ['42'],
             wantarray_context => 'scalar',
             stdout            => '',
             stderr            => '',
@@ -212,13 +228,13 @@ subtest 'CG2: libperl global name on constant-only line caught after payload-onl
 
     my $case = {
         title        => 'cg2-libperl-in-global-name-of-constant',
-        source       => 'do { 42 }',
-        behavior     => "return: Int:42\ncontext: scalar\n",
-        ir           => "%c = Constant(42) :Int\nreturn %c\nL: GREEN\n",
+        source       => "use 5.42.0;\nprint 42;\n",
+        behavior     => "stdout: 42\ncontext: scalar\n",
+        ir           => $PRINT_42_IR,
         source_pos   => undef,
         behavior_pos => undef,
         ir_pos       => undef,
-        _perl_actual => 'Int:42',
+        _perl_actual => '42',
     };
 
     my $result = Chalk::CodeGen::Harness::MdtestCorpus->run_case($case, {});
