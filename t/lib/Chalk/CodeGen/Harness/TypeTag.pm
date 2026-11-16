@@ -1,5 +1,5 @@
 # ABOUTME: Canonical type-tag contract for the typed-compare oracle (G2+).
-# ABOUTME: Single source of truth for infer_tag, tag_live_value and the oracle fragment.
+# ABOUTME: Single source of truth for infer_tag (declared values) and tag_live_value (live values).
 package Chalk::CodeGen::Harness::TypeTag;
 
 use 5.42.0;
@@ -54,8 +54,7 @@ sub infer_tag {
 # tag_live_value($scalar) -> $tagged_string
 #
 # Tags a LIVE Perl value (is_bool available). This is the canonical live-value
-# oracle rule used by both MdtestCorpus's generated oracle program and
-# ReturnNodePerlDriver's print statements.
+# oracle rule.
 #
 # Rules (checked in order):
 #   is_bool true          -> 'Bool:1'
@@ -89,40 +88,6 @@ sub tag_live_value {
         return "Int:$val";
     }
     return "Str:$val";
-}
-
-# ---------------------------------------------------------------------------
-# oracle_perl_fragment() -> $perl_source_string
-#
-# Returns a Perl code fragment (suitable for embedding in a generated .pl
-# program) that, given the result in $_ result, prints the canonical type-tag.
-# The fragment assumes the result is in a variable named $_result.
-#
-# The generated program must include:
-#   use lib 't/lib';
-#   use Chalk::CodeGen::Harness::TypeTag;
-# and must be run with -It/lib in @INC so that the module is locatable.
-# ---------------------------------------------------------------------------
-sub oracle_perl_fragment {
-    return <<'END_FRAGMENT';
-use Scalar::Util qw(looks_like_number);
-use builtin qw(is_bool);
-no warnings 'experimental::builtin';
-if (is_bool($_result)) {
-    print "Bool:" . ($_result ? "1" : "") . "\n";
-} elsif (!defined $_result) {
-    print "Undef:\n";
-} elsif (looks_like_number($_result)) {
-    my $_str = "$_result";
-    if    ($_str =~ /^Inf$/i)  { print "Num:Inf\n"  }
-    elsif ($_str =~ /^-Inf$/i) { print "Num:-Inf\n" }
-    elsif ($_str =~ /^NaN$/i)  { print "Num:NaN\n"  }
-    elsif ($_result =~ /\./)   { printf "Num:%g\n", $_result }
-    else                       { print "Int:$_result\n" }
-} else {
-    print "Str:$_result\n";
-}
-END_FRAGMENT
 }
 
 1;

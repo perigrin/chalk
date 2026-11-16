@@ -1,4 +1,4 @@
-# ABOUTME: P-corner driver for typed SoN Return nodes: lowers to a Perl expression, runs under perl.
+# ABOUTME: P-corner driver for typed SoN Return nodes: lowers to a Perl program, runs under perl.
 # ABOUTME: Parallel to LLVMDriver but targets Perl text emission for the computation slice.
 package Chalk::CodeGen::Harness::ReturnNodePerlDriver;
 
@@ -10,7 +10,6 @@ use File::Temp   qw(tempfile);
 use Scalar::Util qw(blessed);
 
 use Chalk::CodeGen::Harness::BehaviorRecord;
-use Chalk::CodeGen::Harness::TypeTag;
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 use Chalk::IR::Node;   # stamp reads gate on isa Chalk::IR::Node
 
@@ -68,8 +67,7 @@ sub run {
         return ( $P, $emission_meta );
     }
 
-    # Wrap in a minimal runnable snippet: print the result via printf.
-    # Use the same format semantics as LLVM (integer or float).
+    # Wrap in a minimal runnable program; what it prints is the record.
     my $snippet = "use 5.42.0; use utf8;\n" . $perl_text . "\n";
 
     # ---- Step 2: run under perl ----
@@ -103,11 +101,11 @@ sub run {
 
 # _emit_return_as_perl($return_node) -> $perl_snippet_string
 #
-# Emits a Perl script fragment that computes the same value as the Return node
-# and prints it (so the script's stdout is the behavior record).
+# Emits a Perl program that runs the same effects as the Return node's control
+# chain, so the script's stdout is the behavior record.
 #
 # Covers the computation slice: Int/Num constants, Add/Subtract/Multiply/Divide/
-# Modulo, Coerce, VarDecl/PadAccess/Assign/CompoundAssign (straight-line only),
+# Modulo, Coerce, VarDecl/PadAccess/Assign/CompoundAssign/Print (straight-line only),
 # TernaryExpr with Boolean condition.
 sub _emit_return_as_perl {
     my ($return_node) = @_;
@@ -128,23 +126,18 @@ sub _emit_return_as_perl {
         }
     }
 
-    # Emit the value sub-graph.
-    my $value_node = $return_node->inputs->[0];
-    my $expr       = _emit_expr( $value_node, \%var_table );
-
-    # Emit type-tagged output: both P and L corners emit tags so Boolean is
-    # distinguishable from its Str coercion in the three-corner Comparator.
-    # The tagging logic is the canonical rule from Chalk::CodeGen::Harness::TypeTag.
-    my $tag_fragment = Chalk::CodeGen::Harness::TypeTag::oracle_perl_fragment();
-    # Wrap: assign the expression to $_result (the variable the fragment expects),
-    # then let the fragment print the tag.
-    my $print_stmt = "{ my \$_result = $expr;\n$tag_fragment}";
-
-    return join( "\n", @ctrl_stmts ) . ( @ctrl_stmts ? "\n" : '' ) . $print_stmt;
+    # The Return's value is not emitted: the graph is a PROGRAM, and a
+    # program's observable contract is stdout plus exit status. perl compiles
+    # a main program's trailing value in void context; it never reaches the
+    # harness. This is the contract the L corner (LLVMDriver) has had since
+    # 47b480f3 and the backend since a9adbfe7 deleted the return-value
+    # type-tag epilogue -- the P corner printed that tag after the L corner
+    # stopped, so the triangle compared two different contracts.
+    return join( "\n", @ctrl_stmts );
 }
 
 # _emit_ctrl_stmt($node, \%var_table) -> $stmt_string or undef
-# Emits a Perl statement for a control-chain node (VarDecl/Assign/CompoundAssign).
+# Emits a Perl statement for a control-chain node (VarDecl/Assign/CompoundAssign/Print).
 sub _emit_ctrl_stmt {
     my ( $node, $var_table ) = @_;
     my $op = $node->operation;
@@ -165,6 +158,11 @@ sub _emit_ctrl_stmt {
         else {
             return "my $perl_var;";
         }
+    }
+    elsif ( $op eq 'Print' ) {
+        # inputs = the values printed, in order (already coerced to Str).
+        my @args = map { _emit_expr( $_, $var_table ) } $node->inputs->@*;
+        return 'print(' . join( ', ', @args ) . ');';
     }
     elsif ( $op eq 'Assign' || $op eq 'CompoundAssign' ) {
         # inputs[0] = lhs (PadAccess), inputs[1] = rhs

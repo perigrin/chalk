@@ -24,7 +24,13 @@ unless ( -x $LLI ) {
 }
 
 # ---------------------------------------------------------------------------
-# Helper: build the arith-add graph (L-GREEN: return 1 + 2)
+# Helper: build the arith-add graph (L-GREEN: print 1 + 2)
+#
+# A PROGRAM, observed the way a program is: by what it prints. Since 47b480f3
+# LLVMDriver lowers every graph as a program, and since a9adbfe7 the backend
+# has no epilogue that prints a return value, so `return 1 + 2` prints nothing.
+# The value under test is printed (Print(Coerce(Int -> Str))) and the program
+# returns undef.
 # ---------------------------------------------------------------------------
 sub _build_arith_add {
     my $f  = Chalk::IR::NodeFactory->new;
@@ -34,7 +40,14 @@ sub _build_arith_add {
     $c2->set_stamp('Int');
     my $add = $f->make( 'Add', inputs => [ $c1, $c2 ] );
     $add->set_stamp('Int');
-    my $ret = $f->make_cfg( 'Return', inputs => [$add] );
+    my $str = $f->make( 'Coerce', inputs => [$add], from_repr => 'Int', to_repr => 'Str' );
+    $str->set_stamp('Str');
+    my $print = $f->make( 'Print', inputs => [$str] );
+    $print->set_control_in( $f->make_cfg('Start') );
+    my $u = $f->make( 'Constant', value => undef, const_type => 'undef' );
+    $u->set_stamp('Undef');
+    my $ret = $f->make_cfg( 'Return', inputs => [$u] );
+    $ret->set_control_in($print);
     return $ret;
 }
 
@@ -71,7 +84,7 @@ subtest 'LLVMDriver BehaviorRecord has correct return value for arith-add' => su
 
     my $rv = $L->return_values;
     is( scalar(@$rv), 1,   'return_values has one element' );
-    is( $rv->[0], 'Int:3', 'return_values[0] is "Int:3" (1+2, type-tagged)' );
+    is( $rv->[0], '3', 'return_values[0] is "3": the program prints 1+2' );
 };
 
 subtest 'LLVMDriver L record is libperl-free (no Perl_/SV_ in .ll)' => sub {
@@ -272,9 +285,9 @@ subtest 'real S/P/L triangle PASS for arith-add' => sub {
 
     # S: perl oracle — run "return 1 + 2" under perl and capture the result.
     # For the triangle test, we build S directly as a BehaviorRecord with
-    # the known perl oracle output "Int:3" (type-tagged, matching the new oracle format).
+    # the known perl oracle output: `print 1 + 2` prints "3".
     # (The full PerlDriver/RunUnderPerl path is tested elsewhere; here we focus on the triangle verdict.)
-    my $S = Chalk::CodeGen::Harness::BehaviorRecord->new( return_values => ['Int:3'] );
+    my $S = Chalk::CodeGen::Harness::BehaviorRecord->new( return_values => ['3'] );
 
     # P: Perl codegen corner — lower the SAME typed graph to Perl, run under perl.
     my ( $P, $p_meta ) = Chalk::CodeGen::Harness::ReturnNodePerlDriver->run(
