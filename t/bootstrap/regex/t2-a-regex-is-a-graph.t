@@ -62,10 +62,18 @@ for my $c (
 }
 
 # A CAPTURE WHERE ITS MATCH MAY HAVE FAILED: perl reads the last match that
-# succeeded there. Refused by name, never read as this match's.
+# succeeded there. Since c044904d T2 lowers it: the capture is read where its
+# match succeeded, and where it did not the program STOPS at run time, by
+# name (exit 255, a message) -- never read as this match's, never a wrong
+# answer. Here the second match fails, so it stops.
 my $r = tap(qq{my \$s = \$ENV{S} // "ab";\n\$s =~ /(a)/;\n\$s =~ /(z)/;\nprint defined \$1 ? "d" : "u", "\\n";\n});
-is $r->{verdict}, 'REFUSED', 'a capture after a match that may have failed: refused';
-like $r->{why}, qr/may have failed/, '... saying why';
+is $r->{llvm}{exit}, 255, 'a capture after a match that failed: stopped' or diag explain $r;
+like $r->{llvm}{err}, qr/where its match failed/, '... saying why';
+is $r->{llvm}{out}, '', '... having printed no answer';
+# The same program where the second match succeeds reads that match's $1.
+$r = tap(qq{my \$s = \$ENV{S} // "ab";\n\$s =~ /(a)/;\n\$s =~ /(b)/;\nprint defined \$1 ? "\$1" : "u", "\\n";\n});
+is $r->{verdict}, 'SAME', 'a capture after a match that may have failed, where it held: as perl'
+    or diag $r->{why} // explain $r;
 # $& AND ITS KIN: B::SoN reads them as package variables, not of a match.
 for my $v ( '$&', '$`', q{$'}, '$+' ) {
     $r = tap(qq{my \$s = \$ENV{S} // "ab";\nprint "[$v]\\n" if \$s =~ /(a)/;\n});
