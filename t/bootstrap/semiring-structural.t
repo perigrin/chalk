@@ -537,6 +537,21 @@ my $make_complete = sub ($value, $rule_name, $alt_idx, $pos, $origin) {
     ok(!($r & STRUCT_IS_BINOP), 'CallExpression clears is_binop from child');
 }
 
+# --- ExpressionStatement: one expression is not a list, method call or not ---
+# `$_->to_string()` as a statement completes both as alt 0 (Expression) and
+# as alt 1 (an ExpressionList of one). Alt 1 must lose on the same span even
+# when the expression is a method call: the method-vs-list preference is for
+# a list whose commas really do bind looser than `->`, not for this wrapper.
+{
+    my $method_call = STRUCT_IS_METHOD | STRUCT_IS_CALL;
+    my $as_expr = $sr->multiply($method_call, $make_complete->($method_call, 'ExpressionStatement', 0, 0, 0));
+    my $as_list = $sr->multiply($method_call, $make_complete->($method_call, 'ExpressionStatement', 1, 0, 0));
+    is($sr->add($as_expr, $as_list), $as_expr,
+        'a method-call statement is an Expression, not a one-item list (expr first)');
+    is($sr->add($as_list, $as_expr), $as_expr,
+        'a method-call statement is an Expression, not a one-item list (list first)');
+}
+
 # --- ExpressionList alts 1+ → is_list tag ---
 # ExpressionList:0 (single Expression) has no is_list.
 # ExpressionList:1 (comma-separated) gets is_list so add() prefers single Expression.

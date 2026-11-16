@@ -225,11 +225,14 @@ class Chalk::Bootstrap::Semiring::Structural {
         # expression matches both Expression and ExpressionList, prefer
         # Expression (simpler parse). The list form is only correct when
         # there are actual commas or fat arrows.
+        # IS_CALL is not carried: the list wrapper is not itself a call, and
+        # an inner call's IS_CALL made a method-call statement look like the
+        # method-vs-list competition in add(), which then picked this alt
+        # over alt 0 for `$_->to_string()` (an ExpressionList of one).
         if ($rule_name eq 'ExpressionStatement' && $alt_idx == 1) {
             return STRUCT_IS_LIST
                 | ($value & STRUCT_IS_BLOCK)
                 | ($value & STRUCT_IS_HASH)
-                | ($value & STRUCT_IS_CALL)
                 | ($value & STRUCT_IS_VARDECL);
         }
 
