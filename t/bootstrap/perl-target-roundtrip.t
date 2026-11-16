@@ -114,6 +114,18 @@ my @cases = (
           "    sub ru() { return undef }\n",
           "}\n"),
       q{my @a = RT5::r(); my @b = RT5::ru(); my $s = RT5::r(); print scalar(@a), scalar(@b), defined($s) ? 'd' : 'u', "\n";} ],
+    [ 'die with a concatenated message under a postfix if',
+      join('', "class RT6 {\n",
+          "    sub d(\$x) {\n",
+          "        die 'a' . 'b' if \$x;\n",
+          "        return 1;\n",
+          "    }\n",
+          "    sub w(\$x) {\n",
+          "        die 'c' . \$x . \"\\n\" unless \$x eq 'ok';\n",
+          "        return 2;\n",
+          "    }\n",
+          "}\n"),
+      q{print RT6::d(0), RT6::w('ok'), "\n"; eval { RT6::d(1) }; print "[$@]"; eval { RT6::w('no') }; print "[$@]\n";} ],
 );
 
 for my $case (@cases) {

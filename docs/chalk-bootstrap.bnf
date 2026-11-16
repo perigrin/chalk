@@ -34,7 +34,8 @@ StatementItem ::= SimpleStatement _ /;/
 SimpleStatement ::= ReturnStatement WS PostfixModifier
     | ReturnStatement
     | ExpressionStatement
-    | UseDeclaration ;
+    | UseDeclaration
+    | ExpressionStatement WS PostfixModifier ;
 
 ReturnStatement ::= /return\b/ WS Expression
     | /return\b/ ;
@@ -53,9 +54,11 @@ CompoundStatement ::= Block
 
 # §4  EXPRESSION STATEMENTS
 
+# A modified statement is SimpleStatement's: the statement completes before
+# its modifier, as `return` does, so nothing about the expression's own
+# operators is carried past it.
 ExpressionStatement ::= Expression
-    | ExpressionList
-    | Expression WS PostfixModifier ;
+    | ExpressionList ;
 
 PostfixModifier ::= /(?:if|unless|while|until|for|foreach)\b/ WS Expression ;
 

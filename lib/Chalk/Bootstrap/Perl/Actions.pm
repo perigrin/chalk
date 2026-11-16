@@ -502,6 +502,18 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     method SimpleStatement($ctx) {
+        # ExpressionStatement WS PostfixModifier: the statement is the body.
+        my ($body_leaf, $postfix_leaf);
+        for my $leaf (_collect_ir_leaves($ctx)) {
+            my $rule = $leaf->rule() // '';
+            $body_leaf    = $leaf if $rule eq 'ExpressionStatement';
+            $postfix_leaf = $leaf if $rule eq 'PostfixModifier';
+        }
+        if (defined $body_leaf && defined $postfix_leaf
+                && $body_leaf->extract() isa Chalk::IR::Node) {
+            return $self->_wire_postfix_body($ctx, $postfix_leaf, $body_leaf->extract());
+        }
+
         my @values = _collect_ir_values($ctx);
         my @ir_nodes;
         for my $val (@values) {
@@ -526,125 +538,105 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
-    # §4 ExpressionStatement — transparent pass-through
-    # For postfix modifier alt (Expression WS PostfixModifier), wires the
-    # expression into the PostfixModifier's cfg_state body_stmts so codegen
-    # emits the body inside the control flow construct.
-    method ExpressionStatement($ctx) {
-        my @leaves = _collect_ir_leaves($ctx);
-        my @ir_nodes;
-        my $postfix_leaf;
-        my $body_expr;
-
-        for my $leaf (@leaves) {
-            my $focus = $leaf->extract();
-            my $rule = $leaf->rule() // '';
-            if ($focus isa Chalk::IR::Node) {
-                push @ir_nodes, $focus;
-                if ($rule eq 'PostfixModifier') {
-                    $postfix_leaf = $leaf;
-                } elsif (!defined $postfix_leaf) {
-                    # Expression before PostfixModifier is the body
-                    $body_expr = $focus;
-                }
-            }
-        }
-
-        # Wire body expression into PostfixModifier's annotations.
-        # Structural cfg data (loop, if_node, etc.) is on the PostfixModifier leaf
-        # context's annotations — not on the outer ExpressionStatement context,
-        # since _mul_ctx does not propagate individual annotation keys through
-        # the multiply chain. Read annotations from postfix_leaf directly.
-        if (defined $postfix_leaf && defined $body_expr) {
-            my $postfix_node = $postfix_leaf->extract();
-            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
-            if (defined $sa) {
-                my $ann = $postfix_leaf->annotations();
-                if (defined $ann && (defined $ann->{loop} || defined $ann->{if_node})) {
-                    my $scope = _ctx_scope($ctx);
-                    if (defined $ann->{loop}) {
-                        # Collect post-body scope bindings for Phi backedge wiring.
-                        # Walk leaves of this context to find any scope updates
-                        # that occurred while parsing the body expression.
-                        my $loop = $ann->{loop};
-                        my %body_final_bindings;
-                        for my $leaf (_collect_ir_leaves($ctx)) {
-                            my $leaf_scope = _ctx_scope($leaf);
-                            if (defined $leaf_scope) {
-                                for my $name ($leaf_scope->variable_names()) {
-                                    my $binding = $leaf_scope->lookup($name);
-                                    $body_final_bindings{$name} = $binding if defined $binding;
-                                }
+    # A postfix-modified statement (`EXPR if COND`, `EXPR for LIST`): the
+    # PostfixModifier built the If/Loop; wire the statement in as its body
+    # and return the modifier's node. The structural cfg data (loop, if_node)
+    # is on the PostfixModifier leaf's annotations -- _mul_ctx does not
+    # propagate individual annotation keys through the multiply chain.
+    method _wire_postfix_body($ctx, $postfix_leaf, $body_expr) {
+        my $postfix_node = $postfix_leaf->extract();
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        if (defined $sa) {
+            my $ann = $postfix_leaf->annotations();
+            if (defined $ann && (defined $ann->{loop} || defined $ann->{if_node})) {
+                my $scope = _ctx_scope($ctx);
+                if (defined $ann->{loop}) {
+                    # Collect post-body scope bindings for Phi backedge wiring.
+                    # Walk leaves of this context to find any scope updates
+                    # that occurred while parsing the body expression.
+                    my $loop = $ann->{loop};
+                    my %body_final_bindings;
+                    for my $leaf (_collect_ir_leaves($ctx)) {
+                        my $leaf_scope = _ctx_scope($leaf);
+                        if (defined $leaf_scope) {
+                            for my $name ($leaf_scope->variable_names()) {
+                                my $binding = $leaf_scope->lookup($name);
+                                $body_final_bindings{$name} = $binding if defined $binding;
                             }
                         }
+                    }
 
-                        # Create Phi nodes for loop-carried variables directly here.
-                        # Postfix loops have no iterator variable, so pass undef.
-                        my $new_scope = $scope;
-                        if (defined $scope) {
-                            $new_scope = $scope->merge_for_loop(
-                                \%body_final_bindings, $loop, $factory, undef,
-                            );
-                        }
-                        $sa->update_scope($new_scope) if defined $new_scope;
-                        $sa->update_annotations({ body_stmts => [$body_expr] });
-                        # Phase 1 mig 6: refine the Loop's schedule_data
-                        # with the postfix body expression. PostfixModifier
-                        # initialized schedule_data with empty body_stmts.
-                        $loop->set_schedule_data(
-                            Chalk::Scheduler::EagerPinning::Loop->new(
-                                node       => $loop,
-                                body_stmts => [$body_expr],
+                    # Create Phi nodes for loop-carried variables directly here.
+                    # Postfix loops have no iterator variable, so pass undef.
+                    my $new_scope = $scope;
+                    if (defined $scope) {
+                        $new_scope = $scope->merge_for_loop(
+                            \%body_final_bindings, $loop, $factory, undef,
+                        );
+                    }
+                    $sa->update_scope($new_scope) if defined $new_scope;
+                    $sa->update_annotations({ body_stmts => [$body_expr] });
+                    # Phase 1 mig 6: refine the Loop's schedule_data
+                    # with the postfix body expression. PostfixModifier
+                    # initialized schedule_data with empty body_stmts.
+                    $loop->set_schedule_data(
+                        Chalk::Scheduler::EagerPinning::Loop->new(
+                            node       => $loop,
+                            body_stmts => [$body_expr],
+                        )
+                    );
+                } elsif (defined $ann->{if_node}) {
+                    # Detect loop jump keywords (next/last) as body:
+                    # set loop_jump marker instead of then_stmts so
+                    # targets emit 'next if/unless' instead of 'if { next }'.
+                    # NOTE: The If CFG node lives in annotation metadata
+                    # (keyed by the IR node's refaddr), not directly in
+                    # body_stmts. _build_cfg_lookup resolves this at codegen
+                    # time. Future GCM/DCE passes that walk only the IR tree
+                    # (not annotations) will need to be extended to see it.
+                    if ($body_expr isa Chalk::IR::Node::Constant
+                            && defined $body_expr->value()
+                            && ($body_expr->value() eq 'next'
+                                || $body_expr->value() eq 'last')) {
+                        $sa->update_annotations({ loop_jump => $body_expr->value() });
+                        # Phase 1 migration 2: mirror the loop_jump
+                        # annotation onto the If's schedule_data so
+                        # the scheduler can detect the shortcut from
+                        # the IR alone. Context annotation kept alive
+                        # until Phase 5 cutover.
+                        my $if_node = $ann->{if_node};
+                        $if_node->set_schedule_data(
+                            Chalk::Scheduler::EagerPinning::If->new(
+                                node         => $if_node,
+                                is_loop_jump => $body_expr->value(),
                             )
                         );
-                    } elsif (defined $ann->{if_node}) {
-                        # Detect loop jump keywords (next/last) as body:
-                        # set loop_jump marker instead of then_stmts so
-                        # targets emit 'next if/unless' instead of 'if { next }'.
-                        # NOTE: The If CFG node lives in annotation metadata
-                        # (keyed by the IR node's refaddr), not directly in
-                        # body_stmts. _build_cfg_lookup resolves this at codegen
-                        # time. Future GCM/DCE passes that walk only the IR tree
-                        # (not annotations) will need to be extended to see it.
-                        if ($body_expr isa Chalk::IR::Node::Constant
-                                && defined $body_expr->value()
-                                && ($body_expr->value() eq 'next'
-                                    || $body_expr->value() eq 'last')) {
-                            $sa->update_annotations({ loop_jump => $body_expr->value() });
-                            # Phase 1 migration 2: mirror the loop_jump
-                            # annotation onto the If's schedule_data so
-                            # the scheduler can detect the shortcut from
-                            # the IR alone. Context annotation kept alive
-                            # until Phase 5 cutover.
-                            my $if_node = $ann->{if_node};
-                            $if_node->set_schedule_data(
-                                Chalk::Scheduler::EagerPinning::If->new(
-                                    node         => $if_node,
-                                    is_loop_jump => $body_expr->value(),
-                                )
-                            );
-                        } else {
-                            $sa->update_annotations({ then_stmts => [$body_expr] });
-                            # Phase 1 migration 5: refine the If's
-                            # schedule_data with the postfix body
-                            # expression in then_stmts. The PostfixModifier
-                            # action initialized schedule_data with
-                            # empty then_stmts; we override now that the
-                            # body is known.
-                            my $if_node = $ann->{if_node};
-                            $if_node->set_schedule_data(
-                                Chalk::Scheduler::EagerPinning::If->new(
-                                    node       => $if_node,
-                                    then_stmts => [$body_expr],
-                                )
-                            );
-                        }
+                    } else {
+                        $sa->update_annotations({ then_stmts => [$body_expr] });
+                        # Phase 1 migration 5: refine the If's
+                        # schedule_data with the postfix body
+                        # expression in then_stmts. The PostfixModifier
+                        # action initialized schedule_data with
+                        # empty then_stmts; we override now that the
+                        # body is known.
+                        my $if_node = $ann->{if_node};
+                        $if_node->set_schedule_data(
+                            Chalk::Scheduler::EagerPinning::If->new(
+                                node       => $if_node,
+                                then_stmts => [$body_expr],
+                            )
+                        );
                     }
                 }
             }
-            return $postfix_node;
         }
+        return $postfix_node;
+    }
 
+    # §4 ExpressionStatement — transparent pass-through. A postfix-modified
+    # expression statement is SimpleStatement's (see _wire_postfix_body).
+    method ExpressionStatement($ctx) {
+        my @ir_nodes = grep { $_ isa Chalk::IR::Node } _collect_ir_values($ctx);
         return $ir_nodes[0] if @ir_nodes == 1;
         return \@ir_nodes if @ir_nodes > 1;
         return undef;
