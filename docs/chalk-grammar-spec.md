@@ -53,7 +53,8 @@ Features that are opaque to the grammar or out of scope:
 - Regex/string interpolation internals (treated as opaque terminals)
 - `format`, `tie`, `dbmopen`, `goto`
 - Alternate regex delimiters beyond `//` and `{}`
-- Special variables beyond `$_`
+- Special variables beyond `$_` and the punctuation variables `$@ $! $/ $\ $. $&`,
+  `$^X`-style and `${^NAME}` (no `$, $; $$`: they collide with grammar tokens)
 - Pod documentation
 
 ## 3. Design Decisions
@@ -478,21 +479,26 @@ Variable ::= ScalarVariable
     | ArrayVariable
     | HashVariable ;
 
-ScalarVariable ::= /\$[a-zA-Z_]\w*/
+ScalarVariable ::= /\$(?:[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*|(?:::[a-zA-Z_]\w*)+)/
     | /\$\d+/
     | /\$\$[a-zA-Z_]\w*/
-    | /\$#[a-zA-Z_]\w*/
-    | /\$#\$[a-zA-Z_]\w*/ ;
+    | /\$#[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*/
+    | /\$#\$[a-zA-Z_]\w*/
+    | /\$#/ _ /\{/ _ Expression _ /\}/
+    | /\$(?:[@!\/\\.&]|\^[A-Z]|\{\^[A-Z_]\w*\})/ ;
 
-ArrayVariable ::= /@[a-zA-Z_]\w*/
+ArrayVariable ::= /@(?:[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*|(?:::[a-zA-Z_]\w*)+)/
     | /@\$[a-zA-Z_]\w*/ ;
 
-HashVariable ::= /%[a-zA-Z_]\w*/
+HashVariable ::= /%(?:[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*|(?:::[a-zA-Z_]\w*)+)/
     | /%\$[a-zA-Z_]\w*/ ;
 ```
 
 Variables are single-token terminals: sigil + identifier name.
-Covers `$self`, `$_`, `@rules`, `%hash`, `@EXPORT_OK`.
+Covers `$self`, `$_`, `@rules`, `%hash`, `@EXPORT_OK`, package-qualified
+names (`@Pkg::x`, `$::x`) and the punctuation variables `$@ $! $/ $\ $. $&`,
+`$^W`, `${^NAME}`. A stash name (`%Pkg::`) stays out (no symbol-table
+manipulation); `docs/chalk-bootstrap.bnf` is authoritative.
 
 ### §19 Literals
 
@@ -681,8 +687,10 @@ Track the set of accepted files and ensure it never shrinks.
 3. **No format declarations**: The `format` keyword's special body syntax is
    not supported. Not used in Chalk code.
 
-4. **Limited special variables**: Only `$name`, `@name`, `%name` forms. No `$!`,
-   `$$`, `$?`, `@_`, `%ENV`, etc. (Can be extended with broader terminal patterns.)
+4. **Limited special variables**: `$name`, `@name`, `%name` (package-qualified
+   too), `$1`.., and the punctuation variables `$@ $! $/ $\ $. $&`, `$^W`,
+   `${^NAME}`. No `$, $; $$` (they collide with the signature placeholder, the
+   statement terminator and `$$ref`), no `@-`/`%+` and the like.
 
 5. **Ambiguity explosion**: The flat expression grammar with all operators at one
    level produces many ambiguous parses for complex expressions. The Earley parser
