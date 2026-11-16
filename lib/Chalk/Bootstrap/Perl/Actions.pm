@@ -1096,18 +1096,29 @@ class Chalk::Bootstrap::Perl::Actions {
         # Perl's implicit-return semantics: when no explicit Return/Unwind
         # was found and the body is non-empty, the last expression is the
         # implicit return value. Wrap it in a Return CFG node so the graph
-        # is always properly terminated. Use the last side-effect node as
-        # the Return's control predecessor (the chain tail).
+        # is always properly terminated. Its control predecessor is the
+        # chain tail before that value: the value's own control_in when the
+        # value is an effect on the chain (`print ...; exit 3`), else the
+        # last statement on the chain -- a VarDecl or any effect. Looking
+        # only for a VarDecl left `print STDERR ...; exit 255` without its
+        # print: the scheduler walks the chain and never reached it.
         if (!@returns && $fixed_body->@*) {
             my $last = $fixed_body->[-1];
             if (ref($last) && blessed($last) && $last->isa('Chalk::IR::Node')) {
                 my $return_ctrl = $graph->start() // $factory->make('Start');
-                for my $stmt (reverse $fixed_body->@*) {
-                    next unless ref($stmt) && blessed($stmt)
-                        && $stmt->isa('Chalk::IR::Node');
-                    if ($stmt isa Chalk::IR::Node::VarDecl) {
-                        $return_ctrl = $stmt;
-                        last;
+                my sub on_chain($n) {
+                    return $n->can('control_in') && defined $n->control_in;
+                }
+                if (on_chain($last)) {
+                    $return_ctrl = $last->control_in;
+                } else {
+                    for my $stmt (reverse $fixed_body->@[0 .. $fixed_body->$#* - 1]) {
+                        next unless ref($stmt) && blessed($stmt)
+                            && $stmt->isa('Chalk::IR::Node');
+                        if ($stmt isa Chalk::IR::Node::VarDecl || on_chain($stmt)) {
+                            $return_ctrl = $stmt;
+                            last;
+                        }
                     }
                 }
                 my $implicit_return = $factory->make_cfg('Return',

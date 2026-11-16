@@ -142,6 +142,20 @@ my @cases = (
           "    }\n",
           "}\n"),
       q{my @b = RT7::b(0); print join(',', RT7::u(0), RT7::u(1), RT7::i(11), RT7::i(1), scalar(@b), RT7::b(1)), "\n";} ],
+    [ 'effects before an implicit final value are kept',
+      join('', "class RT11 {\n",
+          "    sub r(\$why) {\n",
+          "        print \"out: \$why\\n\";\n",
+          "        warn \"warned\\n\";\n",
+          "        exit 3;\n",
+          "    }\n",
+          "    sub v(\$x) {\n",
+          "        my \$y = \$x + 1;\n",
+          "        print \"y=\$y\\n\";\n",
+          "        \$y * 2;\n",
+          "    }\n",
+          "}\n"),
+      q{print "before\n"; print RT11::v(1), "\n"; RT11::r('x');} ],
 );
 
 for my $case (@cases) {
