@@ -261,9 +261,11 @@ subtest 'L3 constructive proof: DefinedOr(Int,Int) builds and lowers to 3 via ll
 # test asserting a refusal that cannot happen is a false RED.
 #
 # So it reverts. `undef // 7` is 7, and the interesting part is that the result
-# is still typed `Scalar`: at runtime the maybe-ness is discharged, but the
-# STATIC type is the join of the two arms and the phi needs one machine type
-# for both, so the narrower arm is boxed.
+# is still typed as the join, not Int: at runtime the maybe-ness is discharged,
+# but the STATIC type is the join of the two arms and the phi needs one machine
+# type for both, so the narrower arm is boxed. Since 543d98fb that join is
+# Maybe[Int] (Int or undef, the least upper bound), below the Scalar it was;
+# it is held in the same %Slot.
 subtest 'L3b lowering proof: DefinedOr(Undef,Int) builds and lowers to 7' => sub {
     my ($l3b_case) = grep { $_->{title} =~ /L3b/ } @$cases;
     ok(defined $l3b_case, 'L3b case found');
@@ -278,10 +280,11 @@ subtest 'L3b lowering proof: DefinedOr(Undef,Int) builds and lowers to 7' => sub
     my $verdict = Chalk::CodeGen::Harness::MdtestCorpus->parse_l_verdict_from_ir($ir_text);
     is($verdict, 'GREEN', 'L3b ir block declares L: GREEN (promoted by a340d22a)');
 
-    # The join is still Scalar, and the ir block must still say so. THAT part
-    # of the D2 ruling did not change -- only whether Scalar can be lowered.
-    like($ir_text, qr/DefinedOr\([^)]*\) :Scalar/,
-        'L3b ir block still pins the merge at :Scalar -- Undef and Int are siblings under it');
+    # The ir block pins the join of the arms. 543d98fb made join(Int, Undef)
+    # Maybe[Int] -- the least upper bound, below Scalar -- and re-typed this
+    # case's ir block to say so.
+    like($ir_text, qr/DefinedOr\([^)]*\) :Maybe\[Int\]/,
+        'L3b ir block pins the merge at :Maybe[Int] -- the join of Undef and Int');
 
     if (defined $return_node) {
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
