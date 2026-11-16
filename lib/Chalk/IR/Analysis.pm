@@ -2547,6 +2547,7 @@ sub _replay_classes ($classes, $graphs) {
                 graph       => $graph,
                 params      => ($sd->{params} // []),
                 uses_args   => ($sd->{uses_args} ? true : false),
+                lvalue      => ($sd->{lvalue} ? true : false),
                 return_type => ($sd->{return_type} // 'Unknown'),
                 ($sd->{signature} ? (signature => $sd->{signature}) : ()),
             );

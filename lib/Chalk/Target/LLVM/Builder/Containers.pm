@@ -19,6 +19,9 @@ sub make_constant_arrays {
         next if $lit->stored_whole_into;   # a package array, read where it is read
         next if grep { !( blessed($_) && $_->operation eq 'Constant' ) } $lit->inputs->@*;
         next unless $b->agg_home_here($lit, 'top');
+        # (an arm's items of `\(c ? (...) : ())`: no array, each item referenced -- item_refs)
+        next if !defined $lit->symbol && grep { my $t = $_; blessed($t) && $t->operation eq 'TernaryExpr'
+            && grep { _refs_each_item($_) } ( $t->consumers // [] )->@* } ( $lit->consumers // [] )->@*;
         $b->value($lit);
     }
     # A `my %h = (...)` of constants, or of @_, is made at entry too.
@@ -153,6 +156,16 @@ sub agg_made_here {
     return $b->_made_in_scope($L, $in->[1], {});
 }
 
+# _refs_made_of_made($n) -> `\(c ? ($x, $y) : ())` whose choice and items are
+# made (or constants): references, which cannot die -- made early, the same.
+sub _refs_made_of_made {
+    my ($b, $n) = @_;
+    return 0 unless _refs_each_item($n);
+    my ( $c, @arms ) = $n->inputs->[0]->inputs->@*;
+    my @parts = ( $c, map { $_->operation eq 'ArrayLiteral' && !defined $_->symbol ? $_->inputs->@* : $_ } @arms );
+    return !grep { !( blessed($_) && ( $b->{memo}{ refaddr($_) } || $_->operation eq 'Constant' ) ) } @parts;
+}
+
 # agg_settle(): AS AN IF OR A LOOP IS ENTERED, each whole aggregate of this
 # function not pinned and not made yet that is of the pass the walk is in --
 # a merge places it there, or none does -- and all of whose parts are made
@@ -164,7 +177,7 @@ sub agg_settle {
     for my $L (grep { $_->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( $_->stamp // '' ) =~ /\A(?:Array|Hash)\z/   # static type
                       && !$_->is_pinned && defined $_->symbol } +($b->{own_nodes} // [])->@*) {
         next if $b->{memo}{ refaddr($L) } || $L->stored_whole_into || !$b->agg_home_here($L, $loop);
-        next if grep { !( blessed($_) && ( $b->{memo}{ refaddr($_) } || $_->operation eq 'Constant' ) ) } $L->inputs->@*;
+        next if grep { !( blessed($_) && ( $b->{memo}{ refaddr($_) } || $_->operation eq 'Constant' || $b->_refs_made_of_made($_) ) ) } $L->inputs->@*;
         local $b->{agg_settling} = 1;
         $b->value($L);
     }
@@ -731,13 +744,8 @@ sub array_value {
             $b->after_call if defined $v->line;
             return $r;
         }
-        # \$x: a reference to the variable itself, kept on the heap (tag 9).
-        # (NOT IN A LOOP BODY OR AN ARM: a `my` there is a new variable each time,
-        # and the one cell made at entry would be all of them -- `2,2` for perl's `1,2`)
-        out('a reference to a scalar in a loop body or an arm') if $b->{depth}
-            && blessed($t) && $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$';
-        return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->location($t) ])
-            if blessed($t) && $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$' && $t->is_location;
+        # \$x, \"lit", \($c ? $x : 0): a reference to a scalar (scalar_ref).
+        return $b->scalar_ref($v, $t) if _scalar_ref_of($t);
         # \%h: a named hash IS its reference here (a %Slot of tag 5), one hash, two names.
         return $b->value($t) if blessed($t) && ( $t->is_named_hash || $t->is_package_aggregate && $t->sigil eq '%' ) && ( $v->stamp // '' ) eq 'HashRef';   # static type
         out('a reference to a glob read other than by ref (its address and slots are the stash\'s)')
@@ -950,6 +958,83 @@ sub captured {
     return $b->emit_entry_end(op => 'Load', type => '%Slot', inputs => [$cell]);
 }
 
+# _scalar_ref_of($t) -> what `\T` is a reference to a scalar of, T2's to make
+# (scalar_ref): a `my` scalar kept in memory, a literal, or a choice of such.
+sub _scalar_ref_of {
+    my ($t) = @_;
+    return 0 unless blessed($t);
+    return 1 if $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$' && $t->is_location;
+    return 1 if $t->operation eq 'Constant' && ( $t->const_type // '' ) =~ /\A(?:integer|number|string|undef)\z/;
+    return $t->operation eq 'TernaryExpr' && !_is_list($t) && _scalar_ref_of( $t->inputs->[1] ) && _scalar_ref_of( $t->inputs->[2] ) ? 1 : 0;
+}
+
+# scalar_ref($Ref, $t) -> `\T` for a T _scalar_ref_of: a `my` scalar's own
+# cell, on the heap (tag 9); a literal's read-only cell, one per site (perl's
+# reference is to the constant itself: a store through it dies); a choice of
+# such, the reference the arm taken makes.
+sub scalar_ref {
+    my ($b, $v, $t) = @_;
+    my $op = $t->operation;
+    if ( $op eq 'PadAccess' ) {
+        # (A `my` MADE ANEW EACH PASS -- B::SoN's fresh_each_pass on the Ref,
+        # `my $x` in a loop's body, `\$x` taken -- is a cell of its own each
+        # pass: fresh_cell. Any other is the function's one variable, its one
+        # cell, wherever the reference is made: an arm, a body.)
+        out('a reference to a `my` made anew each pass that T2 keeps one of') if $v->fresh_each_pass && !$b->fresh_var($t);
+        return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->location($t) ]);
+    }
+    if ( $op eq 'Constant' ) {
+        my $k = $b->{ro_cells}{ refaddr($v) . ':' . refaddr($t) } //= $b->{ro_n}++;
+        out('more than 256 references to literals') if $k >= 256;
+        my $cell = $b->emit(op => 'ROCell', type => '%Slot*', attr => { index => $k });
+        $b->emit(op => 'Store', type => 'void', inputs => [ $b->as( $b->value($t), '%Slot' ), $cell ]);
+        return $b->emit(op => 'SRef', type => '%Slot', inputs => [$cell]);
+    }
+    # A CHOICE: each arm's reference made in its own block, the taken one's at the join.
+    my ( $cond, $then, $else ) = $t->inputs->@*;
+    my $c = $b->truth( $b->value($cond) );
+    my $from = $b->{cur};
+    my $tb = $b->new_block('then');
+    my $tv = do { local $b->{memo} = { $b->{memo}->%* }; local $b->{depth} = ( $b->{depth} // 0 ); $b->scalar_ref( $v, $then ) };
+    my $tend = $b->{cur};
+    my $eb = $b->new_block('else');
+    my $ev = do { local $b->{memo} = { $b->{memo}->%* }; $b->scalar_ref( $v, $else ) };
+    my $eend = $b->{cur};
+    my $jb = $b->new_block('join');
+    $from->{term} = [ 'condbr', $c, $tb, $eb ];
+    $tend->{term} = [ 'br', $jb ];
+    $eend->{term} = [ 'br', $jb ];
+    return $b->emit(op => 'Phi', type => '%Slot', inputs => [ $tv, $ev ], attr => { from => [ $tend, $eend ] });
+}
+
+# item_refs($Ref) -> the list `\(c ? ($x, $y) : ())` is (_refs_each_item): the
+# arm taken's items, a reference to each (scalar_ref), made in its own block.
+sub item_refs {
+    my ($b, $v) = @_;
+    return $b->{memo}{ 'refs:' . refaddr($v) } if $b->{memo}{ 'refs:' . refaddr($v) };
+    my ( $cond, $then, $else ) = $v->inputs->[0]->inputs->@*;
+    my $c = $b->truth( $b->value($cond) );
+    my $from = $b->{cur};
+    my $arm = sub ($x) {
+        local $b->{memo} = { $b->{memo}->%* };
+        my $a = $b->emit(op => 'NewArray', type => '%Array*');
+        my @items = $x->operation eq 'ArrayLiteral' && !defined $x->symbol ? $x->inputs->@* : ($x);
+        $b->emit(op => 'APush', type => 'void', inputs => [ $a, $b->scalar_ref( $v, $_ ) ]) for grep { blessed($_) } @items;
+        return $a;
+    };
+    my $tb = $b->new_block('then');
+    my $tv = $arm->($then);
+    my $tend = $b->{cur};
+    my $eb = $b->new_block('else');
+    my $ev = $arm->($else);
+    my $eend = $b->{cur};
+    my $jb = $b->new_block('join');
+    $from->{term} = [ 'condbr', $c, $tb, $eb ];
+    $tend->{term} = [ 'br', $jb ];
+    $eend->{term} = [ 'br', $jb ];
+    return $b->{memo}{ 'refs:' . refaddr($v) } = $b->emit(op => 'Phi', type => '%Array*', inputs => [ $tv, $ev ], attr => { from => [ $tend, $eend ] });
+}
+
 # array_var($pad): a `my @a` named, not made here (is_my_array): one %Array
 # per variable, made at its function's entry -- fresh each call. A closure's
 # (shared) is not T2's.
@@ -991,6 +1076,7 @@ sub array_of {
         $b->list_only($n, 'a reference to each element');
         return $b->{memo}{ 'each:' . refaddr($n) } //= $b->emit(op => 'AElemRefs', type => '%Array*', inputs => [ do { local $b->{writing} = 1; $b->array_of( $n->inputs->[0] ) } ]);
     }
+    return $b->item_refs($n) if _refs_each_item($n);
     return $b->array_of($n->inputs->[0]) if blessed($n) && $n->operation eq 'Ref';
     if (blessed($n) && ( $n->operation =~ /\A(?:ArrayLiteral|ArgsSource|Slice|Range)\z/ || $n->is_array_deref || $n->is_my_array || $n->is_argv
                          || $n->is_package_aggregate && $n->sigil eq '@'

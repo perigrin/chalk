@@ -30,10 +30,11 @@ sub hash_reads_settled {
     local $b->{settling} = 1;
     for my $ver ($b->{passed}->@*) {
         my @waiting = grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) } } +($b->{readers}{ refaddr($ver) } // [])->@*;
-        # (one an arm of @_'s aliases made, before this: settled -- read
-        # again after, refused where it is: value)
-        $b->{arm_settled}{$_} = 1 for grep { $b->{arm_made}{$_} } map { refaddr($_) } @waiting;
-        @waiting = grep { !$b->{arm_made}{ refaddr($_) } } @waiting;
+        # (ONE MADE ALREADY IN A SCOPE NOW CLOSED -- a loop's body, an arm, an
+        # arm of @_'s aliases -- was read there, before this: settled. Read
+        # again after, refused where it is: value.)
+        $b->{arm_settled}{$_} = 1 for grep { $b->{made}{$_} } map { refaddr($_) } @waiting;
+        @waiting = grep { !$b->{made}{ refaddr($_) } } @waiting;
         next unless @waiting;
         # MADE HERE WHERE NOTHING RAN BETWEEN: the read's version is the
         # statement just before this one, in this block, and the read is under
@@ -177,6 +178,7 @@ sub location {
         # (its own cell would be another variable: 3 wrong answers).
         && ( !$pad->shared || ( grep { $_->operation eq 'MakeCell' && ( $_->cell_name // '' ) eq $pad->name } +($b->{own_nodes} // [])->@* ) || $b->_own_shared($pad) );
     my $key = $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
+    return $b->fresh_cell($pad, $key) if $b->fresh_var($pad);
     return $b->{locs}{$key} //= do {
         # A VARIABLE A CLOSURE CAPTURES (shared) lives on the heap -- made at
         # its function's entry, fresh each call -- so a closure outliving the
@@ -190,6 +192,42 @@ sub location {
         unshift $b->{blocks}[0]{nodes}->@*, $p;
         $p;
     };
+}
+
+# fresh_var($pad) -> a `my` scalar of this function a reference is taken to
+# that B::SoN says is made anew each pass (Ref's fresh_each_pass: `for (...)
+# { my $x = $_; push @l, \$x }`), not a closure's: each pass's is a cell
+# of its own (fresh_cell).
+sub fresh_var {
+    my ($b, $pad) = @_;
+    return 0 unless blessed($pad) && $pad->operation eq 'PadAccess' && ( $pad->sigil // '' ) eq '$' && !$pad->shared;
+    return $b->{fresh_vars}{ $pad->name } //= scalar grep {
+        $_->operation eq 'Ref' && $_->fresh_each_pass && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'PadAccess'
+            && ( $_->inputs->[0]->name // '' ) eq $pad->name
+    } +($b->{own_nodes} // [])->@*;
+}
+
+# fresh_cell($pad, $key) -> the cell of a fresh_var this pass: made where the
+# pass first reaches it (its `my`), on the heap -- a reference to it
+# outlives the pass -- and held in a slot of the function (a %Slot holding a
+# reference to it, made at its entry) for the rest of the pass. First reached
+# other than in the body of a loop T2 walks (an arm in it), refused.
+sub fresh_cell {
+    my ($b, $pad, $key) = @_;
+    my $holder = $b->{locs}{"fresh:$key"} //= do {
+        my $p = Chalk::Target::LLVM::Node::_n(op => 'Alloca', type => '%Slot*', attr => { name => $pad->name . ' (each pass)' });
+        unshift $b->{blocks}[0]{nodes}->@*, $p;
+        $p;
+    };
+    my $pass = $b->{fresh_pass};
+    out('a variable made anew each pass first reached outside a loop\'s body') unless $pass;
+    unless ( $pass->{made}{$key} ) {
+        out('a variable made anew each pass first reached in an arm or an inner loop') unless ( $b->{depth} // 0 ) == $pass->{depth};
+        my $cell = $b->emit(op => 'NewCell', type => '%Slot*', attr => { name => $pad->name });
+        $b->emit(op => 'Store', type => 'void', inputs => [ $b->emit(op => 'SRef', type => '%Slot', inputs => [$cell]), $holder ]);
+        $pass->{made}{$key} = 1;
+    }
+    return $b->emit(op => 'SCell', type => '%Slot*', inputs => [ $b->emit(op => 'Load', type => '%Slot', inputs => [$holder]) ]);
 }
 
 # reads_before($version): a store replaces a memory version, so every read
@@ -214,8 +252,31 @@ sub reads_before {
     # (A READ AN EVAL'S BODY MADE was made there, before any store after it:
     # its value is dropped only because a die skips it -- not made again here,
     # it is not read here; a use past the eval is refused where it is: value.)
-    $b->value($_) for grep { !$_->is_pinned && !$b->{past_eval}{ refaddr($_) } && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_) }
+    # (A READ RESTING ON A READ THROUGH A REFERENCE SETTLED IN A SCOPE NOW
+    # CLOSED -- `my @l = $c ? $r->@* : ()` in a loop's body, its count at the
+    # body's memory -- was made there, of the state there: settled too, not
+    # made again here; read again after, refused where it is: value.)
+    for my $r (+($b->{readers}{ refaddr($version) } // [])->@*) {
+        next if $b->{memo}{ refaddr($r) } || !$b->_rests_on_settled($r, {});
+        $b->{arm_settled}{ refaddr($r) } = 1;
+    }
+    $b->value($_) for grep { !$_->is_pinned && !$b->{past_eval}{ refaddr($_) } && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_)
+                             && !$b->{arm_settled}{ refaddr($_) }
+                             # (a variable made anew each pass, read before its `my`: none -- B::SoN's store target)
+                             && !( $_->operation eq 'PadAccess' && $b->fresh_var($_) ) }
         +($b->{readers}{ refaddr($version) } // [])->@*;
+}
+
+# _rests_on_settled($n) -> $n, or a value it is made of (not a memory
+# version), is a read through a reference settled where it was made
+# (hash_reads_settled) and not made in this scope.
+sub _rests_on_settled {
+    my ($b, $n, $seen) = @_;
+    return 0 unless blessed($n) && $n->can('operation') && !$seen->{ refaddr($n) }++;
+    return 0 if $b->{memo}{ refaddr($n) } || $n->is_memory_version;
+    return 1 if $b->{arm_settled} && $b->{arm_settled}{ refaddr($n) };
+    my $m = $n->memory_operand;
+    return scalar grep { !( blessed($m) && blessed($_) && refaddr($_) == refaddr($m) ) && $b->_rests_on_settled($_, $seen) } $n->inputs->@*;
 }
 
 sub _needs_unmade_phi {
@@ -308,11 +369,34 @@ sub assign {
         $b->emit(op => 'Store', type => 'void', inputs => [ $b->emit(op => 'Undef', type => '%Slot'), $zc ]);
         return;
     }
+    return $b->lvalue_sub_store($target, $v) if blessed($target) && $target->operation eq 'Call' && ( $target->dispatch_kind // '' ) eq 'direct';
     my $ptr = $b->location($target);
     $b->reads_before($target->inputs->[0]);
     my $val = $b->as($b->value($v), '%Slot');
     $b->emit(op => 'Store', type => 'void', inputs => [ $val, $ptr ]);
     $b->pos_reset($target);
+}
+
+# lvalue_sub_store($Call, $value): `f() = v` -- perl compiles it only where f
+# is an :lvalue sub, whose value is the container it ends at. The value made,
+# the sub called, and v stored there: a variable of the file (its global) or
+# a package scalar, the same whoever reaches it. Another container -- one of
+# the sub's own, an element, a choice -- is refused.
+sub lvalue_sub_store {
+    my ($b, $c, $v) = @_;
+    my $t = $c->target;
+    my $ret = blessed($t) && $t->can('graph') && $t->graph ? $t->graph->returns->[0] : undef;
+    my $lv = blessed($ret) && $ret->operation eq 'Return' && $ret->inputs->@* == 1 ? $ret->inputs->[0] : undef;
+    my $file = blessed($lv) && $lv->operation eq 'PadAccess' && ( $lv->sigil // '' ) eq '$' && $lv->can('file') && $lv->file;
+    out('an assignment to an lvalue sub whose value is not a scalar of the file or a package')
+        unless $file || blessed($lv) && $lv->is_package_scalar && !( $b->is_topic($lv) && $b->topic_alias );
+    my $val = $b->as($b->value($v), '%Slot');
+    $b->value($c);
+    $b->hash_reads_settled('a store through an lvalue sub');
+    $b->reads_before($_) for $b->{passed}->@*;
+    my $ptr = $file ? $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_named( 'my::' . $lv->symbol ) })
+                    : $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_of($lv) });
+    $b->emit(op => 'Store', type => 'void', inputs => [ $val, $ptr ]);
 }
 
 # local_elem($Subscript): `local $r->{k} = ...` -- what the element held and

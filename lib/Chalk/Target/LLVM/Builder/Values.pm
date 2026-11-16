@@ -66,8 +66,7 @@ sub phi_type {
     my $st = $phi->stamp // ''; # static type
     # THE LIST A SUB RETURNS, merged from its returns (`return` in one arm, a
     # last value in the other): an array, each arm's value a list of it.
-    return '%Array*' if grep { blessed($_) && $_->operation eq 'Return' && $_->inputs->@* == 2 && refaddr( $_->inputs->[0] ) == refaddr($phi) }
-        ( $phi->consumers // [] )->@*;
+    return '%Array*' if _way_into_returned_list($phi, {});
     # AN EVAL'S VALUE IN LIST CONTEXT, typed a list: the body's list, or the
     # empty one where a die was caught (close_eval). (B::SoN merges nothing
     # else at an eval's join but its memory: a variable the body rebinds it
@@ -109,6 +108,19 @@ sub phi_type {
         out("a phi stamped $st");
     }
     return $SCALAR{$st} // out("a phi stamped $st");
+}
+
+# _way_into_returned_list($Phi) -> the list a sub returns (B::SoN's
+# Return(list, scalar)), or a merge, stamped a list, each of whose uses is a
+# way into one: the bare returns of nested arms merged arm by arm (`return
+# unless ...; if (...) { return }`), each way's value a list of it.
+sub _way_into_returned_list {
+    my ($phi, $seen) = @_;
+    return 0 if $seen->{ refaddr($phi) }++;
+    my @uses = grep { blessed($_) } ( $phi->consumers // [] )->@*;
+    return 1 if grep { $_->operation eq 'Return' && $_->inputs->@* == 2 && refaddr( $_->inputs->[0] ) == refaddr($phi) } @uses;
+    return 0 unless ( $phi->stamp // '' ) =~ /\A(?:List|Array)\z/ && !$phi->is_memory && @uses;   # static type
+    return !grep { !( $_->operation eq 'Phi' && !$_->is_memory && _way_into_returned_list($_, $seen) ) } @uses;
 }
 
 # _eval_want_of($Phi) -> the context of the eval whose value $Phi is (B::SoN's
@@ -363,7 +375,9 @@ sub value {
         if delete $b->{past_eval}{ refaddr($v) } and !$v->all_made_the_same;
     out('a read through a reference an arm made, read again past a call or a store')
         if $b->{arm_settled} && $b->{arm_settled}{ refaddr($v) } && !$b->{memo}{ refaddr($v) };
-    return $b->{memo}{ refaddr($v) } //= $b->_value($v);
+    my $t = $b->{memo}{ refaddr($v) } //= $b->_value($v);
+    $b->{made}{ refaddr($v) } = 1;   # (made, in some scope: hash_reads_settled)
+    return $t;
 }
 
 sub _value {
@@ -548,6 +562,7 @@ sub _value {
     }
     if ($v->is_package_scalar) {
         out('a package scalar read of no one version') if $b->{unversioned}{ refaddr($v) };
+        return $b->emit(op => 'AliasVal', type => '%Slot', inputs => [ $b->topic_raw ]) if $b->is_topic($v) && $b->topic_alias;
         return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_of($v) });
     }
     if ($op eq 'Call' && $v->changes_case) {

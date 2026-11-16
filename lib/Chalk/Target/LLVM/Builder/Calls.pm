@@ -135,8 +135,10 @@ sub plain_anon {
     return 0 unless ( $c->name // '' ) =~ /__(?:ANON|EVAL)__/;
     my $t = $c->can('target') ? $c->target : undef;
     return 0 unless blessed($t) && $t->can('graph') && $t->graph;
+    # (A FILE LEXICAL it reads -- `my @a; my sub t { scalar @a }` -- is no
+    # capture: one variable for the program, reached as a named sub reaches it)
     return 0 if grep { $_->operation eq 'CellParam'
-        || $_->operation eq 'PadAccess' && ( $_->shared || !defined $_->inputs->[0] ) } $t->graph->component;
+        || $_->operation eq 'PadAccess' && !( $_->can('file') && $_->file ) && ( $_->shared || !defined $_->inputs->[0] ) } $t->graph->component;
     return 0 if grep { $_->operation eq 'AnonSub' && ( $_->name // '' ) eq $c->name } +($b->{own_nodes} // [])->@*;
     out('a closure called directly and as a code value') if ( $b->{funcs}{ refaddr($t) } // {} )->{closure};
     return 1;
@@ -608,21 +610,47 @@ sub refs_into_args {
         map { $_->graph ? $_->graph->component : () } map { $_->methods } $b->{mop} ? $b->{mop}->classes : () );
 }
 
-# call_refs_args($Call) -> what it calls may take a reference into its @_: a
-# direct call's sub does, or hands its @_ on where any sub does; another
-# call's, where any sub does (as call_writes_args).
-sub call_refs_args {
+# call_targets($Call) -> the subs the call may run: a direct call's sub; a
+# method call's, every sub or method of the program of its name (whichever
+# class the invocant is) -- or () where T2 cannot tell: a method named at run
+# time, an AUTOLOAD, one of its name with no body here, a code value.
+sub call_targets {
     my ($b, $c) = @_;
-    return $b->refs_into_args unless ( $c->dispatch_kind // '' ) eq 'direct';
-    my $t = $c->can('target') ? $c->target : undef;
-    return $b->refs_into_args unless blessed($t) && $t->can('graph') && $t->graph;
-    my @gn = $t->graph->component;
-    return 1 if _refs_args_in(@gn);
-    my $hands_on = grep {
+    my $k = $c->dispatch_kind // '';
+    if ( $k eq 'direct' ) {
+        my $t = $c->can('target') ? $c->target : undef;
+        return blessed($t) && $t->can('graph') && $t->graph ? ($t) : ();
+    }
+    return () unless $k eq 'method' && $b->{mop};
+    my $m = ( $c->name // '' ) =~ s/\A.*:://r;
+    my @all = map { ( $_->subs, $_->methods ) } $b->{mop}->classes;
+    return () if grep { ( $_->name // '' ) =~ /(?:\A|::)AUTOLOAD\z/ } @all;
+    my @t = grep { ( ( $_->name // '' ) =~ s/\A.*:://r ) eq $m } @all;
+    return () if !@t || grep { !( $_->can('graph') && $_->graph ) } @t;
+    return @t;
+}
+
+# _hands_args_on(@nodes) -> a call among them hands its @_ on (`&g`, `g(@_)`, `g($_[0])`).
+sub _hands_args_on {
+    return scalar grep {
         $_->operation eq 'Call' && ( $_->is_sub_call || ( $_->dispatch_kind // '' ) eq 'dynamic_method' )
             && ( $_->can('shares_args') && $_->shares_args || grep { _of_args($_) } $_->inputs->@* )
-    } @gn;
-    return $hands_on ? $b->refs_into_args : 0;
+    } @_;
+}
+
+# call_refs_args($Call) -> what it calls may take a reference into its @_:
+# a sub it may run does (call_targets), or hands its @_ on where any sub
+# does; a call whose subs T2 cannot tell, where any sub does (as
+# call_writes_args).
+sub call_refs_args {
+    my ($b, $c) = @_;
+    my @t = $b->call_targets($c) or return $b->refs_into_args;
+    for my $t (@t) {
+        my @gn = $t->graph->component;
+        return 1 if _refs_args_in(@gn);
+        return $b->refs_into_args if _hands_args_on(@gn);
+    }
+    return 0;
 }
 
 # may_write_args -> the call whose @_ is being built may write it (or the
@@ -632,21 +660,18 @@ sub may_write_args {
     return $b->{alias_strict} || ( $b->{alias_writes} // $b->writes_args );
 }
 
-# call_writes_args($Call) -> what it calls may write its @_: a direct call's
-# sub writes it, or hands it on (`&g`, `g(@_)`, `g($_[0])`) where any sub
-# writes; another call's, where any sub writes.
+# call_writes_args($Call) -> what it calls may write its @_: a sub it may
+# run writes it (call_targets), or hands it on (`&g`, `g(@_)`, `g($_[0])`)
+# where any sub writes; a call whose subs T2 cannot tell, where any sub writes.
 sub call_writes_args {
     my ($b, $c) = @_;
-    return $b->writes_args unless ( $c->dispatch_kind // '' ) eq 'direct';
-    my $t = $c->can('target') ? $c->target : undef;
-    return $b->writes_args unless blessed($t) && $t->can('graph') && $t->graph;
-    my @gn = $t->graph->component;
-    return 1 if _writes_args_in(@gn);
-    my $hands_on = grep {
-        $_->operation eq 'Call' && ( $_->is_sub_call || ( $_->dispatch_kind // '' ) eq 'dynamic_method' )
-            && ( $_->can('shares_args') && $_->shares_args || grep { _of_args($_) } $_->inputs->@* )
-    } @gn;
-    return $hands_on ? $b->writes_args : 0;
+    my @t = $b->call_targets($c) or return $b->writes_args;
+    for my $t (@t) {
+        my @gn = $t->graph->component;
+        return 1 if _writes_args_in(@gn);
+        return $b->writes_args if _hands_args_on(@gn);
+    }
+    return 0;
 }
 
 # arg_alias($n) -> what @_ holds for a scalar argument: an alias of the
@@ -674,6 +699,7 @@ sub arg_alias {
     }
     if ($n->is_package_scalar) {
         out('a package scalar of no one version passed as an argument') if $b->{unversioned}{ refaddr($n) };
+        return $b->topic_raw if $b->is_topic($n) && $b->topic_alias;   # (what $_ is now: its alias)
         return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_of($n) }) ]);
     }
     # (a foreach alias read, B::SoN's ${ \ $a[i] }: the element)
@@ -792,7 +818,7 @@ sub alias_list {
         my $eb = $b->new_block('else');
         my $ev = $in_arm->($else);
         my $eend = $b->{cur};
-        $b->{arm_made}{$_} = 1 for keys %made;
+        $b->{made}{$_} = 1 for keys %made;
         my $jb = $b->new_block('join');
         $from->{term} = [ 'condbr', $c, $tb, $eb ];
         $tend->{term} = [ 'br', $jb ];
@@ -816,6 +842,12 @@ sub alias_list {
         out("a slice of kind $kind") unless $kind eq 'array';
         my $arr = do { local $b->{ $b->may_write_args ? 'writing' : 'elem_read' } = 1; $b->array_of($src) };
         return $b->emit(op => 'ASliceAlias', type => '%Array*', inputs => [ $arr, $list ]);
+    }
+    # (A LIST A SUB RETURNS is of copies, temporaries none else holds -- not an
+    # :lvalue sub's, whose list is its variables: its array, aliased, is them)
+    if ( $op eq 'Call' && $n->is_sub_call && $b->may_write_args ) {
+        my @t = $b->call_targets($n);
+        return $b->array_of($n) if @t && !grep { $_->can('lvalue') && $_->lvalue } @t;
     }
     out('a list perl may alias (' . $op . ') passed where a sub writes @_') if $b->may_write_args;
     return $b->array_of($n);
@@ -1189,7 +1221,10 @@ sub func {
     local $b->{cur};
     local $b->{seq} = 0;   # (its own statements' turns: its entry is turn 0)
     local $b->{locs} = {};
+    local $b->{fresh_vars} = {};
+    local $b->{fresh_pass};
     local $b->{memo} = {};
+    local $b->{made} = {};
     local $b->{args} = $is_method ? { map { ( $_ => $argn[ $margs{$_} ] ) } grep { $_ ne 'np' && $_ ne 'slurpy' } keys %margs }
                                   : { ( map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads ), ( map { ( refaddr( $_->[0] ) => $argn[ $_->[1] ] ) } @also ) };
     local $b->{self} = $is_method ? $argn[0] : undef;   # a field's object

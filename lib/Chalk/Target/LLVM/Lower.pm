@@ -55,15 +55,17 @@ sub lower_program {
         } Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
         # A SCALAR DEREF where a reference T2 does not make may reach it (to an
         # element, `\(@a)`, `\$_[0]`): refused, not stopped at run time. T2
-        # makes one to a `my` scalar kept in memory, an array's, a hash's, an
-        # array's or a hash's element (or refuses it by name where it makes it).
+        # makes one to a `my` scalar kept in memory, a literal (read-only), a
+        # choice of such, an array's, a hash's, an array's or a hash's element
+        # (or refuses it by name where it makes it).
         Chalk::Target::LLVM::Builder::out('a scalar deref where a reference T2 does not make may reach it')
             if ( grep { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' && !$_->alias_element } Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret) )
             && grep { $_->operation eq 'Ref' && !( ( $_->stamp // '' ) =~ /\A(?:ArrayRef|HashRef)\z/
                           || $_->is_alias_ref || $_->is_element_ref || $_->is_hash_element_ref
                           # (\&name: a code value, tag 8 -- a scalar deref of it dies as perl's)
                           || blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'Constant' && ( $_->inputs->[0]->const_type // '' ) eq 'code'
-                          || blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'PadAccess' && ( $_->inputs->[0]->sigil // '' ) eq '$' && $_->inputs->[0]->is_location ) }
+                          # (a `my` scalar kept in memory, a literal, a choice of such: scalar_ref)
+                          || Chalk::Target::LLVM::Builder::_scalar_ref_of( $_->inputs->[0] ) ) }
                      Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
         $b->build($ret); 1 };
     unless ($ok) { $PATH = { path => 'fallback', why => ( $@ =~ s/\n.*//sr ) }; return undef }

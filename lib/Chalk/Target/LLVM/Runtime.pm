@@ -1818,7 +1818,16 @@ viv:
 go:
   %c = call %Slot* @t2_sderef_cell(%Slot %r, i1 %strict, i8* %at, i64 %n, i8* %pk, i64 %pkn)
   %z = icmp eq %Slot* %c, null
-  br i1 %z, label %done, label %st
+  br i1 %z, label %done, label %chk
+chk:
+  %ro = call i1 @t2_is_ro(%Slot* %c)
+  br i1 %ro, label %rodie, label %st
+rodie:
+  %m0 = call %Str @t2_str(i8* getelementptr ([44 x i8], [44 x i8]* @lit_ro, i64 0, i64 0), i64 43)
+  %as = call %Str @t2_str(i8* %at, i64 %n)
+  %m = call %Str @t2_concat(%Str %m0, %Str %as)
+  call void @t2_die_unwind(%Str %m)
+  br label %done
 st:
   store %Slot %v, %Slot* %c
   br label %done
@@ -2114,6 +2123,18 @@ one:
 }
 ; CLOSURES: a captured variable's storage on the heap; a code value (tag 8)
 ; points at {its function, its cells}.
+; A LITERAL'S CELL, READ-ONLY (`\0`, `\"x"`: perl's reference is to the
+; constant itself, one per site): one of a pool, a store through which dies.
+@t2_ro_pool = internal global [256 x %Slot] zeroinitializer
+define internal i1 @t2_is_ro(%Slot* %c) {
+  %p = ptrtoint %Slot* %c to i64
+  %lo = ptrtoint [256 x %Slot]* @t2_ro_pool to i64
+  %hi = ptrtoint %Slot* getelementptr ([256 x %Slot], [256 x %Slot]* @t2_ro_pool, i64 1, i64 0) to i64
+  %a = icmp uge i64 %p, %lo
+  %b = icmp ult i64 %p, %hi
+  %r = and i1 %a, %b
+  ret i1 %r
+}
 define internal %Slot* @t2_cell_new() {
   %m = call i8* @malloc(i64 16)
   %c = bitcast i8* %m to %Slot*
@@ -3303,6 +3324,9 @@ entry:
                             i8 0, label %undef ]
 cell:
   %c = inttoptr i64 %p to %Slot*
+  %isro = call i1 @t2_is_ro(%Slot* %c)
+  br i1 %isro, label %ro, label %cellst
+cellst:
   store %Slot %v, %Slot* %c
   ret i1 1
 elv:

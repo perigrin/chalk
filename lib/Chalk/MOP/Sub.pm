@@ -19,6 +19,9 @@ class Chalk::MOP::Sub {
     # Consumed by the calling convention -- params by default, `@_` materialised
     # only when the body actually touches it.
     field $uses_args   :param :reader = false;
+    # An :lvalue sub (the wire's `lvalue`): its value is the container it ends
+    # at, not a copy -- a foreach over its call, an @_ of it, alias that.
+    field $lvalue      :param :reader = false;
     # The wire's signature record, as declared: {kind, mandatory, optional,
     # params}. `mandatory` counts every positional parameter, named or not --
     # `params` above lists the named ones only.

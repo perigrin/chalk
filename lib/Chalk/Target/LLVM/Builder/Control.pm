@@ -253,7 +253,30 @@ sub walk {
                 # (B::SoN's reference to the element, guarded or not: the element)
                 $src = $src->inputs->[1] if blessed($src) && $src->operation eq 'TernaryExpr' && blessed( $src->inputs->[1] ) && $src->inputs->[1]->operation eq 'Ref';
                 $src = $src->inputs->[0] if blessed($src) && $src->operation eq 'Ref';
-                $b->emit(op => 'GStore', type => 'void', inputs => [ $b->as( $b->value($src), '%Slot' ) ], attr => { global => $b->global_named('main::_') });
+                if ($b->topic_alias) {
+                    # (ALIASED: what $_ is now, as @_ holds an argument -- an
+                    # element alias, a variable's cell, a literal read-only,
+                    # a temporary's fresh cell; one perl aliases and T2
+                    # cannot reach is refused there)
+                    # B::SoN SEES NO WRITE THROUGH $_ to what it aliases: an
+                    # item of a list written out it may have folded (`for
+                    # ($x)`: $x read as its constant after), and a read of
+                    # $_ it folds to the element, at a version before a sub
+                    # that writes $_ ran. Refused, both.
+                    my $c = blessed($src) && $src->operation eq 'Subscript' ? $src->inputs->[0] : undef;
+                    out('a $_ aliased to an item of a list written out, where the program writes $_ (B::SoN may have folded the item)')
+                        if blessed($c) && $c->operation eq 'ArrayLiteral' && !defined $c->symbol;
+                    out('a read of $_ B::SoN folds to the element it aliases, where the program writes $_ (B::SoN sees no write through $_)')
+                        if blessed($c) && grep {
+                            my $o = $_;
+                            blessed($o) && refaddr($o) != refaddr($src) && $o->operation eq 'Subscript' && ( $o->kind // 'array' ) eq ( $src->kind // 'array' )
+                                && blessed( $o->inputs->[1] ) && blessed( $src->inputs->[1] ) && refaddr( $o->inputs->[1] ) == refaddr( $src->inputs->[1] )
+                                && grep { blessed($_) && $_->operation ne 'Ref' } ( $o->consumers // [] )->@*
+                        } ( $c->consumers // [] )->@*;
+                    my $raw = do { local $b->{alias_strict} = 1; local $b->{alias_refs} = 0; $b->arg_alias($src) };
+                    $b->emit(op => 'GStore', type => 'void', inputs => [$raw], attr => { global => $b->global_named('my::0topic') });
+                }
+                else { $b->emit(op => 'GStore', type => 'void', inputs => [ $b->as( $b->value($src), '%Slot' ) ], attr => { global => $b->global_named('main::_') }) }
             }
             $ctl = $s;
         }
@@ -298,7 +321,14 @@ sub walk {
             out('a local') if $s->can('local') && $s->local;
             my $val = $b->as($b->value($s->inputs->[1]), '%Slot');
             $b->hash_reads_settled('a package store');
-            $b->emit(op => 'GStore', type => 'void', inputs => [$val], attr => { global => $b->global_of($s->inputs->[0]) });
+            if ( $b->is_topic( $s->inputs->[0] ) && $b->topic_alias ) {
+                # (through $_'s alias: the element it is, perl's die on a literal)
+                my $at = $b->deref_at( $s->inputs->[0] );
+                my $line = $s->can('line') && defined $s->line ? $s : undef;
+                $at = $b->deref_at($line) if $line;
+                $b->emit(op => 'AliasStore', type => 'void', inputs => [ $b->topic_raw, $val ], attr => { msg => $at->{msg}, id => $at->{id} });
+            }
+            else { $b->emit(op => 'GStore', type => 'void', inputs => [$val], attr => { global => $b->global_of($s->inputs->[0]) }) }
             push $b->{passed}->@*, $s;
             $ctl = $s;
         }
@@ -657,6 +687,24 @@ sub if_stmt {
         }
         push @made, [ $tgt{$k}, '%Slot', \@in, $tgt{$k}->symbol ];
     }
+    # A STATEMENT AN ARM RAN READ AS A VALUE AFTER THE JOIN by the && or ||
+    # of the if's own condition (`push @p, $v if $c` a sub's last statement:
+    # `$c && push ...`): that && reads it only where the arm ran, so its value
+    # is the arm's, carried to the join (the other way's is never read).
+    my $c1 = $if->inputs->[1];
+    if ( @live == 2 && blessed($c1) ) {
+        my %seen_s;
+        for my $u ( grep { blessed($_) && $_->operation =~ /\A(?:And|Or)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($c1) } ( $c1->consumers // [] )->@* ) {
+            my $arm = $u->operation eq 'And' ? 0 : 1;
+            my $st = $u->inputs->[1];
+            next unless blessed($st) && $st->is_pinned && !$seen_s{ refaddr($st) }++ && !$outer_memo->{ refaddr($st) };
+            my $v = $vals{$arm}{memo}{ refaddr($st) } or next;
+            my $ty = $v->type;
+            next if $ty eq '%Array*' || _is_list($st);   # (a list: the choice of lists makes its own, list_choice)
+            my $none = do { local $b->{cur} = $vals{ 1 - $arm }{block}; my $u0 = $b->emit(op => 'Undef', type => '%Slot'); my $x = $b->as($u0, $ty); $vals{ 1 - $arm }{block} = $b->{cur}; $x };
+            push @made, [ $st, $ty, [ [ $v, $arm ], [ $none, 1 - $arm ] ] ];
+        }
+    }
     my $join = $b->new_block('join');
     $_->{block}{term} = [ 'br', $join ] for grep { !$_->{block}{dead} } values %vals;
     for my $m (@made) {
@@ -860,6 +908,7 @@ sub loop {
         local $b->{memo} = { $b->{memo}->%* };
         local $b->{stood} = { ( $b->{stood} // {} )->%* };   # (as its memo: see _stood_already)
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
+        local $b->{fresh_pass} = { depth => $b->{depth}, made => {} };   # (a pass's own variables: fresh_cell)
         local $b->{lscope} = scope_key($bodyp);
         local $b->{scope_in} = [ 'loop', $pre_memo ];
         local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $cond[0], 0 );   # (a body runs where its condition held)
@@ -879,7 +928,7 @@ sub loop {
             { block => $exit, memo => $b->{memo}, end => $exitp }, @out ) };
     }
     # (what $_ held put back where every way out has met)
-    $b->emit(op => 'GStore', type => 'void', inputs => [$save], attr => { global => $b->global_named('main::_') }) if $save;
+    $b->emit(op => 'GStore', type => 'void', inputs => [$save], attr => { global => $b->global_named( $b->topic_alias ? 'my::0topic' : 'main::_' ) }) if $save;
     # THE EXIT'S MEMORY is a version too: a read at it, before a store after.
     push $b->{passed}->@*, $region->memory_phis if $region;
     return $region // $exitp;
@@ -900,21 +949,45 @@ sub _only_counted {
 }
 
 # reads_topic -> the program reads the global $_ (a sub reading it, called
-# in a foreach's body). Refused where anything writes it: perl's $_ is the
-# element itself, and a write through it changes the list.
+# in a foreach's body). Where anything writes it too, $_ is aliased
+# (topic_alias): perl's $_ is the element itself, and a write through it
+# changes the list.
 sub reads_topic {
     my ($b) = @_;
     return $b->{reads_topic} //= do {
         my @all = _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
         my @top = grep { $_->is_package_scalar && ( $_->symbol // '' ) eq '_' } @all;
         my $reads = grep { my $t = $_; grep { blessed($_) && $_->operation ne 'EntryWrite' } ( $t->consumers // [] )->@* } @top;
-        out('a $_ aliased where the program writes $_ (perl writes the element)')
-            if $reads && ( grep { $_->operation eq 'EntryWrite' && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->symbol // '' ) eq '_' && $_->inputs->[0]->is_package_scalar } @all
-                           or grep { $_->operation =~ /\A(?:RegexSubst|Transliterate|Chomp)\z/ && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->can('symbol') ? $_->inputs->[0]->symbol // '' : '' ) eq '_' } @all );
         out('a $_ aliased where the program reads $_, in a program with an eval') if $reads && $b->{has_eval};
         $reads ? 1 : 0;
     };
 }
+
+# topic_alias -> $_ IS AN ALIAS: the program aliases $_ (a foreach, a map)
+# and writes it -- a store, or an s///, tr or chomp of it. Its global
+# (my::0topic, a name no lexical has) then holds what $_ is now, as an element of @_ does: a
+# reference to a cell (to $main::_ itself outside any alias), an element
+# alias, or a value as it is (read-only: a literal). Every read of $_ is
+# through it, every store to it (AliasVal, AliasStore).
+sub topic_alias {
+    my ($b) = @_;
+    return $b->{topic_alias} //= do {
+        my @all = _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
+        my $aliased = grep { $_->operation eq 'LocalAlias' && ( $_->name // '' ) eq '_' } @all;
+        my $writes = grep { $_->operation eq 'EntryWrite' && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->symbol // '' ) eq '_' && $_->inputs->[0]->is_package_scalar } @all
+                     or grep { $_->operation =~ /\A(?:RegexSubst|Transliterate|Chomp)\z/ && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->can('symbol') ? $_->inputs->[0]->symbol // '' : '' ) eq '_' } @all;
+        $aliased && $writes && $b->reads_topic ? 1 : 0;
+    };
+}
+
+# is_topic($n) -> $n is the package scalar $_ (main::_).
+sub is_topic {
+    my ($b, $n) = @_;
+    return blessed($n) && $n->is_package_scalar && $b->global_of($n) eq $b->global_named('main::_');
+}
+
+# topic_raw -> what $_'s alias holds now (topic_alias).
+sub topic_raw { my ($b) = @_; return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_named('my::0topic') }) }
 
 # alias_saves($Loop) -> what $_ held before the loop (a GLoad), where the
 # loop's body aliases $_ and the program reads it; else undef.
@@ -934,7 +1007,7 @@ sub alias_saves {
     };
     return undef unless grep { $_->operation eq 'LocalAlias' && ( $_->name // '' ) eq '_' && $mine->($_) } +($b->{own_nodes} // [])->@*;
     return undef unless $b->reads_topic;
-    return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_named('main::_') });
+    return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_named( $b->topic_alias ? 'my::0topic' : 'main::_' ) });
 }
 
 # loop_breaks($Loop) -> the control the program goes on from: A LOOP THAT

@@ -18,6 +18,9 @@ my @CASES = qw(
     chalk-found-gaps:104 chalk-found-gaps:144 names:2 subroutines:12 subroutines:13
     symbol-table:1 symbol-table:3
     chalk-found-gaps:134 chalk-found-gaps:141 quote-like-terms:1
+    chalk-found-gaps:109 chalk-found-gaps:160 chalk-found-gaps:59 chalk-found-gaps:147 chalk-found-gaps:154
+    chalk-found-gaps:123 chalk-found-gaps:132 chalk-found-gaps:3 chalk-found-gaps:43 chalk-found-gaps:67
+    chalk-found-gaps:110 subroutines:5
     chalk-found-gaps:94 chalk-found-gaps:146 chalk-found-gaps:150 chalk-found-gaps:76
     chalk-found-gaps:64 adjacency-02_variables:1
     argument-extent:3

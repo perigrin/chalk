@@ -11,6 +11,14 @@ class Chalk::Target::LLVM::Node::Alloca :isa(Chalk::Target::LLVM::Node) {
         return "$nm = alloca %Slot  ; my " . $self->attr->{name} . "\n  store %Slot zeroinitializer, %Slot* $nm";
     }
 }
+# A LITERAL'S READ-ONLY CELL (t2_ro_pool's): one per site, a store through it dies.
+class Chalk::Target::LLVM::Node::ROCell :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = getelementptr [256 x %Slot], [256 x %Slot]* @t2_ro_pool, i64 0, i64 ' . $self->attr->{index} }
+}
+# A `my` made anew each pass: a new cell where the pass reaches it.
+class Chalk::Target::LLVM::Node::NewCell :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { $self->name . ' = call %Slot* @t2_cell_new()  ; my ' . $self->attr->{name} . ', this pass' }
+}
 class Chalk::Target::LLVM::Node::HeapCell :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { $self->name . ' = call %Slot* @t2_cell_new()  ; my ' . $self->attr->{name} . ', captured' }
 }

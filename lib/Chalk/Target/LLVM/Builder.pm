@@ -79,6 +79,10 @@ sub build {
     $b->make_mop if $b->special_containers->%* || grep { $_->operation eq 'IsaOp' || $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) =~ /\A(?:method|dynamic_method)\z/ || ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' ) } _all_nodes($b->{mop}, $ret);
     $b->special_startup;
     $b->glob_stashes;
+    # $_ ALIASED (topic_alias): outside any alias it is $main::_ itself.
+    $b->emit(op => 'GStore', type => 'void', attr => { global => $b->global_named('my::0topic') },
+        inputs => [ $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_named('main::_') }) ]) ])
+        if $b->topic_alias;
     $b->make_constant_arrays(Chalk::IR::Graph::own_nodes($ret));
     # PHASE BLOCKS, each a function as a sub is (its file lexicals shared as a
     # sub's are): a BEGIN runs first, in order, at the program's start; an END
@@ -146,7 +150,28 @@ sub _is_list {
     # refused where it is typed)
     return 1 if $n->operation eq 'Phi' && !$n->is_memory && eval { Chalk::Target::LLVM::Builder::agg_versions(undef, $n) };
     return 1 if $Chalk::Target::LLVM::Builder::LIST_FIELD{ refaddr($n) };
+    return 1 if _refs_each_item($n);
     return 0;
+}
+
+# _refs_each_item($Ref) -> `\(c ? ($x, $y) : ())`: perl's reference of a list
+# written out is a list of a reference to each item (B::SoN stamps the Ref
+# ArrayRef) -- a choice, an arm a list of items or one, each a scalar T2
+# makes a reference to (scalar_ref). (`\(c ? @a : @b)` is a reference to the
+# array taken: not this.)
+sub _refs_each_item {
+    my ($n) = @_;
+    return 0 unless blessed($n) && $n->operation eq 'Ref' && !$n->each;
+    my $t = $n->inputs->[0];
+    return 0 unless blessed($t) && $t->operation eq 'TernaryExpr';
+    my $lit = sub ($x) { blessed($x) && $x->operation eq 'ArrayLiteral' && !defined $x->symbol && ( $x->stamp // '' ) eq 'Array' };   # static type
+    my @arms = $t->inputs->@[1, 2];
+    return 0 unless grep { $lit->($_) } @arms;
+    for my $a (@arms) {
+        my @items = $lit->($a) ? $a->inputs->@* : ($a);
+        return 0 if grep { !Chalk::Target::LLVM::Builder::_scalar_ref_of($_) } @items;
+    }
+    return 1;
 }
 
 # _match_in_list($match) -> 1 if what takes the match takes a list: print (a
@@ -216,6 +241,10 @@ our %PRINTED;
 our %LIST_FIELD;
 sub _list_use {
     my ($c) = @_;
+    # (CALLED IN SCALAR CONTEXT by perl's own op -- B::SoN's want=scalar,
+    # `my $l = $n->name; ... push @f, $l` folded to the call -- is a scalar
+    # wherever its value goes: perl called it once, for one value)
+    return 0 if ( $c->can('want') ? $c->want // '' : '' ) eq 'scalar';
     my ($list, $scalar) = _use_counts($c, {});
     out('a call used both as a list and as a scalar') if $list && $scalar;
     return $list ? 1 : 0;

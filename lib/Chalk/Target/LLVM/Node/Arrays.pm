@@ -100,6 +100,15 @@ class Chalk::Target::LLVM::Node::AElemRefs :isa(Chalk::Target::LLVM::Node) { met
 class Chalk::Target::LLVM::Node::HElemRef :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_helem_ref') } }
 # A READ THROUGH AN ELEMENT REFERENCE, passed to a sub: @_ holds the cell (t2_alias_of).
 class Chalk::Target::LLVM::Node::AliasOf :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_alias_of') } }
+# $_ ALIASED (topic_alias): the value an alias stands for now (t2_alias_val),
+# and a store through it (t2_alias_store: perl's die on a read-only one).
+class Chalk::Target::LLVM::Node::AliasVal :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_alias_val') } }
+class Chalk::Target::LLVM::Node::AliasStore :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () {
+        my %a = $self->attr->%*;
+        return $self->name . '.d = call i1 @t2_alias_store(' . $self->_args($self->inputs->@*) . ', ' . $self->_cstr($a{msg}, $a{id}) . ')';
+    }
+}
 
 class Chalk::Target::LLVM::Node::ARepeat:isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_arepeat') } }
 
