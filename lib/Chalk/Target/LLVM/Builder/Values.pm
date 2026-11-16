@@ -562,7 +562,7 @@ sub _value {
         # THE CELL IS THE VARIABLE'S OWN STORAGE (the maker reads and writes it
         # as the closure does). A variable a loop renews, captured in it, is a
         # new one each pass: not this (one storage per call).
-        my $var = Chalk::Target::LLVM::Context::_cell_variable($v) // out('a captured variable that is not one kept in memory');
+        my $var = _cell_variable($v) // out('a captured variable that is not one kept in memory');
         # WHERE THE CELL IS MADE, not where it is first used: the aggregate
         # arm's rule. A closure made at the top and called in an arm or a
         # loop (`if (...) { $add->(5) }`) asked for its cell there, and was

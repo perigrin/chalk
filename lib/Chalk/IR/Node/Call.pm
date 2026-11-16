@@ -230,6 +230,10 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # reorders_list -> true for sort and reverse: its LIST in another order.
     method reorders_list() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'reorders' ) ? 1 : 0 }
 
+    # reads_its_list -> true for join, sort and reverse: its LIST read, no
+    # element of it written.
+    method reads_its_list() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'reads_list' ) ? 1 : 0 }
+
     # does_handle_io -> true for an operation on a filehandle (open, close,
     # eof, readline, select, four-argument select).
     method does_handle_io() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'handle_io' ) ? 1 : 0 }

@@ -1059,6 +1059,9 @@ sub _deserialize_graph ($method_data) {
 # refused, and those of them a graph that runs calls -- for the passes that ask
 # which code runs (Analysis::_answer_sub_defined).
 our ( %RUN, %ON_WIRE, %REFUSED, %REFUSED_CALLED, %CALLED );   # %CALLED: names a running graph calls (full, or a method's short name)
+# The pragmas a require of runs no code a program sees: a require of one is
+# no load of code the program would not have.
+our %PURE_PRAGMA = map { $_ => 1 } qw(strict.pm warnings.pm utf8.pm feature.pm);
 
 # _reachable_methods(\%methods) -> the names of the graphs the program may run.
 # from_json loads only these: what is never run is neither compiled nor read.
@@ -1174,7 +1177,7 @@ sub _stash_changes ($data) {
                 $mod =~ s{/}{::}g;
                 $k = join('/', split /::/, $k) . '.pm' unless $k =~ /\.pm\z/;
                 return 'a require of what is not known to be loaded'
-                    unless $Chalk::Target::LLVM::Context::_PURE_PRAGMA{$k} || $Chalk::IR::Serialize::JSON::USED_MODULES{$mod};
+                    unless $PURE_PRAGMA{$k} || $Chalk::IR::Serialize::JSON::USED_MODULES{$mod};
             }
             return 'an import the program does not define'
                 if $name =~ /\A(?:import|unimport)\z/ && ( $f->{dispatch_kind} // '' ) ne 'builtin'

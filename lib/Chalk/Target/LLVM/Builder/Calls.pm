@@ -1046,7 +1046,8 @@ sub func {
     my $self_arg = !$is_method && grep { $_->operation eq 'FieldAccess' } $g->component;
     out("closure $name reads a field of its method's object, as a code value") if $self_arg && $closure;
     out("sub $name reads a field and is no closure of a method") if $self_arg && $name !~ /::__ANON__/;
-    my $an = bless {}, 'Chalk::Target::LLVM::Context';
+    require Chalk::Target::LLVM::Builder::Args;
+    my $an = bless {}, 'Chalk::Target::LLVM::Builder::Args';
     my @reads = $is_method ? () : eval { $an->_collect_positional_arg_reads($g, $name) };
     # @_ READ AS A LIST (join(@_), "@_", scalar(@_), for (@_)): the sub takes
     # @_ as one %Array its caller builds -- the list convention. A write to
@@ -1153,13 +1154,13 @@ sub func {
     out("closure $name reads \@_ other than T2 takes it") if $closure && !$list;
     # A CAPTURE USED BUT BY A CELL READ OR WRITE: B::SoN spells `$t += 1` on
     # one as Coerce(CellParam) + 1, with no write -- lowered, $t never changed
-    # (0 for 16). Refused, as Context.pm refuses it.
+    # (0 for 16). Refused.
     out("closure $name uses a capture other than by reading or writing it (an op-assign)")
         if grep { my $p = $_; grep { blessed($_) && $_->operation !~ /\A(?:CellRead|CellWrite|MakeCell)\z/ } ( $p->consumers // [] )->@* }
            grep { $_->operation eq 'CellParam' } $g->component;
     out("sub $name captures a variable (a named sub's closure)") if !$closure
         && grep { $_->operation eq 'CellParam' } $g->component;
-    # $_[N] READ ANYWHERE is the Nth argument: Context.pm's binder keeps one
+    # $_[N] READ ANYWHERE is the Nth argument: the binder (Builder/Args.pm) keeps one
     # read per index, and a position never read is a hole it refuses. A sub
     # that reads @_ only so binds every such read -- after a store, twice --
     # to its argument; an unread position is a placeholder (its argument

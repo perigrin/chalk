@@ -38,7 +38,7 @@ class Chalk::Grammar::Perl::BuiltinTable {
         # ones a backend asks about are.
         push    => { list_args => 1 },
         unshift => { list_args => 1 },
-        join    => { list_args => 1 },
+        join    => { list_args => 1, reads_list => 1 },
         sprintf => { list_args => 1 },
         printf  => { list_args => 1 },
         die     => { list_args => 1 },
@@ -57,7 +57,7 @@ class Chalk::Grammar::Perl::BuiltinTable {
         # `caller EXPR`, `readline` ("in list context, reads until end-of-file
         # ... and returns a list of lines"), `unpack`, `glob`, `localtime` (its
         # nine fields). Each is a scalar of its own in scalar context.
-        reverse   => { return_type => 'List', reorders => 1 },
+        reverse   => { return_type => 'List', reorders => 1, reads_list => 1 },
         caller    => { return_type => 'List' },
         readline  => { return_type => 'List', handle_io => 1 },
         unpack    => { return_type => 'List' },
@@ -66,7 +66,11 @@ class Chalk::Grammar::Perl::BuiltinTable {
 
         # ITS LIST IN ANOTHER ORDER (perlfunc: sort, reverse): the elements of
         # its LIST, none added or taken away.
-        sort    => { reorders => 1 },
+        # READS ITS LIST, AND NO ELEMENT OF IT IS WRITTEN (join, sort, reverse;
+        # column reads_list): a sub that hands its @_ to one only reads its
+        # arguments. Not every such builtin is listed -- the ones a backend asks
+        # about are.
+        sort    => { reorders => 1, reads_list => 1 },
 
         # A HASH'S KEYS OR ITS VALUES (perlfunc: keys, values): every one, a
         # count in scalar context. Each also RESETS THE HASH'S ITERATOR

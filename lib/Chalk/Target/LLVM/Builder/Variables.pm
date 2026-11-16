@@ -525,4 +525,22 @@ sub list_assign {
     push $b->{passed}->@*, $s;
 }
 
+# _cell_variable($cell) -> the location a MakeCell holds: the variable of its
+# name stored at the memory version it was made at (Values.pm, MakeCell).
+sub _cell_variable {
+    my ($cell) = @_;
+    my $want = $cell->can('cell_name') ? ( $cell->cell_name // '' ) : '';
+    my $mem = $cell->inputs->[1];
+    for (1 .. 64) {
+        return undef unless blessed($mem);
+        my $v = $mem->inputs->[0];
+        return $v if blessed($v) && $v->operation eq 'PadAccess' && $v->is_location && $v->name eq $want;
+        # Another variable's cell, made just before, is a step too (two captures),
+        # as is a location read, whose input is the memory it reads at.
+        return undef unless $mem->operation =~ /\A(?:Assign|EntryWrite|Call|MakeCell|PadAccess)\z/;
+        ($mem) = grep { blessed($_) && $_->operation ne 'Constant' } reverse $mem->inputs->@*;
+    }
+    return undef;
+}
+
 1;

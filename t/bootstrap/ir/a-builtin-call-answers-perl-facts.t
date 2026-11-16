@@ -89,6 +89,12 @@ subtest 'reorders_list: sort and reverse -- its LIST in another order' => sub {
     ok( !sub_call( 'direct', 'sort' )->reorders_list, 'a sub named sort is not the builtin' );
 };
 
+subtest 'reads_its_list: join, sort and reverse -- its LIST read, no element of it written' => sub {
+    ok( builtin($_)->reads_its_list, "$_ only reads its list" ) for qw(join sort reverse);
+    ok( !builtin($_)->reads_its_list, "$_ is not listed" ) for qw(push shift splice map);
+    ok( !sub_call( 'direct', 'join' )->reads_its_list, 'a sub named join is not the builtin' );
+};
+
 subtest 'returns_a_list: in list context its value is a list (the signature\'s List, else the table\'s)' => sub {
     ok( builtin($_)->returns_a_list, "$_ returns a list" )
         for qw(keys values each sort splice split reverse caller readline unpack glob localtime);
