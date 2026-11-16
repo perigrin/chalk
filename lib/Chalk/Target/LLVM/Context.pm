@@ -1576,6 +1576,28 @@ sub _refuse_an_in_place_write_to_a_location {
     }
 }
 
+# _refuse_a_pass_ending_at_a_pinned_read($node, $op): die by name for a read
+# B::SoN pinned where it stands (through a reference: it may die) that is the
+# memory a loop's next pass starts from -- the last thing an arm leaving by
+# `next` did (`if (ref $c eq 'HASH') { $c = $c->{next}; next }`). Lowered,
+# it ran where the pass did not (perl's "found stop end" exited 255).
+# (In an if's arm: one ending the loop body's own straight line is lowered.)
+sub _refuse_a_pass_ending_at_a_pinned_read {
+    my ($node, $op) = @_;
+    return unless $op =~ /\A(?:Subscript|Exists|PostfixDeref|Count)\z/ && $node->is_pinned;
+    my $c = $node->control_in;
+    my %seen;
+    $c = $c->control_in while blessed($c) && $c->operation ne 'Proj' && !$seen{ refaddr($c) }++ && $c->can('control_in');
+    return unless blessed($c) && $c->operation eq 'Proj' && blessed( $c->inputs->[0] ) && $c->inputs->[0]->operation eq 'If';
+    for my $phi (grep { blessed($_) && $_->operation eq 'Phi' && $_->is_memory } ( $node->consumers // [] )->@*) {
+        my $r = $phi->can('region') ? $phi->region : undef;
+        next unless blessed($r) && $r->operation eq 'Loop';
+        my $back = $phi->inputs->[1];
+        die "GAP: a read pinned where it stands that ends a loop's pass (the memory its next pass starts from) is not lowered\n"
+            if blessed($back) && refaddr($back) == refaddr($node);
+    }
+}
+
 # _boxed_str($n) -> true for a merge (Phi, ?:, //) T1 types Str that a Num
 # reaches, through merges of Str. T1 is right: Num joined with Str is Str. Its
 # REPR is not %Str, which holds a Num's 15 printed digits -- `$c ? 0.1 + 0.2 :
@@ -1876,6 +1898,7 @@ sub lower_value {
     my $id = $node->id();
     my $op = $node->operation();
     _refuse_an_in_place_write_to_a_location($node, $op);
+    _refuse_a_pass_ending_at_a_pinned_read($node, $op);
     # A PINNED BITWISE OR SHIFT OP RAN ONCE, at its statement: a later use reads
     # what it made there. Re-lowered at the use (it is pure over a read), it ran
     # again -- after a later op had numified its operand.
