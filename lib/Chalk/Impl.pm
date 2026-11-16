@@ -136,7 +136,7 @@ sub wire ($class) {
     return $WIRE{$class} if $WIRE{$class};
     my $file = file_of($class);
     open my $fh, '<:raw', $file or die "GAP: $class, the metaobject of a container the program uses, has no file ($file)\n";
-    my $src = do { local $/; <$fh> };
+    my $src = do { local $/; readline($fh) };
     close $fh;
     my $son = File::Spec->catfile( $SON, 'B', 'SoN.pm' );
     die "GAP: $class cannot be compiled in: B::SoN is not at $SON (set PERL5_SON_LIB)\n" unless -f $son;
@@ -148,7 +148,7 @@ sub wire ($class) {
     my $cache = File::Spec->catdir( File::Spec->tmpdir, "chalk-impl-$<" );
     my $path  = File::Spec->catfile( $cache, "$class-$key.json" =~ s/::/-/gr );
     my $json;
-    if ( open my $in, '<:raw', $path ) { local $/; $json = <$in>; close $in }
+    if ( open my $in, '<:raw', $path ) { local $/; $json = readline($in); close $in }
     unless ( defined $json && length $json ) {
         $json = qx($^X -I$SON -I$LIB -MO=-q,SoN,json,package=$class $file 2>/dev/null);
         die "GAP: $class cannot be compiled in: B::SoN gave no wire for $file\n" unless $? == 0 && $json =~ /\S/;
