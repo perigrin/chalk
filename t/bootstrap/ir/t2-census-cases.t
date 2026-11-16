@@ -116,6 +116,7 @@ my @CASES = qw(
     vstrings:1 vstrings:2 writing:1 writing:2 writing:3 writing:4
     chalk-found-gaps:106 chalk-found-gaps:107 chalk-found-gaps:108 chalk-found-gaps:71
     chalk-found-gaps:26 chalk-found-gaps:27
+    chalk-found-gaps:70 chalk-found-gaps:75 chalk-found-gaps:129 chalk-found-gaps:156 chalk-found-gaps:159
 );
 
 my %case = map { ( $_->{id} => $_ ) } Chalk::CodeGen::Harness::T2Case::cases();
