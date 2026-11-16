@@ -624,7 +624,7 @@ sub attempt ($g) {
     );
     # (the stack is not left with this start's choices: emptied on a match)
     $g->while_( sub { $g->lt_( $g->int_(0), $g->depth ) }, sub { $g->pop_ } );
-    delete $g->{var}{$_} for qw(pc pos run), map {"k$_"} 0 .. $NS - 1;
+    for ( qw(pc pos run), map {"k$_"} 0 .. $NS - 1 ) { delete $g->{var}{$_} }
 }
 
 sub fail ($g) { $g->set( fail => $g->int_(1) ) }

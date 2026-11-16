@@ -490,7 +490,7 @@ sub special_startup {
 sub method_by_name {
     my ($b, $o, $m, @args) = @_;
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
-    $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for $o, @args;
+    for ( $o, @args ) { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) }
     my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => 0 },
         inputs => [ $o, $b->const_str($m), $b->const_str(" at chalk's start-up.\n"), $b->const_str('') ]);
     return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
@@ -554,7 +554,7 @@ sub impl_call {
     my $class = $n->metaobject_class;
     my $o = $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->impl_global($n) });
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
-    $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) for $o, @args;
+    for ( $o, @args ) { $b->emit(op => 'APush', type => 'void', inputs => [ $arr, $_ ]) }
     my $fp = $b->emit(op => 'MResolve', type => 'i8*', attr => { mode => 0 },
         inputs => [ $o, $b->const_str($m), $b->const_str(" at chalk's $class.\n"), $b->const_str('') ]);
     return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ]);
