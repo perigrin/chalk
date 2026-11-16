@@ -853,6 +853,25 @@ class Chalk::Bootstrap::Earley {
                         }
                         $self->_predict($w_rule, $pos, \@chart, \@agenda, \%predicted_at, $lateral_seed)
                             unless $is_late;
+                        # A late derivation of an item waiting on a nonterminal
+                        # joins the chart entry: that nonterminal completes at a
+                        # later position, and _complete reads the waiting value
+                        # from the chart, so a derivation kept off the chart is
+                        # never advanced (`die 'a' . 'b' if $x` kept only the
+                        # `(die 'a') . 'b'` reading). A completion here, at
+                        # this position, is advanced below with this
+                        # derivation alone.
+                        if ($is_late) {
+                            my $existing_val = $self->_force($chart[$pos][$core_id][($pos - $origin)]);
+                            my $merged_value;
+                            try {
+                                $merged_value = $semiring->add($existing_val, $value);
+                            } catch ($e) {
+                                die "Ambiguity merging late derivation of '$rule_name' "
+                                    . "(origin=$origin, pos=$pos): $e";
+                            }
+                            $self->_chart_set(\@chart, $pos, $core_id, $origin, $merged_value);
+                        }
                         # Advance from already-completed items at this position.
                         # When a nullable nonterminal (e.g. _) appears multiple
                         # times in a rule, the second prediction is suppressed
