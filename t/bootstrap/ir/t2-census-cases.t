@@ -14,6 +14,9 @@ require Chalk::CodeGen::Harness::T2Case;
 my @CASES = qw(
     adjacency-01_literals:1 adjacency-12_packages:1 adjacency-05_scoping:1 adjacency-06_control:2
     adjacency-08_references:1 adjacency-06_control:1 adjacency-13_opaque:1
+    adjacency-14_recursive:1 adjacency-10_io:1 chalk-found-gaps:54 chalk-found-gaps:73
+    chalk-found-gaps:104 chalk-found-gaps:144 names:2 subroutines:12 subroutines:13
+    symbol-table:1 symbol-table:3
     chalk-found-gaps:134 chalk-found-gaps:141 quote-like-terms:1
     chalk-found-gaps:94 chalk-found-gaps:146 chalk-found-gaps:150 chalk-found-gaps:76
     chalk-found-gaps:64 adjacency-02_variables:1

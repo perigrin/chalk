@@ -273,6 +273,7 @@ sub type_of {
     return $v->sigil eq '@' ? '%Array*' : '%Slot' if $v->is_package_aggregate;   # a hash is its %Slot
     return '%Slot' if $op eq 'ArrayLiteral' && ( $v->stamp // '' ) eq 'ArrayRef'; # static type
     return '%Slot' if $op eq 'Ref';
+    return '%Slot' if $op eq 'Constant' && ( $v->const_type // '' ) eq 'ref';   # `\1`: a reference (const_ref)
     return '%Slot' if $op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '$';
     return $v->copy ? '%Slot' : '%Array*' if $op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '%';   # (a copy: its own hash; else its pairs)
     return '%Array*' if $op eq 'ArrayLiteral' || $v->is_array_deref || $v->is_my_array || $op eq 'ArgsSource' || $op eq 'ListAppend';
@@ -309,6 +310,8 @@ sub type_of {
         my (undef, $sg) = $b->field_of($v);
         return $sg eq '@' ? '%Array*' : '%Slot';   # a scalar's value, or a hash's (its %Slot)
     }
+    return '%Slot' if $op eq 'EntryDef' && $v->special_scalar;   # (special_scalar)
+    return '%Slot' if $op eq 'EntryDef' && ( $v->sigil // '' ) eq '$' && ( $v->symbol // '' ) eq 'AUTOLOAD';
     return '%Str' if $op eq 'EntryDef';
     return '%Slot' if $op eq 'PadAccess' && $v->is_location;
     return '%Slot' if $op eq 'Increment' || $op eq 'Decrement';
@@ -371,6 +374,11 @@ sub _value {
         if $v->operation eq 'EntryDef' && ( $v->symbol // '' ) =~ /\A(?:[&`'+-]|\d+)\z/;
     return $b->pkg_agg($v) if $v->is_package_aggregate;
     return $b->special_hash($v) if $v->operation eq 'EntryDef' && $v->metaobject_class;
+    return $b->special_scalar($v) if $v->operation eq 'EntryDef' && $v->special_scalar;
+    # $AUTOLOAD: a package scalar perl writes (a call an AUTOLOAD answers sets
+    # it -- call), the program reads.
+    return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_of($v) })
+        if $v->operation eq 'EntryDef' && ( $v->sigil // '' ) eq '$' && ( $v->symbol // '' ) eq 'AUTOLOAD';
     # $] IS THE VERSION OF THE PERL T2 IS: the one compiling (whose semantics it
     # keeps), read-only.
     return $b->as( $b->const_str("$]"), $b->type_of($v) )   # (its text: "5.042000")
@@ -381,6 +389,7 @@ sub _value {
     if (my $t = $v->stored_whole_into) { return $b->pkg_agg($t) }
     # A qr// VALUE (a regex constant read as a value): an object of class Regexp.
     return $b->qr_value($v) if $v->operation eq 'Constant' && ( $v->const_type // '' ) eq 'regex';
+    return $b->const_ref($v) if $v->operation eq 'Constant' && ( $v->const_type // '' ) eq 'ref';
     # A PRINT THAT RAN AS A STATEMENT (in an arm of && or ||) read as a value
     # after the join: perl's print returns 1, and the merge reads it only on
     # the path where it ran.
@@ -849,6 +858,48 @@ sub substr_value {
     out('an index of fewer than two arguments') if @a < 2;
     my $pos = @a > 2 ? $b->as( $b->value( $a[2] ), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
     return $b->emit(op => 'Index', type => 'i64', inputs => [ $str, $b->as( $b->value( $a[1] ), '%Str' ), $pos ]);
+}
+
+# special_scalar($EntryDef) -> perl's special scalar of the run, read (a
+# %Slot): $^W the warnings switch B::SoN's dowarn gives (-w); $^O the name of
+# the operating system -- T2's target is the system it compiles on, so the
+# compiling perl's; $^T the time the program started, kept at its start
+# (special_startup); $^ "STDOUT_TOP", the top-of-page format name of STDOUT --
+# in a program that selects no other handle. A write to one is refused at the
+# write (walk).
+sub special_scalar {
+    my ($b, $v) = @_;
+    my $k = $v->special_scalar;
+    if ($k eq 'warnings_switch') {
+        my $on = ( $Chalk::IR::Serialize::JSON::DOWARN // {} )->{on} ? 1 : 0;
+        return $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => $on }), '%Slot' );
+    }
+    return $b->as( $b->const_str($^O), '%Slot' ) if $k eq 'os_name';
+    return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_named("perl's start time") }) if $k eq 'start_time';
+    if ($k eq 'format_top_name') {
+        out('$^ where the program selects another handle (its top-of-page format name is that handle\'s)') if $b->selects;
+        return $b->as( $b->const_str('STDOUT_TOP'), '%Slot' );
+    }
+    out("perl's special scalar $k");
+}
+
+# const_ref($Constant) -> `\1`, `\"a"`: a reference (tag 9) to a cell of its
+# own holding the constant. What it holds is read-only in perl -- a write
+# through it dies -- and B::SoN gives the referent's value but not its type
+# (`\2` and `\"2"` alike): a program that dereferences a scalar anywhere is
+# refused, so neither is ever read. Its type, its truth, its definedness and
+# what it is as a reference are perl's.
+sub const_ref {
+    my ($b, $v) = @_;
+    out('a reference to a constant where the program dereferences a scalar (a write through it dies; its referent\'s type is not given)')
+        if grep { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
+    my $d = $v->value;
+    my $x = !defined $d ? $b->emit(op => 'Undef', type => '%Slot')
+          : $d =~ /\A-?[0-9]{1,18}\z/ ? $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => $d }), '%Slot' )
+          : $b->as( $b->const_str($d), '%Slot' );
+    my $c = $b->emit(op => 'HeapCell', type => '%Slot*', attr => { name => 'const_ref' });
+    $b->emit(op => 'Store', type => 'void', inputs => [ $x, $c ]);
+    return $b->emit(op => 'SRef', type => '%Slot', inputs => [$c]);
 }
 
 # _glob_name($n) -> the qualified name of the glob a constant `*name` is

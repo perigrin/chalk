@@ -71,10 +71,14 @@ sub build {
     $b->index_readers(Chalk::IR::Graph::own_nodes($ret));
     $b->new_block('entry');
     $b->emit(op => 'SaveArgs', type => 'void');   # argv, for @ARGV
+    # $^T: the time the program started, kept here for every read of it.
+    $b->emit(op => 'GStore', type => 'void', inputs => [ $b->as( $b->emit(op => 'Time', type => 'i64'), '%Slot' ) ], attr => { global => $b->global_named("perl's start time") })
+        if grep { $_->operation eq 'EntryDef' && ( $_->special_scalar // '' ) eq 'start_time' } _all_nodes($b->{mop}, $ret);
     # (a tie calls its class's methods too)
     # (and `isa`, and a method named at run time, look through it)
     $b->make_mop if $b->special_containers->%* || grep { $_->operation eq 'IsaOp' || $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) =~ /\A(?:method|dynamic_method)\z/ || ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'tie' ) } _all_nodes($b->{mop}, $ret);
     $b->special_startup;
+    $b->glob_stashes;
     $b->make_constant_arrays(Chalk::IR::Graph::own_nodes($ret));
     # PHASE BLOCKS, each a function as a sub is (its file lexicals shared as a
     # sub's are): a BEGIN runs first, in order, at the program's start; an END

@@ -1002,6 +1002,9 @@ sub array_of {
         return $b->emit(op => 'ADeref', type => '%Array*', inputs => [$a]) if $a->type eq '%Slot';   # [...]
         out('not an array');
     }
+    # A CALL OF A SUB A GLOB IS GIVEN AT RUN TIME: its wrapper hands back a
+    # list's reference in list context, as a method's does (glob_call).
+    return $b->emit(op => 'ADeref', type => '%Array*', inputs => [ $b->value($n) ]) if $b->is_glob_call($n);
     # A CALL IN LIST CONTEXT: a sub returning a list gives a reference to it; a
     # sub returning one value is a list of it. A method's sub is not known here.
     if (blessed($n) && $n->operation eq 'Call' && ( $n->dispatch_kind // '' ) eq 'direct' && ( ( $n->name // '' ) !~ /__(?:ANON|EVAL)__/ || $b->plain_anon($n) )) {

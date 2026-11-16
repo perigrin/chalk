@@ -55,8 +55,12 @@ sub print_module {
     for my $fn (sort { $a->{name} cmp $b->{name} } values +($bld->{funcs} // {})->%*) {
         my $i = 0;
         $_->set_name('%v' . $i++) for map { $_->{nodes}->@* } $fn->{blocks}->@*;
-        push @L, "define internal %Slot $fn->{name}(" . ( $fn->{closure} ? '%Array* %a0, %Slot** %env' : $fn->{list} ? '%Array* %a0' : join(', ', map { "%Slot %a$_" } 0 .. $fn->{nargs} - 1) ) . ') {',
+        push @L, "define internal %Slot $fn->{name}(" . join(', ', ( $fn->{closure} ? '%Array* %a0, %Slot** %env' : $fn->{list} ? '%Array* %a0' : map { "%Slot %a$_" } 0 .. $fn->{nargs} - 1 ),
+                ( $fn->{self_arg} ? '%Slot %self' : () ) ) . ') {',
             _blocks($fn->{blocks}), '}', '';
+        # (A CLOSURE OF A METHOD READING ITS FIELDS is called directly only,
+        # its object handed to it: no wrapper.)
+        next if $fn->{self_arg};
         if ($fn->{closure}) {   # its code value's entry: a list context gets a list
             my @cn = $fn->{listret} ? ('  ret %Slot %r') : ('  %rn = call %Slot @t2_list_of(%Slot %r, i1 %w)', '  ret %Slot %rn');
             push @L, "define internal %Slot $fn->{name}_cw(%Array* %args, %Slot** %env) {", '  %w = load i1, i1* @t2_want',

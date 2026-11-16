@@ -279,6 +279,20 @@ sub walk {
             $b->value($s);
             $ctl = $s;
         }
+        # ONE OF PERL'S SPECIAL SCALARS OF THE RUN WRITTEN ($^W, $^O, $^T, $^):
+        # each changes what perl does (its warnings, a handle's format) --
+        # refused by name.
+        elsif ($op =~ /\A(?:EntryWrite|LocalAlias)\z/ && grep { $_ isa Chalk::IR::Node && $_->operation eq 'EntryDef' && $_->special_scalar } $s->inputs->[0]) {
+            my $k = $s->inputs->[0]->special_scalar;
+            out( 'a write to ' . { warnings_switch => q{$^W (perl's warnings switch)}, os_name => '$^O', start_time => '$^T', format_top_name => q{$^ (a handle's top-of-page format name)} }->{$k} );
+        }
+        # A GLOB'S CODE SLOT WRITTEN (`*name = sub {...}`): the sub put in its
+        # package's run-time stash, here (glob_code_write).
+        elsif ($op eq 'EntryWrite' && $s->inputs->[0] isa Chalk::IR::Node && $s->inputs->[0]->operation eq 'EntryDef' && ( $s->inputs->[0]->sigil // '' ) eq '&') {
+            $b->glob_code_write($s);
+            push $b->{passed}->@*, $s;
+            $ctl = $s;
+        }
         # A PACKAGE SCALAR WRITTEN: what it held is read first, then stored.
         elsif ($op eq 'EntryWrite' && ( $s->inputs->[0] isa Chalk::IR::Node && $s->inputs->[0]->is_package_scalar )) {
             out('a local') if $s->can('local') && $s->local;
@@ -597,12 +611,59 @@ sub if_stmt {
         }
         push @made, [ $p, $ty, \@in ];
     }
+    # AN && OR || OF THIS IF'S CONDITION whose other side is made only in the
+    # arm it decides (B::SoN: a sub ending in `if ($c) { X if $d }` returns
+    # `$c && <X's merge>`, that merge the arm's own): the join's phi -- the
+    # arm's value from that arm, the condition's from the other. Made after
+    # the join, the arm's value was not there to read.
+    my $cnode = $if->inputs->[1];
+    for my $lo ( grep { blessed($_) && $_->operation =~ /\A(?:And|Or)\z/ && !$b->{memo}{ refaddr($_) }
+                        && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($cnode) } ( $cnode->consumers // [] )->@* ) {
+        next if $seen{ refaddr($lo) }++;
+        my $rhs = $lo->inputs->[1];
+        my $arm_of_rhs = $lo->operation eq 'And' ? 0 : 1;   # (&& goes on where the condition is true: the then arm)
+        next unless blessed($rhs) && !$b->{memo}{ refaddr($rhs) } && $vals{$arm_of_rhs}{memo}{ refaddr($rhs) };
+        my $ty = $b->type_of($lo);
+        my @in;
+        for my $k (@live) {
+            my $arm = $arm_of[$k];
+            local $b->{cur} = $vals{$arm}{block};
+            local $b->{memo} = $vals{$arm}{memo};
+            push @in, [ $b->as( $b->value( $arm == $arm_of_rhs ? $rhs : $cnode ), $ty ), $arm ];
+            $vals{$arm}{block} = $b->{cur};
+        }
+        push @made, [ $lo, $ty, \@in ];
+    }
+    # A VARIABLE A LIST ASSIGNMENT IN AN ARM GIVES ITS VALUE (`($lo, $u) =
+    # f()` in one arm, `= (1, 2)` in the other): B::SoN gives the variable one
+    # node, the assignments' targets and the reads after the join alike, and
+    # no merge. Its value after the join is the join's phi of what each arm
+    # left it (list_assign's memo), else what it was before the if.
+    my %tgt = map { ( refaddr($_) => $_ ) } grep { blessed($_) && $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' }
+        map { $_->inputs->@[ 0 .. $_->targets - 1 ] } grep { $_->operation eq 'Assign' && $_->can('targets') && defined $_->targets } +($b->{own_nodes} // [])->@*;
+    for my $k ( sort keys %tgt ) {
+        my @arms = map { $arm_of[$_] } @live;
+        my $before = $b->{memo}{$k};
+        next unless grep { my $v = $vals{$_}{memo}{$k}; defined $v && !( $before && refaddr($v) == refaddr($before) ) } @arms;
+        # (one arm only, of no value before: a `my` of that arm, or one a read
+        # after the join finds unmade -- refused there, as before)
+        next if grep { !defined $vals{$_}{memo}{$k} } @arms;
+        my @in;
+        for my $arm (@arms) {
+            local $b->{cur} = $vals{$arm}{block};
+            my $v = $vals{$arm}{memo}{$k};
+            push @in, [ $b->as( $v, '%Slot' ), $arm ];
+            $vals{$arm}{block} = $b->{cur};
+        }
+        push @made, [ $tgt{$k}, '%Slot', \@in, $tgt{$k}->symbol ];
+    }
     my $join = $b->new_block('join');
     $_->{block}{term} = [ 'br', $join ] for grep { !$_->{block}{dead} } values %vals;
     for my $m (@made) {
-        my ($p, $ty, $in) = @$m;
+        my ($p, $ty, $in, $sym) = @$m;
         $b->{memo}{ refaddr($p) } = $b->emit(op => 'Phi', type => $ty,
             inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $vals{ $_->[1] }{block} } @$in ] });
+        $b->{lvals}{$sym} = $b->{memo}{ refaddr($p) } if defined $sym;   # (what the last list assign gave it: list_assign)
     }
     push $b->{passed}->@*, $region->memory_phis;
     return $region;

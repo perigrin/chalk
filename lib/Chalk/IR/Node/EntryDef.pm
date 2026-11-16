@@ -65,6 +65,22 @@ class Chalk::IR::Node::EntryDef :isa(Chalk::IR::Node::Access) {
     # sigil.
     method is_perls_own() { return $PERLS_OWN{ $sigil // '' }{ $symbol // '' } ? 1 : 0 }
 
+    # PERL'S SPECIAL SCALARS OF THE RUN (perlvar), by their spelling (`$^W`
+    # is the symbol "\x17"): what each is when the program starts.
+    #   $^W  the warnings switch: 1 under -w, else 0
+    #   $^O  the name of the operating system perl was built for
+    #   $^T  the time the program started, in seconds since the epoch
+    #   $^   the top-of-page format name of the selected output handle
+    #        ("STDOUT_TOP" for STDOUT)
+    my %SPECIAL_SCALAR = ( "\x17" => 'warnings_switch', "\x0f" => 'os_name', "\x14" => 'start_time', '^' => 'format_top_name' );
+
+    # special_scalar -> which of perl's special scalars of the run this is
+    # (a key of %SPECIAL_SCALAR's values), or undef.
+    method special_scalar() {
+        return undef unless ( $sigil // '' ) eq '$' && ( $package // 'main' ) eq 'main';
+        return $SPECIAL_SCALAR{ $symbol // '' };
+    }
+
     # PERL'S SPECIAL HASHES WHOSE METAOBJECT IS A MOP OBJECT
     # (docs/plans/2026-11-15-perls-special-hashes-have-mop-metaobjects.md):
     # a container like any other, its operations answered by an instance of

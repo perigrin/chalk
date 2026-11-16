@@ -2590,6 +2590,40 @@ define internal void @t2_mop_def(%Str %c, %Str %m, i8* %f) {
   call void @t2_hset(%Slot %s, %Str %m, %Slot %fs)
   ret void
 }
+; t2_sub_find(package, name, " at FILE line N.\n") -> the code the package's
+; stash holds under name -- a sub stored into the glob at run time (no @ISA:
+; a call by name is no method call) -- or perl's die, "Undefined subroutine
+; &package::name called at ...", unwinding (t2_nomethod is called instead).
+@lit_undefsub = private unnamed_addr constant [23 x i8] c"Undefined subroutine &\00"
+@lit_called = private unnamed_addr constant [8 x i8] c" called\00"
+define internal i8* @t2_sub_find(%Str %p, %Str %n, %Str %at) {
+entry:
+  %t = call %Slot @t2_stash_table()
+  %s = call %Slot @t2_hget(%Slot %t, %Str %p)
+  %st = extractvalue %Slot %s, 0
+  %known = icmp eq i8 %st, 5
+  br i1 %known, label %look, label %none
+look:
+  %f = call %Slot @t2_hget(%Slot %s, %Str %n)
+  %ft = extractvalue %Slot %f, 0
+  %code = icmp eq i8 %ft, 7
+  br i1 %code, label %found, label %none
+found:
+  %fv = extractvalue %Slot %f, 1
+  %fp = inttoptr i64 %fv to i8*
+  ret i8* %fp
+none:
+  %u0 = call %Str @t2_str(i8* getelementptr ([23 x i8], [23 x i8]* @lit_undefsub, i64 0, i64 0), i64 22)
+  %u1 = call %Str @t2_concat(%Str %u0, %Str %p)
+  %c2 = call %Str @t2_str(i8* getelementptr ([3 x i8], [3 x i8]* @lit_colons, i64 0, i64 0), i64 2)
+  %u2 = call %Str @t2_concat(%Str %u1, %Str %c2)
+  %u3 = call %Str @t2_concat(%Str %u2, %Str %n)
+  %c4 = call %Str @t2_str(i8* getelementptr ([8 x i8], [8 x i8]* @lit_called, i64 0, i64 0), i64 7)
+  %u4 = call %Str @t2_concat(%Str %u3, %Str %c4)
+  %full = call %Str @t2_concat(%Str %u4, %Str %at)
+  call void @t2_die_unwind(%Str %full)
+  ret i8* bitcast (%Slot (%Array*)* @t2_nomethod to i8*)
+}
 ; t2_mfind1(class, m, skip) -> m's code in class (unless skip) or, depth first,
 ; its @ISA; null.
 define internal i8* @t2_mfind1(%Str %c, %Str %m, i1 %skip) {

@@ -37,6 +37,22 @@ sub regex_result {
         ( $pat, $flags ) = ( $re->value // '', join '', ( $re->can('flags') ? $re->flags // '' : '' ), $flags );
         }
     }
+    # A WHOLE PATTERN THAT IS ONE POSTPONED SUBEXPRESSION, `/(??{ CODE })/`:
+    # perl's match is the leftmost of the pattern CODE gives, its groups its
+    # own (discarded). CODE only reading, how often perl runs it is unseen:
+    # run once, its value -- a qr value -- matched as a match against it is
+    # (a string there is a pattern built at run time: a stop, t2_qr_match).
+    if ( $m->operation eq 'RegexMatch' && @code == 1 && $flags eq '' && ( $pat // '' ) =~ /\A\(\?\?\{.*\}\)\z/s ) {
+        my $g = $Chalk::IR::Serialize::JSON::CODE_GRAPHS{ $m->code_bodies->[0] };
+        out('a postponed subexpression whose body does more than read')
+            if grep { $_->operation !~ /\A(?:Start|MemStart|Return|Constant|PadAccess|CellParam|CellRead|EntryDef)\z/ } $g->component;
+        out('a postponed subexpression whose match is read in list context') if _is_list($m);
+        out('a group of a postponed subexpression\'s match read (its groups are its own)')
+            if grep { $_->operation eq 'RegexCapture' && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($m) } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} );
+        $b->emit(op => 'SetWant', type => 'void', inputs => [ $b->emit(op => 'Const', type => 'i1', attr => { value => 0 }) ]);
+        my $qr = $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code[0], $b->emit(op => 'NewArray', type => '%Array*') ]);
+        return $b->{memo}{$k} = $b->emit_call(op => 'QrMatch', type => '%Slot', inputs => [ $qr, $subj ]);
+    }
     my @lit = map { $b->as( $b->value($_), '%Slot' ) } +($rlits // [])->@*;
     my %ro = @lit ? ( rlits => scalar @lit ) : ();
     $ro{codes} = scalar @code if @code;

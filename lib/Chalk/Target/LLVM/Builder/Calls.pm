@@ -170,10 +170,29 @@ sub call {
     }
     my $sub = $c->target;
     out( $c->name . ' is XS: there is no Perl source to compile' ) if $c->can('xs') && $c->xs;
+    # A SUB A GLOB IS GIVEN AT RUN TIME (and no other, here): found in its
+    # package's run-time stash where it is called (glob_call).
+    return $b->glob_call($c) if $b->is_glob_call($c);
     out('a direct call with no sub') unless blessed($sub) && $sub->can('graph') && $sub->graph;
     my $fn = $b->func($sub, $c->name);
+    # A SUB NO PACKAGE DEFINES, ITS PACKAGE'S AUTOLOAD RUN in its place
+    # (Analysis's target, the name it autoloads): perl sets that package's $AUTOLOAD to the full name
+    # called, first.
+    if ( defined( my $full = $c->can('autoloads') ? $c->autoloads : undef ) ) {
+        my $pkg = blessed( $sub->class ) ? $sub->class->name : $sub->class // 'main';
+        $b->emit(op => 'GStore', type => 'void', inputs => [ $b->as( $b->const_str($full), '%Slot' ) ], attr => { global => $b->global_named("${pkg}::AUTOLOAD") });
+    }
     my @args = $c->inputs->@*;
     pop @args if $c->can('memory_input') && $c->memory_input;
+    # A CLOSURE OF A METHOD READING ITS FIELDS is handed the object, last:
+    # called from that method only (its name is the closure's prefix).
+    my @self;
+    if ($fn->{self_arg}) {
+        my $in = $b->{func_name} // '';
+        out('a closure reading its method\'s fields, called other than from that method')
+            unless $b->{self} && length $in && ( $c->name // '' ) =~ /\A\Q$in\E::__ANON__/;
+        @self = ( $b->{self} );
+    }
     # `&f;` IS CALLED WITH THE CALLER'S OWN @_ (the same array: a shift there
     # is seen here): both must take @_ as an array.
     if ($c->can('shares_args') && $c->shares_args) {
@@ -182,13 +201,13 @@ sub call {
         if (!$fn->{list} && !$fn->{nargs} && !$fn->{signature}) {
             $b->hash_reads_settled('a call');
             $b->set_want($c) if $fn->{listret};
-            return $b->emit_call(op => 'Call', type => '%Slot', inputs => [], attr => { fn => $fn->{name} }, site => $c);
+            return $b->emit_call(op => 'Call', type => '%Slot', inputs => [@self], attr => { fn => $fn->{name} }, site => $c);
         }
         local $b->{argsarr} = $b->{argsarr} // ( $b->{in_func} ? undef : $b->emit(op => 'NewArgs', type => '%Array*') );
         out('an & call sharing @_ of a sub not taking it as a list') unless $fn->{list} && $b->{argsarr};
         $b->hash_reads_settled('a call');
         $b->set_want($c) if $fn->{listret};
-        return $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $b->{argsarr} ], attr => { fn => $fn->{name} }, site => $c);
+        return $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $b->{argsarr}, @self ], attr => { fn => $fn->{name} }, site => $c);
     }
     # A SIGNATURE WITH A SLURPY TAIL dies with too few arguments, or an odd
     # count into a slurpy hash (perl's "Too few arguments", "Odd name/value"):
@@ -206,7 +225,7 @@ sub call {
         my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
         $b->hash_reads_settled('a call');
         $b->set_want($c) if $fn->{listret};
-        return $b->emit_call(op => 'Call', type => '%Slot', inputs => [$arr], attr => { fn => $fn->{name} }, site => $c);
+        return $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $arr, @self ], attr => { fn => $fn->{name} }, site => $c);
     }
     out('a call of a sub with a signature of another arity (perl dies)')
         if $fn->{signature} && @args != $fn->{nargs};
@@ -214,8 +233,94 @@ sub call {
     $b->hash_reads_settled('a call');   # the sub may store into a hash
     push @pass, $b->emit(op => 'Undef', type => '%Slot') while @pass < $fn->{nargs};
     splice @pass, $fn->{nargs};
+    push @pass, @self;
     $b->set_want($c) if $fn->{listret};
     return $b->emit_call(op => 'Call', type => '%Slot', inputs => \@pass, attr => { fn => $fn->{name} }, site => $c);
+}
+
+# A GLOB'S CODE SLOT WRITTEN AT RUN TIME (`*name = sub {...}`, `*name =
+# \&other`): the sub is put in its package's run-time stash (the run-time MOP
+# make_mop builds) there, where it stands -- a call by that name finds it
+# from then on (glob_call), as can() and a method call do. A sub of no body
+# here, a closure (its cells are not the stash's to hold), a code value in a
+# variable, a sub the package also defines by name (calls of that name are
+# bound to it), and a local, are refused by name.
+# glob_code_writes -> { "Pkg::name" => [ its EntryWrites ] }.
+sub glob_code_writes {
+    my ($b) = @_;
+    return $b->{glob_code_writes} //= do {
+        my %w;
+        for my $n ( grep { $_->operation eq 'EntryWrite' } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} ) ) {
+            my $t = $n->inputs->[0];
+            next unless $t isa Chalk::IR::Node && $t->operation eq 'EntryDef' && ( $t->sigil // '' ) eq '&';
+            push $w{ ( $t->package // 'main' ) . '::' . $t->symbol }->@*, $n;
+        }
+        \%w;
+    };
+}
+
+# glob_stashes: at the start, each package whose glob a sub is stored into
+# has its run-time stash (make_mop made those of the MOP's classes already).
+sub glob_stashes {
+    my ($b) = @_;
+    my %pkg = map { /\A(.*)::[^:]+\z/ ? ( $1 => 1 ) : () } keys $b->glob_code_writes->%*;
+    $b->emit(op => 'MopClass', type => 'void', inputs => [ $b->const_str($_) ]) for grep { !$b->{mop_classes}{$_} } sort keys %pkg;
+}
+
+# glob_code_write($EntryWrite): the sub put in its package's stash, here.
+sub glob_code_write {
+    my ($b, $s) = @_;
+    my ($t, $v) = $s->inputs->@*;
+    out('a local of a glob') if $s->can('local') && $s->local;
+    my ( $pkg, $name ) = ( $t->package // 'main', $t->symbol );
+    my $cls = $b->{mop} ? $b->{mop}->for_class($pkg) : undef;
+    out("a glob given a sub where its package defines one by that name ($pkg\::$name)") if $cls && grep { $_->name eq $name } $cls->subs;
+    my $sub;
+    if ( blessed($v) && $v->operation eq 'AnonSub' ) {
+        $sub = $v->sub;
+        out('a glob given a closure (its cells are not the stash\'s to hold)')
+            if blessed($sub) && $sub->graph && grep { $_->operation eq 'CellParam' } $sub->graph->component;
+    }
+    elsif ( blessed($v) && $v->operation eq 'Ref' && blessed( $v->inputs->[0] ) && $v->inputs->[0]->operation eq 'Constant'
+            && ( $v->inputs->[0]->const_type // '' ) eq 'code' ) {
+        my $q = $v->inputs->[0]->value // '';
+        my ( $qp, $qs ) = $q =~ /\A(.*)::(\w+)\z/ ? ( $1, $2 ) : ( 'main', $q );
+        my $qc = $b->{mop} ? $b->{mop}->for_class($qp) : undef;
+        ($sub) = $qc ? grep { $_->name eq $qs && $_->graph } $qc->subs : ();
+        out("a glob given a reference to a sub not here ($q)") unless $sub;
+    }
+    else { out('a glob given a code value held in a variable') }
+    out('a glob given a sub of no body here') unless blessed($sub) && $sub->can('graph') && $sub->graph;
+    my $fn = $b->func( $sub, "$pkg\::$name" );
+    out('a glob given a sub T2 calls other than through its stash') if $fn->{closure} || $fn->{self_arg} || $fn->{direct_only} && !$fn->{arity};
+    $b->emit(op => 'MopDef', type => 'void', inputs => [ $b->const_str($pkg), $b->const_str($name) ], attr => { fn => $fn->{name} });
+}
+
+# is_glob_call($Call) -> true for a direct call of a name no sub here is
+# bound to, whose glob a sub is stored into at run time.
+sub is_glob_call {
+    my ($b, $c) = @_;
+    return 0 unless blessed($c) && $c->operation eq 'Call' && ( $c->dispatch_kind // '' ) eq 'direct';
+    my $t = $c->target;
+    return 0 if blessed($t) && $t->can('graph') && $t->graph;
+    return $b->glob_code_writes->{ $c->name // '' } ? 1 : 0;
+}
+
+# glob_call($Call) -> a call by name of a sub a glob is given at run time:
+# @_ built (aliased), the sub found in its package's run-time stash (or
+# perl's die, "Undefined subroutine"), its wrapper called in the call's context.
+sub glob_call {
+    my ($b, $c) = @_;
+    out('an & call of a sub a glob is given at run time') if $c->can('shares_args') && $c->shares_args;
+    my ( $pkg, $name ) = ( $c->name // '' ) =~ /\A(.*)::([^:]+)\z/ or out('a call of a glob\'s sub of no package');
+    my @args = $c->inputs->@*;
+    pop @args if $c->can('memory_input') && $c->memory_input;
+    my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
+    $b->hash_reads_settled('a call');
+    $b->set_want($c);
+    my $at = ' at ' . ( $c->can('file') ? $c->file // '-' : '-' ) . ' line ' . ( $c->can('line') ? $c->line // 0 : 0 ) . ".\n";
+    my $fp = $b->emit(op => 'SubFind', type => 'i8*', inputs => [ $b->const_str($pkg), $b->const_str($name), $b->const_str($at) ]);
+    return $b->emit_call(op => 'MCall', type => '%Slot', inputs => [ $fp, $arr ], site => $c);
 }
 
 # THE RUN-TIME MOP: perl's classes as data the program holds. Each package is
@@ -250,6 +355,7 @@ sub make_mop {
     for my $cls (@classes) {
         my $cs = $b->const_str($cls->name);
         $b->emit(op => 'MopClass', type => 'void', inputs => [$cs]);
+        $b->{mop_classes}{ $cls->name } = 1;
         $b->emit(op => 'MopIsa', type => 'void', inputs => [ $cs, $b->const_str($cls->parent_name) ])
             if defined $cls->parent_name && length $cls->parent_name;
         # (A SPECIAL CONTAINER'S METAOBJECT CLASS -- Chalk::Impl::* -- every sub:
@@ -259,6 +365,7 @@ sub make_mop {
         for my $sub (@sub{ sort keys %sub }) {
             my $fn = $b->func($sub, $cls->name . '::' . $sub->name);
             out('a sub of a signature T2 checks at its calls, called other than directly') if $fn->{direct_only} && !$fn->{arity};
+            out('a closure reading its method\'s fields, in its stash') if $fn->{self_arg};
             $b->emit(op => 'MopDef', type => 'void', inputs => [ $cs, $b->const_str($sub->name) ], attr => { fn => $fn->{name} });
         }
         # AN UNLOADED SUB (a module's, never reached) is in its stash by name,
@@ -723,7 +830,7 @@ sub scalar_arg {
     my ($b, $n) = @_;
     return $b->as($b->value($n), '%Slot') unless _is_list($n);
     out('a call passing a list') unless $n->operation eq 'Call';
-    if (( $n->dispatch_kind // '' ) eq 'direct' && ( ( $n->name // '' ) !~ /__(?:ANON|EVAL)__/ || $b->plain_anon($n) )) {
+    if (( $n->dispatch_kind // '' ) eq 'direct' && !$b->is_glob_call($n) && ( ( $n->name // '' ) !~ /__(?:ANON|EVAL)__/ || $b->plain_anon($n) )) {
         my $r = $b->value($n);
         my $t = $n->target;
         my $fn = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;
@@ -896,6 +1003,15 @@ sub func {
         $margs{ refaddr($_) } = $_->index + 1 for grep { $_->operation eq 'Parameter' && ( $_->can('sigil') ? $_->sigil // '$' : '$' ) eq '$' } @gn;
         $margs{np} = $np;
     }
+    # A SUB MADE IN A METHOD READING ITS FIELDS (`method n { my $in = sub
+    # ($k) { exists $m{$k} } ... }`): perl's closure over the method's pad, a
+    # field among it. Called directly (B::SoN resolved it) only from the
+    # method that makes it, it is handed that method's object as a last,
+    # hidden argument (self_arg): its fields are that object's. As a code
+    # value (one that may be called anywhere) it is refused.
+    my $self_arg = !$is_method && grep { $_->operation eq 'FieldAccess' } $g->component;
+    out("closure $name reads a field of its method's object, as a code value") if $self_arg && $closure;
+    out("sub $name reads a field and is no closure of a method") if $self_arg && $name !~ /::__ANON__/;
     my $an = bless {}, 'Chalk::Target::LLVM::Context';
     my @reads = $is_method ? () : eval { $an->_collect_positional_arg_reads($g, $name) };
     # @_ READ AS A LIST (join(@_), "@_", scalar(@_), for (@_)): the sub takes
@@ -1045,7 +1161,7 @@ sub func {
     my $fn = $b->{funcs}{ refaddr($sub) } = { name => "\@f_$id", wrapper => "\@w_$id", nargs => $nargs,
         signature => $sig, list => $list, listret => $listret, list_copy => ( $ctxlist ? 1 : 0 ), closure => $closure, blocks => [] , minargs => ( $optional ? ( $decl->{mandatory} // 0 ) - $decl->{optional} : $slurpy && $sig ? scalar @positional : undef ),
         maxargs => ( $optional && !$slurpy ? $decl->{mandatory} // 0 : undef ),
-        direct_only => ( $optional || $padded ? 1 : 0 ), sig_min => $cmin, sig_max => $cmax,
+        direct_only => ( $optional || $padded || $self_arg ? 1 : 0 ), self_arg => ( $self_arg ? 1 : 0 ), sig_min => $cmin, sig_max => $cmax,
         slurpy_sigil => ( $slurpy && $sig ? ( $slurpy->can('sigil') ? $slurpy->sigil // '@' : '@' ) : undef ) };
     # A SIGNATURE'S ARITY, checked by its wrapper (a method call's entry):
     # perl's die naming the sub where another count is passed.
@@ -1077,6 +1193,9 @@ sub func {
     local $b->{args} = $is_method ? { map { ( $_ => $argn[ $margs{$_} ] ) } grep { $_ ne 'np' && $_ ne 'slurpy' } keys %margs }
                                   : { ( map { ( refaddr( $reads[$_] ) => $argn[$_] ) } 0 .. $#reads ), ( map { ( refaddr( $_->[0] ) => $argn[ $_->[1] ] ) } @also ) };
     local $b->{self} = $is_method ? $argn[0] : undef;   # a field's object
+    # (a closure of a method reading its fields: the object it is handed)
+    if ($self_arg) { $b->{self} = Chalk::Target::LLVM::Node::_n(op => 'Arg', type => '%Slot', attr => { index => -1 }); $b->{self}->set_name('%self') }
+    local $b->{func_name} = $name;
     local $b->{cells} = $closure ? $o{cells} : undef;
     local $b->{env} = $closure ? do { my $e = Chalk::Target::LLVM::Node::_n(op => 'Arg', type => '%Slot**', attr => { index => 1 }); $e->set_name('%env'); $e } : undef;
     local $b->{own_nodes} = [ $g->component ];
@@ -1224,6 +1343,12 @@ sub func {
         $fn->{listret} = 1;
         $r = $b->as($b->value($tail), '%Slot');
     }
+    elsif ($tail && $b->is_glob_call($tail)) {
+        # A TAIL CALL OF A SUB A GLOB IS GIVEN AT RUN TIME (glob_call): its
+        # wrapper's, by the context handed on, as a method's.
+        $fn->{listret} = 1;
+        $r = $b->as($b->value($tail), '%Slot');
+    }
     elsif ($tail) {
         # A TAIL CALL OF A SUB RETURNING A LIST: its result as it is (the
         # list's reference or its scalar, by the context handed on).
@@ -1306,6 +1431,22 @@ sub selects {
         _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
 }
 
+# _after_close($version, $fh, \@nodes) -> the memory version $version stands
+# on the control chain after the close of the handle $fh (a `my $fh` opened
+# once among @nodes): back along the chain from it, straight, the close is met.
+sub _after_close {
+    my ($ver, $fh, $nodes) = @_;
+    my $sym = $fh->can('symbol') ? $fh->symbol // '' : '';
+    my $is_fh = sub ($x) { blessed($x) && $x->operation eq 'PadAccess' && ( $x->symbol // '' ) eq $sym };
+    my $opens = grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'builtin' && ( $_->name // '' ) eq 'open' && $is_fh->( $_->inputs->[0] ) } @$nodes;
+    return 0 unless $opens == 1;
+    my %been;
+    for ( my $c = $ver; blessed($c) && !$been{ refaddr($c) }++; $c = $c->can('control_in') ? $c->control_in : undef ) {
+        return 1 if $c->operation eq 'Call' && ( $c->dispatch_kind // '' ) eq 'builtin' && ( $c->name // '' ) eq 'close' && $is_fh->( $c->inputs->[0] );
+    }
+    return 0;
+}
+
 # io_value($Call) -> open, close, eof, readline, select of a handle.
 sub io_value {
     my ($b, $v) = @_;
@@ -1334,11 +1475,14 @@ sub io_value {
             # B::SoN versions no memory at a print to a handle: a read of the
             # variable before the close is one node with any read after the
             # open (a copy taken between two prints read what the last left).
-            # Read only after a close, it is what the prints wrote.
+            # Read only after a close, it is what the prints wrote: a read whose
+            # memory version stands after the handle's close on the control
+            # chain (the close itself, or a statement the chain reaches from
+            # it), the handle opened once here.
             out('a variable a handle writes, read other than after a close')
                 if ( $var->can('shared') && $var->shared )
                 || grep { refaddr($_) != refaddr($var) && ( $_->symbol // '' ) eq $var->symbol && !_opens_it($_)
-                          && !( blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'Call' && ( $_->inputs->[0]->name // '' ) eq 'close' ) }
+                          && !_after_close( $_->inputs->[0], $fh, $b->{own_nodes} ) }
                    grep { $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' } +($b->{own_nodes} // [])->@*;
             $h = $b->emit(op => 'FhWOpen', type => '%Slot', inputs => [ $b->location($var) ], attr => { trunc => $m eq '>' });
         }

@@ -19,6 +19,8 @@ class Chalk::Target::LLVM::Node::MopIsaSet :isa(Chalk::Target::LLVM::Node) { met
 class Chalk::Target::LLVM::Node::MopDef :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { 'call void @t2_mop_def(' . $self->_args($self->inputs->@*) . ', i8* bitcast (%Slot (%Array*)* ' . $self->attr->{fn} . '_w to i8*))' }
 }
+# a sub by its package and name from the run-time stash (t2_sub_find): its wrapper, or perl's die.
+class Chalk::Target::LLVM::Node::SubFind :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i8* @t2_sub_find') } }
 class Chalk::Target::LLVM::Node::MResolve :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { $self->name . ' = call i8* @t2_mresolve(' . $self->_args($self->inputs->@*) . ', i8 ' . $self->attr->{mode} . ')' }
 }
