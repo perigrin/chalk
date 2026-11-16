@@ -237,6 +237,33 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # changes_case -> true for lc, uc, lcfirst, ucfirst.
     method changes_case() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'changes_case' ) ? 1 : 0 }
 
+    # case_change -> which case, of what: 'upper' (uc), 'lower' (lc),
+    # 'upper_first' (ucfirst), 'lower_first' (lcfirst); else undef.
+    method case_change() { return $self->is_builtin ? Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'changes_case' ) : undef }
+
+    # may_be_undef -> true for a builtin whose value may be undef (substr
+    # outside its string, blessed of no object, -d and -e of nothing there).
+    method may_be_undef() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'may_be_undef' ) ? 1 : 0 }
+
+    # builtin_family -> the kind of builtin it is (number, path, substring,
+    # object, array, list, warning, scalar: BuiltinTable says what each
+    # holds), or undef.
+    method builtin_family() { return $self->is_builtin ? Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'family' ) : undef }
+
+    # number_kind -> what number a numeric builtin makes of its operand:
+    # 'integer_part' (int), 'absolute' (abs), 'random' (rand), 'numeral'
+    # (hex, oct); else undef.
+    method number_kind() { return $self->is_builtin ? Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'number_kind' ) : undef }
+
+    # reads_state -> true for a builtin whose value is of state a later
+    # store may change (a hash's keys, a list's join, %SIG's __WARN__ ...):
+    # it is read where it stands.
+    method reads_state() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'reads_state' ) ? 1 : 0 }
+
+    # changes_state -> true for a builtin that changes state a later read
+    # sees (chdir the working directory, require %INC).
+    method changes_state() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'changes_state' ) ? 1 : 0 }
+
     # is_tie_builtin -> true for tie, tied, untie: each of a variable's tie.
     method is_tie_builtin() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'tie' ) ? 1 : 0 }
 

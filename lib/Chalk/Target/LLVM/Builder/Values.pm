@@ -11,55 +11,59 @@ use Scalar::Util qw(blessed refaddr);
 my %SCALAR = (Int => 'i64', Num => 'double', Str => '%Str', Boolean => 'i1', Undef => '%Slot', Scalar => '%Slot');
 my %ARITH  = (Add => 'add', Subtract => 'sub', Multiply => 'mul');
 my %SCMP   = (StrEq => 'eq', StrNe => 'ne', StrLt => 'lt', StrGt => 'gt', StrLe => 'le', StrGe => 'ge');
+# t2_strcase's mode, by the case T1 says a case function changes to (Call::case_change).
+my %CASE_MODE = (upper => 0, lower => 1, upper_first => 2, lower_first => 3);
 my %CMP    = (NumLt => 'lt', NumGt => 'gt', NumLe => 'le', NumGe => 'ge', NumEq => 'eq', NumNe => 'ne');
 
-# T2'S BUILTINS: what T2 makes of a builtin, by name -- the functor from a
-# builtin to T2, in one place. Not a fact of perl's about the builtin (those
-# are Chalk::IR::Node::Call's, read from BuiltinTable and TypeLibrary): how T2
-# holds its value and which of T2's emitters makes it.
-#   type      its T2 type, where that is one in every context (one whose type
-#             follows its context -- caller, keys, sort, localtime, readline --
-#             is type_of's own case):
-#               %Slot   may be undef or either kind of number: substr outside
-#                       its string, int, rand, abs, hex and oct (a UV too), -d, chdir, reftype, a shift or
-#                       pop, an object (bless; blessed's class or undef), -e
-#               i64     require's 1, index's position
-#               %Array* a list always: unpack's, glob's, each's
-#               %Str    join's string
-#   value     the emitter of its value (a builtin made elsewhere -- an array's,
-#             a hash's, a handle's -- is in array_value, hash_value, io_value)
-#   node      number_value's: the T2 op that makes it
-#   in_place  where B::SoN pins it, T2 makes its value where it stands (walk):
-#             'passed' -- a read it waits on also settled before a later store
-#             -- or 'value'
-our %T2_BUILTIN = (
-    ( map { ( $_ => { type => '%Slot' } ) }   qw(shift pop blessed reftype_of_ref) ),
-    ( map { ( $_ => { type => '%Array*' } ) } qw(unpack glob) ),
-    join     => { type => '%Str', in_place => 'passed' },
-    each     => { type => '%Array*', in_place => 'passed' },
-    ( map { ( $_ => { in_place => 'passed' } ) } qw(keys values sort caller pos tie untie) ),
-    bless    => { type => '%Slot', in_place => 'passed' },
-    formline => { value => 'builtin_value', in_place => 'passed' },
-    ftdir    => { type => '%Slot', value => 'path_value' },
-    chdir    => { type => '%Slot', value => 'path_value', in_place => 'value' },
-    require  => { type => 'i64',   value => 'path_value', in_place => 'value' },
-    int      => { type => '%Slot', value => 'number_value', node => 'IntOf' },
-    rand     => { type => '%Slot', value => 'number_value', node => 'Rand' },
-    abs      => { type => '%Slot', value => 'number_value', node => 'AbsOf' },
-    ( map { ( $_ => { type => '%Slot', value => 'number_value', node => 'HexOct' } ) } qw(hex oct) ),
-    substr   => { type => '%Slot', value => 'substr_value' },
-    index    => { type => 'i64',   value => 'substr_value' },
-    ftis     => { type => '%Slot', value => 'builtin_value' },
-    ( map { ( $_ => { value => 'builtin_value' } ) } qw(chr ord time reverse sprintf lock prototype pack) ),
-    warn     => { type => '%Slot', value => 'warn_value', in_place => 'passed' },
+# T2'S BUILTINS, by what T1 says they are -- never by name. Perl's facts
+# about a builtin are Chalk::IR::Node::Call's, read from BuiltinTable and
+# TypeLibrary: what it returns (result_type, may_be_undef), the kind of
+# builtin it is (builtin_family), the state it reads or changes
+# (reads_state, changes_state: where B::SoN pins it, walk makes it where it
+# stands). What T2 makes of each kind is here.
+#
+# THE EMITTER of a builtin's value, by its family. (A builtin made
+# elsewhere -- an array's, a hash's, a handle's, an object's -- is in
+# array_value, hash_value, io_value, value.)
+my %FAMILY_VALUE = (
+    number    => 'number_value',
+    path      => 'path_value',
+    substring => 'substr_value',
+    warning   => 'warn_value',
+    scalar    => 'builtin_value',
 );
 
-# t2_builtin($Call, $column) -> what T2's table says of a builtin's call, or undef.
-sub t2_builtin {
-    my ($v, $col) = @_;
-    return undef unless $v->operation eq 'Call' && $v->is_builtin;
-    my $e = $T2_BUILTIN{ $v->name // '' } or return undef;
-    return $e->{$col};
+# THE T2 TYPE of what a builtin is declared to return: an Int an i64, a Str a
+# %Str, a List an %Array* (each such builtin is refused in scalar context:
+# list_only, array_value's each). Any other -- a Scalar, a number that may be
+# an IV, a UV or an NV, a yes or no (1 or ''), anything that may be undef --
+# a %Slot, read by its tag.
+my %DECLARED = (Int => 'i64', Str => '%Str', List => '%Array*');
+
+# THE NODE that makes a number family's value, by what number it makes.
+my %NUMBER_NODE = (integer_part => 'IntOf', random => 'Rand', absolute => 'AbsOf', numeral => 'HexOct');
+
+# builtin_type($node) -> a builtin's T2 type where its family makes it one in
+# every context (from what T1 says it returns), else undef. The scalar
+# family's is its stamp's, as any value's (reverse's a list in a list). An
+# object family's is a %Slot: a reference, its class or its kind, each the
+# runtime's answer, read by its tag.
+sub builtin_type {
+    my ($v) = @_;
+    return undef unless $v->operation eq 'Call';
+    my $fam = $v->builtin_family // return undef;
+    return undef if $fam eq 'scalar';
+    return '%Slot' if $fam eq 'object' || $v->may_be_undef;
+    return $DECLARED{ $v->result_type // '' } // '%Slot';
+}
+
+# builtin_emitter($node) -> the name of T2's emitter of a builtin's value, by
+# its family, else undef.
+sub builtin_emitter {
+    my ($v) = @_;
+    return undef unless $v->operation eq 'Call';
+    my $fam = $v->builtin_family // return undef;
+    return $FAMILY_VALUE{$fam};
 }
 
 # phi_type($Phi) -> a merge's T2 type: its stamp's, except a Str (a Num may
@@ -330,7 +334,7 @@ sub type_of {
     return '%Slot' if $op eq 'Delete' && $hk eq 'hash';
     return ( $v->stamp // '' ) eq 'Scalar' ? '%Slot' : '%Array*'   # static type
         if $op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'builtin' && ( $v->name // '' ) eq 'caller';
-    if ( my $t = t2_builtin( $v, 'type' ) ) { return $t }
+    if ( my $t = builtin_type($v) ) { return $t }
     if ($op eq 'Call' && $v->lists_a_hash) {
         return $v->lists_a_hash eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar' ? 'i64' : '%Array*';
     }
@@ -679,8 +683,7 @@ sub _value {
         my @a = grep { blessed($_) } $v->inputs->@*;
         pop @a if $v->can('memory_input') && $v->memory_input;
         out('a case change of other than one argument') unless @a == 1;
-        my %mode = (uc => 0, lc => 1, ucfirst => 2, lcfirst => 3);
-        my $m = $b->emit(op => 'Const', type => 'i64', attr => { value => $mode{ $v->name } });
+        my $m = $b->emit(op => 'Const', type => 'i64', attr => { value => $CASE_MODE{ $v->case_change } });
         return $b->emit(op => 'StrCase', type => '%Str', inputs => [ $b->as($b->value($a[0]), '%Str'), $m ]);
     }
     if ($op eq 'Length') {
@@ -729,7 +732,7 @@ sub _value {
         $b->{strs}{$c} //= scalar keys $b->{strs}->%*;
         return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => $c, id => $b->{strs}{$c} });
     }
-    if ( my $m = t2_builtin( $v, 'value' ) ) { return $b->$m($v, $ty) }
+    if ( my $m = builtin_emitter($v) ) { return $b->$m($v, $ty) }
     if ($op eq 'Coerce') {
         # TO Undef IS NOT A CONVERSION: undef has no value to convert into, and
         # boxing the value would keep it.
@@ -960,8 +963,9 @@ sub _value {
 }
 
 # -d PATH: a directory (1), something else there (''), nothing (undef).
-# chdir PATH: 1, or '' where it could not. A require of a file B::SoN
-# followed is done -- its subs are compiled in (1); of any other, not T2's.
+# -e PATH: something there (1), nothing (undef). chdir PATH: 1, or '' where
+# it could not. A require of a file B::SoN followed is done -- its subs are
+# compiled in (1); of any other, not T2's.
 sub path_value {
     my ($b, $v, $ty) = @_;
     my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
@@ -980,7 +984,8 @@ sub path_value {
             if $b->special_containers->{'%INC'};
         return $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => 1 }), $ty );
     }
-    return $b->as( $b->emit(op => $v->name eq 'ftdir' ? 'FtDir' : 'Chdir', type => '%Slot', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty );
+    my $op = $v->name eq 'ftdir' ? 'FtDir' : $v->name eq 'ftis' ? 'FtIs' : 'Chdir';
+    return $b->as( $b->emit(op => $op, type => '%Slot', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty );
 }
 
 # int(X): X's integer (pp_int: an IV or a UV while one holds it). rand(X):
@@ -991,7 +996,7 @@ sub number_value {
     my $name = $v->name;
     my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
     out("a $name of no argument (of \$_)") if $name ne 'rand' && !@a;
-    my $node = t2_builtin( $v, 'node' );
+    my $node = $NUMBER_NODE{ $v->number_kind };
     if ( $node eq 'HexOct' ) {
         my $s = $b->as( $b->value( $a[0] ), '%Str' );
         out("a $name where a string goes past ASCII") if $b->past_ascii;
@@ -1107,7 +1112,7 @@ sub warn_value {
     return $b->as( $b->emit_call(op => 'Warn', type => '%Slot', inputs => [ $m, $at ]), $ty );
 }
 
-# builtin_value($Call, $ty) -> a builtin of one value: chr, ord, time, -e,
+# builtin_value($Call, $ty) -> a builtin of one value: chr, ord, time,
 # reverse in scalar context, sprintf, lock.
 sub builtin_value {
     my ($b, $v, $ty) = @_;
@@ -1159,7 +1164,6 @@ sub builtin_value {
     out("a $name of a list") if _is_list( $a[0] );
     # lock: perl's without threads is a no-op, its value its argument.
     return $b->as( $b->value( $a[0] ), $ty ) if $name eq 'lock';
-    return $b->as( $b->emit(op => 'FtIs', type => '%Slot', inputs => [ $b->as( $b->value( $a[0] ), '%Str' ) ]), $ty ) if $name eq 'ftis';
     # chr, ord: of a byte -- perl's are of a character, the same while no string goes past ASCII.
     out("a $name where a string goes past ASCII") if $b->past_ascii;
     return $b->as( $b->emit(op => 'Chr', type => '%Str', inputs => [ $b->as( $b->value( $a[0] ), '%Slot' ) ]), $ty ) if $name eq 'chr';

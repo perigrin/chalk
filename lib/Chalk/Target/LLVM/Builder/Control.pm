@@ -116,7 +116,7 @@ sub walk {
         # FETCHSIZE or EXISTS call, made here, in order.
         elsif ($op eq 'RegexSubst' || $op eq 'Transliterate') { $b->regex_subst_stmt($s); push $b->{passed}->@*, $s; $ctl = $s }
         elsif ($op =~ /\A(?:Subscript|Count|Exists|PostfixDeref|FieldAccess|RegexMatch|Match|BitAnd|BitOr|BitXor|Complement|LeftShift|RightShift)\z/
-               || $op eq 'Call' && ( t2_builtin( $s, 'in_place' ) // '' ) eq 'passed') {
+               || $op eq 'Call' && $s->reads_state) {
             # (A WHOLE ARRAY THROUGH AN ELEMENT, COUNTED, read where B::SoN pinned
             # it -- `scalar @{ $h->{l} }`: one that is no array there stops, see
             # array_of. Read as a list it stays refused there.)
@@ -137,7 +137,7 @@ sub walk {
         }
         # A HANDLE'S open, close, readline, eof, select, where it stands. (A
         # format's formline, a tie OR untie -- every later access of the
-        # container is the new metaobject's -- and a bless: %T2_BUILTIN's in_place.)
+        # container is the new metaobject's -- and a bless: Call::reads_state.)
         elsif ($op eq 'Call' && $s->does_handle_io) {
             $b->value($s);
             push $b->{passed}->@*, $s;
@@ -393,7 +393,7 @@ sub walk {
         # there; one in a loop body or an arm) is made there.
         elsif ($op eq 'HashLiteral' && ( $s->stamp // '' ) eq 'Hash') { $b->value($s) if defined $s->symbol; $ctl = $s }
         # A chdir OR A require is made where it stands (the next -d reads its cwd).
-        elsif ($op eq 'Call' && ( t2_builtin( $s, 'in_place' ) // '' ) eq 'value') { $b->value($s); $ctl = $s }
+        elsif ($op eq 'Call' && $s->changes_state) { $b->value($s); $ctl = $s }
         # A lock is a no-op without threads (its operand the variable, not a value).
         elsif ($op eq 'Call' && ( $s->dispatch_kind // '' ) eq 'builtin' && ( $s->name // '' ) eq 'lock') { $ctl = $s }
         # `$#a = N` where it stands: the array resized (t2_aset_len).

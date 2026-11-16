@@ -108,6 +108,66 @@ subtest 'does_handle_io: an operation on a filehandle' => sub {
     ok( !sub_call( 'method', 'close' )->does_handle_io, 'a method named close is not the builtin' );
 };
 
+subtest 'result_type: what each builtin returns, where the signatures do not say' => sub {
+    is( builtin($_)->result_type, 'Num', "$_: a number (an IV, a UV or an NV)" ) for qw(int abs rand hex oct);
+    is( builtin('require')->result_type, 'Int', 'require: 1' );
+    is( builtin('index')->result_type, 'Int', 'index: a position (-1 for none)' );
+    is( builtin($_)->result_type, 'Boolean', "$_: yes or no" ) for qw(chdir ftdir ftis);
+    is( builtin('blessed')->result_type, 'Str', 'blessed: a class name' );
+    is( builtin('reftype_of_ref')->result_type, 'Str', 'ref \\$x: a kind of thing' );
+};
+
+subtest 'may_be_undef: a builtin whose value may be undef' => sub {
+    ok( builtin($_)->may_be_undef, "$_ may be undef" ) for qw(substr blessed ftdir ftis);
+    ok( !builtin($_)->may_be_undef, "$_ is not" ) for qw(index join chdir require reftype_of_ref);
+    ok( !sub_call( 'direct', 'substr' )->may_be_undef, 'a sub named substr is not the builtin' );
+};
+
+subtest 'builtin_family: the kind of builtin it is' => sub {
+    my %want = (
+        number    => [qw(int abs rand hex oct)],
+        path      => [qw(ftdir ftis chdir require)],
+        substring => [qw(substr index)],
+        object    => [qw(bless blessed reftype_of_ref)],
+        array     => [qw(shift pop)],
+        list      => [qw(join unpack glob each)],
+        warning   => [qw(warn)],
+        scalar    => [qw(chr ord time reverse sprintf lock prototype pack formline)],
+    );
+    for my $fam ( sort keys %want ) { is( builtin($_)->builtin_family, $fam, "$_: $fam" ) for $want{$fam}->@* }
+    is( builtin('lc')->builtin_family, undef, 'lc: none' );
+    is( sub_call( 'direct', 'int' )->builtin_family, undef, 'a sub named int: none' );
+};
+
+subtest 'number_kind: what number a numeric builtin makes of its operand' => sub {
+    is( builtin('int')->number_kind,  'integer_part', 'int: its integer part' );
+    is( builtin('abs')->number_kind,  'absolute',     'abs: its absolute value' );
+    is( builtin('rand')->number_kind, 'random',       'rand: a random number below it' );
+    is( builtin($_)->number_kind, 'numeral', "$_: a numeral read" ) for qw(hex oct);
+    is( builtin('substr')->number_kind, undef, 'substr: none' );
+};
+
+subtest 'case_change: which case, of what' => sub {
+    is( builtin('uc')->case_change,      'upper',       'uc' );
+    is( builtin('lc')->case_change,      'lower',       'lc' );
+    is( builtin('ucfirst')->case_change, 'upper_first', 'ucfirst' );
+    is( builtin('lcfirst')->case_change, 'lower_first', 'lcfirst' );
+    is( builtin('quotemeta')->case_change, undef, 'quotemeta: none' );
+};
+
+subtest 'reads_state: its value is of state a later store may change' => sub {
+    ok( builtin($_)->reads_state, "$_ reads it" )
+        for qw(keys values each sort caller pos tie untie bless formline join warn);
+    ok( !builtin($_)->reads_state, "$_ does not" ) for qw(chdir require int substr lc);
+    ok( !sub_call( 'direct', 'keys' )->reads_state, 'a sub named keys is not the builtin' );
+};
+
+subtest 'changes_state: it changes state a later read sees' => sub {
+    ok( builtin($_)->changes_state, "$_ changes it" ) for qw(chdir require);
+    ok( !builtin($_)->changes_state, "$_ does not" ) for qw(ftdir keys int);
+    ok( !sub_call( 'direct', 'chdir' )->changes_state, 'a sub named chdir is not the builtin' );
+};
+
 subtest 'is_perls_own: a name perl gives its own meaning, by sigil' => sub {
     my $e = sub ($sigil, $symbol) { $f->make('EntryDef', sigil => $sigil, symbol => $symbol, package => 'main') };
     ok( $e->( '$', $_ )->is_perls_own, "\$$_ is perl's" ) for qw(ENV INC ARGV STDIN STDOUT STDERR 0 AUTOLOAD);

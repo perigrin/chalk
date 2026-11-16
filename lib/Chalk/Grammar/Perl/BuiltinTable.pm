@@ -1,5 +1,5 @@
-# ABOUTME: Per-builtin facts the type signatures (TypeLibrary) do not hold: which builtins
-# ABOUTME: change case, work a tie or a handle, take or return a LIST. Sits beside KeywordTable.
+# ABOUTME: Per-builtin facts the type signatures (TypeLibrary) do not hold: what a builtin returns,
+# ABOUTME: its kind, the state it reads or changes, a tie, a handle, a LIST. Sits beside KeywordTable.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -18,11 +18,11 @@ use experimental 'class';
 class Chalk::Grammar::Perl::BuiltinTable {
     my %FACTS = (
         # THE CASE FUNCTIONS (perlfunc: lc, lcfirst, uc, ucfirst): a string of
-        # their argument's, in another case.
-        lc        => { changes_case => 1, return_type => 'Str' },
-        uc        => { changes_case => 1, return_type => 'Str' },
-        lcfirst   => { changes_case => 1, return_type => 'Str' },
-        ucfirst   => { changes_case => 1, return_type => 'Str' },
+        # their argument's, in another case (which: changes_case, below).
+        lc        => { return_type => 'Str' },
+        uc        => { return_type => 'Str' },
+        lcfirst   => { return_type => 'Str' },
+        ucfirst   => { return_type => 'Str' },
         quotemeta => { return_type => 'Str' },
 
         # THE TIE FUNCTIONS (perlfunc: tie, tied, untie): each of a variable's
@@ -90,6 +90,83 @@ class Chalk::Grammar::Perl::BuiltinTable {
         select  => { handle_io => 1 },
         sselect => { handle_io => 1 },
     );
+
+    # COLUMNS GIVEN A COLUMN AT A TIME, each builtin it names merged into its
+    # row above (a builtin may be in several).
+    my @COLUMNS = (
+        # WHAT IT RETURNS, for a builtin TypeLibrary has no signature for.
+        # A number of its operand's (perlfunc: "Numeric functions") -- an
+        # IV, a UV or an NV as it comes out: int(1e20) is an NV, hex of 16
+        # f's a UV. require's 1 (a file already loaded, or one B::SoN
+        # followed). index's position, -1 for none. Yes or no: perl's
+        # chdir, -d and -e (1 or ''). blessed's class name, the kind of thing
+        # `ref \$x` names (B::SoN's reftype_of_ref).
+        return_type => {
+            ( map { ( $_ => 'Num' ) } qw(int abs rand hex oct) ),
+            require => 'Int', index => 'Int',
+            ( map { ( $_ => 'Boolean' ) } qw(chdir ftdir ftis) ),
+            blessed => 'Str', reftype_of_ref => 'Str',
+        },
+
+        # ITS VALUE MAY BE UNDEF: substr outside its string, blessed of what
+        # is not an object, -d and -e of nothing there.
+        may_be_undef => { map { ( $_ => 1 ) } qw(substr blessed ftdir ftis) },
+
+        # THE KIND OF BUILTIN IT IS (after perlfunc's "Perl Functions by
+        # Category", one each):
+        #   number     a number of its operand: int, abs, rand, hex, oct
+        #   path       of a file it is given the name of: a file test (-d,
+        #              -e), the directory chdir changes to, the file
+        #              require loads
+        #   substring  a piece of a string (substr), or where one is (index)
+        #   object     what a reference is: bless, blessed, `ref \$x`
+        #   array      an element taken off an array's end: shift, pop
+        #   list       a LIST made or taken whole: join's (a string of one),
+        #              unpack's and glob's (a list), each's (a key and value)
+        #   warning    a message to the warn handler or STDERR: warn
+        #   scalar     one scalar of its operands: chr, ord, time, reverse
+        #              (in scalar context), sprintf, lock, prototype, pack,
+        #              formline
+        family => {
+            ( map { ( $_ => 'number' ) }    qw(int abs rand hex oct) ),
+            ( map { ( $_ => 'path' ) }      qw(ftdir ftis chdir require) ),
+            ( map { ( $_ => 'substring' ) } qw(substr index) ),
+            ( map { ( $_ => 'object' ) }    qw(bless blessed reftype_of_ref) ),
+            ( map { ( $_ => 'array' ) }     qw(shift pop) ),
+            ( map { ( $_ => 'list' ) }      qw(join unpack glob each) ),
+            warn => 'warning',
+            ( map { ( $_ => 'scalar' ) }    qw(chr ord time reverse sprintf lock prototype pack formline) ),
+        },
+
+        # WHAT NUMBER IT MAKES OF ITS OPERAND (the number family): int its
+        # integer part, abs its absolute value, rand a random number below
+        # it, hex and oct the numeral it reads.
+        number_kind => {
+            int => 'integer_part', abs => 'absolute', rand => 'random',
+            hex => 'numeral', oct => 'numeral',
+        },
+
+        # WHICH CASE, OF WHAT (the case functions): every character's or the
+        # first's, upper or lower.
+        changes_case => {
+            uc => 'upper', lc => 'lower', ucfirst => 'upper_first', lcfirst => 'lower_first',
+        },
+
+        # ITS VALUE IS OF STATE A LATER STORE MAY CHANGE: a hash's keys,
+        # values or next pair, a list's order or join, the call stack, a
+        # string's pos, a variable's tie (tie, untie: every later access is
+        # the tie's), an object's class (bless), the format accumulator
+        # (formline), %SIG's __WARN__ (warn). Read where it stands, not
+        # later.
+        reads_state => { map { ( $_ => 1 ) } qw(keys values each sort caller pos tie untie bless formline join warn) },
+
+        # IT CHANGES STATE A LATER READ SEES: chdir the working directory
+        # (the next -d's), require %INC and the subs it compiles in.
+        changes_state => { map { ( $_ => 1 ) } qw(chdir require) },
+    );
+    while ( my ( $col, $rows ) = splice @COLUMNS, 0, 2 ) {
+        $FACTS{$_}{$col} = $rows->{$_} for keys $rows->%*;
+    }
 
     # fact($builtin, $column) -> the builtin's fact in that column, or undef.
     sub fact($name, $column) {
