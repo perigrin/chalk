@@ -379,6 +379,33 @@ sub int_within ($node, $lo, $hi) {
 # int_is_iv($node) -> true where $node is proven an IV (within [IV_MIN, IV_MAX]).
 sub int_is_iv ($node) { return int_within( $node, $IV_MIN, $IV_MAX ) }
 
+# not_a_value_type($type) -> why $type is no value's type, or undef for one
+# that is. These have no layout at any width on any target -- not "not yet
+# narrowed" but "nothing to narrow to": List is signature vocabulary, None
+# the empty type, Void arity 0. A target narrowing a stamp asks this first.
+my %NOT_A_VALUE = (
+    List => "'List' is signature vocabulary -- it answers 'what does this "
+          . "parameter position accept?' and denotes a SEQUENCE, so no "
+          . "single-value layout exists at any width",
+    None => "'None' is the lattice BOTTOM, the empty type, inhabited by "
+          . "nothing -- there is no value to lay out",
+    Void => "'Void' is arity 0: a position that yields no value, so there "
+          . "is nothing to give a layout to",
+);
+sub not_a_value_type ($type) { return $NOT_A_VALUE{ $type // '' } }
+
+# is_fractional_constant($node) -> true for a Constant whose value is not an
+# integer literal (1.5): a value that can be no integer, whatever represents
+# it. (B::SoN sends 0.0 as 0, so a fractional literal spelled integral is not
+# seen: see t2-narrows-num-from-observations.t.)
+sub is_fractional_constant ($node) {
+    return false unless blessed($node) && $node->can('operation') && $node->operation eq 'Constant';
+    return false unless $node->can('value');
+    my $v = $node->value;
+    return false unless defined $v;
+    return $v !~ /\A-?\d+\z/ ? true : false;
+}
+
 # integer_intervals(@returns): the analysis, over every node of the programs
 # the Returns end (Chalk::IR::Graph::program_nodes: callees included). A
 # Return already analysed is not again.

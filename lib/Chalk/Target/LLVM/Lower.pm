@@ -1,5 +1,5 @@
-# ABOUTME: The LLVM target's T2 entry: lower_program checks a program is T2's, builds it
-# ABOUTME: (Chalk::Target::LLVM::Builder), prints it (Printer); $PATH says which path it took.
+# ABOUTME: The LLVM target's T2 entry: lower_program checks a program is T2's, builds it (Builder),
+# ABOUTME: prints it (Printer); narrow_graphs narrows a graph's Chalk stamps to LLVM types.
 use 5.42.0;
 use utf8;
 
@@ -8,6 +8,8 @@ package Chalk::Target::LLVM::Lower;
 use Scalar::Util qw(blessed refaddr);
 use Chalk::Target::LLVM::Builder;
 use Chalk::Target::LLVM::Printer;
+use Chalk::IR::Value;      # narrow_num tests operands with isa
+use Chalk::IR::Analysis;   # not_a_value_type, is_fractional_constant: T1's facts
 
 # lower_program($return_node) -> the module's text, or undef when the program
 # is not slice 1's.
@@ -74,6 +76,187 @@ sub lower_program {
     my $ir = eval { Chalk::Target::LLVM::Printer::print_module($b) };
     $PATH = defined $ir ? { path => 't2' } : { path => 'fallback', why => 'T2 printing: ' . ( $@ =~ s/\n.*//sr ) };
     return $ir;
+}
+
+# =====================================================================
+# NARROWING: a Chalk type to the LLVM type that represents it.
+#
+# NOT A TYPE MAPPING BUT A NARROWING ANALYSIS. perigrin, stating the design
+# (docs/plans/2026-08-31-t2-is-a-narrowing-analysis.md):
+#
+#   "T2 needs to do a type mapping from a Chalk type to an LLVM type but
+#    the types aren't 1:1 ... Num for example is the parent type of Int so
+#    a Num maps to double|i64 and then T2 does narrowing passes to get a
+#    single representation type."
+#
+# A stamp names a type AND EVERYTHING BELOW IT on the lattice, so it
+# denotes a SET of candidate machine types:
+#
+#     Scalar -> everything below, or %Slot    narrowing, else box
+#     Str    -> {%Str, double, i64...}        is it ever rendered?
+#     Num    -> {double, i64...}              is it ever fractional?
+#     Int    -> {i8,u8,...,i64,u64}           sign and range
+#
+# NOTHING ON THE SPINE IS ALREADY CONCRETE: `Str :> Num`, and a bounded
+# positive Int could be u8. Width and sign selection need an interval
+# lattice, a widening operator at loop Phis and sign tracking; until they
+# are built `Int` answers `i64`. `_choose` picks from the candidate SET, so
+# adding evidence shrinks a set without changing the shape.
+#
+# IT COSTS NO NEW FIELD. A node has ONE stamp field (`representation()` reads
+# it): narrowing changes what it holds -- a Chalk type before, an LLVM type
+# after -- so a Chalk name surviving narrow_graphs is a T2 bug findable
+# without reasoning about the program.
+#
+# THE MAPPING IS INJECTIVE, a design requirement. `Boolean` and `Undef` both
+# denote one bit; the four reference types are all boxed pointers. Collapsed,
+# a consumer holding `i1` cannot tell which it had, and a check meaning two
+# things at once is the failure mode this codebase keeps recording. LLVM
+# enforces the distinction for free -- named struct types are NOMINAL
+# (measured against lli-15: an %Undef where a %Bool = type { i1 } was defined
+# is a verifier error) -- and a brand costs an insertvalue/extractvalue pair
+# a post-T2 rewrite can unwind with no analysis.
+#
+# WHAT IS NOT T2'S here is T1's, asked of Chalk::IR::Analysis: which types
+# are no value's (not_a_value_type), whether a literal is fractional
+# (is_fractional_constant).
+our %CANDIDATES = (
+    # Decidable today: one candidate. BRANDED where the machine type is shared.
+    Boolean  => ['%Boolean'],    # { i1 }, distinct from Undef
+    Undef    => ['%Undef'],      # { i1 }, distinct from Boolean
+    Object   => ['%Object*'],
+    ArrayRef => ['%ArrayRef*'],
+    HashRef  => ['%HashRef*'],
+    CodeRef  => ['%CodeRef*'],
+    Array    => ['%Array*'],
+    Hash     => ['%Hash*'],
+
+    # THE SPINE: each names its type and everything below it.
+    Int      => ['i64'],                       # until intervals: one
+    Num      => ['double', 'i64'],
+    Str      => ['%Str', 'double', 'i64'],
+    Scalar   => ['%Slot', '%Str', 'double', 'i64'],
+);
+
+# narrow_graphs(\%graphs) -> void. Rewrites every node's stamp in place: IN
+# PLACE because the stamp field is the same slot before and after, so every
+# consumer holding a node sees the narrowed type.
+sub narrow_graphs ($class, $graphs) {
+    for my $gname (sort keys %$graphs) {
+        my %seen;
+        for my $node ($graphs->{$gname}->nodes->@*) {
+            next unless blessed($node);
+            next if $seen{ $node->id }++;
+            $class->_narrow_node($node, $gname);
+        }
+    }
+    return;
+}
+
+# _narrow_node($node, $gname) -> void. One node's Chalk stamp becomes its
+# LLVM type, or narrowing refuses and says why.
+sub _narrow_node ($class, $node, $gname) {
+    my $stamp = $node->stamp;
+
+    # AN UNSTAMPED node is T1's gap (inference never reached it), left alone
+    # so the NO-REPR diagnostics keep naming the right pass.
+    return unless defined $stamp;
+
+    # ALREADY AN LLVM TYPE (narrowing is idempotent): recognised by not being
+    # a Chalk lattice name, so nothing has to be threaded.
+    my $why = Chalk::IR::Analysis::not_a_value_type($stamp);
+    return unless exists $CANDIDATES{$stamp} || $why || $stamp eq 'Unknown';
+
+    die "T2: cannot narrow '$stamp' in $gname (op=" . $node->operation . "): $why. "
+      . "Reaching T2 with it means non-value vocabulary leaked into the value pipeline.\n"
+        if $why;
+
+    # UNKNOWN IS T2 REPORTING ITS OWN FAILURE, where the decision is made,
+    # with the graph still in hand -- not an emission-time error blaming T1.
+    die "T2: cannot narrow 'Unknown' in $gname (op=" . $node->operation . "). Unknown is the "
+      . "lattice TOP -- inference ran and could not determine this node, so there is no "
+      . "candidate set to choose from. This is T2 failing to narrow, not a missing table entry.\n"
+        if $stamp eq 'Unknown';
+
+    $node->set_stamp($class->_choose($node, $stamp));
+    return;
+}
+
+# llvm_type_for($chalk_type) -> the LLVM type a DECLARED type narrows to.
+#
+# THE MOP IS NOT REWRITTEN, DELIBERATELY: a field's, a method's or a sub's
+# declared type is the program's own view of itself, and the MOP is meant to
+# become a RUNTIME metaobject (`$obj->meta->field('n')->type` must answer
+# `Int`, which is what the language says). So the Chalk type stays canonical
+# on the metaobject and the LLVM type is derived here, on demand -- one
+# decision in one place, not one per consumer.
+sub llvm_type_for ($class, $chalk_type) {
+    return undef unless defined $chalk_type;
+    # Already an LLVM type, or a name narrowing does not take (Unknown here is
+    # the caller's to diagnose): passed through.
+    return $chalk_type unless exists $CANDIDATES{$chalk_type};
+    return $CANDIDATES{$chalk_type}[0];
+}
+
+# narrow_num($node) -> 'double' or 'i64'. THE ONLY MULTI-CANDIDATE CHOICE.
+#
+# Getting it wrong is a live miscompile (t/corpus/mdtest/arithmetic.md: `my
+# $n = 9007199254740993; my $s = $n + 0.0` -- the sitofp cannot hold an i64
+# above 2^53). THREE CONSTRAINT SOURCES (36 of 54 Num nodes directly, 46 of
+# 54 after propagation: docs/plans/2026-09-04-narrowing-reaches-85-percent.md):
+#
+#   (a) a consumer states a requirement
+#   (b) a fractional literal constrains itself
+#   (c) every value input is already Int -- the inputs PROVE i64
+#
+# ORDER MATTERS: fractional evidence is POSITIVE evidence about this value,
+# "all inputs are Int" evidence about its operands, so a node with one
+# fractional and one integral input is a double.
+sub narrow_num ($class, $node) {
+    my $stamp = $node->stamp // '';
+    die "T2: narrow_num expects a Num-stamped node, got '"
+      . ($stamp eq '' ? '(unstamped)' : $stamp) . "' (op="
+      . $node->operation . ")\n"
+        unless $stamp eq 'Num';
+
+    # (b) A FRACTIONAL LITERAL IS ITS OWN CONSTRAINT, and a fractional input
+    # propagates the same way -- before (c), so Add(Int, 1.5) is a double.
+    return 'double' if Chalk::IR::Analysis::is_fractional_constant($node);
+    for my $in (($node->inputs // [])->@*) {
+        next unless defined $in && ref $in && $in->can('operation');
+        return 'double' if Chalk::IR::Analysis::is_fractional_constant($in);
+    }
+
+    # (c) EVERY VALUE INPUT IS ALREADY Int: nothing needs a float -- the 2^53
+    # case, a Coerce(Int -> Num) over an Int constant.
+    my @vals = grep { defined $_ && ref $_ && $_ isa Chalk::IR::Value } (($node->inputs // [])->@*);
+    if (@vals) {
+        my $every_int = 1;
+        for my $v (@vals) {
+            $every_int = 0 unless ($v->stamp // '') eq 'Int';
+        }
+        return 'i64' if $every_int;
+    }
+
+    # DEFAULT, FORCED RATHER THAN CHOSEN. A named rule, so a test can INVERT it
+    # to prove a constraint is load-bearing rather than agreeing with it.
+    return $class->_default_num_repr;
+}
+
+# _default_num_repr -> the representation an unobserved Num takes. FORCED:
+# double and i64 are incomparable and the emitter needs one (GHC: no
+# representation polymorphism with principal types). `i64` because it is
+# perl's -- a literal stays an IV until something makes it an NV, and IV_MAX+1
+# promotes rather than wraps.
+sub _default_num_repr ($class) { return 'i64' }
+
+# _choose($node, $stamp) -> the single LLVM type: the head of the candidate
+# set, the widest safe choice -- what "nothing has been proven" means.
+# `%Slot` for an unnarrowed Scalar is the FALLBACK, not the goal.
+sub _choose ($class, $node, $stamp) {
+    my $candidates = $CANDIDATES{$stamp}
+        or die "T2: no candidate set for '$stamp' (op=" . $node->operation . ")\n";
+    return $candidates->[0];
 }
 
 1;

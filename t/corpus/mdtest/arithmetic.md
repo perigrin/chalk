@@ -199,8 +199,8 @@ is.
 Perl does not have this problem because it keeps an IV and an NV as distinct
 representations of one scalar: `B::svref_2object(\9007199254740993)` is a
 `B::IV` and stays one across `+ 0.0`. Chalk's `Num` is likewise a UNION, and
-`Chalk::IR::Transform::T2` already records it as the candidate SET
-`['double','i64']` -- but `T2::_choose` returns `$candidates->[0]`
+T2's narrowing (`Chalk::Target::LLVM::Lower`) already records it as the candidate SET
+`['double','i64']` -- but its `_choose` returns `$candidates->[0]`
 unconditionally, and T2 is not wired into lowering at all, so `double` always
 wins.
 

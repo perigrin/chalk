@@ -6,7 +6,8 @@ use Test::More;
 use lib 'lib', 't/lib';
 
 use Chalk::IR::Serialize::JSON;
-use Chalk::IR::Transform::T2;
+use Chalk::Target::LLVM::Lower;
+use Chalk::IR::Analysis;
 
 # T2 IS A NARROWING ANALYSIS, NOT A TYPE MAPPING. From
 # docs/plans/2026-08-31-t2-is-a-narrowing-analysis.md, recording perigrin:
@@ -92,7 +93,7 @@ sub stamps_of ($graphs) {
 
 subtest 'after T2 every stamp is an LLVM type' => sub {
     my $graphs = $LOAD->($WIRE);
-    Chalk::IR::Transform::T2->run($graphs);
+    Chalk::Target::LLVM::Lower->narrow_graphs($graphs);
     my $s = stamps_of($graphs);
 
     # ASSERTED AS VOCABULARY, which is the question the design says T2 makes
@@ -107,7 +108,7 @@ subtest 'after T2 every stamp is an LLVM type' => sub {
 # program means.
 subtest 'no Chalk lattice name survives T2' => sub {
     my $graphs = $LOAD->($WIRE);
-    Chalk::IR::Transform::T2->run($graphs);
+    Chalk::Target::LLVM::Lower->narrow_graphs($graphs);
 
     my @chalk = qw(Int Num Str Scalar Boolean Undef Unknown None
                    Array Hash ArrayRef HashRef CodeRef Object List);
@@ -131,7 +132,7 @@ subtest 'no Chalk lattice name survives T2' => sub {
 subtest 'an unnarrowed Scalar boxes rather than guessing' => sub {
     my $wire = $WIRE =~ s/"stamp": "Int", "inputs": \[1, 2\]/"stamp": "Scalar", "inputs": [1, 2]/r;
     my $graphs = $LOAD->($wire);
-    Chalk::IR::Transform::T2->run($graphs);
+    Chalk::Target::LLVM::Lower->narrow_graphs($graphs);
     my $s = stamps_of($graphs);
 
     is $s->{Add}[0], '%Slot',
@@ -158,7 +159,7 @@ subtest 'Unknown is T2 failing to narrow, and it says so' => sub {
 
     $add->set_stamp('Unknown');
 
-    my $err = do { local $@; eval { Chalk::IR::Transform::T2->run($graphs) }; $@ };
+    my $err = do { local $@; eval { Chalk::Target::LLVM::Lower->narrow_graphs($graphs) }; $@ };
     ok $err, 'it refuses rather than inventing a machine type' or return;
     like $err, qr/^T2:/,
         'and names ITSELF as the failing pass, not a downstream consumer';
@@ -176,10 +177,17 @@ subtest 'a non-value type is refused as a layer violation, not as a gap' => sub 
                 $graphs->{'main::__PROGRAM__'}->nodes->@*;
     $add->set_stamp('List');
 
-    my $err = do { local $@; eval { Chalk::IR::Transform::T2->run($graphs) }; $@ };
+    my $err = do { local $@; eval { Chalk::Target::LLVM::Lower->narrow_graphs($graphs) }; $@ };
     ok $err, 'it refuses' or return;
     like $err, qr/signature vocabulary|SEQUENCE/,
         'and says List is not a value type, rather than blaming inference';
+};
+
+# WHICH TYPES ARE NO VALUE'S is the lattice's fact, not T2's: T1 says so
+# (Chalk::IR::Analysis), T2 refuses to narrow one.
+subtest 'a type that is no value type is said so by Chalk::IR::Analysis' => sub {
+    like( Chalk::IR::Analysis::not_a_value_type($_), qr/\Q'$_'\E/, "$_ is no value's type" ) for qw(List None Void);
+    is( Chalk::IR::Analysis::not_a_value_type($_), undef, "$_ is one" ) for qw(Int Num Str Scalar Boolean Undef Object);
 };
 
 # THE MAPPING IS INJECTIVE, and this is the property the brands exist to give.
@@ -212,8 +220,8 @@ subtest 'a non-value type is refused as a layer violation, not as a gap' => sub 
 subtest 'the Chalk -> LLVM mapping is injective' => sub {
     my %seen;
     my @collisions;
-    for my $chalk (sort keys %Chalk::IR::Transform::T2::CANDIDATES) {
-        my $llvm = $Chalk::IR::Transform::T2::CANDIDATES{$chalk}[0];
+    for my $chalk (sort keys %Chalk::Target::LLVM::Lower::CANDIDATES) {
+        my $llvm = $Chalk::Target::LLVM::Lower::CANDIDATES{$chalk}[0];
         push @collisions, "$llvm <- $seen{$llvm}, $chalk" if exists $seen{$llvm};
         $seen{$llvm} = $chalk;
     }
@@ -226,8 +234,8 @@ subtest 'the Chalk -> LLVM mapping is injective' => sub {
 # THE TWO COLLAPSES THAT MOTIVATED THE BRANDS, pinned by name so a later
 # "simplification" back to bare i1 fails here rather than in a miscompile.
 subtest 'Boolean and Undef are distinguishable' => sub {
-    my $b = $Chalk::IR::Transform::T2::CANDIDATES{Boolean}[0];
-    my $u = $Chalk::IR::Transform::T2::CANDIDATES{Undef}[0];
+    my $b = $Chalk::Target::LLVM::Lower::CANDIDATES{Boolean}[0];
+    my $u = $Chalk::Target::LLVM::Lower::CANDIDATES{Undef}[0];
     isnt $b, $u, 'Boolean and Undef narrow to DIFFERENT types';
 
     # ASSERTED POSITIVELY too: `isnt` alone is satisfied by any two distinct
@@ -239,7 +247,7 @@ subtest 'Boolean and Undef are distinguishable' => sub {
 subtest 'the four reference types are distinguishable' => sub {
     my %by;
     for my $t (qw(ArrayRef HashRef CodeRef Object)) {
-        my $llvm = $Chalk::IR::Transform::T2::CANDIDATES{$t}[0];
+        my $llvm = $Chalk::Target::LLVM::Lower::CANDIDATES{$t}[0];
         push @{ $by{$llvm} }, $t;
     }
     my @shared = grep { @{ $by{$_} } > 1 } sort keys %by;

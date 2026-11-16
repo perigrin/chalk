@@ -7,7 +7,8 @@ use utf8;
 use Test::More;
 
 use lib 'lib';
-use Chalk::IR::Transform::T2;
+use Chalk::Target::LLVM::Lower;
+use Chalk::IR::Analysis;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
 
@@ -48,14 +49,14 @@ sub build (%opt) {
 subtest 'a fractional literal narrows to double' => sub {
     my ($f, $g) = build();
     my $c = $f->make('Constant', value => 1.5, stamp => 'Num');
-    is Chalk::IR::Transform::T2->narrow_num($c), 'double',
+    is Chalk::Target::LLVM::Lower->narrow_num($c), 'double',
         'Constant(1.5) :Num narrows to double -- the literal is its own constraint';
 };
 
 subtest 'an integral literal with no observation takes the default' => sub {
     my ($f, $g) = build();
     my $c = $f->make('Constant', value => 42, stamp => 'Num');
-    is Chalk::IR::Transform::T2->narrow_num($c), 'i64',
+    is Chalk::Target::LLVM::Lower->narrow_num($c), 'i64',
         'Constant(42) :Num defaults to i64';
 };
 
@@ -67,7 +68,7 @@ subtest 'all-Int inputs narrow to i64 -- the 2^53 shape' => sub {
     my $lit  = $f->make('Constant', value => 9007199254740993, stamp => 'Int');
     my $coer = $f->make('Coerce', inputs => [$lit],
                         from_repr => 'Int', to_repr => 'Num', stamp => 'Num');
-    is Chalk::IR::Transform::T2->narrow_num($coer), 'i64',
+    is Chalk::Target::LLVM::Lower->narrow_num($coer), 'i64',
         'Coerce(Int -> Num) over an Int input narrows to i64, not double';
 
     # AND IT MUST BE SOURCE (c) THAT SAYS SO, not the default falling the same
@@ -79,12 +80,12 @@ subtest 'all-Int inputs narrow to i64 -- the 2^53 shape' => sub {
     # `double` default the answer can only be `i64` if the all-Int rule fired.
     {
         no warnings 'redefine';
-        local *Chalk::IR::Transform::T2::_default_num_repr = sub { 'double' };
-        is Chalk::IR::Transform::T2->narrow_num($coer), 'i64',
+        local *Chalk::Target::LLVM::Lower::_default_num_repr = sub { 'double' };
+        is Chalk::Target::LLVM::Lower->narrow_num($coer), 'i64',
             'still i64 with the default inverted -- source (c) is load-bearing';
 
         my $bare = $f->make('Constant', value => 42, stamp => 'Num');
-        is Chalk::IR::Transform::T2->narrow_num($bare), 'double',
+        is Chalk::Target::LLVM::Lower->narrow_num($bare), 'double',
             'and the inverted default IS reached when nothing constrains';
     }
 };
@@ -94,7 +95,7 @@ subtest 'a fractional input still wins over integral siblings' => sub {
     my $i = $f->make('Constant', value => 2,   stamp => 'Int');
     my $d = $f->make('Constant', value => 1.5, stamp => 'Num');
     my $add = $f->make('Add', inputs => [$i, $d], stamp => 'Num');
-    is Chalk::IR::Transform::T2->narrow_num($add), 'double',
+    is Chalk::Target::LLVM::Lower->narrow_num($add), 'double',
         'Add(Int, Num) does not claim all-Int inputs';
 };
 
@@ -107,7 +108,7 @@ subtest 'a consumer requiring Num does not force double' => sub {
     my $a = $f->make('Constant', value => 6, stamp => 'Int');
     my $b = $f->make('Constant', value => 3, stamp => 'Int');
     my $q = $f->make('Divide', inputs => [$a, $b], stamp => 'Num');
-    is Chalk::IR::Transform::T2->narrow_num($q), 'i64',
+    is Chalk::Target::LLVM::Lower->narrow_num($q), 'i64',
         'Divide over Int operands narrows to i64 on its inputs';
 };
 
@@ -115,14 +116,23 @@ subtest 'the answer is always one of the declared candidates' => sub {
     # THE FENCE: `_candidates` is the only place sets are constructed, so
     # whatever narrowing returns must be a member. A typo'd machine type here
     # would otherwise reach the emitter.
-    my $cands = $Chalk::IR::Transform::T2::CANDIDATES{Num};
+    my $cands = $Chalk::Target::LLVM::Lower::CANDIDATES{Num};
     my %ok = map { $_ => 1 } $cands->@*;
     my ($f, $g) = build();
     for my $probe ([1.5, 'Num'], [42, 'Num']) {
         my $c = $f->make('Constant', value => $probe->[0], stamp => $probe->[1]);
-        my $got = Chalk::IR::Transform::T2->narrow_num($c);
+        my $got = Chalk::Target::LLVM::Lower->narrow_num($c);
         ok $ok{$got}, "narrowing yields a declared candidate (got $got)";
     }
+};
+
+subtest 'a fractional constant is a fact of the value, asked of Chalk::IR::Analysis' => sub {
+    # Not T2's: whether a literal is an integer is the program's, whatever
+    # machine types a target has.
+    my ($f, $g) = build();
+    ok( Chalk::IR::Analysis::is_fractional_constant( $f->make('Constant', value => 1.5, stamp => 'Num') ), '1.5 is fractional' );
+    ok( !Chalk::IR::Analysis::is_fractional_constant( $f->make('Constant', value => -42, stamp => 'Int') ), '-42 is not' );
+    ok( !Chalk::IR::Analysis::is_fractional_constant( $f->make('Add', inputs => [], stamp => 'Num') ), 'nor is what is no Constant' );
 };
 
 subtest 'narrowing refuses a stamp that is not Num' => sub {
@@ -131,7 +141,7 @@ subtest 'narrowing refuses a stamp that is not Num' => sub {
     # have.
     my ($f, $g) = build();
     my $c = $f->make('Constant', value => 1, stamp => 'Int');
-    my $err = do { local $@; eval { Chalk::IR::Transform::T2->narrow_num($c) }; $@ };
+    my $err = do { local $@; eval { Chalk::Target::LLVM::Lower->narrow_num($c) }; $@ };
     like $err, qr/\bNum\b/,
         'narrow_num on a non-Num stamp dies naming the expectation';
 };
