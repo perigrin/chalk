@@ -9,7 +9,9 @@ class Chalk::MOP::Field {
     field $param_name :param :reader = undef;
     field $has_default :param :reader = false;
     field $default_value :param :reader = undef;
+    field $default_unmodeled :param :reader = false;
     field $type :param :reader = undef;
+    field $is_reader :param :reader = false;
     field $attributes :param = [];
     method attributes() {
         return $attributes->@*;
