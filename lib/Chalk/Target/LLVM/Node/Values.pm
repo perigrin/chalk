@@ -43,6 +43,7 @@ class Chalk::Target::LLVM::Node::Numify :isa(Chalk::Target::LLVM::Node) { method
 class Chalk::Target::LLVM::Node::IntOf :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_slot_int') } }
 class Chalk::Target::LLVM::Node::Rand :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_slot_rand') } }
 class Chalk::Target::LLVM::Node::SlotStep :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_slot_' . $self->attr->{op}) } }
+class Chalk::Target::LLVM::Node::IntArith :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('i64 @t2_int_' . $self->attr->{op}) } }
 class Chalk::Target::LLVM::Node::SlotArith :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_slot_' . $self->attr->{op}) } }
 class Chalk::Target::LLVM::Node::Mod :isa(Chalk::Target::LLVM::Node) {
     method to_ll () {

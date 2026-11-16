@@ -207,6 +207,7 @@ my @NEED_FLAGS = qw(
     _need_print_str_fmt
     _need_print_int_fmt
     _need_exit
+    _need_stop_message
     _need_str_type
 );
 
@@ -2592,6 +2593,13 @@ sub _lower_constant {
     }
 
     if ($repr eq 'Int') {
+        # AN INTEGER PAST WHAT AN i64 HOLDS (a UV perl folded,
+        # `9223372036854775807 + 1`) is no i64: emitted, it wrapped.
+        if (defined $val && $val =~ /\A\+?0*(\d+)\z/) {
+            my $d = $1;
+            die "GAP: an integer constant past what an i64 holds is not lowered\n"
+                if length $d > 19 || length $d == 19 && $d gt '9223372036854775807';
+        }
         # Int constant -> i64 immediate via add i64 0, VALUE. Emit into the ENTRY
         # block: a constant is pure and, when hash-consed across blocks (e.g. an
         # index shared by a branch-guarded store and a post-merge read, memory-SSA
@@ -2783,6 +2791,8 @@ sub _lower_binop_int {
         my $ref = $self->_fresh;
         $self->_emit("  $ref = " . _repr_opcode($llvm_op, $repr) . " " . _repr_to_llvm_type($repr)
             . " $v[0], $v[1]  ; $op(nothing typed, as $repr)");
+        $self->_stop_past_i64($node, $llvm_op, @v[0, 1]) if $repr eq 'Int';
+        $self->_stop_integer_as_double($node, $ref) if $repr eq 'Num';
         $self->{cache}{$node->id} = $ref;
         return $ref;
     }
@@ -2806,8 +2816,63 @@ sub _lower_binop_int {
 
     my $ref = $self->_fresh;
     $self->_emit("  $ref = $opcode $ty $lhs_ref, $rhs_ref  ; $op(repr=$repr) -> $ty $opcode");
+    $self->_stop_past_i64($node, $llvm_op, $lhs_ref, $rhs_ref) if $repr eq 'Int';
+    $self->_stop_integer_as_double($node, $ref) if $repr eq 'Num';
     $self->{cache}{$node->id} = $ref;
     return $ref;
+}
+
+# _stop_integer_as_double($node, $ref) -- AN OPERAND THAT MAY HOLD PERL'S
+# INTEGER (a scalar, a string) is done here as a double: perl keeps two
+# integers' + - * an integer, exact and printed whole, where the double lost
+# digits past 2**53 and printed %.15g from 1e15 (`$ENV{X} //
+# "9223372036854775807"` + 0 said 9.22337203685478e+18). Stopped where the
+# result is a whole number that large; below it the double is perl's integer.
+sub _stop_integer_as_double {
+    my ($self, $node, $ref) = @_;
+    return unless grep {
+        my $n = $_;
+        $n = $n->inputs->[0] while blessed($n) && $n->operation eq 'Coerce';
+        ( $self->_repr_of($n) // $n->stamp // '' ) =~ /\A(?:Scalar|Slot|Str|Unknown)\z/;   # static type
+    } $node->inputs->@[0, 1];
+    my $d = _repr_to_llvm_type('Num');
+    my ($hi, $lo, $big, $fr, $whole, $bad, $ok) = map { $self->_fresh } 1 .. 7;
+    $self->_emit("  $hi = fcmp oge $d $ref, 1.0e15");
+    $self->_emit("  $lo = fcmp ole $d $ref, -1.0e15");
+    $self->_emit("  $big = or i1 $hi, $lo");
+    $self->_emit("  $fr = frem $d $ref, 1.0");
+    $self->_emit("  $whole = fcmp oeq $d $fr, 0.0");
+    $self->_emit("  $bad = and i1 $big, $whole  ; perl's integer, past what %.15g prints whole?");
+    $self->_emit("  $ok = xor i1 $bad, true");
+    $self->_stop_unless($ok, 'an integer + - * of a scalar past 1e15, done in floating point (perl keeps it an integer)');
+    return;
+}
+
+# _stop_past_i64($node, 'add'|'sub'|'mul', $x, $y) -- PERL'S INTEGERS DO NOT
+# WRAP: past what an i64 holds its + - * is a UV or a number, which an Int
+# cannot be. Refused: by name here where both operands are integer literals,
+# else at run time where the exact result (in i128) leaves an i64.
+sub _stop_past_i64 {
+    my ($self, $node, $llop, $x, $y) = @_;
+    my @lit = map { my $n = $_; $n = $n->inputs->[0] while blessed($n) && $n->operation eq 'Coerce'; $n } $node->inputs->@[0, 1];
+    if ( !grep { !( blessed($_) && $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'integer'
+                    && ( $_->value // '' ) =~ /\A[-+]?\d+\z/ ) } @lit ) {
+        require Math::BigInt;
+        my ($a, $b) = map { Math::BigInt->new( $_->value ) } @lit;
+        my $r = $llop eq 'add' ? $a + $b : $llop eq 'sub' ? $a - $b : $a * $b;
+        return if $r >= Math::BigInt->new('-9223372036854775808') && $r <= Math::BigInt->new('9223372036854775807');
+        die "GAP: an integer + - * past what an i64 holds (perl makes a UV or a number of it) is not lowered\n";
+    }
+    my ($wx, $wy, $wr, $nr, $ok) = map { $self->_fresh } 1 .. 5;
+    $self->_emit("  $wx = sext i64 $x to i128");
+    $self->_emit("  $wy = sext i64 $y to i128");
+    $self->_emit("  $wr = $llop i128 $wx, $wy  ; exactly");
+    $self->_emit("  $nr = trunc i128 $wr to i64");
+    my $back = $self->_fresh;
+    $self->_emit("  $back = sext i64 $nr to i128");
+    $self->_emit("  $ok = icmp eq i128 $back, $wr  ; within an i64?");
+    $self->_stop_unless($ok, 'an integer + - * past what an i64 holds (perl makes a UV or a number of it)');
+    return;
 }
 
 # _lower_as_repr($node, $want) -> an SSA ref for $node in representation $want's
@@ -3423,6 +3488,12 @@ sub _lower_negate {
     }
     my $repr = ( $self->_repr_of($node) // '' ) eq 'Int' ? 'Int' : 'Num';
     my $v = $self->_operand_as($x, $repr, '-');
+    # -IV_MIN IS A UV (9223372036854775808), no i64: it wrapped to IV_MIN.
+    if ($repr eq 'Int') {
+        my $ok = $self->_fresh;
+        $self->_emit("  $ok = icmp ne i64 $v, -9223372036854775808  ; - of IV_MIN?");
+        $self->_stop_unless($ok, 'an integer - past what an i64 holds (perl makes a UV of -IV_MIN)');
+    }
     my $r = $self->_fresh;
     $self->_emit($repr eq 'Int' ? "  $r = sub i64 0, $v  ; -" : "  $r = fneg " . _repr_to_llvm_type('Num') . " $v  ; -");
     # A SCALAR NEGATION (B::SoN types it so: -"abc" is "-abc"; the string

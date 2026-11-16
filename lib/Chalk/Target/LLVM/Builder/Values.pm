@@ -641,6 +641,11 @@ sub _value {
                 inputs => [ map { $b->as($b->value($_), '%Slot') } $v->inputs->@[0, 1] ]);
         }
         my @in = map { $b->as($b->value($_), $ty) } $v->inputs->@[0, 1];
+        # PERL'S INTEGERS DO NOT WRAP: past what an i64 holds its result is a
+        # UV or a number, which an Int-typed value cannot be -- stopped by
+        # name where it overflows (4611686018427387904 * 2 printed
+        # -9223372036854775808 for 9223372036854775808).
+        return $b->emit(op => 'IntArith', type => 'i64', inputs => \@in, attr => { op => $a }) if $ty eq 'i64';
         return $b->emit(op => 'Arith', type => $ty, inputs => \@in, attr => { op => $a });
     }
     if (my $c = $CMP{$op}) {

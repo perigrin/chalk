@@ -361,6 +361,7 @@ define internal i64 @t2_str_i64(%Str %s) {
   ret i64 %i
 }
 declare i64 @strtoll(i8*, i8**, i32)
+declare i64 @strtoull(i8*, i8**, i32)
 ; A STRING'S NUMBER, perl's way: its leading integer kept whole (strtoll)
 ; unless a fraction or exponent follows, else its double.
 define internal %Slot @t2_str_numslot(%Str %s) {
@@ -387,8 +388,27 @@ after:
   %max = icmp eq i64 %i, 9223372036854775807
   %min = icmp eq i64 %i, -9223372036854775808
   %edge = or i1 %max, %min
-  %tonum = or i1 %frac, %edge
-  br i1 %tonum, label %num, label %int
+  br i1 %frac, label %num, label %edged
+edged:
+  br i1 %edge, label %clamped, label %int
+clamped:
+  ; strtoll's IV_MAX or IV_MIN is the string's or where it clamped one past:
+  ; strtoull reads the same digits, and agrees only on the string's own
+  ; ("9223372036854775807" is an Int, as perl's; through a double it was
+  ; 9.22337203685478e+18). Past IV_MAX and within UV_MAX perl's is a UV,
+  ; which T2 has not: stopped. Below IV_MIN, or past UV_MAX, a Num.
+  %u = call i64 @strtoull(i8* %buf, i8** null, i32 10)
+  %own = icmp eq i64 %u, %i
+  br i1 %own, label %int, label %past
+past:
+  br i1 %min, label %num, label %uvq
+uvq:
+  %ud = call double @strtod(i8* %buf, i8** null)
+  %inuv = fcmp ole double %ud, 18446744073709551616.0
+  br i1 %inuv, label %uv, label %num
+uv:
+  call void @t2_stop_uv()
+  unreachable
 int:
   %si = call %Slot @t2_box_i64(i64 %i)
   ret %Slot %si
@@ -714,7 +734,14 @@ int:
   %v = extractvalue %Slot %s, 1
   %r = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %v, i64 %by)
   %ov = extractvalue { i64, i1 } %r, 1
-  br i1 %ov, label %num, label %intok
+  br i1 %ov, label %over, label %intok
+over:
+  ; (++ past IV_MAX is perl's UV; -- past IV_MIN its number)
+  %up = icmp sgt i64 %by, 0
+  br i1 %up, label %uv, label %num
+uv:
+  call void @t2_stop_uv()
+  unreachable
 intok:
   %rv = extractvalue { i64, i1 } %r, 0
   %si = call %Slot @t2_box_i64(i64 %rv)
@@ -800,11 +827,48 @@ other:
   %i = fptosi double %d to i64
   ret i64 %i
 }
-; PERL'S ARITHMETIC ON TWO SCALARS: two Ints give an Int unless it overflows,
-; anything else a Num.
+; PERL'S ARITHMETIC ON TWO SCALARS (pp_add, pp_subtract, pp_multiply): two
+; Ints give an Int while the exact result fits an IV; past IV_MAX and within
+; UV_MAX perl's is a UV, which T2 has not -- stopped, never wrapped; beyond
+; either end the operands' numbers' (a Num), as for anything else.
 declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
+declare { i64, i1 } @llvm.umul.with.overflow.i64(i64, i64)
+@msg_int_uv = private unnamed_addr constant [77 x i8] c"an integer result past IV_MAX (a UV, which T2 has not): stopped (chalk, T2)\0A\00"
+@msg_int_i64 = private unnamed_addr constant [98 x i8] c"an integer + - * past what an i64 holds (perl makes a UV or a number of it): stopped (chalk, T2)\0A\00"
+define internal void @t2_stop_uv() {
+  call void @t2_stop(i8* getelementptr ([77 x i8], [77 x i8]* @msg_int_uv, i64 0, i64 0), i64 76)
+  unreachable
+}
+; t2_int_over(wrapped, ovf) -> wrapped, or stopped where it overflowed: an
+; i64's + - * (T2 typed it Int) past what one holds.
+define internal i64 @t2_int_over({ i64, i1 } %r) {
+entry:
+  %ov = extractvalue { i64, i1 } %r, 1
+  br i1 %ov, label %stop, label %ok
+stop:
+  call void @t2_stop(i8* getelementptr ([98 x i8], [98 x i8]* @msg_int_i64, i64 0, i64 0), i64 97)
+  unreachable
+ok:
+  %v = extractvalue { i64, i1 } %r, 0
+  ret i64 %v
+}
+define internal i64 @t2_int_add(i64 %x, i64 %y) {
+  %r = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %x, i64 %y)
+  %v = call i64 @t2_int_over({ i64, i1 } %r)
+  ret i64 %v
+}
+define internal i64 @t2_int_sub(i64 %x, i64 %y) {
+  %r = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %x, i64 %y)
+  %v = call i64 @t2_int_over({ i64, i1 } %r)
+  ret i64 %v
+}
+define internal i64 @t2_int_mul(i64 %x, i64 %y) {
+  %r = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %x, i64 %y)
+  %v = call i64 @t2_int_over({ i64, i1 } %r)
+  ret i64 %v
+}
 define internal %Slot @t2_slot_add(%Slot %x, %Slot %y) {
 entry:
   %tx = extractvalue %Slot %x, 0
@@ -818,7 +882,14 @@ ints:
   %vy = extractvalue %Slot %y, 1
   %r = call { i64, i1 } @llvm.sadd.with.overflow.i64(i64 %vx, i64 %vy)
   %ov = extractvalue { i64, i1 } %r, 1
-  br i1 %ov, label %nums, label %int
+  br i1 %ov, label %over, label %int
+over:
+  ; (past IV_MAX the exact result is within UV_MAX: a UV; below IV_MIN a Num)
+  %up = icmp sge i64 %vx, 0
+  br i1 %up, label %uv, label %nums
+uv:
+  call void @t2_stop_uv()
+  unreachable
 int:
   %v = extractvalue { i64, i1 } %r, 0
   %si = call %Slot @t2_box_i64(i64 %v)
@@ -843,7 +914,14 @@ ints:
   %vy = extractvalue %Slot %y, 1
   %r = call { i64, i1 } @llvm.ssub.with.overflow.i64(i64 %vx, i64 %vy)
   %ov = extractvalue { i64, i1 } %r, 1
-  br i1 %ov, label %nums, label %int
+  br i1 %ov, label %over, label %int
+over:
+  ; (past IV_MAX the exact result is within UV_MAX: a UV; below IV_MIN a Num)
+  %up = icmp sge i64 %vx, 0
+  br i1 %up, label %uv, label %nums
+uv:
+  call void @t2_stop_uv()
+  unreachable
 int:
   %v = extractvalue { i64, i1 } %r, 0
   %si = call %Slot @t2_box_i64(i64 %v)
@@ -946,7 +1024,25 @@ ints:
   %vy = extractvalue %Slot %y, 1
   %r = call { i64, i1 } @llvm.smul.with.overflow.i64(i64 %vx, i64 %vy)
   %ov = extractvalue { i64, i1 } %r, 1
-  br i1 %ov, label %nums, label %int
+  br i1 %ov, label %over, label %int
+over:
+  ; (a positive product within UV_MAX is a UV; a larger one, or a negative
+  ; one below IV_MIN, a Num)
+  %nx = icmp slt i64 %vx, 0
+  %ny = icmp slt i64 %vy, 0
+  %neg = xor i1 %nx, %ny
+  br i1 %neg, label %nums, label %mag
+mag:
+  %mx = sub i64 0, %vx
+  %my = sub i64 0, %vy
+  %ax = select i1 %nx, i64 %mx, i64 %vx
+  %ay = select i1 %ny, i64 %my, i64 %vy
+  %u = call { i64, i1 } @llvm.umul.with.overflow.i64(i64 %ax, i64 %ay)
+  %uo = extractvalue { i64, i1 } %u, 1
+  br i1 %uo, label %nums, label %uv
+uv:
+  call void @t2_stop_uv()
+  unreachable
 int:
   %v = extractvalue { i64, i1 } %r, 0
   %si = call %Slot @t2_box_i64(i64 %v)
