@@ -129,3 +129,39 @@ friends) reduce how often the static choice has to be a guess.
   probes chosen. Not audited.
 - The ceiling mechanism. A floor that must not fall is well understood here; a
   ceiling that must not rise is new and has no precedent in the gate.
+
+## Ruling, 2026-11-16: a second ground — provably correct
+
+perigrin: perl's IV/UV/NV forms are an implementation detail, not language
+semantics, and a leaky abstraction. Chalk may break with exact replication of
+perl where its behaviour is **provably correct**. The rule above ("CANNOT, not
+HAS NOT YET") becomes two grounds, and every reason names its own:
+
+- **`cannot:`** — static compilation cannot do what `perl` does.
+- **`correct:`** — chalk's answer is provably correct where perl's is an
+  artifact of its implementation. Three conditions: the reason **states the
+  proof** (e.g. "the exact value of the expression; perl prints a rounded
+  double"); the deviation is **never less exact or less consistent** than
+  perl, only more; and "chalk has not yet" is still illegitimate.
+
+Both fields stay mandatory. `L: DEVIATES(<ground>: <reason>) expected=...`
+refuses a reason with no ground (`MdtestCorpus::parse_deviation_from_ir`,
+`t/bootstrap/corpus/deviates-is-a-third-verdict.t`). The census gets the same
+mechanism: `t/data/census-deviations.tsv` (case `file:N`, ground, reason,
+expected output). A declared case passes only on its declared output, exactly,
+and is reported `DEVIATES` — never `SAME` (script/t2-case) or `ROUNDTRIP` (the
+LLVM round-trip census) — `Chalk::CodeGen::Harness::Deviation`,
+`t/bootstrap/corpus/census-declared-deviations.t`.
+
+The 2^53 case above stays a defect under the new ground too: perl's answer
+there is the exact one, so chalk's is less exact.
+
+Measured at the UV work's end (`t/bootstrap/ir/t2-numeric-forms-deviate-only-when-exact.t`):
+
+- `"1.0" * 1e15` — T2 prints perl's `1e+15` in every form measured. There
+  is no deviation, so nothing is declared.
+- An NV perl has already read as an integer (IOK set by `sv_2iv_flags`) —
+  perl prints it whole from then on (`"$x"`, `-$x`, a postfix `++`'s old
+  value); T2 keeps no such history and prints `%.15g`. For 1234567890123456
+  perl prints the exact value and T2 prints `1.23456789012346e+15`. Ground (b)
+  fails: this is a defect, recorded as a TODO there, and it is **not declared**.
