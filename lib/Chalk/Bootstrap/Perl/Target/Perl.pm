@@ -991,6 +991,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node->can('synthetic') && $node->synthetic) {
             return defined $value ? $self->_emit_expr($value) . ";" : undef;
         }
+        # Valueless: the source's bare `return`, the empty list in list
+        # context. `return undef` would hand a list caller one element.
+        return "return;" if $node->can('valueless') && $node->valueless;
         return "return " . $self->_emit_operand($value, $PREC_TERM{comma}, true) . ";";
     }
 

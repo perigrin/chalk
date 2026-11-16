@@ -108,6 +108,12 @@ my @cases = (
           "    sub kf() { return false ? 'T' : 'F' }\n",
           "}\n"),
       q{print join(',', RT8::s(), RT8::st(), RT8::ku(), RT8::kt(), RT8::kf()), "\n";} ],
+    [ 'a bare return is the empty list, not undef',
+      join('', "class RT5 {\n",
+          "    sub r() { return }\n",
+          "    sub ru() { return undef }\n",
+          "}\n"),
+      q{my @a = RT5::r(); my @b = RT5::ru(); my $s = RT5::r(); print scalar(@a), scalar(@b), defined($s) ? 'd' : 'u', "\n";} ],
 );
 
 for my $case (@cases) {

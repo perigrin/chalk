@@ -491,8 +491,11 @@ class Chalk::Bootstrap::Perl::Actions {
         # Fall back to a fresh Start node when no scope is available
         # (e.g., in tests or early-parse contexts without scope tracking).
         my $control = $ctx->control_head // $factory->make('Start');
+        # A bare `return` is the empty list: nothing in list context, undef
+        # only to a scalar caller -- the producer's `valueless` Return.
         my $ret = $factory->make_cfg('Return',
-            inputs => [$value // _make_keyword_const($factory, 'undef')],
+            inputs    => [$value // _make_keyword_const($factory, 'undef')],
+            valueless => !defined $value,
         );
         $ret->set_control_in($control);
         return $ret;
