@@ -49,6 +49,15 @@ for my $case (
     [ q{my $x = 1; my $f = sub { $x = 5; 0 }; my $r = $x + $f->(); print "$r $x\n";}, 'an operand a closure stores is read after its call' ],
     [ q{my $x = 1; my $r = eval { eval q{$x = 2; die "in\n"}; $x + 10 }; print "$r $x [$@]\n";}, 'a string eval in a block eval' ],
     [ q{my $x = 0; my $f = sub { $x + 1 }; eval q{$x = 4}; print $f->(), "\n";}, 'a closure sees what the eval stored' ],
+    # AN op= THROUGH THE CELL: B::SoN took the cell itself for the operand and
+    # stored nothing, the statement fell out of the body, and these printed
+    # 1 and "2 1".
+    [ q{my $n = 1; eval q{$n *= 3; 1}; print "$n\n";}, 'an op= in the string stores through the cell' ],
+    [ q{my $n = 1; my $r = $n + eval '$n *= 3; 1'; print "$r $n\n";}, 'an operand the eval op-assigns is read after it' ],
+    [ q{my $n = 1; my $r = eval q{$n += 4}; print "$r $n\n";}, "an op='s value is the eval's" ],
+    [ q{my $n = "a"; eval q{$n x= 3; $n .= "b"; 1}; print "$n\n";}, 'string op=s in the string' ],
+    [ q{my $n = 1; my $f = sub { $n *= 3; 1 }; $f->(); $f->(); print "$n\n";}, 'an op= in a closure' ],
+    [ q{my $n = 1; my $f = sub { $n }; $n *= 3; $n++; print $f->(), "\n";}, 'op= and ++ in the scope that made the cell' ],
 ) {
     my ($src, $name) = @$case;
     my ($pl, $u, $err) = lower($src);
