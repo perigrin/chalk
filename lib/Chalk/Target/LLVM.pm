@@ -1987,6 +1987,28 @@ sub lower_with_elaboration {
             if @taken;
     }
 
+    # AN EVAL STRING B::SoN COMPILED (a Call with string_eval: a block eval
+    # calling a closure over the lexicals its code names) is T2's alone. The
+    # fallback has no rule for it: refused by name where T2 refused.
+    {
+        require Chalk::Target::LLVM::Builder;
+        my %seen;
+        my @todo = Chalk::Target::LLVM::Builder::_all_nodes( $opts{mop}, $return_node );
+        my $found;
+        while (defined( my $n = shift @todo )) {
+            next if $seen{ Scalar::Util::refaddr($n) }++;
+            if ($n->operation eq 'Call' && $n->can('string_eval') && $n->string_eval) { $found = 1; last }
+            # (one in a body a call or a substitution reaches: s///ee's)
+            for my $g ( grep { Scalar::Util::blessed($_) } ( $n->can('target') && Scalar::Util::blessed( $n->target ) && $n->target->can('graph') ? $n->target->graph : () ),
+                        ( $n->can('replacement_body') && defined $n->replacement_body ? $Chalk::IR::Serialize::JSON::CODE_GRAPHS{ $n->replacement_body } : () ) ) {
+                push @todo, $g->component;
+            }
+        }
+        die "GAP: a string eval B::SoN compiled is T2's alone -- the fallback has no rule for its body"
+          . " (T2: " . ( ( $Chalk::Target::LLVM::Lower::PATH // {} )->{why} // 'refused' ) . ")\n"
+            if $found;
+    }
+
     # Context sees a Maybe[T] as Scalar, as it did before Maybe[T] was a type.
     my $maybe_view = _context_sees_maybe_as_scalar($return_node, $opts{mop});
 

@@ -132,7 +132,7 @@ sub args_assign {
 # it reads -- shared, or of no version of its own.)
 sub plain_anon {
     my ($b, $c) = @_;
-    return 0 unless ( $c->name // '' ) =~ /__ANON__/;
+    return 0 unless ( $c->name // '' ) =~ /__(?:ANON|EVAL)__/;
     my $t = $c->can('target') ? $c->target : undef;
     return 0 unless blessed($t) && $t->can('graph') && $t->graph;
     return 0 if grep { $_->operation eq 'CellParam'
@@ -149,7 +149,7 @@ sub call {
     # A DIRECT CALL OF A CLOSURE (`$f->()` B::SoN resolved): through the code
     # value its AnonSub makes in this function -- its cells are there.
     my $plain = $b->plain_anon($c);
-    if (( $c->name // '' ) =~ /__ANON__/ && !$plain) {
+    if (( $c->name // '' ) =~ /__(?:ANON|EVAL)__/ && !$plain) {
         my @anon = grep { $_->operation eq 'AnonSub' && ( $_->name // '' ) eq $c->name } +($b->{own_nodes} // [])->@*;
         # (ITS CODE VALUE FOLDED AWAY -- `my $c = sub {...}; $c->(1)` -- the
         # AnonSub hangs off the cells it captures, after its statement)
@@ -723,7 +723,7 @@ sub scalar_arg {
     my ($b, $n) = @_;
     return $b->as($b->value($n), '%Slot') unless _is_list($n);
     out('a call passing a list') unless $n->operation eq 'Call';
-    if (( $n->dispatch_kind // '' ) eq 'direct' && ( ( $n->name // '' ) !~ /__ANON__/ || $b->plain_anon($n) )) {
+    if (( $n->dispatch_kind // '' ) eq 'direct' && ( ( $n->name // '' ) !~ /__(?:ANON|EVAL)__/ || $b->plain_anon($n) )) {
         my $r = $b->value($n);
         my $t = $n->target;
         my $fn = blessed($t) && $t->can('graph') && $t->graph ? $b->{funcs}{ refaddr($t) } : undef;

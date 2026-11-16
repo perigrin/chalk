@@ -622,6 +622,7 @@ sub _deserialize_graph ($method_data) {
                 if exists $fields->{param_names};
             $args{want}          = $fields->{want} if exists $fields->{want};
             $args{shares_args}   = 1 if $fields->{shares_args};
+            $args{string_eval}   = 1 if $fields->{string_eval};
             # THE LAST INPUT IS MEMORY, not an argument: a builtin that reads
             # or writes an aggregate (push, shift, ...) follows a memory
             # version. Dropped, push took its MemStart for a value to append.

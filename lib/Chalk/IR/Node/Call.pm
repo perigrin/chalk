@@ -78,6 +78,12 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # a list of its own. In the hash: `&f` and `f()` are different calls.
     field $shares_args :param :reader = 0;
 
+    # A direct call that runs an eval string's compiled body (B::SoN
+    # `string_eval`): perl's `eval STRING` whose code B::SoN knew, compiled as
+    # a closure over the lexicals it names (the AnonSub of the same name holds
+    # their cells), called inside the eval's trap as a block eval's body.
+    field $string_eval :param :reader = 0;
+
     # Whether the last input is the MEMORY version this call follows rather
     # than an argument (B::SoN `memory_input`). Not identity: the inputs are.
     field $memory_input :param :reader = 0;
@@ -129,6 +135,7 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
             (defined $class_name ? "class_name=$class_name" : ()),
             ($paren_form ? "paren_form=1" : ()),
             ($shares_args ? "shares_args=1" : ()),
+            ($string_eval ? "string_eval=1" : ()),
             $self->_serialize_inputs());
     }
 

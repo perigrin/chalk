@@ -1406,7 +1406,8 @@ sub _attach_call_targets ($graphs, $mop) {
             # the graph is the metaobject's source -- the producer's own
             # resolution does the same (B::SoN _callee_return_type).
             my $cname = $node->name // '';
-            if ($cname =~ /::__ANON__:\d+:\d+\z/ && $graphs->{$cname}) {
+            # (AN EVAL STRING'S COMPILED BODY, `::__EVAL__:LINE:N`, is one too.)
+            if ($cname =~ /::__(?:ANON|EVAL)__:\d+:\d+\z/ && $graphs->{$cname}) {
                 $node->set_target($anon{$cname} //= Chalk::MOP::Sub->new(
                     name => $cname, class => $mop->for_class('main'),
                     graph => $graphs->{$cname}, params => ['@_'], uses_args => true));
