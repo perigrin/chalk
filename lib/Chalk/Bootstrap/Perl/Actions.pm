@@ -1524,6 +1524,22 @@ class Chalk::Bootstrap::Perl::Actions {
             # calls that may participate in postfix-chain stitching.
             my $text = $ctx->scanned_text() // '';
             my $is_paren_form = $text =~ /^\s*[\w:]+\s*\(/ ? true : false;
+            # `print STDERR LIST`: perl reads a bareword after print, say or
+            # printf, followed by its list with no comma, as the filehandle.
+            # The grammar sees a bare call `STDERR LIST` as the first
+            # argument; it is the handle, a `filehandle` Constant, and its
+            # list is print's. (An upper-case bareword: perl's own handles
+            # and the ones a program opens by convention.)
+            if ($func_name =~ /\A(?:print|say|printf)\z/ && @args
+                    && $args[0] isa Chalk::IR::Node::Call
+                    && $args[0]->dispatch_kind() eq 'builtin'
+                    && !$args[0]->paren_form()
+                    && $args[0]->name() =~ /\A[A-Z][A-Z0-9_]*\z/) {
+                my $handle = shift @args;
+                unshift @args,
+                    $factory->make('Constant', const_type => 'filehandle', value => $handle->name()),
+                    $handle->inputs()->[1]->@*;
+            }
             my $call = $ctx->factory->make('Call',
                 dispatch_kind => 'builtin',
                 name          => $name_node->value(),

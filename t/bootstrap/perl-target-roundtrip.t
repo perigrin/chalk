@@ -169,6 +169,16 @@ my @cases = (
           "    method c(\$v) { return \"\$v\" . \"[\$v]\" . \"\${v}x\" }\n",
           "}\n"),
       q{my $o = RT9->new(name => 'P'); print $o->a('k'), '|', $o->b(), '|', $o->c('x'), "\n";} ],
+    [ 'print to a bareword filehandle, then exit, as Class::_refuse does',
+      join('', "class RT12 {\n",
+          "    sub r(\$why) {\n",
+          "        print STDERR \"chalk: refused: \$why\\n\";\n",
+          "        print STDOUT 'a', 'b';\n",
+          "        print \"\\n\";\n",
+          "        exit 3;\n",
+          "    }\n",
+          "}\n"),
+      q{print "before\n"; RT12::r('x');} ],
 );
 
 for my $case (@cases) {

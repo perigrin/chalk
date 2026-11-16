@@ -1066,7 +1066,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 return $val;
             }
             # Bare identifiers (class names, qualified names) emit without quoting
-            if ($ct eq 'bareword') {
+            if ($ct eq 'bareword' || $ct eq 'filehandle') {
                 return $val;
             }
             # Numeric values
@@ -1526,6 +1526,13 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 return "$name $block_str " . join(', ', @rest_strs);
             }
             return "$name $block_str";
+        }
+
+        # `print FH LIST`: the handle is followed by the list, no comma.
+        if ($args->@* && $args->[0] isa Chalk::IR::Node::Constant
+                && ($args->[0]->const_type() // '') eq 'filehandle') {
+            my ($fh, @list) = $args->@*;
+            return join(' ', $name, $fh->value(), @list ? join(', ', $self->_emit_operand_list(@list)) : ());
         }
 
         my @arg_strs = $self->_emit_operand_list($args->@*);
