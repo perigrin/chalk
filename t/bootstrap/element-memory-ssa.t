@@ -272,12 +272,12 @@ subtest 'drain shapes that touch the array besides the drain (soundness guards)'
         'my @q=(1,2,3); my $s=0; while (my $x = shift @q) { $s += $x; push @q, 7, 8, 9 if $x == 2 } $s');
     is("$gk:$go", 'value:30', 'a re-fill past the original buffer grows it -> 1+2+3+7+8+9 = 30');
 
-    #  - `defined(my $x = shift @q)` as the condition (Defined is not an icmp)
-    #    is still refused, never a wrong value.
+    #  - `defined(my $x = shift @q)` as the condition (Defined is not an icmp):
+    #    the shift runs in the loop header each pass, so the 0 is summed, not
+    #    a stop -- perl's 1+2+0+3 = 6.
     my $body = 'my @q=(1,2,0,3); my $s=0; while (defined(my $x = shift @q)) { $s += $x } $s';
     my ($kind, $out) = lower_and_run($body);
-    isnt($kind, 'value', "[$body] does NOT lower to a value (GAPs)")
-        or diag("unexpectedly lowered to: $out");
+    is("$kind:$out", 'value:6', "[$body] is perl's 1+2+0+3 = 6");
 
     # A drain over a constant RANGE `(1..4)` now lowers correctly (the folded
     # const AV is expanded to a 4-element ArrayRef, zhi 019f5942) -- it is no
