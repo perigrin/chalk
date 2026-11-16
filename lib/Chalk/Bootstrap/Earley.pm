@@ -1679,11 +1679,12 @@ class Chalk::Bootstrap::Earley {
                     wait_origin  => $leo_candidate_w_origin,
                     sole         => ($waiter_count == 1),
                 };
+                # An unlinked item is its own top and stores no top: a
+                # reference to itself would keep the item, and the value
+                # it holds, alive after the parse.
                 if (defined $parent && $parent->{sole}) {
                     $item->{next} = $parent;
-                    $item->{top}  = $parent->{top};
-                } else {
-                    $item->{top}  = $item;
+                    $item->{top}  = $parent->{top} // $parent;
                 }
                 $leo_items{$rule_name}{$origin} = $item;
             }
