@@ -1862,6 +1862,7 @@ class Chalk::Bootstrap::Earley {
 # { leo, completed, pos }: the chain from Leo item `leo` up to its top,
 # applied to the completion `completed` at `pos`; or { inner, reify }: the
 # reification of another thunk. Only Earley::_force reads it.
-package Chalk::Bootstrap::Earley::LeoThunk {
+{
+    package Chalk::Bootstrap::Earley::LeoThunk;
     sub new($class, %args) { return bless {%args}, $class }
 }
