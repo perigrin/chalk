@@ -126,6 +126,22 @@ my @cases = (
           "    }\n",
           "}\n"),
       q{print RT6::d(0), RT6::w('ok'), "\n"; eval { RT6::d(1) }; print "[$@]"; eval { RT6::w('no') }; print "[$@]\n";} ],
+    [ 'return under a postfix unless keeps its return',
+      join('', "class RT7 {\n",
+          "    sub u(\$x) {\n",
+          "        return 'y' unless \$x;\n",
+          "        return 'n';\n",
+          "    }\n",
+          "    sub i(\$x) {\n",
+          "        return 'big' if \$x > 10;\n",
+          "        return 'small';\n",
+          "    }\n",
+          "    sub b(\$x) {\n",
+          "        return unless \$x;\n",
+          "        return 'v';\n",
+          "    }\n",
+          "}\n"),
+      q{my @b = RT7::b(0); print join(',', RT7::u(0), RT7::u(1), RT7::i(11), RT7::i(1), scalar(@b), RT7::b(1)), "\n";} ],
 );
 
 for my $case (@cases) {

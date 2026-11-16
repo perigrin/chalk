@@ -502,11 +502,14 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     method SimpleStatement($ctx) {
-        # ExpressionStatement WS PostfixModifier: the statement is the body.
+        # ExpressionStatement WS PostfixModifier, ReturnStatement WS
+        # PostfixModifier: the statement is the modifier's body. A Return left
+        # out of it was dropped, and `return X unless C` became an empty if.
         my ($body_leaf, $postfix_leaf);
         for my $leaf (_collect_ir_leaves($ctx)) {
             my $rule = $leaf->rule() // '';
-            $body_leaf    = $leaf if $rule eq 'ExpressionStatement';
+            $body_leaf    = $leaf
+                if $rule eq 'ExpressionStatement' || $rule eq 'ReturnStatement';
             $postfix_leaf = $leaf if $rule eq 'PostfixModifier';
         }
         if (defined $body_leaf && defined $postfix_leaf
