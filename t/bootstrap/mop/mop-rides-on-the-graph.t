@@ -106,16 +106,22 @@ SRC
     is $call{m}->stamp, 'Int',   'inherited is stamped through the edge';
 };
 
-# A `:reader` accessor is synthesized by the backend, so no MOP::Method exists
-# for it and the Call is legitimately target-less. It is still INHERITED, and it
-# still needs its repr. This pins the fallback that resolution-through-the-edge
-# must not eat: a reader declared on Base, called on Child.
+# A `:reader` accessor is a callable method, and since perl5-son 4df7576 the
+# producer records it as one (it used to be absent from {methods}, so the Call
+# was target-less and stamped from a fallback on the field record). It is
+# still INHERITED: a reader declared on Base, called on Child, must resolve
+# through the edge onto the DECLARING class and take its repr from there.
+#
+# The field has no :param. perl5-son 9d23bda types a :param field Scalar --
+# a caller may pass anything -- which would make the repr assertion below
+# unable to tell a resolved type from a widened one. Without :param the
+# field has no outside writer and its default's Int stands.
 subtest 'an inherited :reader still gets its repr' => sub {
     my ($graphs, $mop) = load(<<'SRC', 'inherited_reader');
 use experimental 'class';
-class Base  { field $v :param :reader = 5; }
+class Base  { field $v :reader = 5; }
 class Child :isa(Base) { method own { return 3 } }
-my $c = Child->new(v => 9);
+my $c = Child->new;
 print $c->v + $c->own, "\n";
 SRC
 
@@ -129,10 +135,11 @@ SRC
     }
 
     ok $call{v}, 'found the inherited reader call' or return;
-    is $call{v}->target, undef,
-        'a synthesized reader has no metaobject to target';
+    isa_ok $call{v}->target, 'Chalk::MOP::Method', 'the inherited reader has a metaobject to target';
+    is $call{v}->target->class->name, 'Base',
+        'the inherited reader resolves onto the DECLARING class';
     is $call{v}->stamp, 'Int',
-        'and is stamped anyway, from the field type on the DECLARING class';
+        'and is stamped through the edge with the field type';
 };
 
 # The wire-vs-graph disagreement die (Analysis.pm) is load-bearing: the producer
@@ -151,18 +158,22 @@ subtest 'the wire/graph disagreement still dies' => sub {
     my $json = qx{$PERL -I$SON -MO=SoN,json,package=main $file 2>$dir/disagree.err};
     ok length $json, 'producer emitted JSON' or return;
 
-    # Lie on the wire: the graph plainly returns an Int constant.
+    # Lie on the wire: the graph plainly returns an Int constant. The lie must
+    # be a CONTRADICTION -- a type on another branch, neither refining the
+    # other. Since 37ccfcb2 the wire and the graph are ordered, not
+    # alternatives: a wire `Str` against a graph `Int` is no lie (Int <: Str)
+    # and reconciles to the narrower, so it can no longer stand in for one.
     my $data = JSON::PP->new->decode($json);
     is $data->{classes}{Base}{method_return_types}{m}, 'Int',
         'the wire and the graph agree to begin with' or return;
-    $data->{classes}{Base}{method_return_types}{m} = 'Str';
+    $data->{classes}{Base}{method_return_types}{m} = 'Code';
 
     my $err;
     try { Chalk::IR::Serialize::JSON::from_json(JSON::PP->new->encode($data)) }
     catch ($e) { $err = $e }
 
     ok defined $err, 'the loader refused' or return;
-    like $err, qr/return type 'Str' on the wire but 'Int' derived from its graph/,
+    like $err, qr/return type 'Code' on the wire but 'Int' derived from its graph/,
         'and said which two disagreed';
 };
 
