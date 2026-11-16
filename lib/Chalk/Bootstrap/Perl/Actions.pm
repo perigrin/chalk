@@ -1570,12 +1570,16 @@ class Chalk::Bootstrap::Perl::Actions {
         if ($text =~ /^"((?:[^"\\]|\\.)*)"$/) {
             my $content = $1;
             # Process escape sequences for double-quoted strings
-            if ($content =~ /\$[a-zA-Z_\d]/) {
-                # Has variable interpolation — build InterpolatedString
+            if ($content =~ /\$\{?[a-zA-Z_\d]/) {
+                # Has variable interpolation — build InterpolatedString.
+                # `${name}` is the variable `$name` (braced so `::` or a word
+                # after it is text); it is kept as `$name`, and the emitter
+                # braces it again where the text after it needs that.
                 my @parts;
                 my $remaining = $content;
-                while ($remaining =~ /\G((?:[^\$\\]|\\.)*?)(\$(?:[a-zA-Z_]\w*|\d+))/gc) {
+                while ($remaining =~ /\G((?:[^\$\\]|\\.)*?)(\$(?:[a-zA-Z_]\w*|\d+)|\$\{[a-zA-Z_]\w*\})/gc) {
                     my ($literal, $var) = ($1, $2);
+                    $var =~ s/\A\$\{(\w+)\}\z/\$$1/;
                     if (length($literal) > 0) {
                         my $lit = $self->_unescape_double_quote($literal);
                         push @parts, $factory->make('Constant',

@@ -161,6 +161,14 @@ my @cases = (
           "    method c(\$k, %opts) { return \$opts{\$k} // 'none' }\n",
           "}\n"),
       q{my $o = RT10->new; print $o->c('a', a => 1), $o->c('b', a => 1), "\n";} ],
+    [ 'a ${name} interpolation stays an interpolation',
+      join('', "class RT9 {\n",
+          "    field \$name :param :reader = 'n';\n",
+          "    method a(\$key) { return \"whether \${name}:: holds \$key\" }\n",
+          "    method b() { return \"stash \${name}::\" }\n",
+          "    method c(\$v) { return \"\$v\" . \"[\$v]\" . \"\${v}x\" }\n",
+          "}\n"),
+      q{my $o = RT9->new(name => 'P'); print $o->a('k'), '|', $o->b(), '|', $o->c('x'), "\n";} ],
 );
 
 for my $case (@cases) {

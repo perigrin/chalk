@@ -1034,9 +1034,17 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     method _emit_interpolated_string($node) {
         my $parts = $node->inputs()->[0];
         my $result = '"';
-        for my $part ($parts->@*) {
+        for my $i (0 .. $parts->$#*) {
+            my $part = $parts->[$i];
             if ($part->const_type() eq 'variable') {
-                $result .= $part->value();
+                # `$name` before `::`, a word character, `[`, `{` or `->[`
+                # would read as another variable or an element: brace it.
+                my $next = $i < $parts->$#* && $parts->[$i + 1]->const_type() ne 'variable'
+                    ? $parts->[$i + 1]->value() // '' : '';
+                my $var = $part->value();
+                $var = '${' . substr($var, 1) . '}'
+                    if $var =~ /\A\$\w+\z/ && $next =~ /\A(?:[\w\[{]|::|->[\[{])/;
+                $result .= $var;
             } else {
                 # Literal string — escape for double-quoted context
                 $result .= $self->_escape_double_quote($part->value());
