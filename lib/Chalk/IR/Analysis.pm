@@ -672,7 +672,9 @@ sub _iv_guard ( $L, $p, $st ) {
     # (the other side: a value of known interval, perl's number of it -- an
     # Int, or a Coerce of one)
     my $o = _iv_uncoerce($other);
-    return undef unless blessed($o) && ( ( $o->stamp // '' ) eq 'Int' || defined _iv_const($o) );    # static type
+    return undef unless blessed($o);
+    my $known = _iv_const($o);
+    return undef unless ( $o->stamp // '' ) eq 'Int' || ref $known;    # static type
     my $ov = _iv_of( $o, $st ) // return undef;
     # phi < o: phi <= hi(o) - 1; phi <= o: hi(o); phi > o: lo(o) + 1; phi >= o: lo(o)
     return [ undef, defined $ov->[1] ? $ov->[1] - 1 : undef ] if $c eq 'lt';
