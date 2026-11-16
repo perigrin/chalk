@@ -82,11 +82,22 @@ class Chalk::Bootstrap::Earley {
     # afterwards is "late": its value was already reified (if complete) or
     # scanned/advanced (if not), so merging it raw into the chart would
     # either mix a raw value into a reified one or drop it. Late
-    # derivations go back on the agenda as [$core_id, $origin, $value] and
-    # are processed on their own. $_processed_pos is -1 outside the
-    # position loop, so no derivation is late there.
+    # derivations go back on the agenda (see @_late and _queue_late).
+    # $_processed_pos is -1 outside the position loop, so no derivation is
+    # late there.
     field @_processed;
     field $_processed_pos = -1;
+
+    # Late derivations waiting on the agenda at the position being
+    # processed: $_late[$core_id][$origin] is the semiring sum of the late
+    # derivations of that item that have arrived since the agenda last
+    # processed it. The item has exactly one agenda entry, [$core_id,
+    # $origin, true], while the slot is defined; a further late derivation
+    # is added into the slot instead of getting an entry of its own.
+    # Processing each late derivation separately instead walks the whole
+    # ancestor chain once per derivation, which is exponential in input
+    # length on an ambiguous grammar while the chart stays polynomial.
+    field @_late;
 
 
     # Scan result cache: {pos}{pattern_string} => $end_pos (or undef)
@@ -353,6 +364,29 @@ class Chalk::Bootstrap::Earley {
         return $slot->[$origin] ? true : false;
     }
 
+    # Queue a late derivation of ($core_id, $origin) at the position being
+    # processed (see @_late). The first one since the item was last
+    # processed gets an agenda entry; later ones are added into its sum, so
+    # the agenda processes an item once per batch of late derivations
+    # rather than once per derivation.
+    method _queue_late($agenda, $core_id, $origin, $value) {
+        my $slot = ($_late[$core_id] //= []);
+        my $pending = $slot->[$origin];
+        if (!defined $pending) {
+            $slot->[$origin] = $value;
+            push $agenda->@*, [$core_id, $origin, true];
+            return;
+        }
+        try {
+            $slot->[$origin] = $semiring->add(
+                $self->_force($pending), $self->_force($value));
+        } catch ($e) {
+            my $rn = $core_index->rule_name_for($core_id);
+            die "Ambiguity merging late derivations of '$rn' "
+                . "(origin=$origin, pos=$_processed_pos): $e";
+        }
+    }
+
     # Report the chart origin dimension type (for testing)
     method chart_origin_type() { return 'ARRAY'; }
 
@@ -586,6 +620,7 @@ class Chalk::Bootstrap::Earley {
             }
 
             @_processed = ();
+            @_late = ();
             $_processed_pos = $pos;
             my %predicted_at;  # Track which rules have been predicted at this pos
 
@@ -623,14 +658,15 @@ class Chalk::Bootstrap::Earley {
             }
 
             while (my $entry = shift @agenda) {
-                my ($core_id, $origin, $late_value) = $entry->@*;
-                my $is_late = defined $late_value;
+                my ($core_id, $origin, $is_late) = $entry->@*;
 
                 my $value;
                 if ($is_late) {
-                    # A derivation that arrived after this item was processed
-                    # (see @_processed). Process this derivation alone.
-                    $value = $late_value;
+                    # Derivations that arrived after this item was processed
+                    # (see @_processed), summed (see @_late). Process their
+                    # sum alone, and free the slot for later arrivals.
+                    $value = $_late[$core_id][$origin];
+                    $_late[$core_id][$origin] = undef;
                 } else {
                     # Skip if already processed (2D array avoids pack + hash lookup)
                     # Uses explicit if-block instead of postfix next-if for XS
@@ -683,7 +719,7 @@ class Chalk::Bootstrap::Earley {
                     if ($is_late) {
                         # The chart already holds this item's reified value and
                         # its parents already received it. Merge the newly
-                        # reified derivation into the chart and propagate only
+                        # reified late sum into the chart and propagate only
                         # it: multiply distributes over add, so the parents end
                         # up with the sum of every derivation. The item is
                         # already indexed in %completed_at and its epoch commit
@@ -744,7 +780,7 @@ class Chalk::Bootstrap::Earley {
                                 my $skip_rd = $pos - $origin;
                                 my $skip_oh = $chart[$pos][$skip_core];
                                 if ($self->_is_processed_here($pos, $skip_core, $origin)) {
-                                    push @agenda, [$skip_core, $origin, $skip_value];
+                                    $self->_queue_late(\@agenda, $skip_core, $origin, $skip_value);
                                 } elsif (defined $skip_oh && defined $skip_oh->[$skip_rd]) {
                                     my $existing_val = $self->_force($skip_oh->[$skip_rd]);
                                     my $merged;
@@ -1401,7 +1437,7 @@ class Chalk::Bootstrap::Earley {
 
         if ($agenda && $self->_is_processed_here($end_pos, $new_core_id, $origin)) {
             # Zero-width scan reaching an item already processed here
-            push $agenda->@*, [$new_core_id, $origin, $new_value];
+            $self->_queue_late($agenda, $new_core_id, $origin, $new_value);
         } elsif ($self->_chart_has($chart, $end_pos, $new_core_id, $origin)) {
             # Merge with existing value using semiring add
             my $existing_val = $self->_force($self->_chart_get($chart, $end_pos, $new_core_id, $origin));
@@ -1469,7 +1505,7 @@ class Chalk::Bootstrap::Earley {
                 my $new_core_id = $core_index->advance($top_core_id);
 
                 if ($self->_is_processed_here($pos, $new_core_id, $top_origin)) {
-                    push $agenda->@*, [$new_core_id, $top_origin, $combined];
+                    $self->_queue_late($agenda, $new_core_id, $top_origin, $combined);
                 } elsif ($self->_chart_has($chart, $pos, $new_core_id, $top_origin)) {
                     my $existing_val = $self->_force($self->_chart_get($chart, $pos, $new_core_id, $top_origin));
                     my $merged_value;
@@ -1556,7 +1592,7 @@ class Chalk::Bootstrap::Earley {
                 my $existing_oh = $chart->[$pos][$new_core_id];
                 my $existing_val = defined($existing_oh) ? $self->_force($existing_oh->[$new_rd]) : undef;
                 if ($self->_is_processed_here($pos, $new_core_id, $w_origin)) {
-                    push $agenda->@*, [$new_core_id, $w_origin, $new_value];
+                    $self->_queue_late($agenda, $new_core_id, $w_origin, $new_value);
                 } elsif (defined $existing_val) {
                     # Merge with existing value using semiring add
                     my $merged_value;
@@ -1772,7 +1808,7 @@ class Chalk::Bootstrap::Earley {
             my $new_core_id = $core_index->advance($waiting_core_id);
 
             if ($self->_is_processed_here($pos, $new_core_id, $waiting_origin)) {
-                push $agenda->@*, [$new_core_id, $waiting_origin, $new_value];
+                $self->_queue_late($agenda, $new_core_id, $waiting_origin, $new_value);
             } elsif ($self->_chart_has($chart, $pos, $new_core_id, $waiting_origin)) {
                 my $existing_val = $self->_force($self->_chart_get($chart, $pos, $new_core_id, $waiting_origin));
                 my $merged_value;
