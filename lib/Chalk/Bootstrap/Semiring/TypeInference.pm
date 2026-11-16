@@ -130,16 +130,27 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         return exists $type->{valid} && !exists $type->{item_types};
     };
 
-    # Search the shared tree nodes for one with call_symbol in annotations->{type}.
-    # Returns the call_symbol string or undef.
-    # Uses $is_completed_sub_expr prune to stop at inner sub-expression boundaries.
+    # The builtin a CallExpression calls: the call_symbol of its HEAD, the
+    # leftmost identifier scan, or undef when the head is no builtin.
+    #
+    # Every CallExpression alternative starts with its QualifiedIdentifier, so
+    # the leftmost scan carrying ident_text IS the head -- the same walk
+    # _get_head_ident makes. It must not prune: the head's own completion is a
+    # completed sub-expression (valid, no item_types), and pruning there
+    # (fc4524ef) hid the head's scan, so this returned undef for EVERY call and
+    # no builtin signature was ever checked. And it must stop at the head: an
+    # identifier further right belongs to an argument (Finding 8 -- an inner
+    # builtin must never lend its signature to an unknown outer call).
     method _get_call_symbol($ctx) {
         return unless defined $ctx;
-        return _walk_annotations($ctx, sub ($n) {
+        my $head = _walk_annotations($ctx, sub ($n) {
             my $type = $n->annotations()->{type};
             return undef unless defined $type && ref($type) eq 'HASH';
-            return $type->{call_symbol};
-        }, false, $is_completed_sub_expr);
+            return undef unless defined $type->{ident_text}
+                || defined $type->{call_symbol};
+            return [ $type->{call_symbol} ];
+        }, false);
+        return defined $head ? $head->[0] : undef;
     }
 
     # Leftmost ident_text in the shared tree: for a CallExpression, the
@@ -407,11 +418,20 @@ class Chalk::Bootstrap::Semiring::TypeInference {
             if ($call_sym) {
                 my $sig = $self->_lookup_builtin($call_sym);
                 if ($sig) {
-                    my $item_types = $self->_get_item_types($value);
+                    # A builtin with two signatures (map, grep, sort) is
+                    # checked against the one its alternative spells: a
+                    # Block in alts 2 and 3, an EXPR and its comma in 0, 1.
+                    my $block_form = ($alt_idx == 2 || $alt_idx == 3);
+                    my $form = $sig->{forms}
+                        ? $sig->{forms}{ $block_form ? 'block' : 'expr' }
+                        : $sig;
+                    # Alt 3 (`NAME BLOCK`) has no list: whatever item types
+                    # a walk finds belong to the block's statements.
+                    my $item_types = $alt_idx == 3 ? undef : $self->_get_item_types($value);
                     if ($item_types) {
-                        my $arg_types = $sig->{arg_types};
-                        my $sig_offset = ($alt_idx == 2 || $alt_idx == 3) ? 1 : 0;
-                        for my $i (0 .. $#$item_types) {
+                        my $arg_types = $form->{arg_types};
+                        my $sig_offset = $block_form ? 1 : 0;
+                        for my $i (0 .. $item_types->$#*) {
                             my $actual = $item_types->[$i];
                             my $sig_idx = $i + $sig_offset;
                             my $expected = $arg_types->[$sig_idx];
@@ -421,9 +441,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                             }
                         }
                     }
-                    my $arity = $self->_get_list_arity($value) // 1;
-                    $arity += 1 if ($alt_idx == 2 || $alt_idx == 3);
-                    if ($arity < $sig->{min_arity}) {
+                    my $arity = $alt_idx == 3 ? 0 : ($self->_get_list_arity($value) // 1);
+                    $arity += 1 if $block_form;
+                    if ($arity < $form->{min_arity}) {
                         return undef;
                     }
                     # For 'return', propagate the argument's type instead of

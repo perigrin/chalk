@@ -1688,15 +1688,18 @@ TODO: {
     is($result->{type}, 'List', 'per-position: map return type => List');
 }
 
-# Alt 3 = block-only (map BLOCK), no ExpressionList.
-# list_arity defaults to 1, +1 for block = 2, meeting map's min_arity of 2.
+# Alt 3 = block-only (map BLOCK), no ExpressionList. map's BLOCK LIST form
+# needs its LIST, even as `()`: perl rejects `map { 1 };` (syntax error near
+# "};") while `map {1} ();` compiles. Alt 3 has no list -- arity 1, the
+# block -- below the form's min_arity of 2. This used to read `map BLOCK` as
+# valid by defaulting the absent list to one element, which perl does not.
 {
     my $val = make_ctx(
         call_symbol => 'map',
         # No list_arity or item_types — only a Block child
     );
     my $result = $ti->multiply($val, $make_complete->($val, 'CallExpression', 3, 10, 0));  # alt 3 = block-only
-    ok(!$ti->is_zero($result), 'per-position: map(Block) alt 3 → valid');
+    ok($ti->is_zero($result), 'per-position: map(Block) alt 3, no LIST → rejected (perl: syntax error)');
 }
 
 # Block-first with Scalar in ExpressionList: grep(Block, Scalar) → accepted.

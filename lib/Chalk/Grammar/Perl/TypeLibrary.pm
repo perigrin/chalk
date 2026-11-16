@@ -264,10 +264,27 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # Flow control (variadic: return LIST)
         return  => { min_arity => 0, arg_types => ['List'],                       return_type => 'List' },
 
-        # Block-first builtins (parse via CallExpression alt 2/3)
-        map     => { min_arity => 2, arg_types => ['Code', 'List'],              return_type => 'List' },
-        grep    => { min_arity => 2, arg_types => ['Code', 'List'],              return_type => 'List' },
-        sort    => { min_arity => 1, arg_types => ['List'],                      return_type => 'List' },
+        # Block-first builtins. Each has TWO signatures (perlfunc), and `forms`
+        # names them by the CallExpression alternatives that spell them:
+        #   block  BLOCK LIST  (alts 2, 3)  no comma after the closing brace,
+        #                                   and the LIST must be there, even
+        #                                   as () -- perl: `map { 1 };` is a
+        #                                   syntax error
+        #   expr   EXPR, LIST  (alts 0, 1)  a comma between them; the LIST may
+        #                                   be empty (`map 1;`)
+        # So a brace after map/grep opens a BLOCK exactly when no comma
+        # follows its close: the two readings never cover the same tokens.
+        # sort's second form is `sort LIST`. The top-level entry, which the
+        # IR's readers consult, stays the block form.
+        map     => { min_arity => 2, arg_types => ['Code', 'List'],              return_type => 'List',
+                     forms => { block => { min_arity => 2, arg_types => ['Code', 'List'] },
+                                expr  => { min_arity => 1, arg_types => ['List'] } } },
+        grep    => { min_arity => 2, arg_types => ['Code', 'List'],              return_type => 'List',
+                     forms => { block => { min_arity => 2, arg_types => ['Code', 'List'] },
+                                expr  => { min_arity => 1, arg_types => ['List'] } } },
+        sort    => { min_arity => 1, arg_types => ['List'],                      return_type => 'List',
+                     forms => { block => { min_arity => 2, arg_types => ['Code', 'List'] },
+                                expr  => { min_arity => 1, arg_types => ['List'] } } },
     );
 
     # Returns the signature hash for a builtin, or undef if not a builtin.
