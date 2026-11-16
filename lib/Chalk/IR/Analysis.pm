@@ -568,8 +568,8 @@ sub _iv_transfer ( $n, $st ) {
     }
     my @x = map { _iv_operand( $n, $_, $st ) } grep { blessed($_) } $n->inputs->@[ 0 .. ( $op =~ /\A(?:Add|Subtract|Multiply|Modulo|BitAnd)\z/ ? 1 : 0 ) ];
     if ( $op =~ /\A(?:Add|Subtract|Multiply)\z/ ) {
-        return undef if grep { !defined } @x[ 0, 1 ];
-        return _iv_round( _iv_arith( $op, @x[ 0, 1 ] ), @x[ 0, 1 ] );
+        return undef if grep { !defined } ( $x[0], $x[1] );
+        return _iv_round( _iv_arith( $op, $x[0], $x[1] ), $x[0], $x[1] );
     }
     if ( $op eq 'Negate' || $op eq 'Increment' || $op eq 'Decrement' ) {
         my $x = $x[0] // return undef;

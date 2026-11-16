@@ -829,7 +829,7 @@ sub _loop_test {
 sub loop {
     my ($b, $L) = @_;
     my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } $L->successors_by_input;
-    my ($bodyp, $exitp) = @proj{0, 1};
+    my ($bodyp, $exitp) = ( $proj{0}, $proj{1} );
     # (NO WAY OUT BUT THE RETURN: a label a `goto` goes back to -- B::SoN's
     # Loop at it, the goto's arm its way round -- in a body that runs on to
     # the program's end: see loop_breaks)

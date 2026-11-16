@@ -208,7 +208,7 @@ sub hash_value {
         }
         out('a {...} of an odd list') if @in % 2;
         for (my $i = 0; $i < @in; $i += 2) {
-            out('a list in a {...}') if grep { _is_list($_) } @in[ $i, $i + 1 ]; # static type
+            out('a list in a {...}') if grep { _is_list($_) } ( $in[$i], $in[ $i + 1 ] ); # static type
             $b->emit(op => 'HSet', type => 'void',
                 inputs => [ $h, $b->as($b->value($in[$i]), '%Str'), $b->as($b->value($in[ $i + 1 ]), '%Slot') ]);
         }

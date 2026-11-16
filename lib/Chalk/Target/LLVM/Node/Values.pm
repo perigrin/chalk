@@ -87,7 +87,7 @@ class Chalk::Target::LLVM::Node::Div :isa(Chalk::Target::LLVM::Node) {
     }
 }
 class Chalk::Target::LLVM::Node::Select :isa(Chalk::Target::LLVM::Node) {
-    method to_ll () { my @in = $self->inputs->@*; $self->name . ' = select i1 ' . $in[0]->name . ', ' . $self->_args( @in[ 1, 2 ] ) }
+    method to_ll () { my @in = $self->inputs->@*; $self->name . ' = select i1 ' . $in[0]->name . ', ' . $self->_args( $in[1], $in[2] ) }
 }
 class Chalk::Target::LLVM::Node::Pow :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_pow') } }
 class Chalk::Target::LLVM::Node::BitOp :isa(Chalk::Target::LLVM::Node) {
