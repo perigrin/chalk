@@ -831,7 +831,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
     method _emit_constant($node) {
         my $value = $node->value();
-        return "'" . $self->_escape_single_quote($value) . "'";
+        return $self->_quote_string($value);
     }
 
     method _emit_use_decl($node) {
@@ -1034,14 +1034,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 $result .= $part->value();
             } else {
                 # Literal string — escape for double-quoted context
-                my $lit = $part->value();
-                $lit =~ s/\\/\\\\/g;
-                $lit =~ s/"/\\"/g;
-                $lit =~ s/\n/\\n/g;
-                $lit =~ s/\t/\\t/g;
-                $lit =~ s/\$/\\\$/g;
-                $lit =~ s/\@/\\\@/g;
-                $result .= $lit;
+                $result .= $self->_escape_double_quote($part->value());
             }
         }
         $result .= '"';
@@ -1075,7 +1068,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             if ($ct eq 'regex') {
                 return $val;
             }
-            return "'" . $self->_escape_single_quote($val) . "'";
+            return $self->_quote_string($val);
         }
 
         # Typed fast-paths for computation nodes
@@ -1664,6 +1657,26 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     method _emit_backtick_expr($node) {
         my $command = $node->inputs()->[0];
         return '`' . $self->_emit_expr($command) . '`';
+    }
+
+    # Spell a string value as a Perl literal. Single quotes when every
+    # character can stand for itself there; a control character (a newline,
+    # a tab) cannot be escaped inside single quotes, and a literal newline
+    # would also be re-indented with the line it sits on, so such a string is
+    # double-quoted with each special character escaped.
+    method _quote_string($str) {
+        return "'" . $self->_escape_single_quote($str) . "'"
+            unless $str =~ /[\x00-\x1f\x7f]/;
+        return '"' . $self->_escape_double_quote($str) . '"';
+    }
+
+    # The body of a double-quoted literal that interpolates nothing.
+    my %DQ_ESCAPE = ("\n" => '\n', "\t" => '\t', "\r" => '\r', "\f" => '\f',
+                     "\e" => '\e', "\a" => '\a');
+    method _escape_double_quote($str) {
+        $str =~ s/([\\"\$\@])/\\$1/g;
+        $str =~ s{([\x00-\x1f\x7f])}{$DQ_ESCAPE{$1} // sprintf('\\x{%x}', ord $1)}ge;
+        return $str;
     }
 
     method _escape_single_quote($str) {

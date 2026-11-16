@@ -88,6 +88,17 @@ my @cases = (
           "    sub e() { my \@a = (); return scalar(\@a) }\n",
           "}\n"),
       q{my @r = RT3::g(0); my @s = RT3::g(1); my @t = RT3::h(1); my @u = RT3::h(0); print scalar(@r), scalar(@s), scalar(@t), scalar(@u), RT3::e(), "\n";} ],
+    [ 'a double-quoted string with escapes keeps its characters',
+      join('', "class RT4 {\n",
+          "    sub h() { return \"a\\nb\\t\\\"c\\\"\" }\n",
+          "    sub d(\$x) {\n",
+          "        if (\$x) {\n",
+          "            die \"MOP: must be defined\\n\";\n",
+          "        }\n",
+          "        return 'ok';\n",
+          "    }\n",
+          "}\n"),
+      q{my $h = RT4::h(); $h =~ s/([^ -~])/sprintf('<%02x>', ord $1)/ge; print $h, "|", RT4::d(0), "\n"; eval { RT4::d(1) }; print "[$@]\n";} ],
 );
 
 for my $case (@cases) {
