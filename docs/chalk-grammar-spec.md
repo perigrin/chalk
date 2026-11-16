@@ -449,7 +449,9 @@ PostfixIncDec ::= Expression _ /\+\+/
 
 `MethodCall` handles `$obj->method()` and `$obj->method` (no-arg).
 `Subscript` handles both arrow (`$ref->[$i]`) and direct (`$arr[$i]`) forms.
-`PostfixDeref` handles modern Perl postfix dereference: `$ref->@*`, `$ref->%*`.
+`PostfixDeref` handles modern Perl postfix dereference: `$ref->@*`, `$ref->%*`,
+`$ref->$*`, `$ref->$#*`, and the slices `$ref->@[...]`, `$ref->@{...}`,
+`$ref->%[...]`, `$ref->%{...}` (sigil and bracket adjacent, as perl requires).
 `CallExpression` handles parenthesized calls, bare calls (`push @arr, $val`),
 and block-first calls (`map { ... } @list`, `grep { ... } @list`).
 

@@ -407,14 +407,18 @@ subtest 'L2 (->) chains: deref-then-method: $obj->@*->method()' => sub {
 };
 
 subtest 'L2 (->) chains: deref-then-subscript: $obj->@*[0]' => sub {
-    # Postfix-deref-array-slice: $obj->@*[0] is an array slice over the deref.
+    # Postfix-deref-array-slice: $obj->@[0] is an array slice over the deref.
     # perlop / postfixderef.t treats this as a single postfix operation.
-    # Expected: a PostfixDeref node carrying both the sigil and the slice.
+    # Expected: a Slice (kind array) whose indices come first and whose
+    # aggregate, last, is the PostfixDeref of $obj -- the shape B::SoN gives
+    # `@{$obj}[0]`. (A bare PostfixDeref would drop the index.)
     my $expr = parse_expr('$obj->@[0]');
 
-    # No TODO: this may already work via the grammar alternative for ->@[idx].
-    my $deref = isa_with_shape($expr, 'Chalk::IR::Node::PostfixDeref',
-        'top is PostfixDeref (with index)');
+    my $slice = isa_with_shape($expr, 'Chalk::IR::Node::Slice',
+        'top is a Slice');
+    is($slice && $slice->kind(), 'array', 'an array slice');
+    is($slice && shape_of($slice), 'Slice(Const(0),PostfixDeref(Const($obj),Const(@)))',
+        'index first, the deref of $obj last');
 };
 
 subtest 'L2: bare-form list-op slurps trailing args: push @arr, $obj->method()' => sub {

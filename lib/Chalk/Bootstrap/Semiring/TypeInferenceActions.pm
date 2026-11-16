@@ -290,7 +290,11 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
             $type_tag = 'Array';
         } elsif ($alt_idx == 1) {
             $type_tag = 'Hash';
+        } elsif ($alt_idx >= 4) {
+            # alts 4-7: ->@[...] ->@{...} ->%[...] ->%{...}, a slice: a list
+            $type_tag = 'List';
         } else {
+            # alts 2-3: ->$* ->$#*
             $type_tag = 'Scalar';
         }
         return { valid => true, type => $type_tag };
@@ -331,7 +335,8 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         if (defined $lhs_type) {
             if ($lhs_type eq 'Scalar') {
                 $eval_context = 'Scalar';
-            } elsif ($lhs_type eq 'Array' || $lhs_type eq 'Hash') {
+            } elsif ($lhs_type eq 'Array' || $lhs_type eq 'Hash' || $lhs_type eq 'List') {
+                # (List: a slice, `$r->@[1, 2] = ...`, is a list assignment)
                 $eval_context = 'List';
             }
         }

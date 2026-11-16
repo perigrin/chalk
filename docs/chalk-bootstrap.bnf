@@ -246,7 +246,13 @@ PostfixDeref ::= Expression _ /->/ _ /@\*/
     | Expression _ /->/ _ /%\*/
     | Expression _ /->/ _ /\$\*/
     | Expression _ /->/ _ /\$#\*/
-    | Expression _ /->/ _ /@/ _ /\[/ _ Expression _ /\]/ ;
+    | Expression _ /->/ _ /@/ /\[/ _ ExpressionList _ /\]/
+    | Expression _ /->/ _ /@/ /\{/ _ ExpressionList _ /\}/
+    | Expression _ /->/ _ /%/ /\[/ _ ExpressionList _ /\]/
+    | Expression _ /->/ _ /%/ /\{/ _ ExpressionList _ /\}/ ;
+# Slices (alts 4-7): ->@[...] ->@{...} take the elements the list names,
+# ->%[...] ->%{...} index/key-value pairs. The sigil and its bracket are one
+# token to perl (`$r->@ [0]` is a syntax error), so no _ between them.
 
 CallExpression ::= QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
     | QualifiedIdentifier WS ExpressionList

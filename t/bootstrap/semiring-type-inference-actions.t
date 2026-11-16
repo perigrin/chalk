@@ -206,6 +206,12 @@ subtest 'PostfixDeref type by alt_idx' => sub {
     # alt 3 = ->$#* (scalar count)
     $result = $actions->PostfixDeref($ctx, 3);
     is($result, { valid => true, type => 'Scalar' }, 'PostfixDeref alt 3 returns Scalar');
+
+    # alts 4-7 = ->@[...] ->@{...} ->%[...] ->%{...} (slices: a list)
+    for my $alt (4 .. 7) {
+        $result = $actions->PostfixDeref($ctx, $alt);
+        is($result, { valid => true, type => 'List' }, "PostfixDeref alt $alt (a slice) returns List");
+    }
 };
 
 # Test 10: Subscript (type depends on alt_idx)
@@ -285,6 +291,14 @@ subtest 'AssignmentExpression eval_context from LHS' => sub {
 
     $result = $actions->AssignmentExpression($ctx);
     is($result->{eval_context}, 'List', 'AssignmentExpression LHS %hash → List context');
+
+    # LHS is a slice (type => 'List', e.g. $r->@[1, 2]) → eval_context = 'List'
+    $lhs = mock_ctx({ type => 'List' });
+    $rhs = mock_ctx({ type => 'Str' });
+    $ctx = mul_ctx($lhs, $rhs);
+
+    $result = $actions->AssignmentExpression($ctx);
+    is($result->{eval_context}, 'List', 'AssignmentExpression LHS slice → List context');
 
     # No LHS type → no eval_context
     $lhs = mock_ctx({ valid => true });

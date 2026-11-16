@@ -2271,30 +2271,56 @@ class Chalk::Bootstrap::Perl::Actions {
     #                     | Expression _ /->/ _ /%\*/
     #                     | Expression _ /->/ _ /\$\*/
     #                     | Expression _ /->/ _ /\$#\*/
-    # Returns Constructor:PostfixDerefExpr with target from child Expression
+    #                     | Expression _ /->/ _ /@/ /\[/ _ ExpressionList _ /\]/
+    #                     | Expression _ /->/ _ /@/ /\{/ _ ExpressionList _ /\}/
+    #                     | Expression _ /->/ _ /%/ /\[/ _ ExpressionList _ /\]/
+    #                     | Expression _ /->/ _ /%/ /\{/ _ ExpressionList _ /\}/
+    # Returns PostfixDeref with target from child Expression; a slice
+    # (->@[...] ->@{...}) is a Slice of that deref, its indices first and
+    # the aggregate last (B::SoN's order).
     method PostfixDeref($ctx) {
+        my @leaves = _collect_ir_leaves($ctx);
+
+        # The target is the first IR leaf; the operator is what follows its
+        # text (the index list may itself hold a `->@*` or `->@[`).
+        my ($target_leaf) = grep { $_->extract() isa Chalk::IR::Node } @leaves;
+        my $target = defined $target_leaf ? $target_leaf->extract() : undef;
         my $text = $ctx->scanned_text();
-        my $sigil;
-        if ($text =~ /\@\*/) {
-            $sigil = '@';
-        } elsif ($text =~ /%\*/) {
-            $sigil = '%';
-        } elsif ($text =~ /\$#\*/) {
-            $sigil = '$#';
-        } elsif ($text =~ /\$\*/) {
-            $sigil = '$';
-        }
+        my $op_text = defined $target_leaf
+            ? substr($text, length($target_leaf->scanned_text()))
+            : $text;
+        my ($op) = $op_text =~ /\A\s*->\s*(\@\*|%\*|\$#\*|\$\*|[\@%][\[\{])/;
+        $op //= '@*';
 
-        # Extract base Expression from children
-        my $target;
-        for my $val (_collect_ir_values($ctx)) {
-            if ($val isa Chalk::IR::Node) {
-                $target = $val;
-                last;
+        if ($op =~ /\A([\@%])([\[\{])\z/) {
+            my ($sigil, $bracket) = ($1, $2);
+            my $kind = $bracket eq '[' ? 'array' : 'hash';
+            die "GAP: a postfix key/value slice (->%$bracket...) has no IR node\n"
+                if $sigil eq '%';
+            my @indices;
+            for my $leaf (@leaves) {
+                next if refaddr($leaf) == refaddr($target_leaf);
+                my $val = $leaf->extract();
+                if ($val isa Chalk::IR::Node::ExpressionList) {
+                    push @indices, $val->items()->@*;
+                } elsif ($val isa Chalk::IR::Node) {
+                    push @indices, $val;
+                }
             }
+            my $deref_sigil = $kind eq 'array' ? '@' : '%';
+            my $aggregate = $ctx->factory->make('PostfixDeref',
+                sigil        => $deref_sigil,
+                inputs       => [$target, _make_const($factory, $deref_sigil)],
+            );
+            my $slice = $ctx->factory->make('Slice',
+                inputs       => [@indices, $aggregate],
+            );
+            $slice->set_kind($kind);
+            return $slice;
         }
 
-        my $sigil_node = _make_const($factory, $sigil // '@');
+        my $sigil = $op eq '$#*' ? '$#' : substr($op, 0, 1);
+        my $sigil_node = _make_const($factory, $sigil);
 
         return $ctx->factory->make('PostfixDeref',
             sigil        => $sigil_node->value(),

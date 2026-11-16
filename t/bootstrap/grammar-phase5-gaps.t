@@ -1,5 +1,5 @@
 # ABOUTME: Grammar gaps that kept lib/Chalk/*.pm out of perl-recognize-phase5.t:
-# ABOUTME: punctuation variables and package-qualified aggregates.
+# ABOUTME: punctuation variables, package-qualified aggregates and postfix slices.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -49,6 +49,26 @@ my sub rejects($src, $label) {
     ok(!$recognizer->parse($src), $label);
 }
 
+# Walk an IR tree (a Program's statements, inputs, arrayrefs) and return
+# every node.
+my sub all_nodes($root) {
+    my (@out, %seen);
+    my @todo = ($root);
+    while (@todo) {
+        my $n = shift @todo;
+        next unless defined $n && ref $n;
+        if (ref $n eq 'ARRAY') { push @todo, $n->@*; next }
+        next if $seen{ refaddr($n) }++;
+        if ($n isa Chalk::IR::Program) { push @todo, $n->other_stmts()->@*; next }
+        next unless $n isa Chalk::IR::Node;
+        push @out, $n;
+        push @todo, $n->inputs()->@* if $n->can('inputs') && ref $n->inputs() eq 'ARRAY';
+        push @todo, $n->items()->@*  if $n->can('items')  && ref $n->items() eq 'ARRAY';
+        push @todo, $n->stmts()->@*  if $n->can('stmts')  && ref $n->stmts() eq 'ARRAY';
+    }
+    return @out;
+}
+use Scalar::Util qw(refaddr);
 
 # ============================================================================
 # §1 Punctuation variables. perl -c accepts each in an expression position;
@@ -88,5 +108,55 @@ accepts('my $n = scalar @Pkg::x;',          'scalar of a qualified array');
 accepts('my $v = $Pkg::x{a};',              'element of a qualified hash');
 rejects('my @a = @Pkg::;',                  'rejects @Pkg:: (a stash name: out of the subset, spec section 2)');
 rejects('my @a = @::;',                     'rejects @:: (the main stash)');
+
+# ============================================================================
+# §3 Postfix slices. perl: `$r->@[...]` and `$r->@{...}` are slices,
+# `$r->%[...]` and `$r->%{...}` key/value slices; the sigil and the bracket
+# are one token (`$r->@ [0]` is a syntax error).
+# ============================================================================
+
+accepts('my @v = $r->@[0];',                '->@[ one index ] (pre-existing)');
+accepts('my @v = $r->@[0, 1];',             '->@[ a list of indices ]');
+accepts('my @v = $r->@[0 .. $#a];',         '->@[ a range ] (pre-existing)');
+accepts('$g->{prog}[$L]->@[ 1, 2 ] = $c ? ( $B, $E ) : ( $E, $B );',
+                                            '->@[ list ] as an assignment target');
+accepts('my @v = $r->@{qw(a b)};',          '->@{ qw list }');
+accepts('my @v = $r->@{"a", "b"};',         '->@{ list of keys }');
+accepts('my @v = $r->@{a};',                '->@{ bareword key }');
+accepts('delete $v->@{qw(inner completed leo)};', 'delete of a postfix hash slice');
+# Key/value slices are recognized; the IR has no node for one yet, so the
+# actions refuse it by name rather than build a plain slice (a miscompile).
+for my $kv ('my %kv = $r->%[0, 1];', 'my %kv = $r->%{a};', 'my %kv = $r->%{qw(a b)};') {
+    ok($recognizer->parse($kv), "recognized: $kv");
+    my $ir = eval { ir_of($kv) };
+    like($@, qr/GAP: .*key\/value slice/, "... the actions refuse it as a GAP: $kv");
+}
+accepts('my $last = $r->$#*;',              '->$#* (pre-existing)');
+accepts('my @x = $r->@*;',                  '->@* (pre-existing)');
+rejects('my @v = $r->@ [0];',               'rejects whitespace between @ and [');
+rejects('my @v = $r->% {a};',               'rejects whitespace between % and {');
+rejects('my @v = $r->@{};',                 'rejects an empty postfix slice');
+
+# The slices build Slice IR over the dereferenced aggregate.
+{
+    my $ir = ir_of('my @v = $r->@[0, 1];');
+    my ($slice) = grep { $_->operation() eq 'Slice' } all_nodes($ir);
+    ok(defined $slice, '->@[0, 1] builds a Slice');
+    is($slice && $slice->kind(), 'array', '... of kind array');
+    my @in = $slice ? $slice->inputs()->@* : ();
+    is(scalar(@in), 3, '... with two indices and the aggregate');
+    ok(@in && $in[-1]->operation() eq 'PostfixDeref' && $in[-1]->sigil() eq '@',
+        '... the aggregate last: the array $r refers to');
+}
+{
+    my $ir = ir_of('my @v = $r->@{qw(a b)};');
+    my ($slice) = grep { $_->operation() eq 'Slice' } all_nodes($ir);
+    ok(defined $slice, '->@{qw(a b)} builds a Slice');
+    is($slice && $slice->kind(), 'hash', '... of kind hash');
+    my @in = $slice ? $slice->inputs()->@* : ();
+    is(scalar(@in), 3, '... with two keys and the aggregate');
+    ok(@in && $in[-1]->operation() eq 'PostfixDeref' && $in[-1]->sigil() eq '%',
+        '... the aggregate last: the hash $r refers to');
+}
 
 done_testing();
