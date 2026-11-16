@@ -110,6 +110,6 @@ class Chalk::Target::LLVM::Node::AliasStore :isa(Chalk::Target::LLVM::Node) {
     }
 }
 
-class Chalk::Target::LLVM::Node::ARepeat:isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_arepeat') } }
+class Chalk::Target::LLVM::Node::ARepeat :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_arepeat') } }
 
 1;
