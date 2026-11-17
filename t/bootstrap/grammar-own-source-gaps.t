@@ -618,4 +618,12 @@ for my $case ([ 'my $s = "a${\ $o->m()}b";', '$' ], [ 'my $s = "@{[ $n + 1 ]}";'
         or diag(join ', ', map { $_->value() } ($la ? $la->names()->@* : ()));
 }
 
+# ============================================================================
+# §17 A C-style for: its three expressions are delimited by `(`, `;` and `)`,
+# so a term in one (`$k++`) does not bind what the next one may hold
+# (Regex/Pattern.pm: `for ($k++; $k < @$chars && ...; $k++)`).
+# ============================================================================
+accepts('for ($k++; $k < 3; $k++) { 1 }',  'for with a postfix increment as its init');
+accepts('for ($k++; $k < @$c && $c->[$k] ne $q; $k++) { $k++ }', 'as Regex/Pattern.pm has it');
+
 done_testing();

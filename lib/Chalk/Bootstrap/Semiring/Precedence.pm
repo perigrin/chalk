@@ -383,6 +383,13 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $self->zero();
         }
 
+        # A C-style for's `(` and `;` delimit its three expressions: what one
+        # binds answers to them, not to the expression before -- `$k++`
+        # (a postfix term, level -2) is no parent of the condition after it.
+        if ($rule_name eq 'ForStatement' && ($matched_text eq '(' || $matched_text eq ';')) {
+            return $self->one();
+        }
+
         # Past those checks the bracket opens a delimited index: what binds
         # inside it answers to the bracket, not to the target's own level. A
         # target that is itself a subscript or a call (`$l[1]`, level -2)
