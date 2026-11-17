@@ -626,4 +626,17 @@ for my $case ([ 'my $s = "a${\ $o->m()}b";', '$' ], [ 'my $s = "@{[ $n + 1 ]}";'
 accepts('for ($k++; $k < 3; $k++) { 1 }',  'for with a postfix increment as its init');
 accepts('for ($k++; $k < @$c && $c->[$k] ne $q; $k++) { $k++ }', 'as Regex/Pattern.pm has it');
 
+# ============================================================================
+# §18 A statement after a list declaration: `my ($nm, @in) = (...)` may not
+# lend its list to the statement after it, whose Expression and
+# ExpressionList readings are then told apart as anywhere else
+# (LLVM/Node/Values.pm, Target/EmitHelpers.pm).
+# ============================================================================
+for my $src ('sub f { my ($nm, @in) = ($o->name, 1); my %a = $o->attr->%*; return 1 }',
+             'sub g { my ($l, $v) = ($1, $2); my $e = $o->esc($l); return $e }') {
+    my ($ir, $ties) = strings_of($src);
+    ok(defined $ir, "parses: $src");
+    is($ties, 0, "one reading: $src");
+}
+
 done_testing();

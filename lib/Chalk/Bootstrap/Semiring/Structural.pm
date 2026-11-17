@@ -270,10 +270,17 @@ class Chalk::Bootstrap::Semiring::Structural {
         }
 
         # Statement boundaries: preserve is_block/is_hash for disambiguation
-        # of nested empty {} (Block vs HashConstructor). Also preserve
+        # of nested empty {} (Block vs HashConstructor). A StatementList's
+        # statements are settled, so their call and list tags stay inside
+        # it: carried on, `my ($a, @b) = (...)`'s list made both readings of
+        # the NEXT statement look like lists, and add() could no longer
+        # prefer its Expression over its ExpressionList. Program keeps
         # is_call and is_list for their existing uses.
-        if ($rule_name eq 'StatementList'
-            || $rule_name eq 'Program') {
+        if ($rule_name eq 'StatementList') {
+            return ($value & STRUCT_IS_BLOCK)
+                 | ($value & STRUCT_IS_HASH);
+        }
+        if ($rule_name eq 'Program') {
             return ($value & STRUCT_IS_BLOCK)
                  | ($value & STRUCT_IS_HASH)
                  | ($value & STRUCT_IS_CALL)
