@@ -18,6 +18,7 @@ class Chalk::MOP::Class {
     field @imports;
     field @adjust_blocks;
     field @class_scope_vars;
+    field @statements;
     field @use_constants;
     field $sealed = false;
     field @unloaded;
@@ -53,6 +54,9 @@ class Chalk::MOP::Class {
     }
     method class_scope_vars() {
         return @class_scope_vars;
+    }
+    method statements() {
+        return @statements;
     }
     method use_constants() {
         return @use_constants;
@@ -166,6 +170,11 @@ class Chalk::MOP::Class {
         $self->_assert_unsealed('declare_class_scope_var');
         push @class_scope_vars, $vardecl_node;
         return $vardecl_node;
+    }
+    method declare_statement($node) {
+        $self->_assert_unsealed('declare_statement');
+        push @statements, $node;
+        return $node;
     }
     method declare_use_constant($name, $value_node) {
         $self->_assert_unsealed('declare_use_constant');
