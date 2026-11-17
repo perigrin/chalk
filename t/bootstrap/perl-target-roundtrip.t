@@ -188,10 +188,9 @@ my @cases = (
       q{print RT13::q1(), RT13::q2('two'), RT13::q3();} ],
     [ '@{ EXPR } and %{ EXPR } are the aggregates EXPR refers to',
       join('', "class RT14 {\n",
-          # (not `my ( $lo, $hi ) = ...` nor `sort keys %...`: a list
-          # declaration keeps only its first variable, and `sort keys %h`
-          # reads as `sort(keys % h)`, whatever the right side is)
-          "    sub firsts(\@in) { my \@p = \@{ shift \@in }; return join('-', \@p) }\n",
+          # (not `sort keys %...`: `sort keys %h` reads as
+          # `sort(keys % h)`, whatever the right side is)
+          "    sub firsts(\@in) { my ( \$lo, \$hi ) = \@{ shift \@in }; return \"\$lo-\$hi\" }\n",
           "    sub ks(\$r) { my \@k = keys %{ \$r->{h} }; return join(',', sort \@k) }\n",
           "    sub n(\$r) { return scalar \@{ \$r->{a} // [] } }\n",
           "    sub add(\$r) { push \@{ \$r->{a} }, 9; return \$r->{a}[-1] }\n",
@@ -241,6 +240,20 @@ my @cases = (
           "    sub v(\$x) { print \$x - 1; print \"\\n\"; return 1 }\n",
           "}\n"),
       q{print RT16::w(), "|"; RT16::v(5);} ],
+    [ 'a list declaration declares, and assigns, every variable in its list',
+      join('', "class RT18 {\n",
+          "    sub two(\@in) { my (\$a, \$b) = \@in; return \"\$a-\$b\" }\n",
+          "    sub one(\@in) { my (\$a) = \@in; return \$a }\n",
+          "    sub rest(\@in) { my (\$h, \@t) = \@in; return \$h . ':' . scalar(\@t) }\n",
+          "    sub lit() { my (\$x, \$y, \$z) = (1, 2); return \$x + \$y . (defined \$z ? 'd' : 'u') }\n",
+          "    sub bare() { my (\$x, \$y); \$x = 3; \$y = 4; return \$x * \$y }\n",
+          "    sub loop(\@in) {\n",
+          "        my (\$s, \$n) = (0, 0);\n",
+          "        for my \$v (\@in) { \$s += \$v; \$n++ }\n",
+          "        return \"\$s/\$n\";\n",
+          "    }\n",
+          "}\n"),
+      q{print join(',', RT18::two(1, 2), RT18::one(7, 8), RT18::rest(1, 2, 3), RT18::lit(), RT18::bare(), RT18::loop(2, 4)), "\n";} ],
     [ 'a statement modifier over a comma expression guards both operands',
       join('', "class RT17 {\n",
           "    sub g(\$x, \$i) {\n",

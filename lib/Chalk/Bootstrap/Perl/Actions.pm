@@ -7,6 +7,7 @@ use experimental 'class';
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::VarDecl;
+use Chalk::IR::Node::ListAssign;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::UnaryOp;
 use Chalk::IR::Node::Call;
@@ -209,6 +210,21 @@ class Chalk::Bootstrap::Perl::Actions {
     # Helper: make a Constant IR node
     my sub _make_const($factory, $value) {
         return $factory->make('Constant', const_type => 'string', value => $value);
+    }
+
+    # The variable Constant a declaration names, from what a Variable action
+    # returned: the Constant itself, or -- where the scope already bound the
+    # name -- that binding's name. undef for anything else.
+    my sub _declared_name_const($factory, $node) {
+        return undef unless blessed($node);
+        if ($node isa Chalk::IR::Node::Constant) {
+            my $v = $node->value();
+            return defined $v && $v =~ /^[\$\@\%]/ ? $node : undef;
+        }
+        if ($node isa Chalk::IR::Node::VarDecl) {
+            return $node->name();
+        }
+        return undef;
     }
 
     # The keyword literal `undef`, `true` or `false`. The value keeps the
@@ -459,7 +475,8 @@ class Chalk::Bootstrap::Perl::Actions {
                         && !($node_to_push isa Chalk::IR::Node::Unwind)
                         && !($node_to_push isa Chalk::IR::Node::If)
                         && !($node_to_push isa Chalk::IR::Node::Loop)
-                        && !($node_to_push isa Chalk::IR::Node::VarDecl)) {
+                        && !($node_to_push isa Chalk::IR::Node::VarDecl)
+                        && !($node_to_push isa Chalk::IR::Node::ListAssign)) {
                     $sa->update_control_head($node_to_push);
                 }
             }
@@ -873,6 +890,8 @@ class Chalk::Bootstrap::Perl::Actions {
                     }
                 } elsif ($item isa Chalk::IR::Node::VarDecl) {
                     Chalk::Bootstrap::Perl::Actions::declare_class_lexical( $mop_class, $item );
+                } elsif ($item isa Chalk::IR::Node::ListAssign) {
+                    die "GAP: a class-scope list declaration (`my (...)` in a class block) has no MOP record\n";
                 } elsif (ref($item) eq 'HASH' && exists $item->{__adjust_body}) {
                     $mop_class->declare_adjust( graph => Chalk::IR::Graph->new );   # (the MOP makes no body)
                 }
@@ -1127,7 +1146,9 @@ class Chalk::Bootstrap::Perl::Actions {
                     for my $stmt (reverse $fixed_body->@[0 .. $fixed_body->$#* - 1]) {
                         next unless ref($stmt) && blessed($stmt)
                             && $stmt->isa('Chalk::IR::Node');
-                        if ($stmt isa Chalk::IR::Node::VarDecl || on_chain($stmt)) {
+                        if ($stmt isa Chalk::IR::Node::VarDecl
+                                || $stmt isa Chalk::IR::Node::ListAssign
+                                || on_chain($stmt)) {
                             $return_ctrl = $stmt;
                             last;
                         }
@@ -1886,7 +1907,8 @@ class Chalk::Bootstrap::Perl::Actions {
         for my $i (0..$#stmts) {
             my $s = $stmts[$i];
             next unless blessed($s);
-            if ($s isa Chalk::IR::Node::VarDecl) {
+            if ($s isa Chalk::IR::Node::VarDecl
+                    || $s isa Chalk::IR::Node::ListAssign) {
                 # Control is a hash-excluded control_in decoration, so this
                 # is a plain mutation — no make/unmerge/merge identity churn.
                 $graph->merge($s);
@@ -2037,6 +2059,12 @@ class Chalk::Bootstrap::Perl::Actions {
     # For other declarators: returns Constructor:VarDecl.
     # Default values are handled by AssignmentExpression wrapping the declaration.
     method VariableDeclaration($ctx) {
+        # The list form `my ($a, @b)`: every name is declared, and an
+        # assignment to it is a list assignment (AssignmentExpression).
+        my ($declarator, $is_list) = ($ctx->scanned_text() // '')
+            =~ /\A\s*(my|our|state|local|field)\b\s*(\()?/;
+        return $self->_list_declaration($ctx, $declarator) if $is_list;
+
         my @leaves = _collect_ir_leaves($ctx);
         my $is_field = false;
         my $var_name;
@@ -2110,6 +2138,44 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return $var_decl;
+    }
+
+    # A list declaration, `my ($a, $b)`: a ListAssign over the names with
+    # no initializer yet, on the control chain where a VarDecl would be.
+    method _list_declaration($ctx, $declarator) {
+        die "GAP: a parenthesized field list (field (...)) is not Perl and has no IR\n"
+            if $declarator eq 'field';
+        my ($names) = grep { ref($_) eq 'ARRAY' } _collect_ir_values($ctx);
+        return undef unless defined $names && $names->@*;
+
+        my $control = $ctx->control_head // $factory->make('Start');
+        my $decl = $ctx->factory->make('ListAssign',
+            scope  => $declarator,
+            inputs => [$names, undef],
+        );
+        $decl->set_control_in($control);
+        $self->_publish_list_declaration($ctx, $decl, undef);
+        return $decl;
+    }
+
+    # Bind each of a ListAssign's names to it, put it on the graph in place
+    # of $replaces (the bare declaration an assignment refines), and make it
+    # the control head.
+    method _publish_list_declaration($ctx, $decl, $replaces) {
+        my $control = $decl->control_in;
+        my $graph = $ctx->graph() // Chalk::IR::Graph->new;
+        $graph->merge($control) if defined $control && $control->operation() eq 'Start';
+        $graph->unmerge($replaces) if defined $replaces;
+        $graph->merge($decl);
+        my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+        return unless defined $sa;
+        my $scope = _ctx_scope($ctx);
+        if (defined $scope) {
+            $scope = $scope->define($_->value(), $decl) for $decl->names()->@*;
+            $sa->update_scope($scope);
+            $sa->update_control_head($decl);
+        }
+        $sa->update_graph($graph);
     }
 
     # §13 ParenExpr — transparent
@@ -2618,6 +2684,9 @@ class Chalk::Bootstrap::Perl::Actions {
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
 
+            # `($a, $b) = ...`: the left side is a parenthesized list.
+            die "GAP: a list assignment to undeclared or existing variables (`(\$a, \$b) = ...`) has no IR\n"
+                if !defined $target && ref($focus) eq 'ARRAY';
             if (!defined $target
                     && ($focus isa Chalk::IR::Node
                         || $focus isa Chalk::IR::FieldInfo)) {
@@ -2704,6 +2773,21 @@ class Chalk::Bootstrap::Perl::Actions {
                 }
                 return $result;
             }
+            # A list declaration's initializer: the right side, in list
+            # context (`my ($a) = @in` is @in's first element).
+            if ($target isa Chalk::IR::Node::ListAssign) {
+                my $init = ref($value) eq 'ARRAY'
+                    ? $ctx->factory->make('ExpressionList', inputs => [$value])
+                    : $value;
+                return undef unless defined $init;
+                my $result = $ctx->factory->make('ListAssign',
+                    scope  => $target->scope(),
+                    inputs => [$target->names(), $init],
+                );
+                $result->set_control_in($target->control_in) if defined $target->control_in;
+                $self->_publish_list_declaration($ctx, $result, $target);
+                return $result;
+            }
             # Plain variable assignment ($var = expr) — emit as BinaryExpr (Assign).
             # VarDecl is only for my/our/state declarations (handled above).
             my $assign_op_str = $op->value();
@@ -2722,6 +2806,8 @@ class Chalk::Bootstrap::Perl::Actions {
             return $assign_result;
         }
 
+        die "GAP: a compound assignment ($op_val) to a list declaration has no IR\n"
+            if $target isa Chalk::IR::Node::ListAssign;
         # Compound assignment (.=, //=, +=, etc.)
         my $compound_result = $ctx->factory->make('CompoundAssign',
             op           => $op,
@@ -3652,9 +3738,22 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
-    # §8 VariableList — not in Tier A
+    # §8 VariableList ::= Variable | VariableList _ /,/ _ Variable
+    # The declared names, in order: an arrayref of variable Constants. A
+    # name the scope already binds resolves to its binding (a VarDecl or a
+    # ListAssign); the declaration is of the name, so it is read back.
     method VariableList($ctx) {
-        return undef;
+        my @names;
+        for my $val (_collect_ir_values($ctx)) {
+            for my $v (ref($val) eq 'ARRAY' ? $val->@* : $val) {
+                next unless ref $v;    # a terminal's text (the comma)
+                my $name = _declared_name_const($factory, $v);
+                die "GAP: a declaration list holding something other than a variable has no IR\n"
+                    unless defined $name;
+                push @names, $name;
+            }
+        }
+        return \@names;
     }
 
 }

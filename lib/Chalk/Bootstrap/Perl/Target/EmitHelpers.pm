@@ -9,6 +9,7 @@ use Chalk::IR::Node;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
 use Chalk::IR::Node::VarDecl;
+use Chalk::IR::Node::ListAssign;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::Interpolate;
 use Chalk::IR::Node::Subscript;
@@ -2320,6 +2321,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         if ($node isa Chalk::IR::Node::Subscript)    { return $self->_emit_subscript_expr($node, $declared_vars); }
         if ($node isa Chalk::IR::Node::PostfixDeref) { return $self->_emit_postfix_deref_expr($node, $declared_vars); }
         if ($node isa Chalk::IR::Node::VarDecl)      { return $self->_emit_var_decl_expr($node, $declared_vars); }
+        die "GAP: the C target has no lowering for a list declaration (my (...) = LIST)\n"
+            if $node isa Chalk::IR::Node::ListAssign;
         if ($node isa Chalk::IR::Node::Return) {
             # Return used as expression: filter-gap merge artifact.
             # Unwrap and emit the inner value (inputs[1]) as an expression.
