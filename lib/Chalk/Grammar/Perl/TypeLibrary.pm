@@ -216,39 +216,42 @@ class Chalk::Grammar::Perl::TypeLibrary {
 
     # Builtin function signatures: argument types, minimum arity, and return type.
     # Last entry in arg_types applies to all remaining positions (variadic).
+    # max_arity, where given: a named unary operator takes one operand, never
+    # a list (perlfunc gives each of these one EXPR), so `defined $a, $b` is
+    # (defined $a), $b -- a reading with more is rejected.
     my %BUILTIN_SIGNATURES = (
         # Array operations
         # Variadic positions use List (Perl flattening: accepts scalars AND arrays)
         push    => { min_arity => 2, arg_types => ['Array', 'List'],              return_type => 'Int' },
-        pop     => { min_arity => 1, arg_types => ['Array'],                     return_type => 'Scalar' },
-        shift   => { min_arity => 1, arg_types => ['Array'],                     return_type => 'Scalar' },
+        pop     => { min_arity => 1, max_arity => 1, arg_types => ['Array'],                     return_type => 'Scalar' },
+        shift   => { min_arity => 1, max_arity => 1, arg_types => ['Array'],                     return_type => 'Scalar' },
         unshift => { min_arity => 2, arg_types => ['Array', 'List'],              return_type => 'Int' },
         splice  => { min_arity => 1, arg_types => ['Array', 'Num', 'Num', 'List'], return_type => 'List' },
 
         # Hash operations
-        keys    => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
-        values  => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
-        delete  => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Scalar' },
-        exists  => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Boolean' },
-        each    => { min_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
+        keys    => { min_arity => 1, max_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
+        values  => { min_arity => 1, max_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
+        delete  => { min_arity => 1, max_arity => 1, arg_types => ['Scalar'],                    return_type => 'Scalar' },
+        exists  => { min_arity => 1, max_arity => 1, arg_types => ['Scalar'],                    return_type => 'Boolean' },
+        each    => { min_arity => 1, max_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
 
         # String operations
-        length  => { min_arity => 0, arg_types => ['Str'],                       return_type => 'Int' },
+        length  => { min_arity => 0, max_arity => 1, arg_types => ['Str'],                       return_type => 'Int' },
         chomp   => { min_arity => 0, arg_types => ['List'],                       return_type => 'Int' },
         chop    => { min_arity => 0, arg_types => ['List'],                       return_type => 'Str' },
-        chr     => { min_arity => 1, arg_types => ['Int'],                       return_type => 'Str' },
-        ord     => { min_arity => 0, arg_types => ['Str'],                       return_type => 'Int' },
+        chr     => { min_arity => 1, max_arity => 1, arg_types => ['Int'],                       return_type => 'Str' },
+        ord     => { min_arity => 0, max_arity => 1, arg_types => ['Str'],                       return_type => 'Int' },
         join    => { min_arity => 2, arg_types => ['Str', 'List'],                return_type => 'Str' },
         split   => { min_arity => 1, arg_types => ['Regex', 'Str', 'Num'],       return_type => 'List' },
         sprintf => { min_arity => 1, arg_types => ['Str', 'List'],                return_type => 'Str' },
         substr  => { min_arity => 2, arg_types => ['Str', 'Num', 'Num'],         return_type => 'Str' },
 
         # Type test
-        defined => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Boolean' },
-        ref     => { min_arity => 1, arg_types => ['Scalar'],                    return_type => 'Str' },
+        defined => { min_arity => 1, max_arity => 1, arg_types => ['Scalar'],                    return_type => 'Boolean' },
+        ref     => { min_arity => 1, max_arity => 1, arg_types => ['Scalar'],                    return_type => 'Str' },
 
         # Context
-        scalar  => { min_arity => 1, arg_types => ['List'],                       return_type => 'Scalar' },
+        scalar  => { min_arity => 1, max_arity => 1, arg_types => ['List'],                       return_type => 'Scalar' },
 
         # Control (variadic: accept scalars and arrays via flattening)
         die     => { min_arity => 0, arg_types => ['List'],                       return_type => 'None' },

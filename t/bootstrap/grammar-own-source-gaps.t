@@ -536,4 +536,20 @@ for my $case (
     is(scalar @calls, 2, '$o->name => 1 and $o->s => 2 call their methods');
 }
 
+# ============================================================================
+# §12 A named unary operator takes one operand, never a list (perlfunc: each
+# of defined, ref, scalar, exists, delete, keys, values, each, shift, pop,
+# length, chr, ord takes one EXPR). Actions.pm's Attribute returns
+# `{ name => defined $n ? $n->value() : undef, value => defined $v ? ... }`;
+# `defined` there may not take `$n ? ... : undef, value => defined $v` as its
+# list. perl -MO=Deparse: {'name', defined $n ? $n->value : undef, ...}.
+# ============================================================================
+{
+    my ($ir, $ties) = strings_of('my $h = { n => defined $n ? $n->v() : undef, w => defined $v ? $v->v() : undef };');
+    ok(defined $ir, 'two defined-ternaries in a hash: parse');
+    is($ties, 0, 'two defined-ternaries in a hash: one reading');
+    my @defined = grep { $_->operation() eq 'Call' && ($_->name() // '') eq 'defined' } all_nodes($ir);
+    is_deeply([map { scalar $_->inputs()->[1]->@* } @defined], [1, 1], 'each defined has one operand');
+}
+
 done_testing();

@@ -457,6 +457,9 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     if ($arity < $form->{min_arity}) {
                         return undef;
                     }
+                    if (defined $form->{max_arity} && $arity > $form->{max_arity}) {
+                        return undef;
+                    }
                     # For 'return', propagate the argument's type instead of
                     # the signature's return_type. This lets the enclosing
                     # method know what type is actually being returned.
