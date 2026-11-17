@@ -1,5 +1,5 @@
 # ABOUTME: Tests for relative distance chart representation.
-# ABOUTME: Verifies chart uses arrays for origin dimension and parsing is correct.
+# ABOUTME: Verifies the origin dimension is keyed by relative distance and parsing is correct.
 use 5.42.0;
 use utf8;
 use Test::More;
@@ -48,11 +48,11 @@ my $parser = Chalk::Bootstrap::Earley->new(
     semiring => $semiring,
 );
 
-# Test 1: chart origin dimension is array (relative distances)
+# Test 1: chart origin dimension is a hash keyed by relative distance
 {
     ok($parser->parse('a,b,c'), "parse succeeds");
     my $origin_type = $parser->chart_origin_type();
-    is($origin_type, 'ARRAY', "chart origin dimension is array (relative distances)");
+    is($origin_type, 'HASH', "chart origin dimension is a hash keyed by relative distance");
 }
 
 # Test 2: parse correctness preserved across all patterns
