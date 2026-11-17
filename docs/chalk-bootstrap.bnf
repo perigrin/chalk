@@ -272,11 +272,26 @@ PostfixDeref ::= Expression _ /->/ _ /@\*/
 # ->%[...] ->%{...} index/key-value pairs. The sigil and its bracket are one
 # token to perl (`$r->@ [0]` is a syntax error), so no _ between them.
 
-CallExpression ::= QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
-    | QualifiedIdentifier WS ExpressionList
+CallExpression ::= /(?!(?:print|printf|say)\b(?:\s|#[^\n]*)*\(?(?:\s|#[^\n]*)*\$(?:[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*|(?:::[a-zA-Z_]\w*)+)(?:\s|#[^\n]*)+(?:[\$\@"'`(\\~0-9]|![^=~]|[-+][^\s=]|\/[^\s\/=]|\.[0-9]|[%*&<][a-zA-Z_]|::[a-zA-Z_]|(?!(?:x|eq|ne|lt|gt|le|ge|cmp|isa|and|or|xor|if|unless|while|until|for|foreach)\b)[a-zA-Z_]))/ QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
+    | /(?!(?:print|printf|say)\b(?:\s|#[^\n]*)*\(?(?:\s|#[^\n]*)*\$(?:[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*|(?:::[a-zA-Z_]\w*)+)(?:\s|#[^\n]*)+(?:[\$\@"'`(\\~0-9]|![^=~]|[-+][^\s=]|\/[^\s\/=]|\.[0-9]|[%*&<][a-zA-Z_]|::[a-zA-Z_]|(?!(?:x|eq|ne|lt|gt|le|ge|cmp|isa|and|or|xor|if|unless|while|until|for|foreach)\b)[a-zA-Z_]))/ QualifiedIdentifier WS ExpressionList
     | QualifiedIdentifier WS Block WS ExpressionList
     | QualifiedIdentifier WS Block
+    | /(?:print|printf|say)\b/ WS IndirectHandle WS ExpressionList
+    | /(?:print|printf|say)\b/ _ /\(/ _ IndirectHandle WS ExpressionList _ /\)/
     ;
+# A filehandle as the indirect object of print, printf and say (alts 4-5;
+# `print {EXPR} LIST` is alt 2's block form). perl 5.42 reads `print $name`
+# followed by whitespace as the handle when what comes next starts a term --
+# `$ @ " ' ` ( \ ~`, a digit, `!` not `!=`/`!~`, `-`/`+` not before a space
+# or `=`, `/` not before a space, `/` or `=`, `.` before a digit,
+# `% * & <` before a name, or a word that is not an infix or modifier
+# keyword -- and as the first value otherwise: `print $x $y` vs
+# `print $x - $y`. IndirectHandle states that test as a lookahead; the guard
+# that opens alts 0-1 is its negation for print, printf and say, so a
+# handle reading never also reads as a value (`print $x -1` is never
+# `print($x - 1)`).
+
+IndirectHandle ::= /(?=\$(?:[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*|(?:::[a-zA-Z_]\w*)+)(?:\s|#[^\n]*)+(?:[\$\@"'`(\\~0-9]|![^=~]|[-+][^\s=]|\/[^\s\/=]|\.[0-9]|[%*&<][a-zA-Z_]|::[a-zA-Z_]|(?!(?:x|eq|ne|lt|gt|le|ge|cmp|isa|and|or|xor|if|unless|while|until|for|foreach)\b)[a-zA-Z_]))/ ScalarVariable ;
 
 PostfixIncDec ::= Expression _ /\+\+/
     | Expression _ /--/ ;

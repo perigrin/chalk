@@ -1447,6 +1447,54 @@ class Chalk::Bootstrap::Perl::Actions {
         my $func_name;
         my @leaves = _collect_ir_leaves($ctx);
 
+        # print/printf/say with a filehandle as the indirect object: alts
+        # 4-5 (`print $fh LIST`, `print($fh LIST)`) carry an IndirectHandle;
+        # alts 2-3 spell it as a block (`print {EXPR} LIST`). The handle is
+        # the first argument, and the Call says so (indirect_handle).
+        my ($print_name) = ($ctx->scanned_text() // '') =~ /\A\s*(print|printf|say)\b/;
+        if (defined $print_name) {
+            my ($handle_leaf) = grep { ($_->rule() // '') eq 'IndirectHandle'
+                                       || ($_->rule() // '') eq 'Block' } @leaves;
+            # (`print {$fh}` with no list, alt 3, is perl's syntax error; it
+            # also completes on the way to `print {$fh} LIST`, so it is
+            # left to the generic path rather than refused here.)
+            my $has_list = grep { ($_->rule() // '') eq 'ExpressionList'
+                                  || $_->extract() isa Chalk::IR::Node::ExpressionList } @leaves;
+            if (defined $handle_leaf && ($handle_leaf->rule() eq 'IndirectHandle' || $has_list)) {
+                my $handle = $handle_leaf->extract();
+                if ($handle_leaf->rule() eq 'Block') {
+                    my $stmts = _block_stmts($handle);
+                    my @stmts = defined $stmts ? $stmts->@* : ();
+                    die "GAP: $print_name {BLOCK} whose block is not one expression has no IR (the handle is an expression)\n"
+                        unless @stmts == 1 && $stmts[0] isa Chalk::IR::Node;
+                    $handle = $stmts[0];
+                }
+                my @list;
+                for my $leaf (@leaves) {
+                    next if refaddr($leaf) == refaddr($handle_leaf);
+                    my $focus = $leaf->extract();
+                    next if $focus isa Chalk::IR::Node::Constant
+                        && ($leaf->rule() // '') eq 'QualifiedIdentifier'
+                        && ($focus->value() // '') eq $print_name;
+                    if ($focus isa Chalk::IR::Node::ExpressionList) {
+                        push @list, $focus->items()->@*;
+                    } elsif (ref($focus) eq 'ARRAY') {
+                        push @list, $focus->@*;
+                    } elsif ($focus isa Chalk::IR::Node) {
+                        push @list, $focus;
+                    }
+                }
+                my $name_node = _make_const($factory, $print_name);
+                return $ctx->factory->make('Call',
+                    dispatch_kind   => 'builtin',
+                    name            => $print_name,
+                    paren_form      => (($ctx->scanned_text() // '') =~ /\A\s*\w+\s*\(/ ? true : false),
+                    indirect_handle => true,
+                    inputs          => [$name_node, [$handle, @list]],
+                );
+            }
+        }
+
         # Find the identifier (first Constant leaf that looks like a name)
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -1931,6 +1979,13 @@ class Chalk::Bootstrap::Perl::Actions {
         my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
         return _resolve_from_scope($ctx, $sa, $text, $factory)
             // $factory->make('Constant', const_type => 'variable', value => $text);
+    }
+
+    # §16 IndirectHandle ::= /(?=lookahead)/ ScalarVariable — print's
+    # filehandle: the variable itself.
+    method IndirectHandle($ctx) {
+        my ($var) = grep { $_ isa Chalk::IR::Node } _collect_ir_values($ctx);
+        return $var;
     }
 
     # §18 ScalarVariable — resolve from scope if available, else Constant

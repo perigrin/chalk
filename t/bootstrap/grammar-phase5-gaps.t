@@ -324,4 +324,84 @@ rejects('L: ;',                             'rejects a label on an empty stateme
     like($@, qr/GAP: .*label.*block/, "... the actions refuse a labelled bare block as a GAP");
 }
 
+# ============================================================================
+# §8 A filehandle as print's indirect object: `print $fh LIST`, `print {EXPR}
+# LIST` (and printf, say). perl 5.42 decides by the text after `print $name`
+# and its whitespace: a term start makes $name the handle, an operator start
+# makes it the first value (`print $x $y` vs `print $x - $y`). Each verdict
+# below is perl's own (B::Concise shows an rv2gv for the handle).
+# ============================================================================
+
+# [source, 1 if perl reads the scalar as the handle]
+my @print_cases = (
+    ['print $fh $json;',                1],   # Impl.pm
+    ['print $fh "a", "b";',             1],
+    ['printf $fh "%s\n", $x;',          1],
+    ['say $fh $x;',                     1],
+    ['print {$fh} "a";',                1],
+    ['print { $self->{out} } "a", "b";', 1],
+    ['print($fh "a");',                 1],
+    ['print ($fh "a");',                1],
+    ['print $fh -1;',                   1],
+    ['print $x - 1;',                   0],
+    ['print $x -$y;',                   1],
+    ['print $x / 2;',                   0],
+    ['print $x . "a";',                 0],
+    ['print $x, $y;',                   0],
+    ['print $x;',                       0],
+    ['print $x x 3;',                   0],
+    ['print $x eq 1;',                  0],
+    ['print $x if $y;',                 0],
+    ['print $x ? 1 : 2;',               0],
+    ['print $x (1);',                   1],
+    ['print $x lc $y;',                 1],
+    ['print $x %h;',                    1],
+    ['print $x % 2;',                   0],
+    ["print \$fh\n  \"a\";",            1],
+    ['print $x::y "a";',                1],
+    ['print $x [1];',                   0],
+    ['print $x{a};',                    0],
+    ['my $ok = print $x -1;',           1],
+    ['print $x !$y;',                   1],
+    ['print $x != 1;',                  0],
+    ['print $x \$y;',                   1],
+    ['print $_ "a";',                   1],
+    ['print $x->{a};',                  0],
+    ['print $x =~ /a/;',                0],
+    ['print $x // 1;',                  0],
+);
+for my $case (@print_cases) {
+    my ($src, $fh) = $case->@*;
+    accepts($src, $fh ? "handle: $src" : "no handle: $src");
+    my $ir = eval { ir_of($src) };
+    my ($call) = grep { $_->operation() eq 'Call' && ($_->name() // '') =~ /\A(?:print|printf|say)\z/ }
+        all_nodes($ir);
+    is($call && $call->indirect_handle() ? 1 : 0, $fh,
+        $fh ? "... the scalar is print's handle" : "... print has no handle");
+}
+{
+    my $ir = ir_of('print $fh $json;');
+    my ($call) = grep { $_->operation() eq 'Call' && $_->name() eq 'print' } all_nodes($ir);
+    my @args = $call ? $call->inputs()->[1]->@* : ();
+    is(scalar(@args), 2, 'print $fh $json: the handle, then one value');
+    ok(@args && $args[0]->operation() eq 'Constant' && $args[0]->value() eq '$fh',
+        '... the handle first: $fh');
+}
+{
+    my $ir = ir_of('print { $self->{out} } "a", "b";');
+    my ($call) = grep { $_->operation() eq 'Call' && $_->name() eq 'print' } all_nodes($ir);
+    my @args = $call ? $call->inputs()->[1]->@* : ();
+    is(scalar(@args), 3, 'print {EXPR} LIST: the handle, then two values');
+    ok(@args && $args[0]->operation() eq 'Subscript', '... the handle the block\'s expression');
+    ok(!grep({ $_->operation() eq 'AnonSub' } all_nodes($ir)), '... and no AnonSub: the block is no sub');
+}
+accepts('print $x -1 if $y;',               'handle: print $x -1 under a postfix if');
+# `print $x .5` is perl's handle reading too, but the grammar has no
+# leading-dot number: it is refused, not read as `print($x . 5)`.
+rejects('print $x .5;',                     'rejects print $x .5 (no .5 literal), rather than reading a concatenation');
+# Another list operator does not take a handle: `die $x -1` is perl's
+# "Missing comma" error, and the grammar's reading is the subtraction.
+accepts('my @a = (join $sep, @b);',         'join with a scalar first argument stays a call');
+accepts('push @a, $x -1;',                  'push with a later $x -1 is a subtraction');
+
 done_testing();

@@ -167,7 +167,9 @@ class Chalk::Bootstrap::Semiring::Structural {
         # parens around the call. Multiply rejects postfix-on-bare-call at
         # MethodCall/Subscript/PostfixDeref completion below.
         if ($rule_name eq 'CallExpression') {
-            my $bare = ($alt_idx == 0) ? 0 : STRUCT_IS_BARECALL;
+            # Alts 0 and 5 are bounded by their parens (5: `print($fh LIST)`);
+            # the rest are bare list-operator calls.
+            my $bare = ($alt_idx == 0 || $alt_idx == 5) ? 0 : STRUCT_IS_BARECALL;
             return STRUCT_IS_CALL | $bare | ($value & STRUCT_IS_BLOCK);
         }
 

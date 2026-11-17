@@ -1539,6 +1539,14 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return "$name " . $args->[0]->value();
         }
 
+        # `print $fh LIST` / `print {EXPR} LIST`: the handle is the first
+        # argument. Braced, any expression is the handle and never a value.
+        if ($node->can('indirect_handle') && $node->indirect_handle() && $args->@*) {
+            my ($fh, @list) = $args->@*;
+            return join(' ', $name, '{' . $self->_emit_expr($fh) . '}',
+                @list ? join(', ', $self->_emit_operand_list(@list)) : ());
+        }
+
         # `print FH LIST`: the handle is followed by the list, no comma.
         if ($args->@* && $args->[0] isa Chalk::IR::Node::Constant
                 && ($args->[0]->const_type() // '') eq 'filehandle') {

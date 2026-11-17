@@ -22,6 +22,12 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # into its args; a paren-form call does not.
     field $paren_form :param :reader = false;
 
+    # indirect_handle: true for `print $fh LIST` / `print {EXPR} LIST` (and
+    # printf, say): the first argument is the filehandle, an expression,
+    # not a value printed. (A bareword handle, `print STDERR LIST`, is a
+    # `filehandle` Constant in that place instead.)
+    field $indirect_handle :param :reader = false;
+
     # Resolved callee handle (Chalk::MOP::Method or Chalk::MOP::Sub).
     # Per Phase 4, CallExpression resolves the symbolic name via
     # $mop->find_method() and stores the metaobject reference here so
@@ -134,6 +140,7 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
             "name=$name",
             (defined $class_name ? "class_name=$class_name" : ()),
             ($paren_form ? "paren_form=1" : ()),
+            ($indirect_handle ? "indirect_handle=1" : ()),
             ($shares_args ? "shares_args=1" : ()),
             ($string_eval ? "string_eval=1" : ()),
             $self->_serialize_inputs());

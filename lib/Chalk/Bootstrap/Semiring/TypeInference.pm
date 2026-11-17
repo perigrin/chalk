@@ -407,6 +407,12 @@ class Chalk::Bootstrap::Semiring::TypeInference {
         # builtin_lookup and type_satisfies for per-position validation.
         # $value is the shared Context; tree-walkers read annotations->{type}.
         if ($rule_name eq 'CallExpression') {
+            # Alts 4-5, `print $fh LIST` and `print($fh LIST)` (printf, say):
+            # the head is a terminal, not a QualifiedIdentifier, so the
+            # leftmost identifier is some word in the list, not the call's
+            # name. print takes any LIST and returns a Boolean.
+            return { valid => true, type => 'Boolean' }
+                if defined $alt_idx && $alt_idx >= 4;
             # A statement keyword is never a sub name: `EXPR until COND` is a
             # statement modifier, never EXPR + until(COND).
             my $head = $self->_get_head_ident($value);

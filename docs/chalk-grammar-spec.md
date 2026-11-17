@@ -461,14 +461,30 @@ PostfixDeref ::= Expression _ /->/ _ /@\*/
     | Expression _ /->/ _ /\$\*/
     | Expression _ /->/ _ /\$#\*/ ;
 
-CallExpression ::= QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
-    | QualifiedIdentifier WS ExpressionList
+CallExpression ::= NOT_HANDLE QualifiedIdentifier _ /\(/ _ ExpressionList? _ /\)/
+    | NOT_HANDLE QualifiedIdentifier WS ExpressionList
     | QualifiedIdentifier WS Block WS ExpressionList
-    | QualifiedIdentifier WS Block ;
+    | QualifiedIdentifier WS Block
+    | /(?:print|printf|say)\b/ WS IndirectHandle WS ExpressionList
+    | /(?:print|printf|say)\b/ _ /\(/ _ IndirectHandle WS ExpressionList _ /\)/ ;
+
+IndirectHandle ::= /(?=$name WS TERM_START)/ ScalarVariable ;
 
 PostfixIncDec ::= Expression _ /\+\+/
     | Expression _ /--/ ;
 ```
+
+`print $fh LIST`, `print($fh LIST)` (and printf, say) take a filehandle as
+the indirect object (alts 4-5; `print {EXPR} LIST` is alt 2). perl 5.42
+reads `print $name` and whitespace as the handle when the text after it
+starts a term (TERM_START: `$ @ " ' \` ( \ ~`, a digit, `!` not `!=`/`!~`,
+`-`/`+` not before a space or `=`, `/` not before a space, `/` or `=`, `.`
+before a digit, `% * & <` before a name, or a word other than `x eq ne lt
+gt le ge cmp isa and or xor if unless while until for foreach`), and as a
+value otherwise: `print $x $y` vs `print $x - $y`. IndirectHandle is that
+test as a lookahead; NOT_HANDLE, a zero-width guard opening alts 0-1, is its
+negation for print/printf/say, so the two readings never coexist.
+`docs/chalk-bootstrap.bnf` spells both regexes out.
 
 `MethodCall` handles `$obj->method()` and `$obj->method` (no-arg).
 `Subscript` handles both arrow (`$ref->[$i]`) and direct (`$arr[$i]`) forms.

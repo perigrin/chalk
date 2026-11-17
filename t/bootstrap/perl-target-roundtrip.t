@@ -221,6 +221,26 @@ my @cases = (
           "    }\n",
           "}\n"),
       q{print RT15::pairs(1, 2, 3, 4), '|', RT15::upto(4), "\n";} ],
+    [ 'print to a filehandle in a scalar or a block; print $x - 1 is a value',
+      join('', "class RT16 {\n",
+          "    sub w() {\n",
+          "        my \$buf = '';\n",
+          # (not `open(my $fh, ...) or die`: that statement is dropped, as
+          # it was before this case)
+          "        my \$fh;\n",
+          "        open(\$fh, '>', \\\$buf);\n",
+          "        my \$h = { out => \$fh };\n",
+          "        print \$fh 'a', 'b';\n",
+          "        print { \$h->{out} } 'c';\n",
+          "        printf \$fh 'n=%d;', 3;\n",
+          "        print \$fh -1;\n",
+          "        print(\$fh 'd');\n",
+          "        close(\$fh);\n",
+          "        return \$buf;\n",
+          "    }\n",
+          "    sub v(\$x) { print \$x - 1; print \"\\n\"; return 1 }\n",
+          "}\n"),
+      q{print RT16::w(), "|"; RT16::v(5);} ],
 );
 
 for my $case (@cases) {
