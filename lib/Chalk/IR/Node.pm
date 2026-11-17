@@ -3,7 +3,6 @@
 use 5.42.0;
 use utf8;
 use experimental 'class';
-use Scalar::Util ();   # (refaddr, in remove_consumer)
 
 #
 # TWO GATES, AND BOTH ARE LOAD-BEARING.
@@ -115,8 +114,8 @@ class Chalk::IR::Node {
     # replaces with one of the same content), and removing the old one by id
     # dropped the new one too.
     method remove_consumer($node) {
-        my $target = Scalar::Util::refaddr($node);
-        $consumers->@* = grep { Scalar::Util::refaddr($_) != $target } $consumers->@*;
+        my $target = refaddr($node);
+        $consumers->@* = grep { refaddr($_) != $target } $consumers->@*;
     }
 
     # Abstract method - subclasses must implement
