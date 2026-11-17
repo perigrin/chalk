@@ -158,6 +158,46 @@ subtest 'an eager sweep runs on a short input and changes no value' => sub {
     }
 };
 
+# A multi-character token is scanned ahead: its item sits in a row past
+# the position being processed, with its origin behind it. A sweep that
+# runs while the token is in flight must count that row, or it frees the
+# origin and the token's completion finds nothing waiting. (The safe-set
+# sweep has the same rule; earley-chart-gc.t pins it there.)
+subtest 'a row scanned ahead keeps its origins through a sweep' => sub {
+    # x("a/b"): Str is scanned from 2 to 7. The other reading, W = ("a/,
+    # ends at 5, so positions 3..5 are processed, and swept, while the Str
+    # item waits at 7 for the row at 2.
+    my $ahead = [
+        rule('S', [reference('X'), terminal('\('), reference('Str'), terminal('\)')],
+                  [reference('X'), reference('W'), terminal('zzz')]),
+        rule('X',   [terminal('x')]),
+        rule('Str', [terminal('"[^"]*"')]),
+        rule('W',   [terminal('\("a\/')]),
+    ];
+    for my $input ('x("a/b")', 'x("ab")', 'x("a/zzz') {
+        my $off   = parser($ahead, TreeSemiring->new(), chart_gc => false);
+        my $eager = parser($ahead, TreeSemiring->new(), chart_gc_eager => true);
+        my $expected = $off->parse_value($input);
+        ok(defined $expected, "$input: parses with the sweep off");
+        is_deeply($eager->parse_value($input), $expected, "$input: same value with an eager sweep");
+    }
+
+    # The same with rows freed around the token: statements before it give
+    # the sweep something to free, and a long string keeps it in flight.
+    my $list = [
+        rule('List', [reference('Stmt')], [reference('List'), reference('Stmt')]),
+        rule('Stmt', [reference('S'), terminal(';')]),
+        $ahead->@*,
+    ];
+    my $input = 'x("ab");' . 'x("a/' . ('b' x 40) . '");' . 'x("a/zzz;';
+    my $off   = parser($list, CountingSemiring->new(), chart_gc => false);
+    my $eager = parser($list, CountingSemiring->new(), chart_gc_eager => true);
+    my $expected = $off->parse_value($input);
+    ok(defined $expected, 'three statements: parse with the sweep off');
+    is_deeply($eager->parse_value($input), $expected, 'three statements: same value with an eager sweep');
+    cmp_ok($eager->gc_stats()->{unreachable_freed}, '>', 0, 'three statements: the eager sweep freed rows');
+};
+
 subtest 'derivation counts survive the sweep' => sub {
     # "a+a+a" has Catalan(2) = 2 parses; statements multiply.
     my $p = parser($statements, CountingSemiring->new());
