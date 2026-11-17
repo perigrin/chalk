@@ -3099,9 +3099,15 @@ class Chalk::Bootstrap::Perl::Actions {
                 # If value is an arrayref (from ParenExpr/ExpressionList),
                 # wrap it in a HashRef node so it can be stored as a node input.
                 # The emitter will render it as (k, v, ...) for hash variable init.
+                # A parenthesized list (an arrayref of its items) is what the
+                # declared variable makes of it: an array its elements
+                # (ArrayLiteral), a hash its pairs (HashLiteral), a scalar
+                # the comma operator's last value (the ExpressionList).
                 my $init_value = $value;
                 if (ref($value) eq 'ARRAY') {
-                    $init_value = $ctx->factory->make('HashLiteral',
+                    my $sigil = substr($target->name()->value() // '$', 0, 1);
+                    $init_value = $ctx->factory->make(
+                        $sigil eq '@' ? 'ArrayLiteral' : $sigil eq '%' ? 'HashLiteral' : 'ExpressionList',
                         inputs       => [$value],
                     );
                 }
