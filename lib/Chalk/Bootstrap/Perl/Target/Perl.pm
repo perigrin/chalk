@@ -1005,7 +1005,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     method _emit_die_call($node) {
         my $args = $node->value;
         my @arg_strs = $self->_emit_operand_list($args->@*);
-        return "die " . join(', ', @arg_strs) . ";";
+        return join(' ', 'die', @arg_strs ? join(', ', @arg_strs) : ()) . ";";
     }
 
     method _emit_field_decl($node) {
@@ -1570,7 +1570,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         # Some builtins use list syntax (no parens)
         if ($LIST_FORM_BUILTINS{$name}) {
-            return "$name " . join(', ', @arg_strs);
+            return join(' ', $name, @arg_strs ? join(', ', @arg_strs) : ());
         }
 
         return "$name(" . join(', ', @arg_strs) . ")";

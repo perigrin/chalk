@@ -43,9 +43,19 @@ sub _ensure_grammar() {
 # Wraps $source in `my $_ = $source;` to give the parser a well-formed
 # statement, then unwraps the VarDecl and returns the initializer expression.
 # Returns undef on parse failure (caller can mark TODO with diagnostic).
+#
+# An expression looser than assignment (`$a or $b`, `print 1 or die`) does
+# not fit in the initializer: `my $_ = $a or $b` is `(my $_ = $a) or $b`.
+# For one of those the statement is not the VarDecl, and the source is
+# parsed again as a statement of its own, whose node is returned.
 sub parse_expr($source) {
     _ensure_grammar();
-    my $stmt = "my \$_ = $source;";
+    my $first = _first_statement("my \$_ = $source;");
+    return $first->inputs()->[1] if $first isa Chalk::IR::Node::VarDecl;
+    return defined $first ? _first_statement("$source;") : undef;
+}
+
+sub _first_statement($stmt) {
     my $parser = build_perl_ir_parser($_grammar, start => 'Program');
     my $result = eval { $parser->parse_value($stmt) };
     return undef if $@ || !defined $result || $result->is_zero();
@@ -53,9 +63,7 @@ sub parse_expr($source) {
     return undef unless $ir isa Chalk::IR::Program;
     my $stmts = $ir->other_stmts();
     return undef unless $stmts && $stmts->@*;
-    my $vardecl = $stmts->[0];
-    return undef unless $vardecl isa Chalk::IR::Node::VarDecl;
-    return $vardecl->inputs()->[1];
+    return $stmts->[0];
 }
 
 # shape_of($node) → a one-line string description of the IR shape.

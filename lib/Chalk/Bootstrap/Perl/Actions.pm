@@ -1448,6 +1448,10 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @items, $val;
             }
         }
+        # `die => 1`: a bare word before a fat comma is its string.
+        if (($ctx->scanned_text() // '') =~ /(?<![\w\$\@%>:-])(?:die|warn)\s*=>/) {
+            @items = map { $self->_quoted_bare_word($_) } @items;
+        }
         return $ctx->factory->make('ExpressionList',
             inputs       => [\@items],
         );
@@ -1457,9 +1461,43 @@ class Chalk::Bootstrap::Perl::Actions {
     method Atom($ctx) {
         my @values = _collect_ir_values($ctx);
         for my $val (@values) {
+            if ($val isa Chalk::IR::Node::Constant
+                    && ($ctx->scanned_text() // '') =~ /\A\s*(die|warn)\s*\z/) {
+                return $self->_bare_word_call($ctx, $1);
+            }
             return $val if $val isa Chalk::IR::Node;
         }
         return undef;
+    }
+
+    # A bare `die` or `warn` as a term (`open(...) or die`, `$x // warn`):
+    # perl calls it with an empty list -- it is no string. Where a bare word
+    # is quoted instead (a hash key `{die}`, `die => ...`), Subscript and
+    # ExpressionList put the string back; %bare_word_call records which
+    # nodes they may.
+    field %bare_word_call;
+    method _bare_word_call($ctx, $word) {
+        my $node;
+        if ($word eq 'die') {
+            $node = $factory->make_cfg('Unwind', inputs => [[]]);
+            $node->set_control_in($ctx->control_head // $factory->make('Start'));
+        } else {
+            $node = $ctx->factory->make('Call',
+                dispatch_kind => 'builtin',
+                name          => $word,
+                paren_form    => false,
+                inputs        => [_make_const($factory, $word), []],
+            );
+        }
+        $bare_word_call{ refaddr($node) } = $word;
+        return $node;
+    }
+
+    # The string a bare word stands for where perl quotes it, else the node.
+    method _quoted_bare_word($node) {
+        return $node unless blessed($node);
+        my $word = $bare_word_call{ refaddr($node) };
+        return defined $word ? _make_const($factory, $word) : $node;
     }
 
     # §16 CallExpression — detect return/die builtins, produce IR nodes
@@ -2556,6 +2594,10 @@ class Chalk::Bootstrap::Perl::Actions {
                 last;
             }
         }
+
+        # `$h{die}`: a bare word alone in a hash subscript is its string.
+        $index = $self->_quoted_bare_word($index)
+            if $style eq 'hash' && $text =~ /\{\s*[a-zA-Z_]\w*\s*\}\z/;
 
         # `@{$r}[0]` and `%{$h}{a}` are slices of the aggregate, not an
         # element of it: the target is the circumfix deref's PostfixDeref.

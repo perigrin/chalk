@@ -301,6 +301,22 @@ class Chalk::Bootstrap::Semiring::Precedence {
             }
         }
 
+        # A comma ends a list item, and `and`/`or`/`xor` are looser than
+        # the comma: `(1 or 2, 3)` is `1 or (2, 3)`. The item before it is
+        # the list so far, whose level the ExpressionList carries as
+        # arg_level (a single Expression) or level.
+        if ($rule_name eq 'ExpressionList' && ($matched_text eq ',' || $matched_text eq '=>')) {
+            my $low = Chalk::Grammar::Perl::PrecedenceTable::low_word_level();
+            for my $l ($existing->{arg_level}, $existing->{level}) {
+                if (defined $l && $l >= $low) {
+                    if ($ENV{DEBUG_PRECEDENCE}) {
+                        warn "  PREC_REJECT_LOW_WORD_ITEM: item_level=$l before '$matched_text'\n";
+                    }
+                    return $self->zero();
+                }
+            }
+        }
+
         # Named-unary CallExpression cannot be a Subscript target.
         # `defined $h{key}` must parse as defined($h{key}) (the call wraps the
         # subscript), not (defined $h){key} (subscript on the call). This
@@ -370,9 +386,13 @@ class Chalk::Bootstrap::Semiring::Precedence {
         return $self->zero() if $self->is_zero($left);
         return $self->zero() if $self->is_zero($right);
 
-        # If neither has operator info, no precedence constraint
-        return $self->one()
-            if !defined($left->{level}) && !defined($right->{level});
+        # If neither has operator info, no precedence constraint -- but an
+        # argument list's arg_level rides along to the CallExpression (or
+        # comma) that checks it.
+        if (!defined($left->{level}) && !defined($right->{level})) {
+            my $al = $right->{arg_level} // $left->{arg_level};
+            return defined $al ? _intern(true, undef, undef, false, undef, $al) : $self->one();
+        }
 
         # Operator check: when a BinaryOp/AssignOp completion (is_operator)
         # multiplies into a BinaryExpression context carrying a left-operand
@@ -646,6 +666,19 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 }
                 return $self->zero();
             }
+            # perlop L22 vs L24/L25: a rightward list operator's bare
+            # argument list (`print LIST`, `push @a, LIST`, `map {...} LIST`,
+            # `print $fh LIST`: alts 1, 2 and 4) is tighter than `and`, `or`
+            # and `xor`. `print 0 or die` is (print 0) or die, never
+            # print(0 or die). A parenthesized list (alt 0, 5) holds anything.
+            if (defined($alt_idx) && ($alt_idx == 1 || $alt_idx == 2 || $alt_idx == 4)
+                    && defined($value->{arg_level})
+                    && $value->{arg_level} >= Chalk::Grammar::Perl::PrecedenceTable::low_word_level()) {
+                if ($ENV{DEBUG_PRECEDENCE}) {
+                    warn "  PREC_REJECT_LIST_OP_LOW_WORD: arg_level=$value->{arg_level}\n";
+                }
+                return $self->zero();
+            }
             if (defined $value->{arg_level}) {
                 return _intern(true, $value->{level}, $value->{assoc},
                     $value->{is_operator}, $value->{op});
@@ -660,6 +693,12 @@ class Chalk::Bootstrap::Semiring::Precedence {
         if ($rule_name eq 'ExpressionList') {
             if (defined($alt_idx) && $alt_idx == 0 && defined($value->{level})) {
                 return _intern(true, undef, undef, false, undef, $value->{level});
+            }
+            # The last item of a comma list is no `and`/`or`/`xor`
+            # expression either (the comma is tighter).
+            if (defined($value->{level})
+                    && $value->{level} >= Chalk::Grammar::Perl::PrecedenceTable::low_word_level()) {
+                return $self->zero();
             }
             return $self->one();
         }
@@ -687,6 +726,16 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 && defined($value->{level})
                 && $value->{level} == Chalk::Grammar::Perl::PrecedenceTable::named_unary_level()) {
             return $value;
+        }
+
+        # A return's operand is a list operator's (perlop L22): `return $x
+        # or die` is (return $x) or die, which has no IR -- refused rather
+        # than read as return($x or die).
+        if ($rule_name eq 'ReturnStatement') {
+            return $self->zero()
+                if defined($value->{level})
+                && $value->{level} >= Chalk::Grammar::Perl::PrecedenceTable::low_word_level();
+            return $self->one();
         }
 
         # Other rules: pass through value, clear operator info

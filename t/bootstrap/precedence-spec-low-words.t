@@ -48,6 +48,8 @@ use Chalk::IR::Node::Assign;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::HashLiteral;
 use Chalk::IR::Node::Constant;
+use Chalk::IR::Node::Unwind;
+use Chalk::IR::Node::TernaryExpr;
 
 # ============================================================================
 # L23 (not) vs L13 (==): the load-bearing illustration of why "not" exists
@@ -371,7 +373,8 @@ subtest 'L25 or vs L21 , with parenthesized call: print(1, 2) or die is Or(print
     is(scalar($args->@*), 2, 'print has two args (1 and 2)');
     is($args->[0]->value(), '1', 'arg 0 is 1');
     is($args->[1]->value(), '2', 'arg 1 is 2');
-    is($or->inputs()->[2]->value(), 'die', 'right of Or is die');
+    # A bare `die` is perl's die with an empty list, not the string 'die'.
+    isa_with_shape($or->inputs()->[2], 'Chalk::IR::Node::Unwind', 'right of Or is die');
 };
 
 # ============================================================================
@@ -379,25 +382,57 @@ subtest 'L25 or vs L21 , with parenthesized call: print(1, 2) or die is Or(print
 # ----------------------------------------------------------------------------
 # perlop: `print 1, 2 or die` should parse as `(print 1, 2) or die`. This
 # combines L22 (list-operator-rightward slurps commas) with L25 (`or` binds
-# below comma). Both ingredients have known issues when expressed inside the
-# `my $_ = ...` wrapper, so this is a TODO.
+# below comma and below the list operator).
 # ============================================================================
 
 subtest 'L21 , tighter than L25 or inside list-op tail: print 1, 2 or die' => sub {
     my $expr = parse_expr('print 1, 2 or die');
 
-    TODO: {
-        local $TODO = 'List operator slurping inside `my $_ = ...;` is broken; , vs or boundary not enforced';
-        my $is_or = ref($expr) && $expr->isa('Chalk::IR::Node::Or');
-        ok($is_or, 'top is Or (or binds the call-result with die)');
-        my $call_node = $is_or ? $expr->inputs()->[1] : undef;
-        my $is_call = ref($call_node) && $call_node->isa('Chalk::IR::Node::Call');
-        ok($is_call, 'left of Or is Call (print)');
-        is(($is_call ? $call_node->name() : undef), 'print', 'callee is print');
-        my $args = $is_call ? $call_node->inputs()->[1] : undef;
-        my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;
-        is($argc, 2, 'print has two args (1 and 2)');
-    }
+    my $or = isa_with_shape($expr, 'Chalk::IR::Node::Or',
+        'top is Or (or binds the call-result with die)') or return;
+    my $call_node = isa_with_shape($or->inputs()->[1], 'Chalk::IR::Node::Call',
+        'left of Or is Call (print)') or return;
+    is($call_node->name(), 'print', 'callee is print');
+    my $args = $call_node->inputs()->[1];
+    my $argc = (ref($args) eq 'ARRAY') ? scalar($args->@*) : 0;
+    is($argc, 2, 'print has two args (1 and 2)');
+};
+
+# ============================================================================
+# L22/L24/L25 bilateral: and/or are looser than = and ?: and a list
+# operator, tighter than nothing a statement holds; `not` stays tighter
+# than both (above).
+# ============================================================================
+
+subtest 'L25 or looser than L20 =: $x = $a or $b is Or(Assign($x,$a),$b)' => sub {
+    my $or = isa_with_shape(parse_expr('$x = $a or $b'), 'Chalk::IR::Node::Or',
+        'top is Or') or return;
+    isa_with_shape($or->inputs()->[1], 'Chalk::IR::Node::Assign', 'left of Or is Assign');
+    is($or->inputs()->[2]->value(), '$b', 'right of Or is $b');
+};
+
+subtest 'L24 and looser than L19 ?:: $c ? $a : $b and $d is And(?:, $d)' => sub {
+    my $and = isa_with_shape(parse_expr('$c ? $a : $b and $d'), 'Chalk::IR::Node::And',
+        'top is And') or return;
+    isa_with_shape($and->inputs()->[1], 'Chalk::IR::Node::TernaryExpr', 'left of And is ?:');
+};
+
+subtest 'L11 || stays tighter than L20 =: $x = $a || $b is Assign($x, Or($a,$b))' => sub {
+    my $assign = isa_with_shape(parse_expr('$x = $a || $b'), 'Chalk::IR::Node::Assign',
+        'top is Assign') or return;
+    isa_with_shape($assign->inputs()->[2], 'Chalk::IR::Node::Or', 'right of Assign is Or');
+};
+
+subtest 'L11 || stays inside a list operator: print $a || $b is print(Or($a,$b))' => sub {
+    my $call = isa_with_shape(parse_expr('print $a || $b'), 'Chalk::IR::Node::Call',
+        'top is Call') or return;
+    isa_with_shape($call->inputs()->[1][0], 'Chalk::IR::Node::Or', 'its argument is Or');
+};
+
+subtest 'L25 or after a comma list item: (1 or 2, 3) is no list of two' => sub {
+    my $expr = parse_expr('(1 or 2, 3)');
+    ok(!(ref($expr) && $expr isa Chalk::IR::Node::HashLiteral && $expr->inputs()->[0]->@* == 2),
+        'not read as ((1 or 2), 3)') or diag('  got shape: ' . shape_of($expr));
 };
 
 # ============================================================================
@@ -417,7 +452,8 @@ subtest 'L25 or with parenthesized list operator: open(F, $f) or die' => sub {
     my $call = isa_with_shape($or->inputs()->[1], 'Chalk::IR::Node::Call',
         'left of Or is Call (open)') or return;
     is($call->name(), 'open', 'callee is open');
-    is($or->inputs()->[2]->value(), 'die', 'right of Or is die');
+    # A bare `die` is perl's die with an empty list, not the string 'die'.
+    isa_with_shape($or->inputs()->[2], 'Chalk::IR::Node::Unwind', 'right of Or is die');
 };
 
 done_testing;

@@ -23,10 +23,18 @@ class Chalk::Grammar::Perl::PrecedenceTable {
             { assoc => 'left',     ops => ['&&'] },                                     # 10
             { assoc => 'left',     ops => ['||', '//', '^^'] },                         # 11
             { assoc => 'nonassoc', ops => ['..', '...'] },                              # 12
-            { assoc => 'left',     ops => ['and'] },                                    # 13
-            { assoc => 'left',     ops => ['or', 'xor'] },                              # 14
+            { assoc => 'left',     ops => ['and'], level => 103 },                      # 13
+            { assoc => 'left',     ops => ['or', 'xor'], level => 104 },                # 14
         );
     }
+
+    # perlop L24, L25: `and`, then `or xor` -- looser than ?: (Chalk level
+    # 100), assignment (101), the comma and the rightward list operators.
+    # An entry's `level` puts it there; the others' level is their index.
+    # `$x = $a or $b` is ($x = $a) or $b; `print 0 or die` is
+    # (print 0) or die. low_word_level is the loosest level a comma-list
+    # item or a list operator's bare argument may not reach.
+    sub low_word_level() { return 103; }
 
     # Build a lookup hash: operator_string => { level => N, assoc => str }
     # Cached as package variable for efficiency.
@@ -39,7 +47,8 @@ class Chalk::Grammar::Perl::PrecedenceTable {
         my $last = scalar(@table) - 1;
         for my $i (0 .. $last) {
             for my $op ($table[$i]->{ops}->@*) {
-                $op_lookup{$op} = { level => $i, assoc => $table[$i]->{assoc} };
+                $op_lookup{$op} = { level => $table[$i]->{level} // $i,
+                                    assoc => $table[$i]->{assoc} };
             }
         }
         $lookup_built = true;
@@ -71,9 +80,10 @@ class Chalk::Grammar::Perl::PrecedenceTable {
     sub named_unary_level() { return 4.5; }
 
     # perlop L23 (not) sits between Chalk binary-op level 12 (.. ...) and
-    # level 13 (and). No integer slot exists between 12 and 13, so 12.5 is
-    # used. This gives `not` a level tighter than `and` (13) and `or`/`xor`
-    # (14), but looser than all binary operators through level 12.
+    # `and` (103). It is not placed below ?: and assignment as perlop has it:
+    # the level check would then refuse `my $x = not $y`, where a prefix
+    # `not` on the right is perl's. It is tighter than `and` and `or`/`xor`,
+    # looser than every binary operator through level 12.
     sub not_level() { return 12.5; }
 
     # Named unary operators do not chain: `defined defined $x` is a syntax
