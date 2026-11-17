@@ -116,6 +116,8 @@ check( 'map { 1 }, @x',          'expr',  'PERL REJECTS: guesses BLOCK' );
     $parser->semiring->reset_cache;
     my $r = $parser->parse_value($src);
     ok defined $r && !$r->is_zero, 'print {$fh} LIST and say {$fh} LIST still parse';
+    # (the block is the filehandle: of the two calls, the block reading)
+    is scalar $parser->semiring->tie_log->@*, 0, 'print {$fh} LIST and say {$fh} LIST: no tie';
 }
 
 # eval and do have two forms each (perlfunc): `eval BLOCK` / `eval EXPR` and
