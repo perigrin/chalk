@@ -76,6 +76,9 @@ check( 'map { 1 } @x',            'block', 'perl: map({1;} @x)' );
 check( 'map { $_ * 2 } @x',       'block', 'perl: map({$_ * 2;} @x)' );
 check( 'grep { $_ } @x',          'block', 'perl: grep({$_;} @x)' );
 check( 'sort { $a <=> $b } @x',   'block', 'perl: sort {$a <=> $b} @x' );
+# A bare word is never subscripted: `map {` is never the element of a hash
+# named by the word map, so a map inside a map's block leaves one reading.
+check( 'map { join(q(,), map { $_ } $_) } @x', 'block', q{perl: map({join(',', map({$_;} $_));} @x)} );
 
 # PERL REJECTS these: its guess is made before the comma (or its absence) is
 # seen, and the guess is wrong. The signatures admit exactly one reading of

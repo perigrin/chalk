@@ -329,7 +329,26 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Subscript: type depends on alt_idx
 
+    # True when the rule's left operand is a bare word read as a term
+    # (Atom > QualifiedIdentifier) and nothing more.
+    my sub _left_is_bare_word($ctx) {
+        my ($left) = grep { $_->rule() eq 'Expression' } _rule_symbols($ctx);
+        return false unless defined $left;
+        my $tok = _last_token($left);
+        return false unless $tok;
+        my ($text, $rules) = $tok->@*;
+        return $text =~ /\A[a-zA-Z_]\w*(?:::\w+)*\z/
+            && $rules->@* >= 2
+            && $rules->[-1] eq 'QualifiedIdentifier'
+            && $rules->[-2] eq 'Atom';
+    }
+
     method Subscript($ctx, $alt_idx = 0) {
+        # Alts 3 and 4 subscript without an arrow (`$a[0]`, `$h{k}`): perl
+        # takes `[` or `{` straight after a term as a subscript only after a
+        # variable or another subscript -- never after a bare word. `map {`
+        # is map and its block, not an element of a hash named map.
+        return undef if ($alt_idx == 3 || $alt_idx == 4) && _left_is_bare_word($ctx);
         my $sub_type;
         if ($alt_idx <= 1) {
             # alt 0 = [...] (array), alt 1 = {...} (hash) → element is Scalar
