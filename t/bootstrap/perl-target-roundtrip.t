@@ -324,6 +324,13 @@ my @cases = (
           "    sub peek() { return \$RT27::v }\n",
           "}\n"),
       q{print join(',', RT27::st(), RT27::st(), RT27::ou(), RT27::lo()), "\n";} ],
+    [ 'a sub outside a class is emitted with its body',
+      join('', "sub top_double(\$x) { return \$x * 2 }\n",
+          "sub top_greet { my (\$w) = \@_; return 'hi ' . \$w }\n",
+          "class RT28 {\n",
+          "    sub q(\$x) { return main::top_double(\$x) + 1 }\n",
+          "}\n"),
+      q{print join(',', RT28::q(3), top_double(5), top_greet('x')), "\n";} ],
     [ 'a statement modifier over a comma expression guards both operands',
       join('', "class RT17 {\n",
           "    sub g(\$x, \$i) {\n",
@@ -347,6 +354,19 @@ for my $case (@cases) {
     my $got  = run_perl("emit$n", $code, $driver);
     is($got, $want, "$name: the emission behaves as the source")
         or diag("emitted:\n$code");
+}
+
+# What the target does not emit it refuses by name, never drops.
+my @refusals = (
+    [ 'a statement outside a class',
+      "my \$count = 3;\nprint \"\$count\\n\";\nclass RTR1 {\n    sub f() { 1 }\n}\n",
+      qr/GAP: a statement outside a class/ ],
+);
+for my $case (@refusals) {
+    my ($name, $body, $want) = $case->@*;
+    my $code = eval { emit($HEAD . $body) };
+    like($@, $want, "$name: refused by name")
+        or diag("emitted:\n" . ($code // '(nothing)'));
 }
 
 done_testing();

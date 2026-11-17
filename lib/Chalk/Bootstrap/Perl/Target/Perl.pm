@@ -123,6 +123,15 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my @lines;
 
         my $main = $mop->for_class('main');
+        # A statement outside any sub runs where the file is compiled, in
+        # its place among the subs (a sub closes over a `my` above it). This
+        # target emits subs and classes only, so such a statement is refused
+        # by name; the functor replacing this target spells it
+        # (docs/plans/2026-11-14-the-perl-target-replaces-deparse.md).
+        if (defined $main && $main->can('statements') && $main->statements) {
+            die "GAP: a statement outside a class (or a lexical sub there) is"
+              . " not emitted by the old Perl target\n";
+        }
         if (defined $main) {
             for my $import ($main->imports) {
                 push @lines, $self->_emit_mop_import($import);

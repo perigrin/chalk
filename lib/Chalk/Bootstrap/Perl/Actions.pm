@@ -366,22 +366,31 @@ class Chalk::Bootstrap::Perl::Actions {
         # Register top-level subs on the MOP's main class.
         # These are SubInfo objects that appear at program scope (not inside a ClassBlock).
         # ClassBlock separately registers in-class subs on the declared class.
+        # Program completes again at each statement boundary (and once per
+        # reading), so `main` is declared afresh here: what the last
+        # completion -- the whole file -- holds is what main holds, each sub
+        # once. A statement outside any sub, and a lexical (`my sub`), is
+        # recorded in order as a statement of main's.
         my $mop = $ctx->mop;
-        if (defined $mop) {
-            my $main = $mop->for_class('main');
-            if (defined $main) {
-                for my $use (@use_decls) {
-                    $main->declare_import($use->name(),
-                        args    => [$use->args->@*],
-                        keyword => $use->keyword(),
+        if (defined $mop && !$mop->is_sealed) {
+            my $main = $mop->declare_class('main');
+            for my $use (@use_decls) {
+                $main->declare_import($use->name(),
+                    args    => [$use->args->@*],
+                    keyword => $use->keyword(),
+                );
+            }
+            for my $stmt (@stmts) {
+                if ($stmt isa Chalk::IR::SubInfo && $stmt->scope() eq 'package') {
+                    $main->declare_sub($stmt->name(),
+                        params => $stmt->params(),
+                        _signature_opt($stmt),
+                        body   => $stmt->body(),
+                        # (its body: the parser's graph, else an empty one -- the MOP makes none)
+                        graph  => $stmt->graph() // Chalk::IR::Graph->new,
                     );
-                }
-                for my $sub (@top_level_subs) {
-                    $main->declare_sub($sub->name(),
-                        params => $sub->params(),
-                        _signature_opt($sub),
-                        graph  => Chalk::IR::Graph->new,   # (its body: the MOP makes none)
-                    );
+                } elsif (!($stmt isa Chalk::IR::UseInfo || $stmt isa Chalk::IR::ClassInfo)) {
+                    $main->declare_statement($stmt);
                 }
             }
         }

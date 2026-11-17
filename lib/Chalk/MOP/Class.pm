@@ -25,6 +25,7 @@ class Chalk::MOP::Class {
     field @imports;
     field @adjust_blocks;
     field @class_scope_vars;
+    field @statements;
     field @use_constants;
 
     # Sealed flag: set by Chalk::MOP::seal() when parse-time accumulation
@@ -48,6 +49,7 @@ class Chalk::MOP::Class {
     method imports()       { return @imports }
     method adjust_blocks() { return @adjust_blocks }
     method class_scope_vars() { return @class_scope_vars }
+    method statements()       { return @statements }
     method use_constants() { return @use_constants }
 
     # UNLOADED: a followed module's subs the program never reaches -- named in
@@ -195,6 +197,15 @@ class Chalk::MOP::Class {
         $self->_assert_unsealed('declare_class_scope_var');
         push @class_scope_vars, $vardecl_node;
         return $vardecl_node;
+    }
+
+    # declare_statement($node): a statement run where the package is
+    # compiled (`my $x = 3;`, `print ...;` outside any sub), in order. The
+    # node is the parser's, opaque here.
+    method declare_statement($node) {
+        $self->_assert_unsealed('declare_statement');
+        push @statements, $node;
+        return $node;
     }
 
     method declare_use_constant($name, $value_node) {
