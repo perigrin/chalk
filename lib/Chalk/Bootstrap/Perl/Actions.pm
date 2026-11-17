@@ -1763,6 +1763,30 @@ class Chalk::Bootstrap::Perl::Actions {
     # interpolate that is none of these is refused by name, never kept as
     # text.
     method _double_quoted($ctx, $content) {
+        pos($content) = 0;
+        my $parts = $self->_dq_parts($ctx, \$content, false);
+        return $self->_dq_value($ctx, $parts);
+    }
+
+    # A list of parts as one value: the string when it is all literal, else
+    # an Interpolate over them.
+    method _dq_value($ctx, $parts) {
+        return _make_const($factory, '') unless $parts->@*;
+        return $parts->[0]
+            if $parts->@* == 1 && $parts->[0] isa Chalk::IR::Node::Constant
+            && $parts->[0]->const_type() eq 'string';
+        return $ctx->factory->make('Interpolate', inputs => [$parts]);
+    }
+
+    # The parts of double-quoted content from pos($$cref): to its end, or --
+    # inside a \L \U \Q group ($in_group) -- to the \E that closes it.
+    # Case modifiers: \L \U \Q apply lc, uc, quotemeta to their group (a
+    # Call part; folded when the group is all literal); \l \u apply
+    # lcfirst, ucfirst to the next character or variable. A modifier inside
+    # a group, or before anything else, is refused.
+    my %DQ_GROUP = (L => 'lc', U => 'uc', Q => 'quotemeta');
+    my %DQ_FIRST = (l => 'lcfirst', u => 'ucfirst');
+    method _dq_parts($ctx, $cref, $in_group) {
         my @parts;
         my $lit = '';
         my $flush = sub {
@@ -1772,54 +1796,91 @@ class Chalk::Bootstrap::Perl::Actions {
         my $gap = sub ($what) {
             die "GAP: a double-quoted string interpolating $what has no IR\n";
         };
-        pos($content) = 0;
-        while (pos($content) < length $content) {
-            if ($content =~ /\G\\/gc) {
-                $lit .= $self->_dq_escape(\$content);
+        my $call = sub ($name, $arg) {
+            return $ctx->factory->make('Call',
+                dispatch_kind => 'builtin',
+                name          => $name,
+                paren_form    => true,
+                inputs        => [_make_const($factory, $name), [$arg]],
+            );
+        };
+        while (pos($$cref) < length $$cref) {
+            if ($$cref =~ /\G\\E/gc) {
+                last if $in_group;    # (a stray \E is nothing)
             }
-            elsif ($content =~ /\G\$\{([a-zA-Z_]\w*|\d+|[!\@&.])\}/gc) {
+            elsif ($$cref =~ /\G\\([LUQ])/gc) {
+                my $fn = $DQ_GROUP{$1};
+                $gap->("\\$1 inside a \\L, \\U or \\Q group") if $in_group;
+                my $inner = $self->_dq_value($ctx, $self->_dq_parts($ctx, $cref, true));
+                if ($inner isa Chalk::IR::Node::Constant) {
+                    my $v = $inner->value();
+                    $lit .= $fn eq 'lc' ? lc $v : $fn eq 'uc' ? uc $v : quotemeta $v;
+                } else {
+                    $flush->();
+                    push @parts, $call->($fn, $inner);
+                }
+            }
+            elsif ($$cref =~ /\G\\([lu])/gc) {
+                my $fn = $DQ_FIRST{$1};
+                if ($$cref =~ /\G([^\\\$\@])/gc) {
+                    $lit .= $fn eq 'lcfirst' ? lcfirst $1 : ucfirst $1;
+                } elsif ($$cref =~ /\G(?=[\$\@][\w{])/gc) {
+                    # The next variable alone: parse one part from here.
+                    my $start = pos($$cref);
+                    my $one = $self->_dq_one_part($ctx, $cref, $gap);
+                    $flush->();
+                    push @parts, $call->($fn, $one);
+                } else {
+                    $gap->("\\$1 before an escape or a modifier");
+                }
+            }
+            elsif ($$cref =~ /\G\\/gc) {
+                $lit .= $self->_dq_escape($cref);
+            }
+            elsif ($$cref =~ /\G(?=[\$\@])/gc) {
+                if ($$cref =~ /\G\@(?![a-zA-Z_{\$:+\-\d])/gc) {
+                    $lit .= '@';
+                    next;
+                }
                 $flush->();
-                push @parts, _make_var_const($factory, '$' . $1);
+                push @parts, $self->_dq_one_part($ctx, $cref, $gap);
             }
-            elsif ($content =~ /\G\$((?:::)?[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)/gc) {
-                my $name = $1;
-                $gap->("\$${name}:: (a package-stash variable)") if $content =~ /\G::/;
-                $flush->();
-                push @parts, $self->_dq_element($ctx, \$content, '$' . $name, $gap);
-            }
-            elsif ($content =~ /\G\$(\d+)/gc) {
-                $gap->("\$$1 followed by a subscript") if $content =~ /\G(?:[\[{]|->[\[{])/;
-                $flush->();
-                push @parts, _make_var_const($factory, '$' . $1);
-            }
-            elsif ($content =~ /\G\$([!\@&.0])/gc
-                    || $content =~ /\G\$(\$)(?![\w{\$:])/gc) {
-                $gap->("\$$1 followed by a subscript") if $content =~ /\G(?:[\[{]|->[\[{])/;
-                $flush->();
-                push @parts, _make_var_const($factory, '$' . $1);
-            }
-            elsif ($content =~ /\G\$/gc) {
-                my ($next) = $content =~ /\G(\^\w|\{\^?\w*|.)/gcs;
-                $gap->('$' . ($next // '') . ' (only $name, ${name}, an element of one, $1.., $! $@ $& $. $0 $$ are modelled)');
-            }
-            elsif ($content =~ /\G\@([a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)/gc) {
-                my $name = $1;
-                $gap->("\@$name followed by a subscript (a slice)")
-                    if $content =~ /\G(?:[\[{]|->)/;
-                $flush->();
-                push @parts, _make_var_const($factory, '@' . $name);
-            }
-            elsif ($content =~ /\G\@(?=[\{\$:+\-\d])/gc) {
-                my ($next) = $content =~ /\G(.)/s;
-                $gap->("\@$next");
-            }
-            elsif ($content =~ /\G([^\\\$\@]+|\@)/gc) {
+            elsif ($$cref =~ /\G([^\\\$\@]+)/gc) {
                 $lit .= $1;
             }
         }
-        return _make_const($factory, $lit) unless @parts;
         $flush->();
-        return $ctx->factory->make('Interpolate', inputs => [\@parts]);
+        return \@parts;
+    }
+
+    # One interpolated variable or element at pos($$cref) (a `$` or `@`).
+    method _dq_one_part($ctx, $cref, $gap) {
+        if ($$cref =~ /\G\$\{([a-zA-Z_]\w*|\d+|[!\@&.])\}/gc) {
+            return _make_var_const($factory, '$' . $1);
+        }
+        if ($$cref =~ /\G\$((?:::)?[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)/gc) {
+            my $name = $1;
+            $gap->("\$${name}:: (a package-stash variable)") if $$cref =~ /\G::/;
+            return $self->_dq_element($ctx, $cref, '$' . $name, $gap);
+        }
+        if ($$cref =~ /\G\$(\d+)/gc
+                || $$cref =~ /\G\$([!\@&.0])/gc
+                || $$cref =~ /\G\$(\$)(?![\w{\$:])/gc) {
+            $gap->("\$$1 followed by a subscript") if $$cref =~ /\G(?:[\[{]|->[\[{])/;
+            return _make_var_const($factory, '$' . $1);
+        }
+        if ($$cref =~ /\G\$/gc) {
+            my ($next) = $$cref =~ /\G(\^\w|\{\^?\w*|.)/gcs;
+            $gap->('$' . ($next // '') . ' (only $name, ${name}, an element of one, $1.., $! $@ $& $. $0 $$ are modelled)');
+        }
+        if ($$cref =~ /\G\@([a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)/gc) {
+            my $name = $1;
+            $gap->("\@$name followed by a subscript (a slice)")
+                if $$cref =~ /\G(?:[\[{]|->)/;
+            return _make_var_const($factory, '@' . $name);
+        }
+        my ($next) = $$cref =~ /\G\@(.)/s;
+        $gap->('@' . ($next // ''));
     }
 
     # After `$name` in a double-quoted string: the variable, or the element

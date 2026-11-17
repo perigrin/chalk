@@ -1034,9 +1034,14 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return "$decl;";
     }
 
+    # A string with an expression part is spelled qq{...}: the part's code
+    # may hold `"` (a nested string), which would end a "..." string;
+    # qq{} nests the braces the code and its own nested qq{} hold, and the
+    # literal runs escape theirs.
     method _emit_interpolated_string($node) {
         my $parts = $node->inputs()->[0];
-        my $result = '"';
+        my $qq = grep { !($_ isa Chalk::IR::Node::Constant) } $parts->@*;
+        my $result = $qq ? 'qq{' : '"';
         for my $i (0 .. $parts->$#*) {
             my $part = $parts->[$i];
             # The literal text after this part, if the next part is literal.
@@ -1048,7 +1053,11 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 # An element (`$a[0]`, `$h{k}`): its value, spelled as an
                 # expression. A `[`, `{` or `->` after it would subscript
                 # the anonymous array; the literal escapes its first one.
-                $result .= '@{[ ' . $self->_emit_expr($part) . ' ]}';
+                my $code = $self->_emit_expr($part);
+                (my $bare = $code) =~ s/\\.//gs;
+                die "GAP: an interpolated expression whose code has unbalanced braces: $code\n"
+                    if ($bare =~ tr/{//) != ($bare =~ tr/}//);
+                $result .= '@{[ ' . $code . ' ]}';
                 $result .= '\\' if $next =~ /\A(?:[\[{]|->)/;
             } elsif ($part->const_type() eq 'variable') {
                 # A variable before `::`, a word character, `[`, `{` or `->[`
@@ -1061,10 +1070,12 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 $result .= $var;
             } else {
                 # Literal string — escape for double-quoted context
-                $result .= $self->_escape_double_quote($part->value());
+                my $text = $self->_escape_double_quote($part->value());
+                $text =~ s/([{}])/\\$1/g if $qq;
+                $result .= $text;
             }
         }
-        $result .= '"';
+        $result .= $qq ? '}' : '"';
         return $result;
     }
 
