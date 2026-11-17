@@ -454,4 +454,22 @@ for my $case ([q{my $s = q{a{b}c};}, 'a{b}c'], [q{my $s = qq{a{b}c};}, 'a{b}c'],
         or diag(join ', ', map { $_->value() } @strings);
 }
 
+# ============================================================================
+# §10 A postfix dereference in a double-quoted string: perl 5.42
+# (postderef_qq) interpolates `$r->@*`, `$r->@[0]`, `$r->$*` and `$r->$#*`,
+# and not `$r->%*`. The string action models none of the first four: it
+# refuses them rather than keep them as text.
+# ============================================================================
+
+for my $src (q{my $s = "$r->@*";}, q{my $s = "$r->@[0]";}, q{my $s = "$r->$*";},
+             q{my $s = "$r->{a}->$#*";}) {
+    eval { ir_of($src) };
+    like($@, qr/GAP: .*postfix dereference/, "refused, not kept as text: $src");
+}
+{
+    my $ir = ir_of(q{my $s = "$r->%*";});
+    my @lits = grep { $_->operation() eq 'Constant' && ($_->value() // '') eq '->%*' } all_nodes($ir);
+    ok(scalar @lits, q{"$r->%*" keeps ->%* as text, as perl does});
+}
+
 done_testing();

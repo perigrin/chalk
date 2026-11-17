@@ -1854,6 +1854,10 @@ class Chalk::Bootstrap::Perl::Actions {
             $node = $ctx->factory->make('Subscript',
                 inputs => [$node, $index, _make_const($factory, $style)]);
         }
+        # perl 5.42 (postderef_qq) interpolates `->@*`, `->@[...]`,
+        # `->@{...}`, `->$*` and `->$#*` too (not `->%`).
+        $gap->("$var with a postfix dereference (->\@ ->\$)")
+            if $$cref =~ /\G->(?:\@[*\[{]|\$#?\*)/;
         return $node;
     }
 
