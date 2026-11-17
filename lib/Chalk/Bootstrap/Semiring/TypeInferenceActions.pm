@@ -396,8 +396,7 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
         # read it as an expression -- `$h{s}` is no substitution, `$h{time}`
         # no call.
         if ($alt_idx == 1 || $alt_idx == 4) {
-            my @operands = grep { $_->rule() eq 'Expression' } _rule_symbols($ctx);
-            my $index = $operands[1];
+            my (undef, $index) = grep { $_->rule() eq 'Expression' } _rule_symbols($ctx);
             return undef if defined $index && _is_lone_word($index);
         }
         my $sub_type;
