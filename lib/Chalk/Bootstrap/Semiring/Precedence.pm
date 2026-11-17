@@ -403,10 +403,15 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # (`$a && $f->(1)` is no call on `$a && $f`). The bracket checks above
         # see the arrow forms' target only after `->` has passed; `->(` has
         # no bracket check at all.
-        if ($rule_name eq 'Subscript' && $matched_text eq '->'
-                && defined($existing->{level})
-                && ($existing->{level} >= 0 || $existing->{level} == -1)) {
-            return $self->zero();
+        # So does every postfix: `->` of a method call or a postfix deref, and
+        # `++`/`--` after a term (L2, L3) -- `!$x->m` is !($x->m), `!$s{$_}++`
+        # is !($s{$_}++).
+        if ((($rule_name eq 'Subscript' || $rule_name eq 'MethodCall' || $rule_name eq 'PostfixDeref')
+                    && $matched_text eq '->')
+                || ($rule_name eq 'PostfixIncDec' && $matched_text =~ /\A(?:\+\+|--)\z/)) {
+            return $self->zero()
+                if defined($existing->{level})
+                && ($existing->{level} >= 0 || $existing->{level} == -1);
         }
 
         # Past those checks the bracket opens a delimited index: what binds

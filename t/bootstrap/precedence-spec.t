@@ -795,4 +795,15 @@ subtest 'L22 push @a, $x ? 1 : 0 pushes the ternary' => sub {
     isa_with_shape($call->inputs()->[1][-1], 'Chalk::IR::Node::TernaryExpr', 'its last argument is the ternary');
 };
 
+# --- L2/L3 postfix binds tighter than L5 unary ---
+# perlop: `->` (L2) and postfix `++` (L3) bind tighter than `!` (L5):
+# `!$x->m` is !($x->m), `!$s{$k}++` is !($s{$k}++).
+# (IR/Node/PadAccess.pm, IR/Node/TernaryExpr.pm)
+for my $src ('!$x->m', '!$x->m->@*', '!$s{$k}++') {
+    subtest "L2/L3 postfix inside L5 !: $src" => sub {
+        my $expr = parse_expr($src);
+        isa_with_shape($expr, 'Chalk::IR::Node::Not', 'top is Not');
+    };
+}
+
 done_testing;
