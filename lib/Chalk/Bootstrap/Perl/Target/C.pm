@@ -327,12 +327,13 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my $str = $self->_escape_c_string($value->value);
         my $c_expr = "newSVpvs(\"$str\")";
         my $raw = $value->value;
-        if ($raw eq '1' || $raw eq 'true') {
+        my $kw  = $self->_keyword_sv($value);
+        if (defined $kw) {
+            $c_expr = $kw;
+        } elsif ($raw eq '1') {
             $c_expr = '&PL_sv_yes';
-        } elsif ($raw eq '0' || $raw eq 'false' || $raw eq '') {
+        } elsif ($raw eq '0' || $raw eq '') {
             $c_expr = '&PL_sv_no';
-        } elsif ($raw eq 'undef') {
-            $c_expr = '&PL_sv_undef';
         } elsif ($raw =~ /\A-?\d+\z/) {
             $c_expr = "newSViv($raw)";
         }
@@ -598,9 +599,10 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my $str = $self->_escape_c_string($value->value);
         my $c_expr = "newSVpvs(\"$str\")";
         my $raw = $value->value;
-        if ($raw eq '1' || $raw eq 'true') { $c_expr = '&PL_sv_yes'; }
-        elsif ($raw eq '0' || $raw eq 'false' || $raw eq '') { $c_expr = '&PL_sv_no'; }
-        elsif ($raw eq 'undef') { $c_expr = '&PL_sv_undef'; }
+        my $kw  = $self->_keyword_sv($value);
+        if (defined $kw) { $c_expr = $kw; }
+        elsif ($raw eq '1') { $c_expr = '&PL_sv_yes'; }
+        elsif ($raw eq '0' || $raw eq '') { $c_expr = '&PL_sv_no'; }
         elsif ($raw =~ /\A-?\d+\z/) { $c_expr = "newSViv($raw)"; }
 
         my @xs_params;
@@ -1709,9 +1711,10 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # my $scalar = literal constant
         if ($init_node isa Chalk::IR::Node::Constant) {
             my $val = $init_node->value();
-            return '&PL_sv_undef' if $val eq 'undef';
-            return '&PL_sv_yes'   if $val eq '1' || $val eq 'true';
-            return '&PL_sv_no'    if $val eq '0' || $val eq 'false' || $val eq '';
+            my $kw  = $self->_keyword_sv($init_node);
+            return $kw if defined $kw;
+            return '&PL_sv_yes'   if $val eq '1';
+            return '&PL_sv_no'    if $val eq '0' || $val eq '';
             if ($val =~ /\A-?\d+\z/) { return "newSViv($val)"; }
             my $esc = $self->_escape_c_string($val);
             return "newSVpvs(\"$esc\")";
@@ -2357,12 +2360,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         if ($default isa Chalk::IR::Node::Constant) {
             my $val = $default->value();
-            if ($val eq 'undef') {
-                push @lines, '            OP *defop = newSVOP(OP_CONST, 0, &PL_sv_undef);';
-            } elsif ($val eq 'true') {
-                push @lines, '            OP *defop = newSVOP(OP_CONST, 0, &PL_sv_yes);';
-            } elsif ($val eq 'false') {
-                push @lines, '            OP *defop = newSVOP(OP_CONST, 0, &PL_sv_no);';
+            my $kw  = $self->_keyword_sv($default);
+            if (defined $kw) {
+                push @lines, "            OP *defop = newSVOP(OP_CONST, 0, $kw);";
             } elsif ($val =~ /^-?\d+$/) {
                 push @lines, "            OP *defop = newSVOP(OP_CONST, 0, newSViv($val));";
             } elsif ($val =~ /^-?\d+\.\d+$/) {

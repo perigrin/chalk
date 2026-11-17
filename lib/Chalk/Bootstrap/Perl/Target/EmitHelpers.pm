@@ -894,8 +894,11 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
 
         if ($node isa Chalk::IR::Node::Constant) {
             my $val = $node->value();
-            # undef is already Perl's default — skip
-            return undef if $val eq 'undef';
+            my $ct  = $node->const_type() // '';
+            # undef is already Perl's default — skip. The keywords are known
+            # by their type: the string 'undef' is a string.
+            return undef if $ct eq 'undef';
+            return $val  if $ct eq 'bool';
             # Numeric literal
             return $val if $val =~ /^-?[0-9]+(?:\.[0-9]+)?$/;
             # String literal
@@ -1457,6 +1460,21 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return "/* unknown node */";
     }
 
+    # The SV of a keyword Constant (`undef`, `true`, `false`), read from its
+    # const_type as the Perl target does (082cf7fe) -- the strings 'undef',
+    # 'true' and 'false' are strings. undef for any other Constant.
+    method _keyword_sv($node) {
+        my $ct = $node->const_type() // '';
+        return '&PL_sv_undef' if $ct eq 'undef';
+        if ($ct eq 'bool') {
+            my $val = $node->value() // '';
+            return $val eq 'true'  ? '&PL_sv_yes'
+                 : $val eq 'false' ? '&PL_sv_no'
+                 : die "GAP: a bool Constant spelled '$val' has no C value\n";
+        }
+        return undef;
+    }
+
     method _emit_const_expr($node, $declared_vars) {
         my $val = $node->value();
         my $ct  = $node->const_type();
@@ -1530,10 +1548,9 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             return "sv_2mortal(newSVnv($val))";
         }
 
-        # Boolean/special
-        if ($val eq 'true')  { return '&PL_sv_yes'; }
-        if ($val eq 'false') { return '&PL_sv_no'; }
-        if ($val eq 'undef') { return '&PL_sv_undef'; }
+        # The keywords undef, true, false -- by type, never by spelling.
+        my $kw = $self->_keyword_sv($node);
+        return $kw if defined $kw;
 
         # qr// with interpolated variables — the C preprocessor doesn't do
         # Perl-style interpolation, so newSVpvs("qr/$var/") would produce
