@@ -20,8 +20,8 @@ sub run_probe ($module, $body) {
     open my $eh, '<', $err or die "$err: $!";
     my $stderr = do { local $/; <$eh> } // '';
     # (the file names differ: each is written as FILE; so do the counts of
-    # string evals each module made before the probe's)
-    s/\Q$file\E/FILE/g, s/\(eval \d+\)/(eval N)/g for $out, $stderr;
+    # string evals each module made before the probe's, and addresses)
+    s/\Q$file\E/FILE/g, s/\(eval \d+\)/(eval N)/g, s/\(0x[0-9a-f]+\)/(0xADDR)/g for $out, $stderr;
     return { out => $out, err => $stderr, exit => $exit };
 }
 
@@ -32,6 +32,10 @@ sub same_as_test_more ($body, $name) {
     is $got->{err},  $want->{err},  "$name: stderr";
     is $got->{exit}, $want->{exit}, "$name: exit status";
 }
+
+# Test::More's prototypes: an argument is in scalar context (a grep is its
+# count, an array its length).
+same_as_test_more( qq{my \@a = (5, 6);\nok((grep { \$_ == 0 } (0, 1)), 'a grep counts');\nis(\@a, 2, 'an array is its length');\nisnt(\@a, 3, 'isnt');\nlike(\@a, qr/^2\$/, 'like');\nunlike(\@a, qr/^5/, 'unlike');\ncmp_ok(\@a, '==', 2, 'cmp_ok');\ndone_testing;\n}, 'prototypes' );
 
 # use_ok and require_ok: the module loaded at run time, into the caller's
 # package; a test named "use Foo;", and on failure the error.
@@ -58,6 +62,9 @@ same_as_test_more( qq{subtest 's' => sub {\n    TODO: {\n        local \$TODO = 
 # $Test::Builder::Level: a helper that raises it is looked through, for the
 # line a failure is reported at and for the $TODO it is in.
 same_as_test_more( qq{package Helper;\nsub check {\n    local \$Test::Builder::Level = \$Test::Builder::Level + 1;\n    main::ok(\$_[0], \$_[1]);\n    main::is(\$_[0], 1, 'is');\n    main::diag('d');\n}\npackage main;\nHelper::check(0, 'here');\nTODO: {\n    local \$TODO = 'via a helper';\n    Helper::check(0, 'todo');\n}\nok(0, 'plain');\ndone_testing;\n}, 'Test::Builder::Level' );
+
+# is_deeply walks an object by what it is underneath, ignoring its class.
+same_as_test_more( qq{my \$a = bless { t => 'x', k => [1, 2] }, 'Foo';\nis_deeply(\$a, bless({ t => 'x', k => [1, 2] }, 'Foo'), 'same object');\nis_deeply(\$a, bless({ t => 'x', k => [1, 3] }, 'Foo'), 'differs inside');\nis_deeply(\$a, { t => 'x', k => [1, 2] }, 'blessed or not');\nis_deeply([bless([1], 'Bar')], [bless([1], 'Baz')], 'two classes, one shape');\nis_deeply(bless([1], 'Bar'), bless({}, 'Bar'), 'array and hash');\ndone_testing;\n}, 'is_deeply of objects' );
 
 # A subtest's plan is checked: one that runs other than it planned fails.
 same_as_test_more( qq{subtest 'short' => sub {\n    plan tests => 2;\n    ok(1);\n};\nsubtest 'long' => sub {\n    plan tests => 1;\n    ok(1);\n    ok(1);\n};\nsubtest 'right' => sub {\n    plan tests => 1;\n    ok(1);\n};\ndone_testing;\n}, 'a subtest runs what it planned' );

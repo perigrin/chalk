@@ -49,26 +49,26 @@ our $TODO_NOW;   # the last test's TODO reason, for its diagnostics
 $Test::Builder::Level = 1 unless defined $Test::Builder::Level;
 
 # ok($test, $name) -- "ok N - name", or "not ok" and where it failed.
-sub ok {
+sub ok ($;$) {
     my ( $test, $name ) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
     return _ok( $test, $name, $file, $line );
 }
 
-sub pass {
+sub pass (;$) {
     my ($name) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
     return _ok( 1, $name, $file, $line );
 }
 
-sub fail {
+sub fail (;$) {
     my ($name) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
     return _ok( 0, $name, $file, $line );
 }
 
 # is($got, $expected, $name) -- eq, with undef equal only to undef.
-sub is {
+sub is ($$;$) {
     my ( $got, $expected, $name ) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
@@ -78,7 +78,7 @@ sub is {
 }
 
 # isnt($got, $expected, $name) -- the negation of is.
-sub isnt {
+sub isnt ($$;$) {
     my ( $got, $expected, $name ) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
@@ -90,7 +90,7 @@ sub isnt {
 # like($got, qr/.../, $name) and unlike -- a match of the regex (undef read
 # as ''), and Test::More's diagnostic. (T2 has no regex engine yet: a program
 # calling these is refused there, by name.)
-sub like {
+sub like ($$;$) {
     my ( $got, $re, $name ) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
     my $s = defined $got ? $got : '';
@@ -100,7 +100,7 @@ sub like {
     return 0;
 }
 
-sub unlike {
+sub unlike ($$;$) {
     my ( $got, $re, $name ) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
     my $s = defined $got ? $got : '';
@@ -112,7 +112,7 @@ sub unlike {
 
 # isa_ok($thing, $class, $name) -- an object or a class by ->isa, a plain
 # reference by its type; named as Test::More names each.
-sub isa_ok {
+sub isa_ok ($$;$) {
     my ( $thing, $class, $name ) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
     my $what = !defined $thing ? 'undef' : ref $thing ? ( _blessed($thing) ? 'object' : 'reference' ) : 'class';
@@ -147,7 +147,7 @@ sub isa_ok {
 }
 
 # can_ok($class_or_object, @methods) -- each method found by ->can.
-sub can_ok {
+sub can_ok ($@) {
     my ( $proto, @methods ) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
     my $class = ref($proto) ? ref($proto) : $proto;
@@ -163,7 +163,7 @@ sub can_ok {
 
 # cmp_ok($got, $op, $expected, $name) -- the comparison named by $op, and
 # Test::More's diagnostic for it.
-sub cmp_ok {
+sub cmp_ok ($$$;$) {
     my ( $got, $op, $expected, $name ) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
     my $ok;
@@ -248,8 +248,14 @@ sub _deep {
     my $r1 = ref $e1;
     my $r2 = ref $e2;
     return 1 if ( $r1 eq '' ) == ( $r2 eq '' ) && $e1 eq $e2;
-    return _differ( $at, $e1, $e2, 0, 0 ) if $r1 eq '' || $r2 eq '' || $r1 ne $r2;
-    die "Test::Chalk: is_deeply of an object ($r1) is not supported\n" if _blessed($e1);
+    return _differ( $at, $e1, $e2, 0, 0 ) if $r1 eq '' || $r2 eq '';
+    # AN OBJECT is walked as what it is underneath, its class ignored
+    # (Test::More's _type); one that is none of those (a `class` object) is
+    # an error, as there.
+    $r1 = _type($e1);
+    $r2 = _type($e2);
+    return _differ( $at, $e1, $e2, 0, 0 ) if $r1 ne $r2;
+    die "Test::Chalk: is_deeply of an object (" . ref($e1) . ") that is no perl type\n" if $r1 eq '';
     # (EACH READ THROUGH A REFERENCE in a helper of its own: made where it is
     # asked. T2 cannot yet place one whose value feeds a ?: across a call.)
     if ( $r1 eq 'ARRAY' ) {
@@ -295,6 +301,17 @@ sub _deep {
         return _deep( _sget($e1), _sget($e2), 0, 0, '${' . $at . '}', $arrow );
     }
     return _differ( $at, $e1, $e2, 0, 0 );
+}
+
+# _type($ref) -- a plain reference's type; an object's, the first of
+# Test::More's types it ->isa (its underlying one, or Regexp), else ''.
+sub _type {
+    my ($r) = @_;
+    return ref $r unless _blessed($r);
+    for my $t (qw(Regexp ARRAY HASH REF SCALAR GLOB CODE VSTRING)) {
+        return $t if $r->isa($t);
+    }
+    return '';
 }
 
 sub _alen  { my ($r) = @_; return scalar(@$r) }
@@ -418,7 +435,7 @@ sub subtest {
 # use_ok($module, @imports) -- `use $module @imports` at run time, in the
 # caller's package, as a test named "use $module;"; on failure, the error.
 # (A string eval: under perl only, as Test::More's.)
-sub use_ok {
+sub use_ok ($;@) {
     my ( $module, @imports ) = @_;
     my ( $pack, $file, $line ) = caller;
     $file =~ y/\n\r/_/;
@@ -433,7 +450,7 @@ sub use_ok {
 
 # require_ok($module) -- `require $module` at run time (a file, if it is not
 # a module name), as a test named "require $module;".
-sub require_ok {
+sub require_ok ($) {
     my ($module) = @_;
     my ( $pack, $file, $line ) = caller;
     my $name = $module;
