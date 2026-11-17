@@ -1555,6 +1555,14 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $name = $node->inputs()->[0]->value();
         my $args = $node->inputs()->[1];
 
+        # `__PACKAGE__` is a term, never called with parens; the emission is
+        # in the same package. `__FILE__` and `__LINE__` would name the
+        # emitted file and its lines, not the source's: refused by name.
+        if ($name =~ /\A__[A-Z]+__\z/) {
+            return $name if $name eq '__PACKAGE__' && !$args->@*;
+            die "GAP: $name is not emitted by the old Perl target (it would name the emitted file)\n";
+        }
+
         # Block-argument form: map { BLOCK } LIST, grep { BLOCK } LIST, sort { BLOCK } LIST
         # First arg is AnonSubExpr representing the block.
         if ($args->@* >= 1 && $args->[0] isa Chalk::IR::Node::AnonSub) {

@@ -28,6 +28,7 @@ use Chalk::IR::ClassInfo;
 use Chalk::IR::FieldInfo;
 use Chalk::IR::MethodInfo;
 use Chalk::IR::SubInfo;
+use Chalk::Grammar::Perl::KeywordTable;
 use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Program;
@@ -1462,13 +1463,31 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @items, $val;
             }
         }
-        # `die => 1`: a bare word before a fat comma is its string.
-        if (($ctx->scanned_text() // '') =~ /(?<![\w\$\@%>:-])(?:die|warn)\s*=>/) {
-            @items = map { $self->_quoted_bare_word($_) } @items;
-        }
+        # `die => 1`, `time => 1`: a bare word before a fat comma is its
+        # string.
+        my $text = $ctx->scanned_text() // '';
+        @items = map {
+            my $word = $self->_bare_word_of($_);
+            defined $word && $text =~ /(?<![\w\$\@%>:-])\Q$word\E\s*=>/
+                ? $self->_quoted_bare_word($_) : $_
+        } @items;
         return $ctx->factory->make('ExpressionList',
             inputs       => [\@items],
         );
+    }
+
+    # Is a bare word, alone as a term, a call of perl's builtin of that name?
+    # perl says so: a builtin that may be called with no operand (`time`,
+    # `wantarray`, `shift`, `caller`, `lc` of $_, `__PACKAGE__`) has a
+    # CORE:: prototype that is empty, optional (`;...`) or `_`. die and warn
+    # take a LIST (`@`), and called bare they raise or warn with nothing. A
+    # word the grammar has a rule of its own for (KeywordTable) never gets
+    # here as a bare term.
+    my sub _is_bare_builtin($word) {
+        return true if $word eq 'die' || $word eq 'warn';
+        return false if Chalk::Grammar::Perl::KeywordTable::is_keyword($word);
+        my $proto = eval { prototype("CORE::$word") };
+        return defined $proto && $proto =~ /\A(?:;|_|\z)/ ? true : false;
     }
 
     # §13 Atom — transparent pass-through
@@ -1476,7 +1495,8 @@ class Chalk::Bootstrap::Perl::Actions {
         my @values = _collect_ir_values($ctx);
         for my $val (@values) {
             if ($val isa Chalk::IR::Node::Constant
-                    && ($ctx->scanned_text() // '') =~ /\A\s*(die|warn)\s*\z/) {
+                    && ($ctx->scanned_text() // '') =~ /\A\s*([a-zA-Z_]\w*)\s*\z/
+                    && _is_bare_builtin($1)) {
                 return $self->_bare_word_call($ctx, $1);
             }
             return $val if $val isa Chalk::IR::Node;
@@ -1505,6 +1525,11 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         $bare_word_call{ refaddr($node) } = $word;
         return $node;
+    }
+
+    # The word a node was called by as a bare term, or undef.
+    method _bare_word_of($node) {
+        return blessed($node) ? $bare_word_call{ refaddr($node) } : undef;
     }
 
     # The string a bare word stands for where perl quotes it, else the node.

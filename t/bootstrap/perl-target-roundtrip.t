@@ -331,6 +331,15 @@ my @cases = (
           "    sub q(\$x) { return main::top_double(\$x) + 1 }\n",
           "}\n"),
       q{print join(',', RT28::q(3), top_double(5), top_greet('x')), "\n";} ],
+    [ 'a bare builtin used as a value is called, not quoted',
+      join('', "class RT29 {\n",
+          "    sub t() { my \$t = time; return \$t > 1000 ? 'later' : 'early' }\n",
+          "    sub w() { return wantarray ? 'list' : 'scalar' }\n",
+          "    sub s1 { my \$x = shift; return \$x }\n",
+          "    sub hk() { my %h = (time => 1, wait => 2); return join(',', sort keys %h) . \$h{time} }\n",
+          "    sub pk() { return __PACKAGE__ }\n",
+          "}\n"),
+      q{my @l = RT29::w(); my $s = RT29::w(); print join(',', RT29::t(), $l[0], $s, RT29::s1('a', 'b'), RT29::hk(), RT29::pk()), "\n";} ],
     [ 'a statement modifier over a comma expression guards both operands',
       join('', "class RT17 {\n",
           "    sub g(\$x, \$i) {\n",
@@ -361,6 +370,9 @@ my @refusals = (
     [ 'a statement outside a class',
       "my \$count = 3;\nprint \"\$count\\n\";\nclass RTR1 {\n    sub f() { 1 }\n}\n",
       qr/GAP: a statement outside a class/ ],
+    [ '__FILE__ and __LINE__, which name the emitted file',
+      "class RTR2 {\n    sub f() { return __FILE__ . __LINE__ }\n}\n",
+      qr/GAP: __FILE__/ ],
 );
 for my $case (@refusals) {
     my ($name, $body, $want) = $case->@*;
