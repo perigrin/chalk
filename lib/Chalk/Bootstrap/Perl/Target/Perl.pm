@@ -1676,9 +1676,12 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         return join("\n", @lines);
     }
 
+    # qx// is readpipe over its command, the command an expression (a
+    # string, an interpolation): wrapping the emitted expression in
+    # backticks would hand the shell its quotes.
     method _emit_backtick_expr($node) {
         my $command = $node->inputs()->[0];
-        return '`' . $self->_emit_expr($command) . '`';
+        return 'readpipe(' . $self->_emit_expr($command) . ')';
     }
 
     # Spell a string value as a Perl literal. Single quotes when every

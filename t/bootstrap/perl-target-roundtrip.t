@@ -179,6 +179,13 @@ my @cases = (
           "    }\n",
           "}\n"),
       q{print "before\n"; RT12::r('x');} ],
+    [ 'qx// and backticks run their command, interpolated',
+      join('', "class RT13 {\n",
+          "    sub q1() { return qx(echo one) }\n",
+          "    sub q2(\$w) { my \$o = `echo \$w`; return \$o }\n",
+          "    sub q3() { my \$o = qx{echo 'a b' 2>/dev/null}; return \$? . ':' . \$o }\n",
+          "}\n"),
+      q{print RT13::q1(), RT13::q2('two'), RT13::q3();} ],
 );
 
 for my $case (@cases) {

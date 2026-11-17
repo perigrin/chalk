@@ -1569,6 +1569,32 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
+    # The first thing in double-quoted CONTENT that perl would interpolate
+    # but _double_quoted keeps as text -- a punctuation or caret variable
+    # (`$^X`, `$!`, `$$`), `${ EXPR }`, an array (`@a`, `@{...}`), an element
+    # or a dereference after a variable (`$h{k}`, `$a[0]`, `$r->[0]`) -- or
+    # undef when there is none.
+    my sub _uninterpolated($content) {
+        while ($content =~ /\G(?:[^\\\$\@]|\\.)*?([\$\@])/gcs) {
+            my $sigil = $1;
+            my $rest  = substr($content, pos($content));
+            if ($sigil eq '@') {
+                return "the array \@$1" if $rest =~ /\A([\w:]+|\{)/;
+                next;
+            }
+            if ($rest =~ /\A(?:[a-zA-Z_]\w*(?:::\w+)*|\d+)/) {
+                my $after = substr($rest, $+[0]);
+                return 'an element or a dereference after a variable'
+                    if $after =~ /\A(?:[\[\{]|->[\[\{])/;
+                next;
+            }
+            next if $rest =~ /\A\{[a-zA-Z_]\w*\}/;    # ${name}
+            return 'the variable $' . ($rest =~ /\A(\^.|.)/s ? $1 : '')
+                if length $rest;                       # $^X $! $$ ${ EXPR }
+        }
+        return undef;
+    }
+
     # §19 StringLiteral — extract string content
     # For double-quoted strings with $variable interpolation, returns
     # Constructor:InterpolatedString. Otherwise returns a plain Constant.
@@ -1584,48 +1610,69 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         # Double-quoted strings: check for $variable interpolation
         if ($text =~ /^"((?:[^"\\]|\\.)*)"$/) {
-            my $content = $1;
-            # Process escape sequences for double-quoted strings
-            if ($content =~ /\$\{?[a-zA-Z_\d]/) {
-                # Has variable interpolation — build InterpolatedString.
-                # `${name}` is the variable `$name` (braced so `::` or a word
-                # after it is text); it is kept as `$name`, and the emitter
-                # braces it again where the text after it needs that.
-                my @parts;
-                my $remaining = $content;
-                while ($remaining =~ /\G((?:[^\$\\]|\\.)*?)(\$(?:[a-zA-Z_]\w*|\d+)|\$\{[a-zA-Z_]\w*\})/gc) {
-                    my ($literal, $var) = ($1, $2);
-                    $var =~ s/\A\$\{(\w+)\}\z/\$$1/;
-                    if (length($literal) > 0) {
-                        my $lit = $self->_unescape_double_quote($literal);
-                        push @parts, $factory->make('Constant',
-                            const_type => 'string', value => $lit);
-                    }
-                    push @parts, $factory->make('Constant',
-                        const_type => 'variable', value => $var);
-                }
-                # Remaining literal after last variable
-                my $tail = substr($remaining, pos($remaining) // 0);
-                if (length($tail) > 0) {
-                    my $lit = $self->_unescape_double_quote($tail);
+            return $self->_double_quoted($ctx, $1);
+        }
+        # Backticks and qx(...) qx{...} qx[...]: run the command, its output
+        # the value. perl interpolates the command as a double-quoted string.
+        if ($text =~ /\A`((?:[^`\\]|\\.)*)`\z/s
+                || $text =~ /\Aqx\s*(?:\(((?:[^)\\]|\\.)*)\)|\{((?:[^}\\]|\\.)*)\}|\[((?:[^\]\\]|\\.)*)\])\z/s) {
+            my $command = $1 // $2 // $3;
+            # _double_quoted models a plain `$name` (or `${name}`) only;
+            # anything else perl would interpolate it keeps as text, which
+            # the shell would then be handed. Refuse that by name.
+            my $unmodelled = _uninterpolated($command);
+            die "GAP: a qx// (or backtick) command interpolating $unmodelled has no IR (only a plain \$name is modelled)\n"
+                if defined $unmodelled;
+            return $ctx->factory->make('BacktickExpr',
+                inputs => [$self->_double_quoted($ctx, $command)],
+            );
+        }
+        return _make_const($factory, $text);
+    }
+
+    # The value of a double-quoted string's CONTENT (quotes stripped): an
+    # Interpolate over its literal runs and `$name` variables, or a plain
+    # Constant when it interpolates nothing.
+    method _double_quoted($ctx, $content) {
+        # Process escape sequences for double-quoted strings
+        if ($content =~ /\$\{?[a-zA-Z_\d]/) {
+            # Has variable interpolation — build InterpolatedString.
+            # `${name}` is the variable `$name` (braced so `::` or a word
+            # after it is text); it is kept as `$name`, and the emitter
+            # braces it again where the text after it needs that.
+            my @parts;
+            my $remaining = $content;
+            while ($remaining =~ /\G((?:[^\$\\]|\\.)*?)(\$(?:[a-zA-Z_]\w*|\d+)|\$\{[a-zA-Z_]\w*\})/gc) {
+                my ($literal, $var) = ($1, $2);
+                $var =~ s/\A\$\{(\w+)\}\z/\$$1/;
+                if (length($literal) > 0) {
+                    my $lit = $self->_unescape_double_quote($literal);
                     push @parts, $factory->make('Constant',
                         const_type => 'string', value => $lit);
                 }
-                return $ctx->factory->make('Interpolate',
-                    inputs       => [\@parts],
-                );
+                push @parts, $factory->make('Constant',
+                    const_type => 'variable', value => $var);
             }
-            # No interpolation — plain constant
-            $content =~ s/\\\\/\x00BS\x00/g;
-            $content =~ s/\\n/\n/g;
-            $content =~ s/\\t/\t/g;
-            $content =~ s/\\"/"/g;
-            $content =~ s/\\\$/\$/g;
-            $content =~ s/\\\@/\@/g;
-            $content =~ s/\x00BS\x00/\\/g;
-            return _make_const($factory, $content);
+            # Remaining literal after last variable
+            my $tail = substr($remaining, pos($remaining) // 0);
+            if (length($tail) > 0) {
+                my $lit = $self->_unescape_double_quote($tail);
+                push @parts, $factory->make('Constant',
+                    const_type => 'string', value => $lit);
+            }
+            return $ctx->factory->make('Interpolate',
+                inputs       => [\@parts],
+            );
         }
-        return _make_const($factory, $text);
+        # No interpolation — plain constant
+        $content =~ s/\\\\/\x00BS\x00/g;
+        $content =~ s/\\n/\n/g;
+        $content =~ s/\\t/\t/g;
+        $content =~ s/\\"/"/g;
+        $content =~ s/\\\$/\$/g;
+        $content =~ s/\\\@/\@/g;
+        $content =~ s/\x00BS\x00/\\/g;
+        return _make_const($factory, $content);
     }
 
     # Process escape sequences in double-quoted string content

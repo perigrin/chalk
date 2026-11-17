@@ -32,7 +32,7 @@ class Chalk::Grammar::Perl::KeywordTable {
         not and or xor
         eq ne lt gt le ge cmp isa x
         undef true false
-        qw q qq m s qr
+        qw q qq qx m s qr
         __SUB__
         return
     );
@@ -126,6 +126,7 @@ class Chalk::Grammar::Perl::KeywordTable {
         'qr'        => [qw(RegexLiteral)],
         'q'         => [qw(StringLiteral)],
         'qq'        => [qw(StringLiteral)],
+        'qx'        => [qw(StringLiteral)],
         # Operators (and, or, xor, eq, ne, etc.) appear inside BinaryOp patterns,
         # not as rule-starting keywords, so they don't need keyword_rules entries.
     );

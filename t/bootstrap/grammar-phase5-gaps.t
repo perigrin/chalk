@@ -202,4 +202,50 @@ accepts("out('x') unless \$c // out('a/b');", "// in a modifier, single-quoted '
     ok(defined $dor, '$c // out("a/b") builds a defined-or');
 }
 
+# ============================================================================
+# §5 qx// and backticks: a command whose output is the value. perl
+# interpolates the command as a double-quoted string; it becomes a
+# BacktickExpr over that string. Interpolation the double-quoted string
+# action does not model (a punctuation variable, an array, an element)
+# would be passed to the shell as text: it is refused as a GAP instead.
+# ============================================================================
+
+accepts('my $o = qx(ls -la);',              'qx(...)');
+accepts('my $o = qx{ls -la};',              'qx{...}');
+accepts('my $o = qx[ls -la];',              'qx[...]');
+accepts('my $o = qx(echo $name 2>/dev/null);', 'qx(...) interpolating a scalar, with a redirect');
+accepts('my $o = `ls -la`;',                'backticks (pre-existing in the grammar)');
+accepts('my @lines = qx(ls);',              'qx in list context');
+accepts('my $ok = qx(true) =~ /x/;',        'qx bound to a match');
+rejects('my $o = qx(ls;',                   'rejects an unterminated qx(');
+# The Boolean recognizer reads `qx ls` as a call of a sub qx (keywords are
+# not reserved in the grammar); the full parser's keyword check refuses it.
+ok(!defined eval { ir_of('my $o = qx ls;') }, 'the full parser refuses qx with no delimiter');
+{
+    my $ir = ir_of('my $o = qx(ls -la);');
+    my ($bt) = grep { $_->operation() eq 'BacktickExpr' } all_nodes($ir);
+    ok(defined $bt, 'qx(ls -la) builds a BacktickExpr');
+    my $cmd = $bt && $bt->inputs()->[0];
+    ok($cmd && $cmd->operation() eq 'Constant' && $cmd->value() eq 'ls -la',
+        '... over the command text');
+}
+{
+    my $ir = ir_of('my $o = `ls -la`;');
+    my ($bt) = grep { $_->operation() eq 'BacktickExpr' } all_nodes($ir);
+    ok(defined $bt, '`ls -la` builds a BacktickExpr, not a string');
+    ok(!grep({ $_->operation() eq 'Constant' && ($_->value() // '') =~ /`/ } all_nodes($ir)),
+        '... and no string Constant holds the backticks');
+}
+{
+    my $ir = ir_of('my $o = qx(echo $name);');
+    my ($bt) = grep { $_->operation() eq 'BacktickExpr' } all_nodes($ir);
+    my $cmd = $bt && $bt->inputs()->[0];
+    ok($cmd && $cmd->operation() eq 'Interpolate', 'qx(echo $name) interpolates the command');
+}
+for my $src ('my $o = qx($^X -e 1);', 'my $o = qx(echo @a);', 'my $o = qx(echo $h{k});') {
+    ok($recognizer->parse($src), "recognized: $src");
+    eval { ir_of($src) };
+    like($@, qr/GAP: .*qx/, "... the actions refuse its interpolation as a GAP: $src");
+}
+
 done_testing();

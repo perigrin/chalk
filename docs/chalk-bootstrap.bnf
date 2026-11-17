@@ -339,7 +339,13 @@ StringLiteral ::= /'(?:[^'\\]|\\.)*'/
     | /q\s*\[(?:[^\]\\]|\\.)*\]/
     | /qq\s*\{(?:[^}\\]|\\.)*\}/
     | /qq\s*\[(?:[^\]\\]|\\.)*\]/
-    | /`(?:[^`\\]|\\.)*`/ ;
+    | /`(?:[^`\\]|\\.)*`/
+    | /qx\s*\((?:[^)\\]|\\.)*\)/
+    | /qx\s*\{(?:[^}\\]|\\.)*\}/
+    | /qx\s*\[(?:[^\]\\]|\\.)*\]/ ;
+    # Backticks and qx(...) qx{...} qx[...] (alts 6-9) run a command: the
+    # action builds a BacktickExpr over the command, interpolated as a
+    # double-quoted string is. (No nested delimiters inside qx.)
 
 RegexLiteral ::= /\/(?:[^\/\\\n]|\\.)*\/[msixpodualngcer]*/
     | /m\s*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/

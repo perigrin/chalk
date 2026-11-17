@@ -524,7 +524,11 @@ StringLiteral ::= /'(?:[^'\\]|\\.)*'/
     | /q\s*\{(?:[^}\\]|\\.)*\}/
     | /q\s*\[(?:[^\]\\]|\\.)*\]/
     | /qq\s*\{(?:[^}\\]|\\.)*\}/
-    | /qq\s*\[(?:[^\]\\]|\\.)*\]/ ;
+    | /qq\s*\[(?:[^\]\\]|\\.)*\]/
+    | /`(?:[^`\\]|\\.)*`/
+    | /qx\s*\((?:[^)\\]|\\.)*\)/
+    | /qx\s*\{(?:[^}\\]|\\.)*\}/
+    | /qx\s*\[(?:[^\]\\]|\\.)*\]/ ;
 
 RegexLiteral ::= /\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
     | /m\s*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
@@ -539,6 +543,9 @@ decimal integers, and floats (`3.14`, `1e10`). Underscores allowed as
 digit separators.
 
 `StringLiteral` treats contents as opaque — no interpolation parsing.
+Backticks and `qx(...)`, `qx{...}`, `qx[...]` are commands: the action
+builds a `BacktickExpr` over the command, interpolated as a double-quoted
+string is (`qx` is a keyword, so `qx(...)` is never a call of a sub `qx`).
 
 `RegexLiteral` covers bare regex (`/pattern/flags`), explicit match
 (`m/.../flags`), quoted regex (`qr/.../flags`), and substitution

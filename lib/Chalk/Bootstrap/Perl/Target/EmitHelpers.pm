@@ -2067,8 +2067,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
 
     method _emit_backtick_expr($node, $declared_vars) {
         my $perl_target = Chalk::Bootstrap::Perl::Target::Perl->new();
-        my $cmd = $perl_target->_emit_expr($node->inputs()->[0]);
-        my $escaped = $self->_escape_c_string("`$cmd`");
+        my $escaped = $self->_escape_c_string($perl_target->_emit_backtick_expr($node));
         return "eval_pv(\"$escaped\", TRUE)";
     }
 
