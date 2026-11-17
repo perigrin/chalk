@@ -155,6 +155,40 @@ my sub _build_perl_parser_with_actions($grammar, $actions, %opts) {
         semirings => [$bool_sr, $prec_sr, $type_sr, $struct_sr, $sem_sr],
     );
 
+    # The code inside a double-quoted string (`"$x[$i - 1]"`) is read by the
+    # same grammar from its Expression rule, through the same actions,
+    # by a second Earley parser built when first needed.
+    if ($actions->can('set_expression_parser')) {
+        my $sub_parser;
+        $actions->set_expression_parser(sub ($text) {
+            $sub_parser //= Chalk::Bootstrap::Earley->new(
+                grammar  => Chalk::Bootstrap::Desugar::desugar_grammar(
+                    _reorder_grammar($grammar, start => 'Expression')),
+                semiring => Chalk::Bootstrap::Semiring::FilterComposite->new(
+                    semirings => [
+                        Chalk::Bootstrap::Semiring::Boolean->new(),
+                        Chalk::Bootstrap::Semiring::Precedence->new(
+                            lookup => \&Chalk::Grammar::Perl::PrecedenceTable::lookup),
+                        Chalk::Bootstrap::Semiring::TypeInference->new(
+                            keyword_check  => \&Chalk::Grammar::Perl::KeywordTable::is_keyword,
+                            builtin_lookup => \&Chalk::Grammar::Perl::TypeLibrary::get_builtin),
+                        Chalk::Bootstrap::Semiring::Structural->new(),
+                        Chalk::Bootstrap::Semiring::SemanticAction->new(actions => $actions),
+                    ]),
+            );
+            return Chalk::Bootstrap::Semiring::SemanticAction::preserving_action_state(sub {
+                my $sr = $sub_parser->semiring;
+                $sr->flush_tie_log();
+                my $r = $sub_parser->parse_value($text);
+                return undef if !defined $r || $r->is_zero();
+                die "GAP: the code `$text` in a double-quoted string has more than one reading\n"
+                    if $sr->tie_log()->@* || ($r->can('is_ambiguous') && $r->is_ambiguous());
+                my $node = $r->extract();
+                return builtin::blessed($node) && $node isa Chalk::IR::Node ? $node : undef;
+            });
+        });
+    }
+
     return Chalk::Bootstrap::Earley->new(
         grammar  => $desugared,
         semiring => $comp_sr,

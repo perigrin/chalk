@@ -107,6 +107,13 @@ class Chalk::Bootstrap::Perl::Actions {
     field $factory;
     field $typed;
 
+    # The parser of one Expression, for the code inside a double-quoted
+    # string (`"$x[$i - 1]"`): a code ref from the source text to its IR
+    # node (undef when it is no Expression). Whoever builds the parser over
+    # these actions installs it; without one, such a string is refused.
+    field $expression_parser;
+    method set_expression_parser($code) { $expression_parser = $code; return }
+
     # Block control-chain rebuild toggle (Phase 2 Step A). The rebuild
     # (in Block) re-threads each side-effect node's control input in source
     # order. It is retained as a safety net while during-parse control_head
@@ -1919,6 +1926,35 @@ class Chalk::Bootstrap::Perl::Actions {
     # `->[...]`, `->{...}` as perl continues them. An index is an integer or
     # a `$name`; a key is a bare word, an integer, a `$name` or a
     # 'single-quoted' string. Any other subscript is refused.
+    # The code between a subscript's brackets in a double-quoted string, from
+    # pos($$cref) (just past the opening bracket) to its matching close,
+    # parsed as one Expression; pos is left at the close.
+    method _dq_index_code($cref, $open, $var, $gap) {
+        my $close = $open eq '[' ? ']' : '}';
+        my $start = pos($$cref);
+        my $depth = 0;
+        while (1) {
+            if ($$cref =~ /\G'(?:[^'\\]|\\.)*'/gc || $$cref =~ /\G\\./gcs
+                    || $$cref =~ /\G[^\[\]{}()'\\]+/gc) {
+                next;
+            }
+            if ($$cref =~ /\G([\[{(])/gc) { $depth++; next }
+            if ($depth == 0 && $$cref =~ /\G(?=\Q$close\E)/) { last }
+            if ($$cref =~ /\G[\]})]/gc) {
+                $gap->("$var with an unbalanced subscript") if --$depth < 0;
+                next;
+            }
+            $gap->("$var with an unclosed subscript");
+        }
+        # (the Expression rule starts and ends at a token)
+        my $code = substr($$cref, $start, pos($$cref) - $start) =~ s/\A\s+|\s+\z//gr;
+        $gap->("$var with an empty subscript") if $code eq '';
+        $gap->("$var with a subscript expression (no expression parser is installed to read `$code`)")
+            unless defined $expression_parser;
+        return $expression_parser->($code)
+            // $gap->("$var with a subscript `$code` that is no expression");
+    }
+
     method _dq_element($ctx, $cref, $var, $gap) {
         my $node = _make_var_const($factory, $var);
         while (1) {
@@ -1927,22 +1963,34 @@ class Chalk::Bootstrap::Perl::Actions {
             my $open = $1;
             my $style = $open eq '[' ? 'array' : 'hash';
             my $index;
-            if ($$cref =~ /\G\s*(-?\d+)\s*/gc) {
+            my $close = $open eq '[' ? ']' : '}';
+            my $start = pos($$cref);
+            if ($$cref =~ /\G\s*(-?\d+)\s*(?=\Q$close\E)/gc) {
                 $index = _make_const($factory, $1);
-            } elsif ($$cref =~ /\G\s*\$([a-zA-Z_]\w*)/gc) {
-                $index = $self->_dq_element($ctx, $cref, '$' . $1, $gap);
-                $$cref =~ /\G\s*/gc;
-            } elsif ($style eq 'hash' && $$cref =~ /\G\s*(-?[a-zA-Z_]\w*)\s*/gc) {
+            } elsif ($style eq 'hash' && $$cref =~ /\G\s*(-?[a-zA-Z_]\w*)\s*(?=\Q$close\E)/gc) {
                 $index = _make_const($factory, $1);
-            } elsif ($style eq 'hash' && $$cref =~ /\G\s*'((?:[^'\\]|\\.)*)'\s*/gc) {
+            } elsif ($style eq 'hash' && $$cref =~ /\G\s*'((?:[^'\\]|\\.)*)'\s*(?=\Q$close\E)/gc) {
                 ($index = $1) =~ s/\\(['\\])/$1/g;
                 $index = _make_const($factory, $index);
             } else {
-                $gap->("$var with a subscript other than an integer, a \$name, a word or a 'string'");
+                # A `$name` index, perhaps subscripted itself, is the
+                # element it names, as before; anything else is code: perl
+                # reads the bracketed text as an expression (toke.c
+                # intuit_more: outside a pattern, a `[` or `{` after a
+                # variable always starts a subscript).
+                if ($$cref =~ /\G\s*\$([a-zA-Z_]\w*)/gc) {
+                    my $at = pos($$cref);
+                    $index = $self->_dq_element($ctx, $cref, '$' . $1, $gap);
+                    $$cref =~ /\G\s*/gc;
+                    if ($$cref !~ /\G\Q$close\E/) {
+                        undef $index;
+                        pos($$cref) = $start;
+                    }
+                }
+                $index //= $self->_dq_index_code($cref, $open, $var, $gap);
             }
-            my $close = $open eq '[' ? ']' : '}';
             $$cref =~ /\G\Q$close\E/gc
-                or $gap->("$var with a subscript other than an integer, a \$name, a word or a 'string'");
+                or $gap->("$var with an unclosed subscript");
             $node = $ctx->factory->make('Subscript',
                 inputs => [$node, $index, _make_const($factory, $style)]);
         }

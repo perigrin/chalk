@@ -267,6 +267,21 @@ class Chalk::Bootstrap::Semiring::SemanticAction {
     # update_scope/update_annotations without needing a reference to the semiring.
     sub current_instance { return $_current_instance }
 
+    # Class method: run $code -- a nested parse, from inside an action --
+    # and put back the state of the action that is running: the current
+    # instance, its type context and its pending updates. The nested
+    # parse's actions set and consume their own.
+    sub preserving_action_state($code) {
+        my @saved = ($_current_instance, $_type_context, $_pending_scope_update,
+            $_pending_graph_update, $_pending_annotations_update, $_pending_control_head_update);
+        my @r = eval { $code->() };
+        my $err = $@;
+        ($_current_instance, $_type_context, $_pending_scope_update,
+            $_pending_graph_update, $_pending_annotations_update, $_pending_control_head_update) = @saved;
+        die $err if $err;
+        return wantarray ? @r : $r[0];
+    }
+
     # Class method: set the MOP instance to thread through parse Contexts.
     # Invalidates the one() singleton so the next call recreates it with the MOP.
     sub set_mop($mop) { $_mop = $mop; $_one_singleton = undef; }

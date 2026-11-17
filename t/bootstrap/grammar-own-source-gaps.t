@@ -565,4 +565,22 @@ for my $src ('$t->s(defined $b);', '$t->s(f $b);', '$t->s(defined $b ? 1 : (2));
     accepts($src, "a bare call inside the postfix's delimiters: $src");
 }
 
+# ============================================================================
+# §14 An element whose index is an expression, in a double-quoted string:
+# perl reads the bracketed text as code (toke.c's intuit_more: outside a
+# pattern a `[` or `{` after a variable always starts a subscript), so
+# "$x[$i - 1]" is the element at $i - 1 (LLVM/Printer.pm: `"$x[$_ - 1]()"`).
+# The index is parsed by the expression grammar, the Subscript built as
+# outside a string.
+# ============================================================================
+for my $case ([ 'my $s = "a $x[$i - 1] b";', 'Subtract' ], [ 'my $s = "$h{$k . q(b)}";', 'Concat' ],
+              [ 'my $s = "$r->[$i * 2]{a}";', 'Multiply' ]) {
+    my ($src, $op) = $case->@*;
+    my $ir = eval { ir_of($src) };
+    is($@, '', "parses: $src");
+    my @subs = grep { $_->operation() eq 'Subscript' } all_nodes($ir);
+    ok((grep { ($_->inputs()->[1] // 0) isa Chalk::IR::Node && $_->inputs()->[1]->operation() eq $op } @subs),
+        "$src: the index is the $op the brackets hold");
+}
+
 done_testing();
