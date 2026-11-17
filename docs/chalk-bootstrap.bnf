@@ -221,9 +221,10 @@ UnaryExpression ::= /!/ _ Expression
     | /~/ _ Expression
     | /\\/ _ Expression
     | /not\b/ WS Expression
-    | /undef\b/ _ /\(/ _ Expression _ /\)/
-    | /undef\b/ WS Expression ;
-# (`undef EXPR`: perlfunc's undef of a variable -- a named unary operator)
+    | /undef\b/ _ /\(/ _ Variable _ /\)/
+    | /undef\b/ WS Variable ;
+# (`undef VARIABLE`: perlfunc's undef of a variable, a named unary
+# operator; its operand is a variable, so no word after `undef` is one)
 
 # §15  BINARY EXPRESSIONS
 # Flat: all binary operators at one level. Precedence semiring resolves.
