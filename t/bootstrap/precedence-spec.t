@@ -806,4 +806,12 @@ for my $src ('!$x->m', '!$x->m->@*', '!$s{$k}++') {
     };
 }
 
+# A unary + before a postfix: `->` binds tighter, and + changes nothing, so
+# `keys +($h // {})->%*` is keys of the hash (Impl.pm, LLVM/Printer.pm).
+subtest 'L5 unary + over a postfix deref: keys +($h // {})->%*' => sub {
+    my $expr = parse_expr('keys +($h // {})->%*');
+    my $call = isa_with_shape($expr, 'Chalk::IR::Node::Call', 'top is keys') or return;
+    is($call->name(), 'keys', 'the call is keys');
+};
+
 done_testing;

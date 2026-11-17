@@ -220,6 +220,13 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     method UnaryExpression($ctx) {
         my $op = _get_op_text($ctx);
         my $result_type;
+        # perlop: "Unary + has no effect whatsoever, even on strings" -- its
+        # value is its operand, of the operand's type (`keys +($h // {})->%*`
+        # hands keys a Hash).
+        if (defined $op && $op eq '+') {
+            my $t = _get_rightmost_type($ctx);
+            return { valid => true, (defined $t ? (type => $t) : ()) };
+        }
         if (defined $op) {
             my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op($op);
             $result_type = $sig->{result} if $sig;
