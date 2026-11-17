@@ -5,8 +5,10 @@
 **Head:** chalk 9e56dcf4 (bson/llvm-corpus); B::SoN from /home/user/repo/lib.
 **Env, every run:** `ulimit -v 4000000; HOME=/home/runner PERL5_SON_LIB=/home/user/repo/lib LLI=/usr/bin/lli`, at most 4 heavy processes.
 **Follows:** `plan-test-chalk.md` (memory), measurement item 5 of 2026-11-11.
-**Data:** `2026-11-17-test-imports.tsv` (one row per test x module, 194,696 rows),
-`2026-11-17-test-imports-summary.tsv` (one row per test, 900 rows).
+**Data:** `2026-11-17-test-imports.tsv` (one row per test x module),
+`2026-11-17-test-imports-summary.tsv` (one row per test). Both now hold the
+run AFTER the migration below (151,765 rows; 901 tests). The before run
+(194,696 rows; 900 tests) is these files at 9442fa3a.
 
 ## Headline
 
@@ -297,6 +299,147 @@ modules and lines over the tests that have the line:
     (3,721), JSON::PP (3,142), overload, File::Path, Fcntl, Cwd, IO::Handle and
     IPC::Open3.
   - The per-test rows have the detail.
+
+## Part C: the artifacts, after the migration (branch test-chalk-migrate)
+
+Every `.t` under t/, and the two t/bootstrap/lib helpers that loaded
+Test::More, now `use Test::Chalk` unless listed under "Kept" below. Test::Chalk
+gained what the suite calls, each red first in
+`t/bootstrap/test-chalk-under-perl.t` (Test::More's stdout, stderr and exit
+status under perl are the oracle); the T2 probes in
+`t/bootstrap/ir/test-chalk-gives-test-more-s-tap.t` still pass, with two more
+(a subtest's plan, `$TODO`) SAME through T2.
+
+### Test::Chalk gained
+
+| function | why the suite needs it |
+|---|---|
+| `use_ok`, `require_ok` | 15 files, 29 calls; one `require_ok` |
+| `explain` | 61 files (`diag explain $r` on a failure) |
+| `$TODO`, read as the caller's package's | 29 files; `local $TODO` replaces an exported alias, so it is read by name |
+| `$Test::Builder::Level` | PrecedenceSpecHelpers' `isa_with_shape`: without it a TODO block around the helper is ignored |
+| Test::More's prototypes (`ok ($;$)` ...) | `ok((grep {...} @ids), ...)` is the count, not the first match (earley-inline-opt.t) |
+| `is_deeply` of an object | walked as what it is underneath, as Test::More's `_type` (earley-chart-reachability.t) |
+| a subtest's plan checked | a subtest running other than it planned failed under Test::More and passed silently here |
+
+### Migrated
+
+| | files |
+|---|---:|
+| `use Test::More` -> `use Test::Chalk` | 823 `.t` + 2 helper `.pm` |
+| `use Test2::V0` -> `use Test::Chalk` | 49 |
+| new (`test-chalk-under-perl.t`) | 1 |
+| kept on Test::More | 19 |
+| kept on Test2::V0 | 9 |
+
+The edit was scripted: the framework line swapped, t/lib put in `@INC` before
+it (a `use lib` line moved up or widened). By hand:
+
+- `comonad-threading.t`: `use Test::More tests => 16` -> `plan tests => 16`.
+- Five corpus files: `binmode Test::More->builder->output ...` -> `binmode
+  STDOUT/STDERR`.
+- `fork-test-helper.t`: the child sends TAP to the file by reopening STDOUT and
+  STDERR, not through `->builder`. `->current_test` becomes `$Test::Chalk::COUNT`.
+- Test2::V0 files:
+  - `skip_all "x"` -> `plan skip_all => "x"`.
+  - One `todo 'why' => sub {...}` -> `TODO: { local $TODO = 'why'; ... }`.
+  - 41 `is($ref, [...] / {...})` -> `is_deeply`: Test2's `is` compares a reference
+    deeply. Found by wrapping `main::is` at run time and logging each call
+    whose expected value is a reference. An `is` of two `class` objects is
+    identity under both, and was left alone.
+- `PrecedenceSpecHelpers.pm`: `Test::More::pass/fail/diag` -> `Test::Chalk::`.
+
+The migration also turned up a lib bug. `Chalk::IR::Node::remove_consumer`
+called `Scalar::Util::refaddr`, but Node.pm never loaded Scalar::Util; it
+worked only because Test::More did. Node.pm now loads it.
+
+### Kept, and what Test::Chalk lacks for them
+
+- **`plan skip_all` inside a subtest** skips that subtest under Test::More. In
+  Test::Chalk it ends the program. Adding it needs the subtest's code run in
+  an eval, or a `last` out of `plan`:
+  - T2 refuses a `last` that leaves its sub. That would refuse `plan` for
+    every program.
+  - Under T2, a package variable the code ref writes is read stale after
+    `eval { $code->(); 1 }`, so the subtest probe DIFFERS.
+
+  Repro: `our $C; sub inc { $C = $C + 1 } sub st { my ($code) = @_; $C = 0;
+  my $ran = eval { $code->(); 1 }; print $C + 0, "\n" } st(sub { inc(); inc() });`
+  perl prints 2; T2 prints 0.
+
+  So these stay on Test::More:
+  - benchmark/parse-performance.t
+  - filter-composite-audit.t
+  - transform/entry-normalization.t
+  - mop/mop-carries-the-graph-registry.t
+  - in ir/: a-flattening-input-is-not-one-element, a-list-stamped-literal-is-an-array,
+    a-recursive-call-contributes-bottom, builtin-join-lowers-a-static-list,
+    builtin-keys-lowers-in-insertion-order, builtin-sort-orders-an-array,
+    call-at-the-abi-unbox-at-the-node, callsite-seeding-narrows-and-joins,
+    callsite-want-picks-the-reading, ctor-arg-inference-joins,
+    direct-call-args-join-all-callsites, element-repr-joins-stores,
+    resolve-direct-calls-reads-the-edge, son-loop-backedge,
+    sort-fold-signature-survives-the-loader
+
+  Two Test2::V0 files are kept for the same reason:
+  - ir/loader-reproduces-the-wire.t
+  - ir/field-default-carries-the-field-type.t (which also calls `dies`)
+
+  son-loop-backedge.t shows what this hides. Its "lowering failed" subtest
+  logs `not ok 1 - lower() does not die`, then skip_alls, so it reports ok:
+  T2 says "a loop condition that is not one value".
+- **Test2-only functions** Test::Chalk does not have (Test::More has none of them):
+  - codegen-harness/extract-wrap.t: `ref_ok`, `isa_ok($x, [classes])`
+  - codegen-harness/comparator.t: `ref_ok`
+  - codegen-harness/oracle-neg.t: `dies`, `ref_ok`, `isa_ok($x, [classes])`
+  - codegen-harness/oracle.t: `ref_ok`, `isa_ok($x, [classes])`
+  - ir/method-return-type-from-wire.t: `dies`, `lives`
+  - ir/typed-invariant-takes-a-graph.t: `dies`
+  - mop-has-default-validation.t: `dies`
+
+### The other artifacts
+
+| artifact | removed from | kept in | why kept |
+|---|---:|---:|---|
+| `use Test::More` (48 modules) | 823 + 2 `.pm` | 19 | skip_all in a subtest (above) |
+| `use Test2::V0` (103 modules) | 49 | 9 | Test2-only functions, or skip_all in a subtest (above) |
+| `use File::Temp` (3 artifact modules) | 1 (llvm-an-inlined-callee-has-its-own-variables.t) | every other file that has it | each one calls tempfile/tempdir/tmpnam: the test writes its probe program to a file |
+| `use lib 'lib', 't/lib'` (lib.pm, 213 lines) | 0 | all | a test must run as `perl -Ilib t/x.t` and under TapDiff/B::SoN with no `-I`; Test::Chalk lives in t/lib. 16 files that had no t/lib gained `use lib 't/lib'` |
+| `use Chalk::CodeGen::Harness` | 1 (corpus-single-source.t: reads Harness.pm as text) | 22 | each calls `Chalk::CodeGen::Harness->run_entry` |
+| GapMap (`use_ok`/`use`) | 0 | 5 | it is the module under test (gap-map*.t), or tier2.t calls `->generate` |
+| RunUnderPerl | 0 | 4 | each calls extract_snippet/wrap_program/run_program/capture |
+| TestPerlHelpers | 0 | 4 | each calls setup_perl_grammar/parse_and_generate/eval_module |
+
+### Before and after (every `.t`, under perl, method of Part A)
+
+| per test | before median | p90 | max | after median | p90 | max |
+|---|---:|---:|---:|---:|---:|---:|
+| modules loaded (END) | 246 | 248 | 306 | 200 | 202 | 306 |
+| modules at compile time (INIT) | 78 | 239 | 290 | 32 | 192 | 259 |
+| source lines, all loaded | 88,168 | 88,613 | 103,644 | 71,704 | 72,149 | 103,645 |
+| source lines at compile time | 34,980 | 82,150 | 98,445 | 18,515 | 66,540 | 87,676 |
+| artifact modules | 53 | 74 | 137 | 7 | 12 | 137 |
+| artifact lines | 21,594 | 29,022 | 51,200 | 5,129 | 8,151 | 50,411 |
+| XS-backed modules | 9 | 9 | 12 | 7 | 7 | 10 |
+
+| totals over all tests | before (900) | after (901) |
+|---|---:|---:|
+| test x module rows | 194,696 | 151,765 |
+| of them at compile time | 123,640 | 80,784 |
+
+The max rows that did not move are the kept Test2::V0 files
+(mop-has-default-validation.t, extract-wrap.t). Test::Chalk itself is one
+harness module of 607 lines in 873 tests.
+
+### Suite
+
+The run was `prove -j2 -Ilib -It/lib` over every `.t` except
+mode2-extractor.t, grammar-conformance.t and chalk-recognizes-its-own-source.t.
+
+- Result: 898 files, 14,170 tests, PASS.
+- The two long files ran alone under perl, through the Part A runner:
+  - grammar-conformance.t: 434/434, exit 0, 2083 s.
+  - chalk-recognizes-its-own-source.t: 275/275, exit 0, 992 s.
 
 ## Reproduce
 
