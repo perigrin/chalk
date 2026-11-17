@@ -607,6 +607,13 @@ class Chalk::Bootstrap::Semiring::Precedence {
             }
         }
 
+        # Neither carries a level: precedence has no opinion. (Two such
+        # values can still differ -- an ExpressionList of one records its
+        # item's level as arg_level -- and picking the left one here
+        # decided, silently, what the filters after this one should:
+        # `[ map { ... } 1, 2 ]` became `[(map { ... } 1), 2]`.)
+        return [$left, $right] if !defined $ll && !defined $rl;
+
         return [$left];
     }
 
