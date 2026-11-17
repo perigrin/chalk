@@ -7,6 +7,8 @@ use experimental 'class';
 use Chalk::IR::Node;
 
 class Chalk::IR::Node::ListAssign :isa(Chalk::IR::Node) {
+    # The declarator (my, our, state, local), or '' for a plain list
+    # assignment to variables already declared: `($a, $b) = (1, 2)`.
     field $scope :param :reader = 'my';
 
     method operation() { 'ListAssign' }

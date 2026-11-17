@@ -2797,13 +2797,23 @@ class Chalk::Bootstrap::Perl::Actions {
         my $target;
         my $op;
         my $value;
+        my $list_replaces;    # the bare node a list assignment supersedes
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
 
-            # `($a, $b) = ...`: the left side is a parenthesized list.
-            die "GAP: a list assignment to undeclared or existing variables (`(\$a, \$b) = ...`) has no IR\n"
-                if !defined $target && ref($focus) eq 'ARRAY';
+            # `($a, $b) = ...`: the left side is a parenthesized list of
+            # variables, assigned as a list. It is a ListAssign that
+            # declares nothing (scope '').
+            if (!defined $target && ref($focus) eq 'ARRAY') {
+                my @names = map {
+                    _declared_name_const($factory, $_)
+                        // die "GAP: a list assignment to something other than variables (`(\$h{k}, undef) = ...`) has no IR\n"
+                } $focus->@*;
+                $target = $ctx->factory->make('ListAssign', scope => '', inputs => [\@names, undef]);
+                $target->set_control_in($ctx->control_head // $factory->make('Start'));
+                next;
+            }
             if (!defined $target
                     && ($focus isa Chalk::IR::Node
                         || $focus isa Chalk::IR::FieldInfo)) {
@@ -2820,6 +2830,20 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return undef unless defined $target && defined $op;
+
+        # `($a) = LIST` and `(my $a) = LIST`: one parenthesized variable is
+        # still a list assignment (the first element, not the count).
+        if (($ctx->scanned_text() // '') =~ /\A\s*\(\s*(?:(my|our|state|local)\s+)?[\$\@%][\w:]+\s*\)\s*[^\s=]*=/
+                && !($target isa Chalk::IR::Node::ListAssign)) {
+            my $declarator = $1 // '';
+            my $name = _declared_name_const($factory, $target)
+                // die "GAP: a parenthesized assignment target that is not a variable has no IR\n";
+            my $bare = $target isa Chalk::IR::Node::VarDecl ? $target : undef;
+            $target = $ctx->factory->make('ListAssign', scope => $declarator, inputs => [[$name], undef]);
+            $target->set_control_in(defined $bare ? $bare->control_in
+                : ($ctx->control_head // $factory->make('Start')));
+            $list_replaces = $bare;
+        }
 
         # Helper: update scope when assigning to a variable.
         # Called with the variable name (string with sigil) and the resulting IR node.
@@ -2902,7 +2926,11 @@ class Chalk::Bootstrap::Perl::Actions {
                     inputs => [$target->names(), $init],
                 );
                 $result->set_control_in($target->control_in) if defined $target->control_in;
-                $self->_publish_list_declaration($ctx, $result, $target);
+                # (a plain `($a, $b) = ...` had no bare node on the graph;
+                # `(my $a) = ...` had its VarDecl)
+                my $replaces = $list_replaces
+                    // ($target->scope() eq '' ? undef : $target);
+                $self->_publish_list_declaration($ctx, $result, $replaces);
                 return $result;
             }
             # Plain variable assignment ($var = expr) — emit as BinaryExpr (Assign).
@@ -2923,7 +2951,7 @@ class Chalk::Bootstrap::Perl::Actions {
             return $assign_result;
         }
 
-        die "GAP: a compound assignment ($op_val) to a list declaration has no IR\n"
+        die "GAP: a compound assignment ($op_val) to a list has no IR\n"
             if $target isa Chalk::IR::Node::ListAssign;
         # Compound assignment (.=, //=, +=, etc.)
         my $compound_result = $ctx->factory->make('CompoundAssign',

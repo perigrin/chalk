@@ -1176,7 +1176,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $scope = $node->scope();   # 'my', 'our', etc.
 
         my @name_strs = map { $_->value() } $names->@*;
-        my $lhs = $scope . ' (' . join(', ', @name_strs) . ')';
+        # (scope '' is a plain list assignment, `($a, $b) = ...`)
+        my $lhs = ($scope eq '' ? '' : "$scope ") . '(' . join(', ', @name_strs) . ')';
 
         if (defined $init) {
             my $rhs = $self->_emit_list_rhs($init);
