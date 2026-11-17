@@ -101,10 +101,14 @@ for my $file (@pm_files) {
     $parser->semiring->reset_cache();
 
     # parse_value returns a unified Context; is_zero false means parse succeeded.
-    my $result   = $parser->parse_value($source);
-    my $parse_ok = defined($result) && !$result->is_zero();
+    # An action refusing a construct the IR cannot hold dies with "GAP: ...":
+    # that file does not parse, and the rest of the corpus still runs.
+    my $result   = eval { $parser->parse_value($source) };
+    my $gap      = $@;
+    my $parse_ok = !$gap && defined($result) && !$result->is_zero();
 
     ok($parse_ok, "PARSE_OK: $norm");
+    diag("  $gap") if $gap;
 
     if ($parse_ok) {
         my $ties = $parser->semiring->tie_log();
