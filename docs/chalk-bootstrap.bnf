@@ -37,8 +37,10 @@ SimpleStatement ::= ReturnStatement WS PostfixModifier
     | UseDeclaration
     | ExpressionStatement WS PostfixModifier ;
 
-ReturnStatement ::= /return\b/ WS Expression
+ReturnStatement ::= /return\b/ WS ExpressionList
     | /return\b/ ;
+# (`return LIST`: `return 4, 5` returns both; one item is an ExpressionList
+# of one)
 
 CompoundStatement ::= Block
     | IfStatement

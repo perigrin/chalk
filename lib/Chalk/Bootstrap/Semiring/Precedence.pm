@@ -790,9 +790,12 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # or die` is (return $x) or die, which has no IR -- refused rather
         # than read as return($x or die).
         if ($rule_name eq 'ReturnStatement') {
+            # (its operand is an ExpressionList: one item's level is its
+            # arg_level)
+            my $low = Chalk::Grammar::Perl::PrecedenceTable::low_word_level();
             return $self->zero()
-                if defined($value->{level})
-                && $value->{level} >= Chalk::Grammar::Perl::PrecedenceTable::low_word_level();
+                if (defined($value->{level}) && $value->{level} >= $low)
+                || (defined($value->{arg_level}) && $value->{arg_level} >= $low);
             return $self->one();
         }
 

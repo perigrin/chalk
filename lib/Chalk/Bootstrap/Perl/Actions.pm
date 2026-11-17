@@ -529,6 +529,19 @@ class Chalk::Bootstrap::Perl::Actions {
                 $value = $val;
                 last;
             }
+            # `return (1, 2)`: a parenthesized list is an arrayref of its
+            # items -- the list, never nothing.
+            if (ref($val) eq 'ARRAY') {
+                $value = $ctx->factory->make('ExpressionList', inputs => [[$val->@*]]);
+                last;
+            }
+        }
+        # `return LIST`: one item is that item (an ExpressionList of one
+        # is how the grammar spells it).
+        if ($value isa Chalk::IR::Node::ExpressionList) {
+            my @items = $value->items()->@*;
+            $value = @items == 1 ? $items[0] : $value;
+            $value = $ctx->factory->make('ExpressionList', inputs => [[]]) if !@items;
         }
         # Retrieve the current control token from scope for CFG edge.
         # Fall back to a fresh Start node when no scope is available
