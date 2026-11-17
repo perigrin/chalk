@@ -1794,7 +1794,7 @@ class Chalk::Bootstrap::Perl::Actions {
     # Interpolate over its parts, or a plain Constant when it interpolates
     # nothing. A part is a literal run (a string Constant), a variable (a
     # `variable` Constant: `$name`, `$Pkg::name`, `${name}`, `$1`, `$!`,
-    # `$@`, `$&`, `$.`, `$0`, `$$`, `@name`), or an element of one (a
+    # `$@`, `$&`, `$.`, `$0`, `$$`, `$^X`, `@name`), or an element of one (a
     # Subscript: `$a[0]`, `$h{k}`, `$r->{k}[1]`). What perl would
     # interpolate that is none of these is refused by name, never kept as
     # text.
@@ -1905,9 +1905,15 @@ class Chalk::Bootstrap::Perl::Actions {
             $gap->("\$$1 followed by a subscript") if $$cref =~ /\G(?:[\[{]|->[\[{])/;
             return _make_var_const($factory, '$' . $1);
         }
+        # A caret variable, `$^X`, `$^O`, `$^W`: its name is $^ and one
+        # capital letter or underscore.
+        if ($$cref =~ /\G\$(\^[A-Z_])/gc) {
+            $gap->("\$$1 followed by a subscript") if $$cref =~ /\G(?:[\[{]|->[\[{])/;
+            return _make_var_const($factory, '$' . $1);
+        }
         if ($$cref =~ /\G\$/gc) {
             my ($next) = $$cref =~ /\G(\^\w|\{\^?\w*|.)/gcs;
-            $gap->('$' . ($next // '') . ' (only $name, ${name}, an element of one, $1.., $! $@ $& $. $0 $$ are modelled)');
+            $gap->('$' . ($next // '') . ' (only $name, ${name}, an element of one, $1.., $! $@ $& $. $0 $$ $^X are modelled)');
         }
         if ($$cref =~ /\G\@([a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)/gc) {
             my $name = $1;
@@ -1969,6 +1975,8 @@ class Chalk::Bootstrap::Perl::Actions {
         return chr(oct $1)                 if $$cref =~ /\Go\{([0-7]+)\}/gc;
         return chr(oct $1)                 if $$cref =~ /\G([0-7]{1,3})/gc;
         return chr(hex $1)                 if $$cref =~ /\GN\{U\+([0-9a-fA-F]+)\}/gc;
+        # \cX, a control character: X's code with bit 6 flipped (perlop).
+        return chr(ord(uc $1) ^ 64)        if $$cref =~ /\Gc([\@-\x5fa-z?])/gc;
         if ($$cref =~ /\G([a-zA-Z])/gc) {
             die "GAP: the escape \\$1 in a double-quoted string has no IR\n";
         }

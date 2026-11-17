@@ -263,10 +263,22 @@ for my $src ('my $o = qx(echo @a);', 'my $o = qx(echo $h{k});') {
     ok($cmd && $cmd->operation() eq 'Interpolate', "$src interpolates the command");
 }
 {
+    # A caret variable interpolates as any variable does (Impl.pm runs
+    # `qx($^X -I$SON ...)`).
     my $src = 'my $o = qx($^X -e 1);';
     ok($recognizer->parse($src), "recognized: $src");
-    eval { ir_of($src) };
-    like($@, qr/GAP: .*\$\^X/, "... the actions refuse its interpolation as a GAP: $src");
+    my $ir = ir_of($src);
+    my ($bt) = grep { $_->operation() eq 'BacktickExpr' } all_nodes($ir);
+    my $cmd = $bt && $bt->inputs()->[0];
+    ok($cmd && $cmd->operation() eq 'Interpolate'
+        && (grep { $_->operation() eq 'Constant' && ($_->value() // '') eq '$^X' } $cmd->inputs()->[0]->@*),
+        "$src interpolates the variable \$^X");
+}
+{
+    # \cX is a control character: \cW is chr(23), \c? chr(127).
+    my $ir = ir_of(q{my $s = "a\cW\c?";});
+    ok((grep { $_->operation() eq 'Constant' && ($_->value() // '') eq "a\x17\x7f" } all_nodes($ir)),
+        q{"a\cW\c?" is a, chr(23), chr(127)});
 }
 
 # ============================================================================
