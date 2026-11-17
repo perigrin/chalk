@@ -396,7 +396,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
             if (defined $value
                 && $value isa Chalk::IR::Node::Constant
                 && $value->const_type() eq 'variable') {
-                my $var_key = "${var_prefix}::" . $value->value();
+                my $var_key = "${var_prefix}::${\$value->value()}";
                 if (exists $var_schemas->{$var_key}) {
                     $var_schemas->{$var_key}{non_promotable} = true;
                 }
@@ -422,7 +422,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
                         if (defined $arg
                             && $arg isa Chalk::IR::Node::Constant
                             && $arg->const_type() eq 'variable') {
-                            my $var_key = "${var_prefix}::" . $arg->value();
+                            my $var_key = "${var_prefix}::${\$arg->value()}";
                             if (exists $var_schemas->{$var_key}) {
                                 $var_schemas->{$var_key}{non_promotable} = true;
                             }
@@ -464,7 +464,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
             && $index isa Chalk::IR::Node::Constant
             && $index->const_type() eq 'string';
 
-        my $var_key    = "${var_prefix}::" . $target->value();
+        my $var_key    = "${var_prefix}::${\$target->value()}";
         my $field_name = $index->value();
 
         return unless exists $var_schemas->{$var_key};
@@ -498,7 +498,7 @@ class Chalk::Bootstrap::Optimizer::StructPromotion
             && $index isa Chalk::IR::Node::Constant
             && $index->const_type() eq 'string';
 
-        my $var_key    = "${var_prefix}::" . $target->value();
+        my $var_key    = "${var_prefix}::${\$target->value()}";
         my $field_name = $index->value();
 
         return unless exists $var_schemas->{$var_key};
