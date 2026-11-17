@@ -1,4 +1,4 @@
-# ABOUTME: Phase 5 test — control flow and full grammar recognition with the Perl grammar.
+# ABOUTME: Chalk recognizes its own source: control-flow snippets, then every .pm under lib/Chalk.
 # ABOUTME: Tests conditionals, loops, full program structures, and real .pm file recognition.
 use 5.42.0;
 use utf8;

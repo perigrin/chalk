@@ -1,4 +1,4 @@
-# ABOUTME: Grammar gaps that kept lib/Chalk/*.pm out of perl-recognize-phase5.t:
+# ABOUTME: Grammar gaps that kept lib/Chalk/*.pm out of chalk-recognizes-its-own-source.t:
 # ABOUTME: punctuation variables, package-qualified aggregates and postfix slices.
 use 5.42.0;
 use utf8;
@@ -26,7 +26,7 @@ my $grammar    = Chalk::Grammar::Perl::Phase5Gaps::grammar();
 my $recognizer = build_perl_recognizer($grammar, start => 'Program');
 my $parser     = build_perl_ir_parser($grammar, start => 'Program');
 
-# The Boolean recognizer is what perl-recognize-phase5.t runs; the full
+# The Boolean recognizer is what chalk-recognizes-its-own-source.t runs; the full
 # five-semiring parser must also come out with exactly one parse (it dies on
 # an ambiguity the filters leave) and build IR.
 my sub ir_of($src) {
