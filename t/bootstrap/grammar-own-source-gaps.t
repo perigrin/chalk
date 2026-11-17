@@ -639,4 +639,10 @@ for my $src ('sub f { my ($nm, @in) = ($o->name, 1); my %a = $o->attr->%*; retur
     is($ties, 0, "one reading: $src");
 }
 
+for my $src ('sub h { my ($a, $b); ($a, $b) = $v->inputs; return $a }') {
+    my ($ir, $ties) = strings_of($src);
+    ok(defined $ir, "parses: $src");
+    is($ties, 0, "a parenthesized list's list tag stays inside it: $src");
+}
+
 done_testing();

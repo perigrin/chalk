@@ -263,6 +263,17 @@ class Chalk::Bootstrap::Semiring::Structural {
             return STRUCT_IS_LIST;
         }
 
+        # An Atom is a term: a ParenExpr's list tag (alt 1) was for choosing
+        # between the ParenExpr's own readings, settled at its completion.
+        # Carried on, `($a, $b) = $v->inputs` looked like a list to add()
+        # in both readings of its statement (Builder/Values.pm, Containers.pm).
+        if ($rule_name eq 'Atom') {
+            return $value & ~STRUCT_IS_LIST & (
+                STRUCT_IS_BLOCK | STRUCT_IS_HASH | STRUCT_IS_CALL  |
+                STRUCT_IS_DEREF | STRUCT_IS_METHOD | STRUCT_IS_BINOP | STRUCT_IS_VARDECL |
+                STRUCT_IS_BARECALL);
+        }
+
         # Boundary rules: clear all structural tags
         if ($rule_name eq 'ParenExpr'
             || $rule_name eq 'ArrayConstructor') {
