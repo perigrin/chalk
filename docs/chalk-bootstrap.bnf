@@ -301,16 +301,23 @@ ScalarVariable ::= /\$(?:[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*|(?:::[a-zA-Z_]\w*)+)/
     | /\$#[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*/
     | /\$#\$[a-zA-Z_]\w*/
     | /\$#/ _ /\{/ _ Expression _ /\}/    # $#{EXPR}: array-length-of-deref
-    | /\$(?:[@!\/\\.&]|\^[A-Z]|\{\^[A-Z_]\w*\})/ ;
-    # Punctuation variables: $@ $! $/ $\ $. $& $^W ${^NAME}. Not $, $; $$:
+    | /\$(?:[@!\/\\.&?`'+|"%=\-~<>()\[\]]|:(?!:)|\^[A-Z]?|\{\^[A-Z_]\w*\}|#(?:[-+]|\{\^[A-Z_]\w*\}))/ ;
+    # Punctuation variables, perlvar's whole set: $@ $! $/ $\ $. $& $? $`
+    # $' $+ $| $" $% $= $- $~ $^ $: $< $> $( $) $[ $], the caret names $^W
+    # and ${^NAME}, and the last indices $#- $#+ $#{^NAME}. Not $, $; $$:
     # they collide with the signature placeholder `($,)`, the statement
-    # terminator and `$$ref`. ($0 is a digit variable, above.)
+    # terminator and `$$ref`. ($0 is a digit variable, above.) `$:` is not
+    # the head of `$::x`, nor `$^` of `$^W`: one token each, one reading.
 
 ArrayVariable ::= /@(?:[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*|(?:::[a-zA-Z_]\w*)+)/
-    | /@\$[a-zA-Z_]\w*/ ;
+    | /@\$[a-zA-Z_]\w*/
+    | /@(?:[-+]|\{\^[A-Z_]\w*\})/ ;
+    # Punctuation arrays: @- @+ (match offsets) and @{^NAME}.
 
 HashVariable ::= /%(?:[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*|(?:::[a-zA-Z_]\w*)+)/
-    | /%\$[a-zA-Z_]\w*/ ;
+    | /%\$[a-zA-Z_]\w*/
+    | /%(?:[-+!]|\^H|\{\^[A-Z_]\w*\})/ ;
+    # Punctuation hashes: %+ %- (named captures), %! (errno), %^H, %{^NAME}.
 
 # §19  LITERALS
 

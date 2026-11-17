@@ -92,6 +92,32 @@ accepts('my $b = ${^WARNING_BITS};',        '${^NAME} (caret-brace name)');
 accepts('my $z = $0;',                      '$0 (program name, a digit variable)');
 rejects('my $e = $@@;',                     'rejects $@@');
 
+# The rest of perlvar's punctuation variables (perl -c accepts each in an
+# expression position): one token each, so each stays one reading.
+for my $v ('$?', '$`', q{$'}, '$+', '$|', '$"', '$%', '$=', '$-', '$~', '$^',
+           '$:', '$<', '$>', '$(', '$)', '$[', '$]', '$^N', '$#-', '$#+',
+           '$#{^CAPTURE}') {
+    accepts("my \$v = $v;", "$v (punctuation variable)");
+}
+for my $v ('@-', '@+', '@{^CAPTURE}') {
+    accepts("my \@v = $v;", "$v (punctuation array)");
+}
+for my $v ('%+', '%-', '%!', '%^H', '%{^CAPTURE}', '%{^CAPTURE_ALL}') {
+    accepts("my \%v = $v;", "$v (punctuation hash)");
+}
+accepts('die "x" unless $? == 0;',          '$? compared, as Impl.pm does');
+accepts('my $s = $-[0] . $+[1];',           'elements of @- and @+');
+accepts('my $n = $+{name} // $-{name};',    'elements of %+ and %-');
+accepts('my $c = $? ? 1 : 0;',              '$? as a ternary condition');
+accepts('my $x = $c ? $::y : $z;',          '$::y in a ternary arm stays one variable, not $: then :y');
+accepts('local $| = 1;',                    '$| assigned');
+accepts('my $w = $^W;',                     '$^W stays one variable, not $^ then W');
+{
+    my $ir = ir_of('my $v = $?;');
+    my ($var) = grep { $_->operation() eq 'Constant' && ($_->value() // '') eq '$?' } all_nodes($ir);
+    ok(defined $var, '$? builds the variable $?');
+}
+
 # ============================================================================
 # §2 Package-qualified aggregates (and `$::x`, the main-package short form).
 # ============================================================================

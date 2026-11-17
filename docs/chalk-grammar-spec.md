@@ -53,8 +53,8 @@ Features that are opaque to the grammar or out of scope:
 - Regex/string interpolation internals (treated as opaque terminals)
 - `format`, `tie`, `dbmopen`, `goto`
 - Alternate regex delimiters beyond `//` and `{}`
-- Special variables beyond `$_` and the punctuation variables `$@ $! $/ $\ $. $&`,
-  `$^X`-style and `${^NAME}` (no `$, $; $$`: they collide with grammar tokens)
+- The special variables `$, $; $$` (they collide with grammar tokens); every
+  other perlvar punctuation variable is in (§18)
 - Pod documentation
 
 ## 3. Design Decisions
@@ -498,8 +498,10 @@ HashVariable ::= /%(?:[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*|(?:::[a-zA-Z_]\w*)+)/
 
 Variables are single-token terminals: sigil + identifier name.
 Covers `$self`, `$_`, `@rules`, `%hash`, `@EXPORT_OK`, package-qualified
-names (`@Pkg::x`, `$::x`) and the punctuation variables `$@ $! $/ $\ $. $&`,
-`$^W`, `${^NAME}`. A stash name (`%Pkg::`) stays out (no symbol-table
+names (`@Pkg::x`, `$::x`) and perlvar's punctuation variables: `$@ $! $/ $\
+$. $& $? $` $' $+ $| $" $% $= $- $~ $^ $: $< $> $( $) $[ $]`, `$^W`,
+`${^NAME}`, `$#- $#+ $#{^NAME}`, `@- @+ @{^NAME}` and `%+ %- %! %^H
+%{^NAME}`. A stash name (`%Pkg::`) stays out (no symbol-table
 manipulation); `docs/chalk-bootstrap.bnf` is authoritative.
 
 ### §19 Literals
@@ -690,9 +692,9 @@ Track the set of accepted files and ensure it never shrinks.
    not supported. Not used in Chalk code.
 
 4. **Limited special variables**: `$name`, `@name`, `%name` (package-qualified
-   too), `$1`.., and the punctuation variables `$@ $! $/ $\ $. $&`, `$^W`,
-   `${^NAME}`. No `$, $; $$` (they collide with the signature placeholder, the
-   statement terminator and `$$ref`), no `@-`/`%+` and the like.
+   too), `$1`.., and perlvar's punctuation variables (§18). No `$, $; $$`
+   (they collide with the signature placeholder, the statement terminator and
+   `$$ref`).
 
 5. **Ambiguity explosion**: The flat expression grammar with all operators at one
    level produces many ambiguous parses for complex expressions. The Earley parser
