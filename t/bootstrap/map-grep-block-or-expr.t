@@ -112,4 +112,18 @@ check( 'map { 1 }, @x',          'expr',  'PERL REJECTS: guesses BLOCK' );
     ok defined $r && !$r->is_zero, 'print {$fh} LIST and say {$fh} LIST still parse';
 }
 
+# eval and do have two forms each (perlfunc): `eval BLOCK` / `eval EXPR` and
+# `do BLOCK` / `do EXPR`. A `{` after either opens the BLOCK -- perl never
+# reads it as an anonymous hash, which as EXPR would be a string to compile
+# or a file to run. perl -MO=Deparse: eval {1;}, do {1;}.
+for my $case ([ 'eval { 1 }', qr/eval \{/ ], [ 'do { 1 }', qr/do \{/ ]) {
+    my ($expr, $want) = $case->@*;
+    my $src = "class E1 { sub f(\$s) { my \$v = $expr; my \$w = " . ($expr =~ /^eval/ ? 'eval $s' : 'do $s') . "; return \$v } }";
+    $parser->semiring->flush_tie_log;
+    $parser->semiring->reset_cache;
+    my $r = $parser->parse_value($src);
+    ok defined $r && !$r->is_zero, "$expr and its EXPR form parse";
+    is scalar $parser->semiring->tie_log->@*, 0, "$expr: one reading, no tie";
+}
+
 done_testing;

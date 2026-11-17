@@ -254,6 +254,18 @@ class Chalk::Grammar::Perl::TypeLibrary {
         die     => { min_arity => 0, arg_types => ['List'],                       return_type => 'None' },
         warn    => { min_arity => 0, arg_types => ['List'],                       return_type => 'Boolean' },
 
+        # Two forms each (perlfunc): `eval BLOCK` / `eval EXPR` (a string to
+        # compile) and `do BLOCK` / `do EXPR` (a file to run). A `{` after
+        # either is the BLOCK: as EXPR an anonymous hash is no string, so the
+        # expr form's Str rejects it. Their value is the block's or the
+        # code's, so no return type is claimed.
+        eval    => { min_arity => 0, arg_types => ['Str'],
+                     forms => { block => { min_arity => 1, arg_types => ['Code'] },
+                                expr  => { min_arity => 0, arg_types => ['Str'] } } },
+        do      => { min_arity => 1, arg_types => ['Str'],
+                     forms => { block => { min_arity => 1, arg_types => ['Code'] },
+                                expr  => { min_arity => 1, arg_types => ['Str'] } } },
+
         # OO
         bless   => { min_arity => 1, arg_types => ['Ref', 'Str'],               return_type => 'Object' },
 
