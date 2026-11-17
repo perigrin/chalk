@@ -2,9 +2,9 @@
 # ABOUTME: Lazy-init: undef by default, set via set_schedule_data, excluded from content_hash.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::Node;
 use Chalk::IR::Node::Loop;
 use Chalk::Scheduler::EagerPinning::Loop;

@@ -1,9 +1,9 @@
 # ABOUTME: A regex code block `(?{ ... })` through T2 is a call in the match's graph:
 # ABOUTME: run on the hit, once each, in order, where the pattern is all literal.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

@@ -2,12 +2,11 @@
 # ABOUTME: and cherry-picked framework-free t/comp rings; per-ring worklist + combined histogram.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
-binmode Test::More->builder->output,         ':encoding(UTF-8)';
-binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
-binmode Test::More->builder->todo_output,    ':encoding(UTF-8)';
+binmode STDOUT, ':encoding(UTF-8)';   # (Test::Chalk's TAP and TODO output)
+binmode STDERR, ':encoding(UTF-8)';   # (its failure output)
 
 use Chalk::CodeGen::Harness::RingWorklist;
 

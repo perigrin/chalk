@@ -2,9 +2,9 @@
 # ABOUTME: Per Phase 4, codegen reads only via MOP's public API - no parser-specific coupling.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(reftype);
-use lib 'lib';
 
 use Chalk::MOP;
 use Chalk::IR::Graph;

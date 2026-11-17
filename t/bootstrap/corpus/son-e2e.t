@@ -2,11 +2,11 @@
 # ABOUTME: Validates the producible-now slice through the real producer (not the IR-block builder).
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use JSON::PP;
 use File::Temp qw(tempfile);
 
-use lib 'lib', 't/lib';
 use Chalk::IR::Serialize::JSON ();
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Pipeline;

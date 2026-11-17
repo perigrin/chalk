@@ -2,9 +2,9 @@
 # ABOUTME: Phase 3d TDD red — covers the 56-snippet corpus identified by 2026-05-22 IR audit.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(blessed refaddr);
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use Chalk::MOP;

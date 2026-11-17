@@ -2,9 +2,9 @@
 # ABOUTME: under a SEPARATE conformance tally that never touches hand corpus gate-green.
 use 5.42.0;
 use utf8;
-use Test::More;
-
 use lib 'lib', 't/lib';
+use Test::Chalk;
+
 use Chalk::CodeGen::Harness::Mode2Adapter;
 use Chalk::CodeGen::Harness::Mode2Extractor;
 

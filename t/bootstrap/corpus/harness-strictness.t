@@ -2,8 +2,8 @@
 # ABOUTME: (bare const_type, dropped MOP positional inputs, dup field_index) croak.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness::MdtestCorpus;
 use Chalk::MOP;

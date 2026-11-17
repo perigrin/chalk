@@ -2,13 +2,13 @@
 # ABOUTME: Pins the MOP edge -- on every load, on every graph, and on every method-dispatch Call.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempdir);
 use Scalar::Util qw(refaddr blessed);
 use JSON::PP;
 use feature 'try';
 no warnings 'experimental::try';
-use lib 'lib', 't/lib';
 use Chalk::IR::Serialize::JSON;
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";

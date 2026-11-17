@@ -2,9 +2,9 @@
 # ABOUTME: Verifies accessors: module, args, class.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::MOP;
 
 # Basic import construction via declare_import

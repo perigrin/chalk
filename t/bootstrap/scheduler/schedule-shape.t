@@ -2,9 +2,9 @@
 # ABOUTME: Phase 2 — data types only, no producer; hand-built fixtures exercise the shape.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::Node;
 use Chalk::IR::Schedule;
 use Chalk::IR::Schedule::Item;

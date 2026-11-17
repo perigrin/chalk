@@ -2,9 +2,9 @@
 # ABOUTME: Guards against JSON routing, under-wired graphs, loose-Graph return, and mis-authored graphs.
 use 5.42.0;
 use utf8;
-use Test::More;
-use Scalar::Util qw(blessed refaddr);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use Scalar::Util qw(blessed refaddr);
 
 use Chalk::MOP;
 use Chalk::IR::Graph;

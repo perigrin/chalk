@@ -2,10 +2,10 @@
 # ABOUTME: A structural action that doesn't propagate scope produces a result with no scope.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use experimental 'class';
 
-use lib 'lib';
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Bindings;
 use Chalk::IR::Graph;

@@ -2,8 +2,8 @@
 # ABOUTME: D6, L1-L4 take parameters passed via spec constructor params.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness;
 

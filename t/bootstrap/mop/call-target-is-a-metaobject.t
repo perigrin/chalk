@@ -2,9 +2,9 @@
 # ABOUTME: target is the MOP handle; resolved_graph was the flat-graph fallback.
 use 5.42.0;
 use utf8;
-use Test::More;
-use File::Temp qw(tempdir);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempdir);
 use Chalk::IR::Serialize::JSON;
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";

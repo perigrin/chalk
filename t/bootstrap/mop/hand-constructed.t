@@ -2,9 +2,9 @@
 # ABOUTME: Constructs a complete MOP without any parser involvement to validate the API surface.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::MOP;
 
 # Build a realistic Chalk program's MOP entirely by hand:

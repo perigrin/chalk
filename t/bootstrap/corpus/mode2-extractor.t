@@ -2,14 +2,13 @@
 # ABOUTME: is/cmp_ok/ok assertions from real perl5 t/opbasic files into corpus cases.
 use 5.42.0;
 use utf8;
-use Test::More;
-
 use lib 't/lib';
+use Test::Chalk;
+
 use Chalk::CodeGen::Harness::Mode2Extractor;
 
-binmode Test::More->builder->output,         ':encoding(UTF-8)';
-binmode Test::More->builder->failure_output, ':encoding(UTF-8)';
-binmode Test::More->builder->todo_output,    ':encoding(UTF-8)';
+binmode STDOUT, ':encoding(UTF-8)';   # (Test::Chalk's TAP and TODO output)
+binmode STDERR, ':encoding(UTF-8)';   # (its failure output)
 
 my $E = 'Chalk::CodeGen::Harness::Mode2Extractor';
 

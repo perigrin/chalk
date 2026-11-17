@@ -2,9 +2,9 @@
 # ABOUTME: Per Phase 3a-migration, MethodInfo+MOP::Method expose body VarDecls as metadata.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(blessed);
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use Chalk::MOP;

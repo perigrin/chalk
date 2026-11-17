@@ -2,9 +2,9 @@
 # ABOUTME: names whose presence is not known; and none claimed where no symbol table was given.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::MOP;
 
 # NO TABLE GIVEN: the Class claims nothing either way.

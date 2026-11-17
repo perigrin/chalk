@@ -2,8 +2,8 @@
 # ABOUTME: Per Phase 4, the SA/Context backchannel is removed from the public codegen API.
 use 5.42.0;
 use utf8;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::Bootstrap::Perl::Target::Perl;
 use Chalk::Bootstrap::Perl::Target::C;

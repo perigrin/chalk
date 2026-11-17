@@ -1,8 +1,8 @@
 # ABOUTME: Chalk::Regex::Pattern reads a constant regex into atoms (G6's front
 # ABOUTME: half, out of Context): literals, classes, groups, quantifiers; refusals by name.
 use 5.42.0;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Chalk::Regex::Pattern;
 
 my $p = Chalk::Regex::Pattern::compile( '^a[b-d]\d+(x)y$', '' );

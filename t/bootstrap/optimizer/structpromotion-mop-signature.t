@@ -2,9 +2,9 @@
 # ABOUTME: Per Phase 5, schemas live as a side-structure / annotation on the MOP.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(blessed);
-use lib 'lib';
 
 use Chalk::Bootstrap::Optimizer::StructPromotion;
 use Chalk::MOP;

@@ -1,9 +1,9 @@
 # ABOUTME: a qr// value through T2: an object of class Regexp holding perl's string
 # ABOUTME: of its pattern and its matcher (the pattern's graph) as a code value.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

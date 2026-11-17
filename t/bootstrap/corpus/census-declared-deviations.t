@@ -4,10 +4,10 @@
 
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempdir);
 
-use lib 'lib', 't/lib';
 use Chalk::CodeGen::Harness::Deviation qw(ground_of read_declared judge declared_path);
 
 # ---------------------------------------------------------------------------

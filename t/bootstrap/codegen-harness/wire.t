@@ -3,9 +3,9 @@
 use 5.42.0;
 use utf8;
 
-use Test::More;
-use Scalar::Util qw(blessed);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use Scalar::Util qw(blessed);
 
 use Chalk::CodeGen::Harness;
 use Chalk::CodeGen::Harness::HandGraphs;

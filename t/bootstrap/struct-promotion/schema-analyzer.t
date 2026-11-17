@@ -3,9 +3,9 @@
 use 5.42.0;
 use utf8;
 
-use Test2::V0;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Optimizer::StructPromotion;
 use Chalk::IR::Node::Return;
@@ -217,7 +217,7 @@ sub program_ir($class_info) {
 
     # Check field names
     my @field_names = sort map { $_->{name} } $schema->{fields}->@*;
-    is(\@field_names, [qw(alt_idx core_id dot origin rule value)],
+    is_deeply(\@field_names, [qw(alt_idx core_id dot origin rule value)],
         'schema has all 6 expected fields');
 }
 

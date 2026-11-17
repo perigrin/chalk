@@ -3,8 +3,8 @@
 use 5.42.0;
 use utf8;
 
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 # I4/I5 (R1 reopened):
 # I4: Chalk::Target::LLVM does NOT isa Chalk::Target — the new base's lower contract

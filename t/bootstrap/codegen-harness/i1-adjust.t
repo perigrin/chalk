@@ -2,8 +2,8 @@
 # ABOUTME: I1: class C { field $x :param; ADJUST { $x = $x + 1; } method m() { return $x; } }
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness;
 

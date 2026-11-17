@@ -2,8 +2,8 @@
 # ABOUTME: Proves the tier-2 path: S = real lib/ file under perl, P = hand-authored MOP via emitter.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness::Tier2;
 use Chalk::CodeGen::Harness::GapMap;

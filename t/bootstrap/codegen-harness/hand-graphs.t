@@ -2,9 +2,9 @@
 # ABOUTME: Asserts graph_for("A1") etc. return a Chalk::MOP built directly, not via JSON.
 use 5.42.0;
 use utf8;
-use Test::More;
-use Scalar::Util qw(blessed);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use Scalar::Util qw(blessed);
 
 use Chalk::MOP;
 use Chalk::CodeGen::Harness::HandGraphs;

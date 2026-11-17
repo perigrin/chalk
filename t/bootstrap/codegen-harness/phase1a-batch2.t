@@ -2,8 +2,8 @@
 # ABOUTME: Each test asserts run_entry(TAG) returns PASS after hand graphs are authored.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness;
 

@@ -1,9 +1,9 @@
 # ABOUTME: a match in list context through T2: its groups (or 1), or with /g every
 # ABOUTME: match's -- the pattern's own graph (the list or all flavor) returns them.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

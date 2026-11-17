@@ -1,9 +1,9 @@
 # ABOUTME: \Q$x\E through T2: a literal known only at run time, matched as one (a
 # ABOUTME: substr compare in the pattern's graph) -- no regex built at run time.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

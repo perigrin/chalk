@@ -2,9 +2,9 @@
 # ABOUTME: Per Phase 4, the C target accepts a MOP and emits both .c and .xs files.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(reftype);
-use lib 'lib';
 
 use Chalk::MOP;
 use Chalk::Bootstrap::Perl::Target::C;

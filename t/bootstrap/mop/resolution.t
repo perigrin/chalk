@@ -2,9 +2,9 @@
 # ABOUTME: Verifies find_method, ancestors, and resolve_adjust_blocks across inheritance chains.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::MOP;
 
 # find_method on direct class

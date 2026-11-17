@@ -2,9 +2,9 @@
 # ABOUTME: Carries iterator/list/is_for_style/for_init/for_step set by parser actions.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::Node;
 use Chalk::Scheduler::EagerPinning::Loop;
 

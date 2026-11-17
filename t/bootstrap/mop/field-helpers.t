@@ -2,9 +2,9 @@
 # ABOUTME: Verifies has_attribute, is_param, has_reader semantics.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use Chalk::MOP;

@@ -2,10 +2,10 @@
 # ABOUTME: Phase 5a — parallel test path for scheduler-driven codegen during integration.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(blessed);
 use File::Glob qw(bsd_glob);
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use Chalk::MOP;

@@ -2,9 +2,9 @@
 # ABOUTME: Carries catch_var, try_stmts, catch_stmts set by TryStatement action.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::Node;
 use Chalk::Scheduler::EagerPinning::TryCatch;
 

@@ -2,8 +2,8 @@
 # ABOUTME: Exercises both: early-return/die path and fall-through path where applicable.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness;
 

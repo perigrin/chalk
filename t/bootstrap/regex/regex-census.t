@@ -1,7 +1,8 @@
 # ABOUTME: script/regex-census.pl lists every regex perl compiles in a file --
 # ABOUTME: its op, flags, the features its pattern uses, or that it is built at run time.
 use 5.42.0;
-use Test::More;
+use lib 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
 
 sub census (@files) {

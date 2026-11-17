@@ -2,8 +2,8 @@
 # ABOUTME: I2, M1, M2 are skipped — non-class snippets need a different exercise rig.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness;
 

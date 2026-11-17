@@ -2,9 +2,9 @@
 # ABOUTME: Migration 3 of Phase 1 — moves C-style for recognition from Context onto IR.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::Node::Loop;

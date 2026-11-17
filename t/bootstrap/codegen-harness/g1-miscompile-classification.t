@@ -2,9 +2,9 @@
 # ABOUTME: RED test verifying that MdtestCorpus classifies a malformed-IR case as MISCOMPILE.
 use 5.42.0;
 use utf8;
-use Test::More;
-use lib 'lib';
 use lib 't/lib';
+use Test::Chalk;
+use lib 'lib';
 
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::MdtestCorpus;

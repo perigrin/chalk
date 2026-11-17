@@ -2,9 +2,9 @@
 # ABOUTME: Verifies `use constant { K => V };` decls are recorded as named/value pairs.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::MOP;
 use Chalk::IR::Node::Constant;
 

@@ -2,10 +2,10 @@
 # ABOUTME: Verifies multiply propagates them left-to-right and extend propagates from children.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use experimental 'class';
 
-use lib 'lib';
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Bindings;
 use Chalk::IR::Graph;

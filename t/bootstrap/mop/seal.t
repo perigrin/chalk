@@ -2,8 +2,8 @@
 # ABOUTME: after seal on the registry and on every class; sealing is idempotent.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::MOP;
 

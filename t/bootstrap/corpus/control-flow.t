@@ -3,8 +3,8 @@
 use 5.42.0;
 use utf8;
 
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness::MdtestCorpus;
 use Chalk::CodeGen::Harness::LLVMDriver;

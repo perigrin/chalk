@@ -2,10 +2,10 @@
 # ABOUTME: stdout AND exit status, and a blocked file names its OWN entry blocker.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
 
-use lib 'lib', 't/lib';
 use Chalk::CodeGen::Harness::ProgramRunner;
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";

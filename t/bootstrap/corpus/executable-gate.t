@@ -2,10 +2,10 @@
 # ABOUTME: against perl. Measures "does this become a runnable program", not a value.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
 
-use lib 'lib', 't/lib';
 use Chalk::CodeGen::Harness::ProgramRunner;
 
 # ---------------------------------------------------------------------------

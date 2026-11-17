@@ -2,9 +2,9 @@
 # ABOUTME: holds the body (a graph) the compiler hands it, its own node cache; the MOP makes none.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::MOP;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Graph;

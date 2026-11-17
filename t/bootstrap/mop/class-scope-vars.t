@@ -2,9 +2,9 @@
 # ABOUTME: Verifies class-scope `my $x = ...;` declarations are recorded in order; their names are the parser's.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::MOP;
 use Chalk::Bootstrap::Perl::Actions;   # (a class lexical's name is the parser's to bind)
 use Chalk::IR::Node::VarDecl;

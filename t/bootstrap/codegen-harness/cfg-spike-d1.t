@@ -2,8 +2,8 @@
 # ABOUTME: Exercises BOTH branches (n=1 takes true branch, n=-1 takes false branch); bilateral coverage.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness;
 

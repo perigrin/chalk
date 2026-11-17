@@ -2,9 +2,9 @@
 # ABOUTME: Pins the seam is reached and that lli actually printed, not printed nothing.
 use 5.42.0;
 use utf8;
-use Test::More;
-
 use lib 'lib', 't/lib';
+use Test::Chalk;
+
 use Chalk::CodeGen::Pipeline;
 use Chalk::CodeGen::Harness::Mode2Adapter;
 
