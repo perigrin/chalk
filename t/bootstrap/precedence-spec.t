@@ -774,4 +774,15 @@ subtest 'L10 named unary right of L13 ==: $n == scalar @a' => sub {
     like(shape_of($right), qr/^Call/, 'right of == is the scalar call');
 };
 
+# --- L2 -> after a looser expression: `->(...)` too ---
+# perlop: `->` (L2) binds tighter than every binary operator, so in
+# `$b eq 1 && $o->w && $f->(1)` the call is on $f, never on the && chain
+# (IR/Node/Ref.pm). A target of `->(` that is an unparenthesized binary or
+# unary expression is rejected, as it is for `->[` and `->{`.
+subtest 'L2 ->( binds to the variable, not the && chain' => sub {
+    my $expr = parse_expr('$b eq 1 && $o->w && $f->(1)');
+    my $and = isa_with_shape($expr, 'Chalk::IR::Node::And', 'top is And') or return;
+    isa_with_shape($and->inputs()->[2], 'Chalk::IR::Node::Subscript', 'its right operand is the call on $f');
+};
+
 done_testing;

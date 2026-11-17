@@ -390,6 +390,17 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $self->one();
         }
 
+        # `->` of a Subscript (`->[`, `->{`, `->(`) binds tighter than every
+        # binary and unary operator: its target may not be one, unparenthesized
+        # (`$a && $f->(1)` is no call on `$a && $f`). The bracket checks above
+        # see the arrow forms' target only after `->` has passed; `->(` has
+        # no bracket check at all.
+        if ($rule_name eq 'Subscript' && $matched_text eq '->'
+                && defined($existing->{level})
+                && ($existing->{level} >= 0 || $existing->{level} == -1)) {
+            return $self->zero();
+        }
+
         # Past those checks the bracket opens a delimited index: what binds
         # inside it answers to the bracket, not to the target's own level. A
         # target that is itself a subscript or a call (`$l[1]`, level -2)
