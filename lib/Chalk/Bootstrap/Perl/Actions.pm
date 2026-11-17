@@ -1729,6 +1729,18 @@ class Chalk::Bootstrap::Perl::Actions {
         if ($text =~ /^"((?:[^"\\]|\\.)*)"$/) {
             return $self->_double_quoted($ctx, $1);
         }
+        # q{...} q[...]: single-quoted, the delimiters not part of the
+        # string. A backslash escapes a backslash or a delimiter only.
+        # (q{} nests its braces: the body is B.)
+        if ($text =~ /\Aq\s*(?:\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}|\[((?:[^\]\\]|\\.)*)\])\z/s) {
+            my ($content, $delims) = defined $+{B} ? ($+{B}, '{}') : ($2, '[]');
+            $content =~ s/\\([\\\Q$delims\E])/$1/g;
+            return _make_const($factory, $content);
+        }
+        # qq{...} qq[...]: double-quoted, interpolated, delimiters dropped.
+        if ($text =~ /\Aqq\s*(?:\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}|\[((?:[^\]\\]|\\.)*)\])\z/s) {
+            return $self->_double_quoted($ctx, $+{B} // $2);
+        }
         # Backticks and qx(...) qx{...} qx[...]: run the command, its output
         # the value. perl interpolates the command as a double-quoted string.
         if ($text =~ /\A`((?:[^`\\]|\\.)*)`\z/s
@@ -1739,7 +1751,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 inputs => [$self->_double_quoted($ctx, $command)],
             );
         }
-        return _make_const($factory, $text);
+        die "GAP: a string literal spelled $text has no IR\n";
     }
 
     # The value of a double-quoted string's CONTENT (quotes stripped): an

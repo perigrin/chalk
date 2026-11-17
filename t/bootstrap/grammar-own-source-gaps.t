@@ -444,5 +444,14 @@ rejects(q(my $s = q{a{b c};),               'rejects q{} with an unbalanced inne
     my $cmd = $bt && $bt->inputs()->[0];
     is($cmd && $cmd->value(), 'echo {a}', 'qx{echo {a}} runs `echo {a}`');
 }
+for my $case ([q{my $s = q{a{b}c};}, 'a{b}c'], [q{my $s = qq{a{b}c};}, 'a{b}c'],
+              [q{my $s = q[a\]b];}, 'a]b'], [q{my $s = qq[a\tb];}, "a\tb"]) {
+    my ($src, $want) = $case->@*;
+    my $ir = ir_of($src);
+    my @strings = grep { $_->operation() eq 'Constant' && ($_->const_type() // '') eq 'string' }
+        all_nodes($ir);
+    ok((grep { $_->value() eq $want } @strings), "$src is the string without its delimiters")
+        or diag(join ', ', map { $_->value() } @strings);
+}
 
 done_testing();
