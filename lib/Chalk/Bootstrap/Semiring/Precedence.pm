@@ -31,7 +31,13 @@ class Chalk::Bootstrap::Semiring::Precedence {
     # ExpressionList in _complete_prec). It travels only as far as the
     # CallExpression that consumes the list, which checks it against a
     # named-unary head and then drops it.
-    sub _intern($valid, $level, $assoc, $is_operator, $op = undef, $arg_level = undef) {
+    # $redge: an expression that ENDS in a named unary operator's bare
+    # operand (`1 . defined $x`) carries that operator's level (4.5) as its
+    # right edge. The operand runs to the expression's end, so an operator
+    # tighter than the named unary after it would have been the operand's:
+    # `1 . defined $x . 2` is '1' . defined($x . '2'), never
+    # ('1' . defined $x) . '2'.
+    sub _intern($valid, $level, $assoc, $is_operator, $op = undef, $arg_level = undef, $redge = undef) {
         my $key;
         if (!$valid) {
             $key = '0';
@@ -40,7 +46,8 @@ class Chalk::Bootstrap::Semiring::Precedence {
             my $a  = $assoc       // '';
             my $io = $is_operator ? '1' : '';
             my $al = $arg_level   // '';
-            $key = "1:$l:$a:$io:$al";
+            my $re = $redge       // '';
+            $key = "1:$l:$a:$io:$al:$re";
         }
         unless (exists $_cache{$key}) {
             $_cache{$key} = {
@@ -50,6 +57,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 is_operator => $is_operator ? true : false,
                 op          => $op,
                 arg_level   => $arg_level,
+                redge       => $redge,
             };
         }
         return $_cache{$key};
@@ -412,6 +420,12 @@ class Chalk::Bootstrap::Semiring::Precedence {
         if ($right->{is_operator} && defined($left->{level})) {
             my $op_level = $right->{level};
             my $left_level = $left->{level};
+            if (defined $left->{redge} && $op_level < $left->{redge}) {
+                if ($ENV{DEBUG_PRECEDENCE}) {
+                    warn "  PREC_REJECT_OPEN_NAMED_UNARY: op_level=$op_level < right edge $left->{redge} ($right->{op})\n";
+                }
+                return $self->zero();
+            }
             if ($left_level > $op_level) {
                 if ($ENV{DEBUG_PRECEDENCE}) {
                     warn "  PREC_REJECT_MUL: left_level=$left_level > op_level=$op_level ($right->{op})\n";
@@ -439,7 +453,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # If only one has operator info, carry it through
         # (strip is_operator to prevent leaking into BinaryExpression context)
         if (!defined($left->{level})) {
-            return _intern(true, $right->{level}, $right->{assoc}, false, $right->{op});
+            return _intern(true, $right->{level}, $right->{assoc}, false, $right->{op}, undef, $right->{redge});
         }
         # Note: is_operator from $right is intentionally NOT propagated above
         if (!defined($right->{level})) {
@@ -447,7 +461,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
             # keep the list's arg_level so CallExpression can check it.
             my $arg_level = $left->{level} == Chalk::Grammar::Perl::PrecedenceTable::named_unary_level()
                 ? $right->{arg_level} : undef;
-            return _intern(true, $left->{level}, $left->{assoc}, false, $left->{op}, $arg_level);
+            return _intern(true, $left->{level}, $left->{assoc}, false, $left->{op}, $arg_level, $left->{redge});
         }
 
         # Both have operator info — validate precedence nesting
@@ -466,8 +480,19 @@ class Chalk::Bootstrap::Semiring::Precedence {
 
         # Child with higher precedence (lower level number) inside parent is always valid
         if ($child_level < $parent_level) {
-            # Child binds tighter — valid. Carry parent's operator info.
-            return _intern(true, $parent_level, $parent_assoc, false, $left->{op});
+            # Child binds tighter — valid. Carry parent's operator info, and
+            # the child's open right edge (it ends this expression too).
+            return _intern(true, $parent_level, $parent_assoc, false, $left->{op}, undef, $right->{redge});
+        }
+
+        # A named unary operator (L10) as the right operand: a prefix
+        # operator, it may follow any tighter operator, taking what binds
+        # tighter than L10 after it -- `1 . scalar @a` is '1' . scalar(@a)
+        # (perl -MO=Deparse). Its own operand is checked by its arg_level;
+        # the expression's right edge is left open at L10 (see _intern).
+        my $nu_level = Chalk::Grammar::Perl::PrecedenceTable::named_unary_level();
+        if ($child_level == $nu_level) {
+            return _intern(true, $parent_level, $parent_assoc, false, $left->{op}, undef, $nu_level);
         }
 
         # Child with lower precedence (higher level number) inside parent is invalid

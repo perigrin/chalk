@@ -738,4 +738,40 @@ for my $src ('$h{ $b ? 1 : 2 }', '$h{a}{ $b ? 1 : 2 }', '$r->{ $b ? 1 : 2 }->@*'
     };
 }
 
+# --- L10 named unary as the RIGHT operand of a tighter operator ---
+# perlop: a named unary operator is a prefix operator; as the right operand
+# of `.` or `*` it takes what binds tighter than L10 after it.
+# perl -MO=Deparse: '1' . scalar(@a); '1' . defined($x . '2');
+# $a . defined($b) || $c; 2 * ref($r); $n == scalar(@a).
+my sub top_and_right($src) {
+    my $expr = parse_expr($src);
+    return (undef, undef) unless defined $expr && $expr->can('inputs');
+    return ($expr, $expr->inputs()->[2]);
+}
+subtest 'L10 named unary right of L8 .: 1 . scalar @a is Concat(1, scalar(@a))' => sub {
+    my ($top, $right) = top_and_right('1 . scalar @a');
+    isa_with_shape($top, 'Chalk::IR::Node::Concat', 'top is Concat') or return;
+    like(shape_of($right), qr/^Call/, 'right of . is the scalar call');
+};
+subtest 'L10 named unary right of L8 . takes the tighter rest: 1 . defined $x . 2' => sub {
+    my ($top, $right) = top_and_right('1 . defined $x . 2');
+    isa_with_shape($top, 'Chalk::IR::Node::Concat', 'top is Concat') or return;
+    like(shape_of($right), qr/^Call\(.*Concat/, 'defined takes $x . 2') or diag(shape_of($top));
+};
+subtest 'L10 named unary right of L8 . stops at L17 ||: $a . defined $b || $c' => sub {
+    my $expr = parse_expr('$a . defined $b || $c');
+    my $or = isa_with_shape($expr, 'Chalk::IR::Node::Or', 'top is Or') or return;
+    isa_with_shape($or->inputs()->[1], 'Chalk::IR::Node::Concat', 'left of Or is the Concat');
+};
+subtest 'L10 named unary right of L7 *: 2 * ref $r' => sub {
+    my ($top, $right) = top_and_right('2 * ref $r');
+    isa_with_shape($top, 'Chalk::IR::Node::Multiply', 'top is Multiply') or return;
+    like(shape_of($right), qr/^Call/, 'right of * is the ref call');
+};
+subtest 'L10 named unary right of L13 ==: $n == scalar @a' => sub {
+    my ($top, $right) = top_and_right('$n == scalar @a');
+    ok(defined $top, 'parses') or return;
+    like(shape_of($right), qr/^Call/, 'right of == is the scalar call');
+};
+
 done_testing;
