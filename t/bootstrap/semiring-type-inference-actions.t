@@ -2,7 +2,8 @@
 # ABOUTME: Tests each action method in isolation with Context tree inputs matching extend() dispatch.
 use 5.42.0;
 use utf8;
-use Test2::V0;
+use lib 't/lib';
+use Test::Chalk;
 
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Semiring::TypeInferenceActions;
@@ -42,12 +43,12 @@ subtest 'Atom passthrough' => sub {
     my $ctx = mul_ctx($child_ctx);
 
     my $result = $actions->Atom($ctx);
-    is($result, { valid => true, type => 'Str' }, 'Atom passes through child type');
+    is_deeply($result, { valid => true, type => 'Str' }, 'Atom passes through child type');
 
     # No type in children → valid but no type
     my $no_type_ctx = mul_ctx(mock_ctx({ valid => true }));
     $result = $actions->Atom($no_type_ctx);
-    is($result, { valid => true }, 'Atom with no child type returns valid without type');
+    is_deeply($result, { valid => true }, 'Atom with no child type returns valid without type');
 };
 
 # Test 2: Expression (wrapper rule - child's type passthrough)
@@ -56,7 +57,7 @@ subtest 'Expression passthrough' => sub {
     my $ctx = mul_ctx($child_ctx);
 
     my $result = $actions->Expression($ctx);
-    is($result, { valid => true, type => 'Int' }, 'Expression passes through child type');
+    is_deeply($result, { valid => true, type => 'Int' }, 'Expression passes through child type');
 };
 
 # Test 3: PostfixExpression (wrapper rule)
@@ -65,7 +66,7 @@ subtest 'PostfixExpression passthrough' => sub {
     my $ctx = mul_ctx($child_ctx);
 
     my $result = $actions->PostfixExpression($ctx);
-    is($result, { valid => true, type => 'Num' }, 'PostfixExpression passes through child type');
+    is_deeply($result, { valid => true, type => 'Num' }, 'PostfixExpression passes through child type');
 };
 
 # Test 4: BinaryExpression (rich rule - op_text determines type)
@@ -75,31 +76,31 @@ subtest 'BinaryExpression type from operator' => sub {
     my $ctx = mul_ctx($op_ctx);
 
     my $result = $actions->BinaryExpression($ctx);
-    is($result, { valid => true, type => 'Num' }, 'BinaryExpression + returns Num');
+    is_deeply($result, { valid => true, type => 'Num' }, 'BinaryExpression + returns Num');
 
     # String concatenation
     $op_ctx = mock_ctx({ op_text => '.' });
     $ctx = mul_ctx($op_ctx);
     $result = $actions->BinaryExpression($ctx);
-    is($result, { valid => true, type => 'Str' }, 'BinaryExpression . returns Str');
+    is_deeply($result, { valid => true, type => 'Str' }, 'BinaryExpression . returns Str');
 
     # Comparison
     $op_ctx = mock_ctx({ op_text => '==' });
     $ctx = mul_ctx($op_ctx);
     $result = $actions->BinaryExpression($ctx);
-    is($result, { valid => true, type => 'Boolean' }, 'BinaryExpression == returns Boolean');
+    is_deeply($result, { valid => true, type => 'Boolean' }, 'BinaryExpression == returns Boolean');
 
     # Logical operator → Any → no type tag
     $op_ctx = mock_ctx({ op_text => '&&' });
     $ctx = mul_ctx($op_ctx);
     $result = $actions->BinaryExpression($ctx);
-    is($result, { valid => true }, 'BinaryExpression && returns valid without type');
+    is_deeply($result, { valid => true }, 'BinaryExpression && returns valid without type');
 
     # No op_text: preserve child type (intermediate completion)
     my $child_ctx = mock_ctx({ type => 'Str' });
     $ctx = mul_ctx($child_ctx);
     $result = $actions->BinaryExpression($ctx);
-    is($result, { valid => true, type => 'Str' }, 'BinaryExpression without op preserves child type');
+    is_deeply($result, { valid => true, type => 'Str' }, 'BinaryExpression without op preserves child type');
 };
 
 # Test 5: UnaryExpression (rich rule - op_text determines type)
@@ -109,19 +110,19 @@ subtest 'UnaryExpression type from operator' => sub {
     my $ctx = mul_ctx($op_ctx);
 
     my $result = $actions->UnaryExpression($ctx);
-    is($result, { valid => true, type => 'Num' }, 'UnaryExpression - returns Num');
+    is_deeply($result, { valid => true, type => 'Num' }, 'UnaryExpression - returns Num');
 
     # Logical not → Boolean
     $op_ctx = mock_ctx({ op_text => '!' });
     $ctx = mul_ctx($op_ctx);
     $result = $actions->UnaryExpression($ctx);
-    is($result, { valid => true, type => 'Boolean' }, 'UnaryExpression ! returns Boolean');
+    is_deeply($result, { valid => true, type => 'Boolean' }, 'UnaryExpression ! returns Boolean');
 
     # Bitwise not → Int
     $op_ctx = mock_ctx({ op_text => '~' });
     $ctx = mul_ctx($op_ctx);
     $result = $actions->UnaryExpression($ctx);
-    is($result, { valid => true, type => 'Int' }, 'UnaryExpression ~ returns Int');
+    is_deeply($result, { valid => true, type => 'Int' }, 'UnaryExpression ~ returns Int');
 };
 
 # Test 6: ExpressionList (tracks list arity and per-item types)
@@ -131,7 +132,7 @@ subtest 'ExpressionList arity and item_types' => sub {
     my $ctx = mul_ctx($child_ctx);
 
     my $result = $actions->ExpressionList($ctx, 0);
-    is($result, {
+    is_deeply($result, {
         valid => true,
         list_arity => 1,
         item_types => ['Str'],
@@ -143,7 +144,7 @@ subtest 'ExpressionList arity and item_types' => sub {
     $ctx = mul_ctx($prev_ctx, $new_ctx);
 
     $result = $actions->ExpressionList($ctx, 1);
-    is($result, {
+    is_deeply($result, {
         valid => true,
         list_arity => 3,
         item_types => ['Str', 'Int', 'Num'],
@@ -154,7 +155,7 @@ subtest 'ExpressionList arity and item_types' => sub {
     $ctx = mul_ctx($prev_with_arity);
 
     $result = $actions->ExpressionList($ctx, 3);
-    is($result, {
+    is_deeply($result, {
         valid => true,
         list_arity => 2,
         item_types => ['Str', 'Int'],
@@ -172,19 +173,19 @@ subtest 'Boundary rules preserve type, clear other tags' => sub {
 
     # ParenExpr: preserves type (via tree-walk), no call_symbol/op_text in result
     my $result = $actions->ParenExpr($ctx);
-    is($result, { valid => true, type => 'Array' }, 'ParenExpr preserves type, clears others');
+    is_deeply($result, { valid => true, type => 'Array' }, 'ParenExpr preserves type, clears others');
 
     # Block
     $result = $actions->Block($ctx);
-    is($result, { valid => true, type => 'Array' }, 'Block preserves type, clears others');
+    is_deeply($result, { valid => true, type => 'Array' }, 'Block preserves type, clears others');
 
     # Signature
     $result = $actions->Signature($ctx);
-    is($result, { valid => true, type => 'Array' }, 'Signature preserves type, clears others');
+    is_deeply($result, { valid => true, type => 'Array' }, 'Signature preserves type, clears others');
 
     # Attribute
     $result = $actions->Attribute($ctx);
-    is($result, { valid => true, type => 'Array' }, 'Attribute preserves type, clears others');
+    is_deeply($result, { valid => true, type => 'Array' }, 'Attribute preserves type, clears others');
 };
 
 # Test 9: PostfixDeref (type depends on alt_idx)
@@ -193,24 +194,24 @@ subtest 'PostfixDeref type by alt_idx' => sub {
 
     # alt 0 = ->@* (array)
     my $result = $actions->PostfixDeref($ctx, 0);
-    is($result, { valid => true, type => 'Array' }, 'PostfixDeref alt 0 returns Array');
+    is_deeply($result, { valid => true, type => 'Array' }, 'PostfixDeref alt 0 returns Array');
 
     # alt 1 = ->%* (hash)
     $result = $actions->PostfixDeref($ctx, 1);
-    is($result, { valid => true, type => 'Hash' }, 'PostfixDeref alt 1 returns Hash');
+    is_deeply($result, { valid => true, type => 'Hash' }, 'PostfixDeref alt 1 returns Hash');
 
     # alt 2 = ->$* (scalar)
     $result = $actions->PostfixDeref($ctx, 2);
-    is($result, { valid => true, type => 'Scalar' }, 'PostfixDeref alt 2 returns Scalar');
+    is_deeply($result, { valid => true, type => 'Scalar' }, 'PostfixDeref alt 2 returns Scalar');
 
     # alt 3 = ->$#* (scalar count)
     $result = $actions->PostfixDeref($ctx, 3);
-    is($result, { valid => true, type => 'Scalar' }, 'PostfixDeref alt 3 returns Scalar');
+    is_deeply($result, { valid => true, type => 'Scalar' }, 'PostfixDeref alt 3 returns Scalar');
 
     # alts 4-7 = ->@[...] ->@{...} ->%[...] ->%{...} (slices: a list)
     for my $alt (4 .. 7) {
         $result = $actions->PostfixDeref($ctx, $alt);
-        is($result, { valid => true, type => 'List' }, "PostfixDeref alt $alt (a slice) returns List");
+        is_deeply($result, { valid => true, type => 'List' }, "PostfixDeref alt $alt (a slice) returns List");
     }
 };
 
@@ -220,15 +221,15 @@ subtest 'Subscript type by alt_idx' => sub {
 
     # alt 0 = [...] (array subscript)
     my $result = $actions->Subscript($ctx, 0);
-    is($result, { valid => true, type => 'Scalar' }, 'Subscript alt 0 returns Scalar');
+    is_deeply($result, { valid => true, type => 'Scalar' }, 'Subscript alt 0 returns Scalar');
 
     # alt 1 = {...} (hash subscript)
     $result = $actions->Subscript($ctx, 1);
-    is($result, { valid => true, type => 'Scalar' }, 'Subscript alt 1 returns Scalar');
+    is_deeply($result, { valid => true, type => 'Scalar' }, 'Subscript alt 1 returns Scalar');
 
     # alt 2+ = ->() deref-call (type unknown)
     $result = $actions->Subscript($ctx, 2);
-    is($result, { valid => true }, 'Subscript alt 2 returns valid without type');
+    is_deeply($result, { valid => true }, 'Subscript alt 2 returns valid without type');
 };
 
 # Test 11: Rules with fixed return types
@@ -236,19 +237,19 @@ subtest 'Rules with fixed types' => sub {
     my $ctx = mock_ctx({ valid => true });
 
     my $result = $actions->PostfixIncDec($ctx);
-    is($result, { valid => true, type => 'Num' }, 'PostfixIncDec returns Num');
+    is_deeply($result, { valid => true, type => 'Num' }, 'PostfixIncDec returns Num');
 
     $result = $actions->AnonymousSub($ctx);
-    is($result, { valid => true, type => 'Code' }, 'AnonymousSub returns Code');
+    is_deeply($result, { valid => true, type => 'Code' }, 'AnonymousSub returns Code');
 
     $result = $actions->QwLiteral($ctx);
-    is($result, { valid => true, type => 'List' }, 'QwLiteral returns List');
+    is_deeply($result, { valid => true, type => 'List' }, 'QwLiteral returns List');
 
     $result = $actions->ArrayConstructor($ctx);
-    is($result, { valid => true, type => 'ArrayRef' }, 'ArrayConstructor returns ArrayRef');
+    is_deeply($result, { valid => true, type => 'ArrayRef' }, 'ArrayConstructor returns ArrayRef');
 
     $result = $actions->HashConstructor($ctx);
-    is($result, { valid => true, type => 'HashRef' }, 'HashConstructor returns HashRef');
+    is_deeply($result, { valid => true, type => 'HashRef' }, 'HashConstructor returns HashRef');
 };
 
 # Test 12: Rules with unknown types
@@ -256,13 +257,13 @@ subtest 'Rules with unknown types' => sub {
     my $ctx = mock_ctx({ valid => true });
 
     my $result = $actions->TernaryExpression($ctx);
-    is($result, { valid => true }, 'TernaryExpression returns valid without type');
+    is_deeply($result, { valid => true }, 'TernaryExpression returns valid without type');
 
     $result = $actions->AssignmentExpression($ctx);
-    is($result, { valid => true }, 'AssignmentExpression returns valid without type');
+    is_deeply($result, { valid => true }, 'AssignmentExpression returns valid without type');
 
     $result = $actions->MethodCall($ctx);
-    is($result, { valid => true }, 'MethodCall returns valid without type');
+    is_deeply($result, { valid => true }, 'MethodCall returns valid without type');
 };
 
 # Test 13: AssignmentExpression with eval_context from LHS sigil

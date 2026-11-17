@@ -2,9 +2,9 @@
 # ABOUTME: `push(@a, 1)` reaches the signature check as (Array, Int), arity 2.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::BNF::Target::Perl;

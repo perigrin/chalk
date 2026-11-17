@@ -2,7 +2,8 @@
 # ABOUTME: Verifies control/scope state propagates correctly through parse operations.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 't/lib';
+use Test::Chalk;
 
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Bindings;

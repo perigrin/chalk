@@ -2,9 +2,9 @@
 # ABOUTME: Tracks disambiguation bug where $a->[$x][$y - 1] fails without parens.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(build_perl_ir_parser perl_pipeline);

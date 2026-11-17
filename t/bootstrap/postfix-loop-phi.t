@@ -2,9 +2,9 @@
 # ABOUTME: Verifies PostfixModifier scope forking collects body variable refs into side table
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::NodeFactory;

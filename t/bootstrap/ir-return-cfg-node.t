@@ -2,9 +2,9 @@
 # ABOUTME: Verifies Bootstrap::IR::NodeFactory::make_cfg and migration from Constructor:ReturnStmt.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 use Chalk::Bootstrap::Bindings;

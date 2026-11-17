@@ -2,9 +2,8 @@
 # ABOUTME: Covers unit tests with manual IR graphs and integration tests with full pipeline.
 use 5.42.0;
 use utf8;
-use Test::More;
-
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;

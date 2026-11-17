@@ -2,9 +2,9 @@
 # ABOUTME: Covers fork_for_loop, resolve_sentinel, raw_lookup, and sentinel lifecycle
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;
 

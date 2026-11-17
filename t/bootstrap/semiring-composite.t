@@ -2,9 +2,9 @@
 # ABOUTME: Verifies _filter_compare, delegation to component semirings via multiply/on_complete interface.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::SemanticAction;

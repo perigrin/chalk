@@ -2,9 +2,9 @@
 # ABOUTME: subclass: round-trips one instance of each op and asserts every field survives.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use File::Basename qw(basename);
 use Scalar::Util qw(blessed);
 use Chalk::IR::NodeFactory;

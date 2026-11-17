@@ -2,7 +2,8 @@
 # ABOUTME: If MOP::Foo is added to lib/Chalk/MOP/, list it below so the doc keeps documenting it.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 't/lib';
+use Test::Chalk;
 
 my $doc = 'docs/architecture/mop.md';
 

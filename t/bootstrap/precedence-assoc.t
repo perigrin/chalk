@@ -2,9 +2,9 @@
 # ABOUTME: Covers Bug 3: two AssignmentExpressions in C-style for header rejected by [B,P,TI] combo.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);

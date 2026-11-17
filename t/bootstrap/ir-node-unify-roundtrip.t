@@ -2,9 +2,9 @@
 # ABOUTME: effects + loop memory-Phi): asserts to_json/from_json is a lossless inverse.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Scalar::Util qw(blessed);
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;

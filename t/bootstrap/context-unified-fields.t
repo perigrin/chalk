@@ -2,9 +2,9 @@
 # ABOUTME: Verifies default values, extend passthrough, and opts override for each field.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Bootstrap::Context;
 use Chalk::MOP;
 

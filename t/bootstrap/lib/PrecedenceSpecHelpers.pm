@@ -5,7 +5,7 @@ use utf8;
 
 package PrecedenceSpecHelpers;
 
-use Test::More;
+use Test::Chalk;
 use Exporter 'import';
 our @EXPORT_OK = qw(parse_expr shape_of isa_with_shape);
 
@@ -106,12 +106,12 @@ sub shape_of($node) {
 sub isa_with_shape($node, $type, $label) {
     local $Test::Builder::Level = $Test::Builder::Level + 1;
     if (ref($node) && $node->isa($type)) {
-        Test::More::pass($label);
+        Test::Chalk::pass($label);
         return $node;
     }
-    Test::More::fail($label);
-    Test::More::diag("  expected isa $type");
-    Test::More::diag("  got shape: " . shape_of($node));
+    Test::Chalk::fail($label);
+    Test::Chalk::diag("  expected isa $type");
+    Test::Chalk::diag("  got shape: " . shape_of($node));
     return undef;
 }
 

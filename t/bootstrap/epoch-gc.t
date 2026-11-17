@@ -2,10 +2,10 @@
 # ABOUTME: Verifies statement-boundary sweeping frees chart memory.
 use 5.42.0;
 use utf8;
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::BNF::Target::Perl;

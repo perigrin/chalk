@@ -13,7 +13,7 @@ use File::Path qw(make_path);
 use File::Basename qw(dirname);
 use File::Copy;
 use Cwd;
-use Test::More;
+use Test::Chalk;
 
 use Config;
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);

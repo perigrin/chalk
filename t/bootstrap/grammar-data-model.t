@@ -2,9 +2,9 @@
 # ABOUTME: Verifies construction, accessors, and basic predicates work correctly.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Grammar::Symbol;
 use Chalk::Grammar::Rule;
 

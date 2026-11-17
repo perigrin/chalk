@@ -2,9 +2,9 @@
 # ABOUTME: Verifies DFA states, prediction, and parse correctness across resets.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Earley;

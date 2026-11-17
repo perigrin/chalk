@@ -3,9 +3,9 @@
 
 use 5.42.0;
 use utf8;
-use Test2::V0;
-
 use lib 'lib', 't/lib';
+use Test::Chalk;
+
 use Chalk::IR::Analysis;
 use Chalk::Grammar::Perl::TypeLibrary;
 
@@ -105,7 +105,7 @@ subtest 'the fold agrees with the lattice on every pair of stamps' => sub {
                 unless defined $got && $got eq $want;
         }
     }
-    is \@disagree, [], 'every ordered pair folds to the lattice join';
+    is_deeply \@disagree, [], 'every ordered pair folds to the lattice join';
 };
 
 # The rule dispatch in _seed_and_propagate_reprs handles 'join' and everything

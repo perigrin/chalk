@@ -1,7 +1,8 @@
 # ABOUTME: lib/ code dereferences postfix ($r->@*, ->@[...], ->$#*), never @{ $r }:
 # ABOUTME: CLAUDE.md's rule, and the form chalk's own Perl grammar recognizes.
 use 5.42.0;
-use Test::More;
+use lib 't/lib';
+use Test::Chalk;
 use File::Find;
 
 my @files;

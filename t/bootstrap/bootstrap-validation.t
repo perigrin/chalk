@@ -2,9 +2,8 @@
 # ABOUTME: Tests each phase independently to identify exactly where implementation is complete.
 use 5.42.0;
 use utf8;
-use Test::More;
-
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 # Phase 0: Data model and infrastructure
 {

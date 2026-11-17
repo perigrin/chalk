@@ -2,10 +2,10 @@
 # ABOUTME: Counts derivations with a counting semiring; a dropped one shows as a lower count.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(blessed);
 
-use lib 'lib';
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Earley;

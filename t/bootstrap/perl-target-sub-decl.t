@@ -2,9 +2,8 @@
 # ABOUTME: Validates sub declarations (package, my, our, state) emit correct Perl.
 use 5.42.0;
 use utf8;
-use Test::More;
-
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::Perl;

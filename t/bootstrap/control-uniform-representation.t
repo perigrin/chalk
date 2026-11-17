@@ -2,10 +2,10 @@
 # ABOUTME: Pins Return/Unwind (step 1) and VarDecl (step 2) carrying control off inputs[0].
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(refaddr blessed);
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use Chalk::MOP;

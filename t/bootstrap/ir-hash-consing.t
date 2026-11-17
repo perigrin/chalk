@@ -3,9 +3,9 @@
 use 5.42.0;
 use utf8;
 
-use Test2::V0;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::NodeFactory;
 
 # Test 1: Duplicate constants deduplicated
@@ -195,7 +195,7 @@ use Chalk::IR::NodeFactory;
     my $ids = $factory->all_node_ids();
     is(ref($ids), 'ARRAY', 'all_node_ids() returns arrayref');
     is(scalar($ids->@*), 2, 'all_node_ids() has correct count');
-    is(
+    is_deeply(
         [sort $ids->@*],
         [ sort($node_a->id(), $node_b->id()) ],
         'all_node_ids() contains all expected IDs',

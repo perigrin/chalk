@@ -2,9 +2,9 @@
 # ABOUTME: Verifies CHALK_COUNT_FILTER_TIES env var enables/disables tie recording.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Context;
 

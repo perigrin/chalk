@@ -2,9 +2,9 @@
 # ABOUTME: Verifies grammar transformation that expands X+ and X* into helper rules (? passes through).
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Grammar::BNF;
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;

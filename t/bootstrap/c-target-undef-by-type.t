@@ -2,9 +2,9 @@
 # ABOUTME: never from its value: the strings 'undef', 'true', 'false' stay strings.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::C;
 

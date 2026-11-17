@@ -2,9 +2,9 @@
 # ABOUTME: Parses 10-rule BNF meta-grammar, generates Perl, evals, compares to BNF.pm.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(build_parser parse_ir bnf_text);
 use Chalk::IR::NodeFactory;

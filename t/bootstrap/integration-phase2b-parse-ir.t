@@ -2,9 +2,9 @@
 # ABOUTME: Validates the full pipeline: BNF text → Earley parse → semantic actions → IR.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(build_parser parse_ir);
 use Chalk::IR::NodeFactory;

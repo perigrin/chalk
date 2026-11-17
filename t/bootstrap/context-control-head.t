@@ -2,10 +2,10 @@
 # ABOUTME: Confirms field default undef, propagation through extend(), and override.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(refaddr);
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use Chalk::Bootstrap::Context;

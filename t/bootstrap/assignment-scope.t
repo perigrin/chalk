@@ -2,9 +2,9 @@
 # ABOUTME: Covers VarDecl target, plain variable assignment, and compound assignment
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;
 use Chalk::IR::Node::VarDecl;

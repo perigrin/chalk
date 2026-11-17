@@ -3,18 +3,18 @@
 
 use 5.42.0;
 use utf8;
-use Test2::V0;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI  = '/usr/lib/llvm-15/bin/lli';
 
-skip_all "perl5-son not found" unless -f "$SON/B/SoN.pm";
-skip_all "lli not found"       unless -x $LLI;
-skip_all "perl 5.42 not found" unless -x $PERL;
+plan skip_all => "perl5-son not found" unless -f "$SON/B/SoN.pm";
+plan skip_all => "lli not found"       unless -x $LLI;
+plan skip_all => "perl 5.42 not found" unless -x $PERL;
 
-use lib 'lib', 't/lib';
 require Chalk::IR::Serialize::JSON;
 require Chalk::Target::LLVM;
 

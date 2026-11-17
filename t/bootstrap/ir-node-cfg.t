@@ -2,9 +2,9 @@
 # ABOUTME: Verifies Start, Return, Unwind, If, Proj, Region, Loop.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::Node;
 use Chalk::IR::Node::Start;
 use Chalk::IR::Node::Return;

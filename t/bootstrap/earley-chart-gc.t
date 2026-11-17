@@ -2,9 +2,9 @@
 # ABOUTME: Verifies that old chart positions are released while maintaining correct parse results.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;

@@ -2,10 +2,10 @@
 # ABOUTME: Validates that chalk-bootstrap.bnf parses, produces IR, and generates compilable Perl.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Time::HiRes qw(time);
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(
     build_parser parse_ir perl_bnf_text perl_pipeline build_perl_recognizer

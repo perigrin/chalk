@@ -2,9 +2,9 @@
 # ABOUTME: Verifies keyword detection at scan time and rejection at QualifiedIdentifier completion.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 # ========================================================================

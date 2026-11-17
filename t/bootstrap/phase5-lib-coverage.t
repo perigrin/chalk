@@ -2,9 +2,9 @@
 # ABOUTME: lowers through B::SoN -> from_json -> LLVM, so progress is measured not guessed.
 use 5.42.0;
 use utf8;
-use Test::More;
-
 use lib 'lib', 't/lib';
+use Test::Chalk;
+
 use Chalk::CodeGen::Harness::Phase5LibCoverage;
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";

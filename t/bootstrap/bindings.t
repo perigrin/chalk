@@ -3,10 +3,10 @@
 use 5.42.0;
 use utf8;
 
-use Test2::V0;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util 'refaddr';
 
-use lib 'lib';
 use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;
 
@@ -162,7 +162,7 @@ my $factory = Chalk::IR::NodeFactory->new;
     my @names = $scope2->variable_names();
     my @sorted = sort @names;
 
-    is(\@sorted, ['$x', '%hash', '@arr'], 'variable_names returns all bound names');
+    is_deeply(\@sorted, ['$x', '%hash', '@arr'], 'variable_names returns all bound names');
 }
 
 done_testing();

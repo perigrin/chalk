@@ -2,9 +2,10 @@
 # ABOUTME: Verifies comonad laws: left identity, right identity, associativity
 use 5.42.0;
 use utf8;
-use Test::More tests => 16;
+use lib 'lib', 't/lib';
+use Test::Chalk;
+plan tests => 16;
 
-use lib 'lib';
 use Chalk::Bootstrap::Context;
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;

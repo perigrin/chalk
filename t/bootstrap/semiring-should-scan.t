@@ -2,9 +2,9 @@
 # ABOUTME: Verifies keyword rejection and scan gating through the unified multiply protocol.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Bootstrap::Semiring::Boolean;
 use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Semiring::TypeInference;

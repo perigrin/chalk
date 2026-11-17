@@ -2,9 +2,9 @@
 # ABOUTME: Prevents nondeterministic parse failures from agenda ordering of zero items.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use Chalk::Bootstrap::Earley;

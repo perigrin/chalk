@@ -2,9 +2,9 @@
 # ABOUTME: Verifies eager Phi creation for if/else branches with differing variables.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Bindings;
 use Chalk::IR::Node::Phi;

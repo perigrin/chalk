@@ -2,10 +2,10 @@
 # ABOUTME: lib/ may use the tie/untie/tied operators.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempdir);
 use File::Find ();
-use lib 'lib', 't/lib';
 
 # WHY A GREP TEST AND NOT AN IR PASS. A tied variable's every read and write
 # is a method call decided at RUNTIME, which is exactly the thing a

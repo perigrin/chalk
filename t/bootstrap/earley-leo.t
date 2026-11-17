@@ -2,10 +2,10 @@
 # ABOUTME: Verifies Leo items enable O(n) parsing for left- and right-recursive grammars.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Time::HiRes qw(time);
 
-use lib 'lib';
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Earley;

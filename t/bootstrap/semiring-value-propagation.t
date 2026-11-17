@@ -2,9 +2,8 @@
 # ABOUTME: Instruments a semiring to trace every multiply/complete callback and validates parse history.
 use 5.42.0;
 use utf8;
-use Test::More;
-
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;

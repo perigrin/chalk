@@ -2,9 +2,9 @@
 # ABOUTME: Verifies Perl code output contains correct if/else and loop structures.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Perl::Target::Perl;
 

@@ -2,7 +2,8 @@
 # ABOUTME: Runs both pipelines on each .pm file, diffs JSON, reports divergences.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 't/lib';
+use Test::Chalk;
 use JSON::PP ();
 
 # -----------------------------------------------------------------------

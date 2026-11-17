@@ -2,9 +2,9 @@
 # ABOUTME: Verifies Repeat, Match, NotMatch, DefinedOr, Xor, Range, Yada, IsaOp, UnaryPlus, Ref.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::Node;
 use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::UnaryOp;

@@ -2,9 +2,9 @@
 # ABOUTME: Verifies registration, lookup, advance, and build_from_grammar operations.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 

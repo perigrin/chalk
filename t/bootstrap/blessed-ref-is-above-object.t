@@ -3,9 +3,9 @@
 
 use 5.42.0;
 use utf8;
-use Test2::V0;
-
 use lib 'lib', 't/lib';
+use Test::Chalk;
+
 use Chalk::Grammar::Perl::TypeLibrary;
 
 my $sub  = \&Chalk::Grammar::Perl::TypeLibrary::is_subtype;

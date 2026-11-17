@@ -2,7 +2,8 @@
 # ABOUTME: Verifies that If/Region/Phi/Loop nodes compose into expected graph shapes
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::NodeFactory;
 

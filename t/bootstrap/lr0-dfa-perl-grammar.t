@@ -2,9 +2,9 @@
 # ABOUTME: Verifies DFA construction, state count, and invariants on a production-scale grammar.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline);
 use Chalk::IR::NodeFactory;

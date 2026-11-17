@@ -4,7 +4,8 @@
 
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 't/lib';
+use Test::Chalk;
 use File::Find;
 
 # perigrin (2026-11-15): "We need to invert those dependencies." A program

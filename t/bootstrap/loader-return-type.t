@@ -3,16 +3,16 @@
 
 use 5.42.0;
 use utf8;
-use Test2::V0;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 
-skip_all "perl5-son not found" unless -f "$SON/B/SoN.pm";
-skip_all "perl 5.42 not found" unless -x $PERL;
+plan skip_all => "perl5-son not found" unless -f "$SON/B/SoN.pm";
+plan skip_all => "perl 5.42 not found" unless -x $PERL;
 
-use lib 'lib', 't/lib';
 require Chalk::IR::Serialize::JSON;
 
 # The producer DECLARES (layer 1, perl5-son t/sub-return-type.t). The loader

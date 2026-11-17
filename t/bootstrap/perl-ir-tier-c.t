@@ -2,9 +2,9 @@
 # ABOUTME: Validates VarDecl, BinaryExpr, MethodCallExpr, etc. via NodeFactory.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::NodeFactory;
 
 my $factory = Chalk::IR::NodeFactory->new();

@@ -2,9 +2,9 @@
 # ABOUTME: Covers Precedence semiring bracket-reset for the PostfixDeref slice alternative.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser);
 use Chalk::IR::NodeFactory;

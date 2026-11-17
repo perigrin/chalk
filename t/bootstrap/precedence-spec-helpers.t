@@ -2,8 +2,8 @@
 # ABOUTME: Guards against the local $TODO bug fixed by the $Test::Builder::Level bump.
 use 5.42.0;
 use utf8;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use lib 't/bootstrap/lib';
 use PrecedenceSpecHelpers qw(parse_expr shape_of isa_with_shape);
 

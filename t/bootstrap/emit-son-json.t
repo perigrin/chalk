@@ -2,7 +2,8 @@
 # ABOUTME: Verifies that chalk-emit-son-json parses a .pm file and emits valid SoN JSON.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 't/lib';
+use Test::Chalk;
 use JSON::PP ();
 
 # ============================================================

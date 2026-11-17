@@ -2,9 +2,9 @@
 # ABOUTME: Tests determinism by generating the same IR twice and comparing results.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(full_pipeline);
 use Chalk::Bootstrap::BNF::Target::Perl;

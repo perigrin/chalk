@@ -2,10 +2,10 @@
 # ABOUTME: Excluded files are listed explicitly with a comment explaining why each skip exists.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Find ();
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_recognizer build_perl_ir_parser);
 use Chalk::IR::NodeFactory;use Chalk::Bootstrap::BNF::Target::Perl;

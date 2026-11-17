@@ -2,8 +2,8 @@
 # ABOUTME: Verifies that extend grows the tree by wrapping self as a child, not copying children.
 use 5.42.0;
 use utf8;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util 'refaddr';
 
 use Chalk::Bootstrap::Context;

@@ -2,9 +2,9 @@
 # ABOUTME: Validates return/die, UseDecl import args, and expression IR structure across hash seeds.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::IR::UseInfo;
 use Chalk::IR::MethodInfo;

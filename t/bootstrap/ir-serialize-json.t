@@ -2,9 +2,9 @@
 # ABOUTME: Verifies to_json and from_json produce correct, deterministic SoN-compatible output.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Scalar::Util qw(blessed);
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;

@@ -2,9 +2,9 @@
 # ABOUTME: Each case's driver must print the same thing for the original and the emission.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempdir);
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use Chalk::MOP;

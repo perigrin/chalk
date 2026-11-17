@@ -3,10 +3,10 @@
 
 use 5.42.0;
 use utf8;
-use Test2::V0;
+use lib 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
 
-use lib 't/lib';
 use Chalk::IR::Serialize::JSON qw(from_json);
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";

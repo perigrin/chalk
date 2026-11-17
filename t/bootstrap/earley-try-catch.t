@@ -2,9 +2,9 @@
 # ABOUTME: Verifies the grammar correctly handles Perl 5.42's try/catch syntax.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_recognizer);
 use Chalk::IR::NodeFactory;

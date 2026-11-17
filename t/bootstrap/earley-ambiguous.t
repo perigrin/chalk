@@ -2,9 +2,9 @@
 # ABOUTME: Layer 2: Verifies parser completes without crashing on ambiguous inputs.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;
 use Chalk::Bootstrap::Earley;

@@ -2,9 +2,9 @@
 # ABOUTME: Verifies the eager pinning approach for Sea of Nodes code generation.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::Bootstrap::Context;
 use Chalk::IR::NodeFactory;

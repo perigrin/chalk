@@ -3,9 +3,8 @@
 
 use 5.42.0;
 use utf8;
-use Test::More;
-
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 # Chalk::IR::Serialize::JSON exports from_json, but JSON::PP also exports a
 # from_json() function. Import via explicit package name to avoid the conflict.

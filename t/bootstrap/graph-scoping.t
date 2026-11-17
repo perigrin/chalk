@@ -2,9 +2,9 @@
 # ABOUTME: Verifies that shared hash-consed nodes don't pull foreign nodes into a graph.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
 use Chalk::IR::Node::Return;

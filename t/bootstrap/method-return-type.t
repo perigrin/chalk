@@ -2,9 +2,9 @@
 # ABOUTME: The MOP migration replaced MethodDecl with MOP::Method.return_repr (son-corpus-wide.t owns it); retarget to un-TODO.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);

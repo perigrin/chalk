@@ -2,9 +2,9 @@
 # ABOUTME: Verifies that the 10-rule BNF meta-grammar can be correctly represented as Rule/Symbol objects
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Grammar::BNF;
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;

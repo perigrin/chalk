@@ -2,9 +2,9 @@
 # ABOUTME: Validates SIGALRM handling, output capture, and failure classification.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use File::Temp ();
@@ -34,18 +34,16 @@ subtest 'fork_test: runtime failure is real fail' => sub {
     my $outfile = File::Temp::tmpnam();
     my $pid = fork();
     if ($pid == 0) {
-        # In child: redirect TAP output to file
-        my $tb = Test::More->builder;
-        open my $fh, '>', $outfile or exit(99);
-        $tb->output($fh);
-        $tb->failure_output($fh);
-        $tb->todo_output($fh);
+        # In child: redirect TAP output to file (Test::Chalk writes its TAP,
+        # failure and TODO output to STDOUT and STDERR)
+        open STDOUT, '>', $outfile or exit(99);
+        open STDERR, '>&', \*STDOUT or exit(99);
 
         fork_test('FakeModule', sub ($m) {
             die "intentional failure";
         }, 'runtime-fail');
 
-        close $fh;
+        close STDOUT;
         exit(0);
     }
     waitpid($pid, 0);
@@ -70,15 +68,14 @@ subtest 'fork_test: runtime failure is real fail' => sub {
 
 subtest 'fork_test: timeout detection' => sub {
     # This test verifies that alarm triggers exit(124), not signal death
-    my $builder = Test::More->builder;
-    my $before = $builder->current_test;
+    my $before = $Test::Chalk::COUNT // 0;   # (tests run so far, this subtest)
 
     fork_test('FakeModule', sub ($m) {
         # Sleep longer than alarm timeout
         sleep(30);
     }, 'timeout', timeout => 2);
 
-    my $after = $builder->current_test;
+    my $after = $Test::Chalk::COUNT // 0;
     is($after - $before, 1, 'fork_test emitted one test for timeout');
 };
 
@@ -89,14 +86,13 @@ subtest 'fork_test: timeout detection' => sub {
 # Can't easily trigger a real segfault in pure Perl, but we can
 # verify the signal-handling path by sending ourselves SIGSEGV
 subtest 'fork_test: signal death is TODO' => sub {
-    my $builder = Test::More->builder;
-    my $before = $builder->current_test;
+    my $before = $Test::Chalk::COUNT // 0;   # (tests run so far, this subtest)
 
     fork_test('FakeModule', sub ($m) {
         kill 'SEGV', $$;
     }, 'signal-death');
 
-    my $after = $builder->current_test;
+    my $after = $Test::Chalk::COUNT // 0;
     is($after - $before, 1, 'fork_test emitted one test for signal death');
 };
 
@@ -108,17 +104,14 @@ subtest 'fork_test: runtime failure with todo is TODO' => sub {
     my $outfile = File::Temp::tmpnam();
     my $pid = fork();
     if ($pid == 0) {
-        my $tb = Test::More->builder;
-        open my $fh, '>', $outfile or exit(99);
-        $tb->output($fh);
-        $tb->failure_output($fh);
-        $tb->todo_output($fh);
+        open STDOUT, '>', $outfile or exit(99);
+        open STDERR, '>&', \*STDOUT or exit(99);
 
         fork_test('FakeModule', sub ($m) {
             die "expected failure";
         }, 'todo-fail', todo => 'XS emitter gap');
 
-        close $fh;
+        close STDOUT;
         exit(0);
     }
     waitpid($pid, 0);

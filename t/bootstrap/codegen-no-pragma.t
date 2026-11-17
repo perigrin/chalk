@@ -2,9 +2,9 @@
 # ABOUTME: Regression test for 'no warnings' being emitted as function call no(...).
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPerlHelpers qw(setup_perl_grammar parse_and_generate eval_module);

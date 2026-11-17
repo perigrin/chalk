@@ -2,9 +2,9 @@
 # ABOUTME: Validates distribution of multiply/add over packed Contexts (Phase 4).
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Context;

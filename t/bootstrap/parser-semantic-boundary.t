@@ -2,9 +2,9 @@
 # ABOUTME: Documents the gap between parse() boolean return and need for semantic Context extraction.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Bootstrap::Earley;
 use Chalk::Bootstrap::Semiring::FilterComposite;
 use Chalk::Bootstrap::Semiring::Boolean;

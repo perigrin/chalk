@@ -2,9 +2,9 @@
 # ABOUTME: Verifies scan contexts are hash-consed by content (text) not position.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Semiring::TypeInference;
