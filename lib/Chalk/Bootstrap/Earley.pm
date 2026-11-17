@@ -36,6 +36,11 @@ class Chalk::Bootstrap::Earley {
     # sweep on against the same parse with it off.
     field $_chart_gc :param(chart_gc) = true;
 
+    # Run the reachability sweep after every position instead of once per
+    # batch of rows. Always false in production: it makes a parse quadratic.
+    # Tests set it so a short input exercises the sweep at every point.
+    field $_chart_gc_eager :param(chart_gc_eager) = false;
+
     # Source file path for diagnostics (set per parse_value call)
     field $_parse_file;
     field $_last_active_pos;
@@ -1229,7 +1234,8 @@ class Chalk::Bootstrap::Earley {
             # Reachability sweep: free the rows no live item can reach.
             if ($_chart_gc) {
                 my $added = scalar(@held_rows) - $held_after_sweep;
-                if ($added >= $SWEEP_MIN_ROWS && $added >= $held_after_sweep) {
+                if ($_chart_gc_eager
+                        || ($added >= $SWEEP_MIN_ROWS && $added >= $held_after_sweep)) {
                     $self->_free_unreachable_rows(
                         \@chart, $pos, $furthest_chart_pos, \@held_rows);
                     $held_after_sweep = scalar(@held_rows);

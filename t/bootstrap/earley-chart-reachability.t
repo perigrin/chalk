@@ -140,6 +140,24 @@ subtest 'values are the same with and without the sweep' => sub {
     same_with_and_without_gc($nullable, 'a + a+a +a;' x 120, 'nullable whitespace');
 };
 
+# chart_gc_eager sweeps after every position, so a short input exercises
+# the sweep at every point of a parse. Production sweeps far less often.
+subtest 'an eager sweep runs on a short input and changes no value' => sub {
+    my $input = $statement x 3;
+    for my $semiring_class (qw(TreeSemiring CountingSemiring)) {
+        my $lazy  = parser($statements, $semiring_class->new());
+        my $eager = parser($statements, $semiring_class->new(), chart_gc_eager => true);
+        my $off   = parser($statements, $semiring_class->new(), chart_gc => false);
+        my $expected = $off->parse_value($input);
+        is_deeply($lazy->parse_value($input), $expected, "$semiring_class: default sweep, same value");
+        is($lazy->gc_stats()->{unreachable_freed}, 0,
+            "$semiring_class: the default sweep does not run on a short input");
+        is_deeply($eager->parse_value($input), $expected, "$semiring_class: eager sweep, same value");
+        cmp_ok($eager->gc_stats()->{unreachable_freed}, '>', 0,
+            "$semiring_class: the eager sweep freed rows");
+    }
+};
+
 subtest 'derivation counts survive the sweep' => sub {
     # "a+a+a" has Catalan(2) = 2 parses; statements multiply.
     my $p = parser($statements, CountingSemiring->new());
