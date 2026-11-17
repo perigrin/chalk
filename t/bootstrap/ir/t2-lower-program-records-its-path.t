@@ -1,9 +1,9 @@
 # ABOUTME: lower_program records what T2 did with a unit -- took it, or refused it and why --
 # ABOUTME: and the pipeline hands it on with the unit, so a corpus can count T2's share.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

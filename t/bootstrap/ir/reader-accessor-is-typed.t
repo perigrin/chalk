@@ -3,7 +3,8 @@
 
 use 5.42.0;
 use utf8;
-use Test2::V0;
+use lib 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::Serialize::JSON;
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
@@ -54,7 +55,7 @@ class Box { field $v :param :reader; method get { return $v } }
 print Box->new(v => 7)->get, "\n";
 PROG
 
-skip_all 'producer did not emit JSON for the class program' unless $graphs;
+plan skip_all => 'producer did not emit JSON for the class program' unless $graphs;
 
 subtest 'the field type is known before either graph is walked' => sub {
     my ($box) = grep { $_->name eq 'Box' } $mop->classes;
@@ -105,7 +106,7 @@ subtest 'no Value node in the accessor graph is left untyped' => sub {
     require Chalk::IR::Value;
     my @untyped = grep { $_ isa Chalk::IR::Value && !defined $_->stamp }
         $graphs->{'Box::v'}->nodes->@*;
-    is [map { $_->operation } @untyped], [],
+    is_deeply [map { $_->operation } @untyped], [],
         'every Value node in Box::v is typed';
 };
 

@@ -1,9 +1,9 @@
 # ABOUTME: `@$a > 0`, `my %c = %$h` of no such reference: perl's die under strict refs (B::SoN names the
 # ABOUTME: site), an empty read without -- not a stop, and not a silent empty read under strict.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

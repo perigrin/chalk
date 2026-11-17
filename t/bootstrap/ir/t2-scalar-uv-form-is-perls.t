@@ -1,9 +1,9 @@
 # ABOUTME: T2's scalar has perl's three numeric forms: IV, UV (past IV_MAX) and NV. Each
 # ABOUTME: numeric reader answers as perl at IV_MAX, IV_MIN and UV_MAX, never wrapping or stopping.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

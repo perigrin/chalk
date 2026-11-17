@@ -2,9 +2,9 @@
 # ABOUTME: Guards the GAP-not-miscompile invariant against a non-terminating compiler.
 use 5.42.0;
 use utf8;
-use Test::More;
-
 use lib 'lib', 't/lib';
+use Test::Chalk;
+
 use File::Temp qw(tempfile);
 use Chalk::CodeGen::Harness::ProgramRunner ();
 

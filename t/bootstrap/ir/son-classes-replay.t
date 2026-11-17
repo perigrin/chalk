@@ -2,10 +2,10 @@
 # ABOUTME: A declarative classes JSON section is replayed via declare_*/seal into a sealed MOP.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use JSON::PP;
 
-use lib 'lib';
 use Chalk::IR::Serialize::JSON ();
 
 # B::SoN emits a `classes` section alongside the per-method graphs (4c-1a).

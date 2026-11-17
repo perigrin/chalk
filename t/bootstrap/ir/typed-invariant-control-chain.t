@@ -2,8 +2,8 @@
 # ABOUTME: Verifies Print/Assign/Return/Call/Unwind nodes with undef control_in are flagged.
 use 5.42.0;
 use utf8;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph::TypedInvariant;

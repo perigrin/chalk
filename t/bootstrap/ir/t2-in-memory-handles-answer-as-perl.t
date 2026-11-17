@@ -1,8 +1,8 @@
 # ABOUTME: In-memory handles through T2 alone: each op on an open, closed, never
 # ABOUTME: opened or read-only handle answers as perl, or is refused by name.
 use 5.42.0;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

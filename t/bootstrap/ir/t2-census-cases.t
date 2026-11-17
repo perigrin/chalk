@@ -1,8 +1,8 @@
 # ABOUTME: The pvm-corpus cases T2 lowers alone (no Context fallback) and prints as
 # ABOUTME: perl does. A ratchet: a slice adds the cases it closes; none is ever removed.
 use 5.42.0;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

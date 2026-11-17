@@ -2,8 +2,8 @@
 # ABOUTME: `Slot` is an encoding, not a Chalk type, and nothing at T1 may name it.
 use 5.42.0;
 use utf8;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::Grammar::Perl::TypeLibrary;
 

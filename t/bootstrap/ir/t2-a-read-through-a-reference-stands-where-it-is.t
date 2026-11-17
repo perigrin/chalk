@@ -1,9 +1,9 @@
 # ABOUTME: A read through a reference (`keys %$h`, `@$r`, `$r->[0][1]`) may die, so B::SoN
 # ABOUTME: pins it where it stands, a memory version: T2 makes it there, before the store or call after.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

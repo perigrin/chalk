@@ -1,9 +1,9 @@
 # ABOUTME: a direct call of a sub no package defines runs its package's AUTOLOAD, $AUTOLOAD set first
 # ABOUTME: to the sub's full name (a package scalar perl writes): T2 answers as perl.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

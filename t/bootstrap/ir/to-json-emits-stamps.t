@@ -3,7 +3,8 @@
 
 use 5.42.0;
 use utf8;
-use Test2::V0;
+use lib 't/lib';
+use Test::Chalk;
 use JSON::PP ();   # no import: its to_json/from_json collide with Chalk's
 
 use Chalk::IR::NodeFactory;

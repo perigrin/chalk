@@ -2,8 +2,8 @@
 # ABOUTME: as a NUL-terminated copy at the offsets the G6 _regex_captures contract records.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;

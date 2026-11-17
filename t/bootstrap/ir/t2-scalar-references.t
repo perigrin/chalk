@@ -1,9 +1,9 @@
 # ABOUTME: scalar references: \$x is the variable's heap cell (tag 9), $$r reads and stores through it,
 # ABOUTME: and a deref of no SCALAR reference dies as perl's does, at its site (B::SoN's), its eval's to catch.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

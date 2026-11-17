@@ -1,9 +1,9 @@
 # ABOUTME: T2 slice 27 -- tie: each array or hash points at a metaobject; tie swaps the default
 # ABOUTME: for one whose every access is a method call on the tie object (perigrin's framing).
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

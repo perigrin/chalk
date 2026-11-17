@@ -3,7 +3,8 @@
 
 use 5.42.0;
 use utf8;
-use Test2::V0;
+use lib 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::Serialize::JSON;
 use Chalk::IR::Analysis;
@@ -102,7 +103,7 @@ subtest 'the predicate is what the nine guards actually call' => sub {
         }
         close $fh;
 
-        is \@stale, [],
+        is_deeply \@stale, [],
             "no guard tests defined-ness of a representation in $path"
             or diag(
                 "These sites ask `defined ->stamp`, which reads Unknown\n"

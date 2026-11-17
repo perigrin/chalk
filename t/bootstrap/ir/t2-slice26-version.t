@@ -1,9 +1,9 @@
 # ABOUTME: T2 slice 26 -- UNIVERSAL::VERSION: a package's $VERSION (its own, not inherited), and
 # ABOUTME: with a wanted version perl's check -- decimal or dotted -- dying as perl does.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

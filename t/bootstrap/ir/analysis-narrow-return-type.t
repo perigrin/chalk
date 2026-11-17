@@ -2,8 +2,8 @@
 # ABOUTME: it may only narrow what is there, never weaken it (Chalk::IR::Analysis::narrow_return_type).
 use 5.42.0;
 use utf8;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::MOP;
 use Chalk::IR::Analysis;

@@ -1,9 +1,9 @@
 # ABOUTME: a sort's comparator is called on perl's pairs in perl's order (pp_sort.c's merge sort,
 # ABOUTME: ported): a comparator with an effect -- a count, a print, a die, a call -- answers as perl's.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

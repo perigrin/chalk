@@ -1,9 +1,9 @@
 # ABOUTME: a slurpy target takes the arguments past the positional ones -- `my ($c, @x) = @_`
 # ABOUTME: and `sub f ($c, @x)` alike (perigrin: identical), and @_ after shifts.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

@@ -1,9 +1,9 @@
 # ABOUTME: A computed goto to a label behind it (B::SoN's Loop with no exit): the body runs
 # ABOUTME: on to the program's Return, the goto's arm going round, as perl's.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

@@ -2,9 +2,9 @@
 # ABOUTME: Validates that a typed SoN graph for `return 1+2` generates LLVM IR that runs correctly.
 use 5.42.0;
 use utf8;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Constant;

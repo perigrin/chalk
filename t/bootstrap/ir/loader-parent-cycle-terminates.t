@@ -1,8 +1,8 @@
 # ABOUTME: A cyclic parent chain on the wire GAPs; it does not exhaust memory.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 use Chalk::IR::Analysis ();
 
 # The loader is defensive over JSON of unknown provenance, so a malformed or

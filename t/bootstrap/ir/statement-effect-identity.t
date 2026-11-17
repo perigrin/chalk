@@ -2,8 +2,8 @@
 # ABOUTME: per-call identity; pure data ops hash-cons; Graph keys per-call nodes by id.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;

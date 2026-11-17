@@ -1,9 +1,9 @@
 # ABOUTME: the variable an in-memory handle writes, read where its memory version stands after the handle's
 # ABOUTME: close on the control chain (statements and calls after it), holds what the prints wrote.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

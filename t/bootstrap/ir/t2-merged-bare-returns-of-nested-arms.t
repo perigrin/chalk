@@ -1,9 +1,9 @@
 # ABOUTME: Bare returns in nested arms, merged arm by arm into the list a sub returns: each
 # ABOUTME: merge a way into that list, an array, each way's value a list of it.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

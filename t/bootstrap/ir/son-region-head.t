@@ -2,10 +2,10 @@
 # ABOUTME: B::SoN emits control-flow bodies as If/Proj/Region/Phi/Return(Region,value).
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use JSON::PP;
 
-use lib 'lib';
 use Chalk::IR::Serialize::JSON ();
 
 # A control-flow body (and/or, if with a merge) loads as

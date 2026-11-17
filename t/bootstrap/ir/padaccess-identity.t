@@ -2,9 +2,9 @@
 # ABOUTME: A pad slot's identity is its variable name, not the CV-local pad index (targ).
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::IR::Node::PadAccess;
 
 # Phase 4b-2: `targ` is the Perl pad-slot index, which is CV-local and unstable

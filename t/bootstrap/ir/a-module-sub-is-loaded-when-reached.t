@@ -1,8 +1,8 @@
 # ABOUTME: a followed module's sub is loaded only when the program may run it:
 # ABOUTME: called by name, or by a method call that may dispatch to it.
 use 5.42.0;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 use Chalk::IR::Serialize::JSON;
 
 my $call = sub (%f) { { op => 'Call', fields => {%f} } };

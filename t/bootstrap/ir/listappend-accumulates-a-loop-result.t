@@ -2,9 +2,9 @@
 # ABOUTME: Arity does NOT identify shape -- grep's third input is a gate, map's is a contribution.
 use 5.42.0;
 use utf8;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 use Chalk::CodeGen::Pipeline;
 

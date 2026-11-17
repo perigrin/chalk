@@ -2,9 +2,9 @@
 # ABOUTME: The fixup lived in the deleted return-value epilogue; a real program reaches the Coerce.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
-use lib 'lib';
 
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;

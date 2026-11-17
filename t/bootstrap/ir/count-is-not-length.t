@@ -2,8 +2,8 @@
 # ABOUTME: and Count SUBTRACTS the aggregate cases rather than adding new ones.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 use Chalk::IR::NodeFactory;
 use Chalk::Grammar::Perl::TypeLibrary ();
 

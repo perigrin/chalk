@@ -1,9 +1,9 @@
 # ABOUTME: A call perl's own op calls in scalar context (B::SoN's want=scalar) is a scalar
 # ABOUTME: wherever B::SoN folded its value: `my $l = $n->name; push @f, $l` pushes one value.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

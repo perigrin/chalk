@@ -1,9 +1,9 @@
 # ABOUTME: A stash is a hash whose metaobject is its package's Chalk::MOP::Class, carried from the
 # ABOUTME: compile into the run: exists and truth answered from the Class's symbols; no tie.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

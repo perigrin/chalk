@@ -1,9 +1,9 @@
 # ABOUTME: A value that may be a string read by two bitwise ops (a shift too): one done on
 # ABOUTME: numbers makes it a number to the next, as perl's; a node of two variables refused.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

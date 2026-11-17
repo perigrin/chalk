@@ -1,9 +1,9 @@
 # ABOUTME: every string constant in T2's runtime is declared the size of its bytes:
 # a miscounted one is an lli type error in every program that links it.
 use 5.42.0;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
-use lib 'lib';
 use Chalk::Target::LLVM::Runtime;
 
 # The .ll text itself, not Runtime.pm's source: the source quotes it, so its

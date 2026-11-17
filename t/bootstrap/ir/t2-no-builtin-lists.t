@@ -4,10 +4,10 @@
 
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Find;
 use Pod::Functions ();
-use lib "lib";
 use Chalk::Grammar::Perl::BuiltinTable;
 
 # A BUILTIN-NAME ALTERNATION: a call's name (->name, or a $name taken from

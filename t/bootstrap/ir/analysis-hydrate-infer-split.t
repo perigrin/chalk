@@ -2,8 +2,8 @@
 # ABOUTME: and inference never touches the raw records the MOP was built from.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 use JSON::PP;
 use File::Temp qw(tempfile);
 use Chalk::IR::Analysis ();

@@ -2,8 +2,8 @@
 # ABOUTME: libperl-free; the child lli/perl processes inherit this test's env.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::Graph;

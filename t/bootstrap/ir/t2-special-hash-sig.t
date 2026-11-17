@@ -1,9 +1,9 @@
 # ABOUTME: %SIG is a container whose metaobject is a MOP object (Chalk::Impl::SIG), not a tie:
 # ABOUTME: its handlers stored and fetched through it, warn and die asking it, tied() false.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

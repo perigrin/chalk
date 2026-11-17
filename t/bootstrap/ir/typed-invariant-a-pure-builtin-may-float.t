@@ -1,9 +1,9 @@
 # ABOUTME: the control-chain leg exempts a PURE builtin Call (join, keys, values, a sort perl
 # ABOUTME: folded): B::SoN floats them, as it does a value op; any other Call must be pinned.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

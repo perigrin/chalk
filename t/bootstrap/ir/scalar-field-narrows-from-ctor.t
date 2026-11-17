@@ -2,8 +2,8 @@
 # ABOUTME: `defined` is the wrong guard once the producer sends Scalar instead of nothing.
 use 5.42.0;
 use utf8;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::Serialize::JSON;
 

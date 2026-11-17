@@ -1,9 +1,9 @@
 # ABOUTME: A string constant past ASCII is declared the size it is printed: one byte a character
 # ABOUTME: up to 0xFF (the wire hands them upgraded); a wider character is refused by name, never mis-sized.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

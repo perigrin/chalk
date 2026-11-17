@@ -1,9 +1,9 @@
 # ABOUTME: a sub from a module the program `use`s is compiled with it (B::SoN follows
 # ABOUTME: use/require) and called through T2 -- by its full name, or by an imported one.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempdir tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempdir tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

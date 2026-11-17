@@ -2,8 +2,8 @@
 # ABOUTME: the non-arity entities, whose %PARENT is Unknown itself.
 use 5.42.0;
 use utf8;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 require Chalk::Grammar::Perl::TypeLibrary;
 my $join = \&Chalk::Grammar::Perl::TypeLibrary::join_types;

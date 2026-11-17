@@ -1,10 +1,10 @@
 # ABOUTME: T1's integer intervals (Chalk::IR::Analysis::integer_intervals) prove where an Int
 # ABOUTME: + - * stays an IV: there T2 emits a plain i64 op, elsewhere perl's IV, UV or NV -- never a stop.
 use 5.42.0;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
 use Scalar::Util qw(blessed);
-use lib 'lib', 't/lib';
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

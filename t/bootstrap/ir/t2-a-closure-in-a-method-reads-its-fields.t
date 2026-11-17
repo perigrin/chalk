@@ -1,9 +1,9 @@
 # ABOUTME: a sub made in a method that reads the method's fields, called directly there, reads them
 # ABOUTME: of the object the method was called on; one handed out as a code value is refused by name.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

@@ -2,8 +2,8 @@
 # ABOUTME: Str splice (malloc+memcpy); $N in the replacement consumes explicit captures.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::Graph;

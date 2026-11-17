@@ -1,9 +1,9 @@
 # ABOUTME: Calls of subs with signatures through T2 alone, against perl: a method call's
 # ABOUTME: arity checked as perl dies, a default the body computes, a list passed to a sub.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

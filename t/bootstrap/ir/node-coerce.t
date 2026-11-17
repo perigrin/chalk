@@ -2,9 +2,9 @@
 # ABOUTME: Verifies from_repr/to_repr are in content_hash and hash-consing works correctly.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(refaddr);
-use lib 'lib';
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Node::Coerce;

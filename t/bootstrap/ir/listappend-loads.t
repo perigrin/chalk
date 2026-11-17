@@ -2,10 +2,10 @@
 # ABOUTME: Covers grep's 3-input predicate shape, map's 2-input shape, and arity 1.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use JSON::PP;
 
-use lib 'lib';
 use Chalk::IR::Serialize::JSON ();
 
 # perl5-son lowers `map`/`grep` with a block into a counted loop whose

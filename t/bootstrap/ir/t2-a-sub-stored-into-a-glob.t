@@ -1,9 +1,9 @@
 # ABOUTME: a sub stored into a glob's code slot at run time (*name = sub {...}, *name = \&other) is in
 # ABOUTME: its package's run-time stash from then on: a call by the name, can() and a method call find it there.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

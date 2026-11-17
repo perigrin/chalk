@@ -2,8 +2,8 @@
 # ABOUTME: The wire splits sigil from symbol; consumers must never re-compose it by hand.
 use 5.42.0;
 use utf8;
-use Test2::V0;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::EntryDef;

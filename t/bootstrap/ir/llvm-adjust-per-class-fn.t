@@ -2,9 +2,9 @@
 # ABOUTME: new; inline main-ctx lowering cache-skipped the second object's ADJUST stores.
 use 5.42.0;
 use utf8;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 use Chalk::CodeGen::Harness::Rooted qw(rooted body);
 
 use Chalk::IR::Graph;

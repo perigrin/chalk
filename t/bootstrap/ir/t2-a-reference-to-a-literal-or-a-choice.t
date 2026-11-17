@@ -1,9 +1,9 @@
 # ABOUTME: `\"lit"`, `\(c ? $v : 0)`: a reference to a literal is to a read-only cell (a store
 # ABOUTME: through it dies as perl's); to a choice, the taken arm's; `\(c ? ($x, $y) : ())` one to each item.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

@@ -2,8 +2,8 @@
 # ABOUTME: it never overwrites. Without that a stamp can move SIDEWAYS forever.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 require Chalk::Grammar::Perl::TypeLibrary;
 my $join = \&Chalk::Grammar::Perl::TypeLibrary::join_types;

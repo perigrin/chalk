@@ -2,8 +2,8 @@
 # ABOUTME: preceded by another effect in an if-arm must still emit the abort.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
 use Chalk::IR::NodeFactory;

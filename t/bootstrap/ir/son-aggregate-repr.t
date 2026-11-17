@@ -2,10 +2,10 @@
 # ABOUTME: ArrayRef/HashRef get their aggregate repr; Subscript gets the element type.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use JSON::PP;
 
-use lib 'lib';
 use Chalk::IR::Serialize::JSON ();
 
 # `my @a = (1,2,3); $a[1]` loads as ArrayLiteral(Int,Int,Int) -> Subscript.

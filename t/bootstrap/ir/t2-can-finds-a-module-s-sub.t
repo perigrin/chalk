@@ -1,9 +1,9 @@
 # ABOUTME: can() through T2 finds a followed module's sub nothing else calls: the
 # ABOUTME: name it asks for reaches that sub, so the sub is loaded, not pruned.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile tempdir);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile tempdir);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

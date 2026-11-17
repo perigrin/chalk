@@ -1,10 +1,10 @@
 # ABOUTME: A reference to an element B::SoN takes where it stands (Ref [location, memory]) is
 # ABOUTME: T2's: as perl, or where T2 refuses it, refused by T2's reason -- never a wrong answer.
 use 5.42.0;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
 use JSON::PP;
-use lib 'lib', 't/lib';
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

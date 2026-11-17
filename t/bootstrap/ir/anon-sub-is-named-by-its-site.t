@@ -2,9 +2,9 @@
 # ABOUTME: Two enclosing subs with the same pad slot must not collide into one key.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Scalar::Util qw(blessed);
-use lib 'lib';
 
 use Chalk::IR::Serialize::JSON;
 

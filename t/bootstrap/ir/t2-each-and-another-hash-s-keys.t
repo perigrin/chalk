@@ -1,9 +1,9 @@
 # ABOUTME: each %h where the program takes keys or values of another named hash (which resets
 # ABOUTME: that hash's iterator, not this one's) is T2's; of this hash, or of a deref, refused by name.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

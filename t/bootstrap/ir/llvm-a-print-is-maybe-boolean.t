@@ -1,10 +1,10 @@
 # ABOUTME: a Print stamped Maybe[Boolean] (perl's print: true, or undef when it fails)
 # ABOUTME: is kept by the loader and lowered as perl answers through T2, or refused by its reason.
 use 5.42.0;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
 use JSON::PP;
-use lib 'lib', 't/lib';
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

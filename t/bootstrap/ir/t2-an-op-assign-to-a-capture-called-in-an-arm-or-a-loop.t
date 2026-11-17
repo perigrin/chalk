@@ -1,9 +1,9 @@
 # ABOUTME: A closure or string eval op-assigning a captured lexical, called in an if, an else, a loop or
 # ABOUTME: a sub: T2 lowers it as perl answers, and the whole pipeline never emits IR lli rejects.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';

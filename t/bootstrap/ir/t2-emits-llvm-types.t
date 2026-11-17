@@ -2,8 +2,8 @@
 # ABOUTME: The sharp question is not "is this stamp sound" but "which vocabulary is it in".
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::Serialize::JSON;
 use Chalk::Target::LLVM::Lower;

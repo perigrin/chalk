@@ -2,8 +2,8 @@
 # ABOUTME: preempts a node whose type has an authoritative source elsewhere.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 # Real nodes, not duck-types: Chalk::IR::Value is a `feature class`, which
 # cannot be subclassed through @ISA, and the pass gates its store on ->isa of

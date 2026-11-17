@@ -2,11 +2,11 @@
 # ABOUTME: (icmp ne for Int), so bare-scalar guards ($x = 7 if $c) are lowerable.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use JSON::PP;
 use File::Temp qw(tempfile);
 
-use lib 'lib';
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Serialize::JSON ();
 

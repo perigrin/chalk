@@ -2,8 +2,8 @@
 # ABOUTME: T1 had no Scalar row at all, which blocked && and || over a tagged cell.
 use 5.42.0;
 use utf8;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::Analysis;
 use Chalk::Grammar::Perl::TypeLibrary;
