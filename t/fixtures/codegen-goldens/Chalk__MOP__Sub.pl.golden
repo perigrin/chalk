@@ -12,10 +12,6 @@ class Chalk::MOP::Sub {
     field $context :param :reader = undef;
     field $graph :param :reader = undef;
     field $body :param :reader = [];
-    method shim_return_type($type) {
-        $return_type = $type;
-        return;
-    }
     method set_return_type($type) {
         if (!defined($type)) {
             die "MOP: return type must be defined\n";

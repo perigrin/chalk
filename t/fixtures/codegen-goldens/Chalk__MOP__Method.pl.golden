@@ -12,10 +12,6 @@ class Chalk::MOP::Method {
     method lexical_bindings() {
         return $lexical_bindings->@*;
     }
-    method shim_return_type($type) {
-        $return_type = $type;
-        return;
-    }
     method set_return_type($type) {
         if (!defined($type)) {
             die "MOP: return type must be defined\n";
