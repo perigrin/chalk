@@ -785,4 +785,14 @@ subtest 'L2 ->( binds to the variable, not the && chain' => sub {
     isa_with_shape($and->inputs()->[2], 'Chalk::IR::Node::Subscript', 'its right operand is the call on $f');
 };
 
+# --- L22 a bare list operator's list takes ?: and assignment ---
+# perlop: rightward list operators (L22) are looser than ?: (L19) and
+# assignment (L20): `push @a, $x ? 1 : 0` is push(@a, $x ? 1 : 0), never
+# (push @a, $x) ? 1 : 0 (BNF/Target/C.pm).
+subtest 'L22 push @a, $x ? 1 : 0 pushes the ternary' => sub {
+    my $expr = parse_expr('push @a, $x ? 1 : 0');
+    my $call = isa_with_shape($expr, 'Chalk::IR::Node::Call', 'top is the push') or return;
+    isa_with_shape($call->inputs()->[1][-1], 'Chalk::IR::Node::TernaryExpr', 'its last argument is the ternary');
+};
+
 done_testing;

@@ -219,8 +219,12 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 }
                 return $self->zero();
             }
+            # A condition ending in an open prefix operand looser than ?:
+            # (a bare list operator's list) would have taken the `?`:
+            # `push @a, $x ? 1 : 0` is push(@a, $x ? 1 : 0).
+            return $self->zero() if defined $existing->{redge} && $existing->{redge} > 100;
             if ($ENV{DEBUG_PRECEDENCE}) {
-                my $el = $existing->{level} // 'undef';
+                my $el = ($existing->{level} // "undef") . " redge=" . ($existing->{redge} // "undef");
                 warn "  PREC_TERNARY_RESET: cond_level=$el at '?' -> reset to one()\n";
             }
             return $self->one();
@@ -234,7 +238,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # condition→then-branch boundary.
         if ($rule_name eq 'TernaryExpression' && $matched_text eq ':') {
             if ($ENV{DEBUG_PRECEDENCE}) {
-                my $el = $existing->{level} // 'undef';
+                my $el = ($existing->{level} // "undef") . " redge=" . ($existing->{redge} // "undef");
                 warn "  PREC_TERNARY_RESET: then_level=$el at ':' -> reset to one()\n";
             }
             return $self->one();
@@ -269,7 +273,7 @@ class Chalk::Bootstrap::Semiring::Precedence {
                     return $self->zero();
                 }
                 if ($ENV{DEBUG_PRECEDENCE}) {
-                    my $el = $existing->{level} // 'undef';
+                    my $el = ($existing->{level} // "undef") . " redge=" . ($existing->{redge} // "undef");
                     warn "  PREC_SCAN: left_level=$el op=$matched_text op_level=$op_level\n";
                 }
 
@@ -286,6 +290,10 @@ class Chalk::Bootstrap::Semiring::Precedence {
             # operand is an AssignmentExpression (level 101, right-assoc).
             if ($rule_name eq 'AssignOp') {
                 my $assign_level = 101;  # $EXPR_LEVELS->{AssignmentExpression}
+                # (a left operand ending in a bare list operator's open list
+                # would have taken the assignment into that list)
+                return $self->zero()
+                    if defined $existing->{redge} && $existing->{redge} > $assign_level;
 
                 # Validate left operand: reject if its level exceeds assignment
                 # precedence. Also reject same-level left operands (right-assoc):
@@ -427,7 +435,11 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # comma) that checks it.
         if (!defined($left->{level}) && !defined($right->{level})) {
             my $al = $right->{arg_level} // $left->{arg_level};
-            return defined $al ? _intern(true, undef, undef, false, undef, $al) : $self->one();
+            # (the right side ends the item: its open right edge, if any,
+            # is the item's)
+            my $re = $right->{redge};
+            return defined $al || defined $re
+                ? _intern(true, undef, undef, false, undef, $al, $re) : $self->one();
         }
 
         # Operator check: when a BinaryOp/AssignOp completion (is_operator)
@@ -659,7 +671,10 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 }
                 return $self->zero();
             }
-            return _intern(true, $expr_level, $expr_assoc, false);
+            # (a PostfixExpression holding a bare call keeps its open right
+            # edge: nothing tighter may follow it)
+            return _intern(true, $expr_level, $expr_assoc, false, undef, undef,
+                $rule_name eq 'PostfixExpression' ? $value->{redge} : undef);
         }
 
         # BinaryOp/AssignOp completion: the value already carries operator info
@@ -744,9 +759,16 @@ class Chalk::Bootstrap::Semiring::Precedence {
                 }
                 return $self->zero();
             }
-            if (defined $value->{arg_level}) {
+            # A bare list operator call (alts 1, 2, 4, not a named unary):
+            # its list is open to the right, at L22 (see _intern's $redge).
+            my $redge = $value->{redge};
+            if (defined($alt_idx) && ($alt_idx == 1 || $alt_idx == 2 || $alt_idx == 4)
+                    && !(defined($value->{level}) && $value->{level} == $nu_level)) {
+                $redge = Chalk::Grammar::Perl::PrecedenceTable::list_op_level();
+            }
+            if (defined $value->{arg_level} || defined $redge) {
                 return _intern(true, $value->{level}, $value->{assoc},
-                    $value->{is_operator}, $value->{op});
+                    $value->{is_operator}, $value->{op}, undef, $redge);
             }
             return $value;
         }

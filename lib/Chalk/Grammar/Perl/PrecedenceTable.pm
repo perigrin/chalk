@@ -36,6 +36,12 @@ class Chalk::Grammar::Perl::PrecedenceTable {
     # item or a list operator's bare argument may not reach.
     sub low_word_level() { return 103; }
 
+    # perlop L22, the rightward list operators (`push @a, LIST`, `print
+    # LIST` written without parens): looser than assignment (101) and the
+    # comma, tighter than not/and/or. A bare list operator's list runs to
+    # the end of what is tighter than this.
+    sub list_op_level() { return 102.5; }
+
     # Build a lookup hash: operator_string => { level => N, assoc => str }
     # Cached as package variable for efficiency.
     my %op_lookup;
