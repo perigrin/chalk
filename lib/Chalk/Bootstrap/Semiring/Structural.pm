@@ -74,9 +74,21 @@ class Chalk::Bootstrap::Semiring::Structural {
 
         # Scan event: right Context has annotations->{scan} = true.
         # Structural is transparent at scan time — pass through unchanged.
+        # Except at a postfix's first token after its target: `->`, or the
+        # `[`/`{` of an arrowless subscript. Per perlop a postfix cannot bind
+        # to a bare-form call (`foo @args->method()`), so a target that is
+        # one is rejected there; past it the bare-call tag is the target's
+        # and is cleared, so a bare call INSIDE the postfix's own parens or
+        # brackets (`$t->s(defined $b)`, `$h{ f $x }`) is no target.
         if (blessed($right) && $right->can('annotations')
                 && $right->annotations()->{scan}) {
             return $ZERO if $l == $ZERO;
+            my $rn = $right->annotations()->{rule_name} // '';
+            if (($rn eq 'MethodCall' || $rn eq 'Subscript' || $rn eq 'PostfixDeref')
+                    && ($right->focus() // '') =~ /\A(?:->|\[|\{)\z/) {
+                return $ZERO if $l & STRUCT_IS_BARECALL;
+                return $l & ~STRUCT_IS_BARECALL;
+            }
             return $l;
         }
 
@@ -137,7 +149,7 @@ class Chalk::Bootstrap::Semiring::Structural {
         # The bare-form CallExpression has no injected `()` boundary, so the
         # postfix has nothing to attach to.
         if ($rule_name eq 'PostfixDeref') {
-            return $ZERO if $value & STRUCT_IS_BARECALL;
+            # (a bare-call target was rejected at its `->`, `[` or `{` scan)
             return STRUCT_IS_DEREF | ($value & STRUCT_IS_BLOCK);
         }
 
@@ -149,7 +161,7 @@ class Chalk::Bootstrap::Semiring::Structural {
         # Subscript(CallExpression, ...) (is_call + is_deref).
         # IS_BARECALL rejection same as PostfixDeref above.
         if ($rule_name eq 'Subscript') {
-            return $ZERO if $value & STRUCT_IS_BARECALL;
+            # (a bare-call target was rejected at its `->`, `[` or `{` scan)
             return STRUCT_IS_DEREF
                 | ($value & STRUCT_IS_CALL)
                 | ($value & STRUCT_IS_BLOCK);
@@ -180,7 +192,7 @@ class Chalk::Bootstrap::Semiring::Structural {
         # IS_BARECALL rejection: per perlop, `foo @args->method()` cannot
         # method-call the bare-form call's result without explicit parens.
         if ($rule_name eq 'MethodCall') {
-            return $ZERO if $value & STRUCT_IS_BARECALL;
+            # (a bare-call target was rejected at its `->`, `[` or `{` scan)
             my $call_from_alt   = ($alt_idx == 0 || $alt_idx == 2) ? STRUCT_IS_CALL : 0;
             my $call_from_child = $value & STRUCT_IS_CALL;
             return STRUCT_IS_METHOD | $call_from_alt | $call_from_child;

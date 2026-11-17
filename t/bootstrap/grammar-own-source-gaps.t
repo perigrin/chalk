@@ -552,4 +552,17 @@ for my $case (
     is_deeply([map { scalar $_->inputs()->[1]->@* } @defined], [1, 1], 'each defined has one operand');
 }
 
+# ============================================================================
+# §13 A bare call inside a postfix's own delimiters: perlop forbids `->`
+# straight after a bare list-operator call (`foo @a->m` is no method call on
+# foo's value), but a bare call as the ARGUMENT of a method call, or as a
+# subscript's index, is delimited by the parens or brackets
+# (Actions.pm: `$target->set_control_in(defined $bare ? ... : (...))`).
+# perl -MO=Deparse: $t->s(defined $b), $t->s(defined $b ? 1 : 2).
+# ============================================================================
+for my $src ('$t->s(defined $b);', '$t->s(f $b);', '$t->s(defined $b ? 1 : (2));',
+             'my $x = $h{ f $b };', 'my $x = $c->(defined $b);') {
+    accepts($src, "a bare call inside the postfix's delimiters: $src");
+}
+
 done_testing();
