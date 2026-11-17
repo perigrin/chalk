@@ -410,7 +410,7 @@ sub _build_A2 {
 # A3: class C { method m() { my %h = (a => 1, b => 2); return $h{a}; } }
 #
 # VarDecl(%h) initialized from HashRef(a,1,b,2).
-# Return: Subscript($h, 'a', 'hash') — emits $h{'a'} (aggregate var, so no arrow).
+# Return: Subscript(%h, 'a', 'hash') — emits $h{'a'}: the target is the aggregate, as the parser builds an arrowless subscript.
 # Control chain: Start <- var_h.control_in <- ret.control_in
 # ---------------------------------------------------------------------------
 sub _build_A3 {
@@ -438,7 +438,7 @@ sub _build_A3 {
 
     # Subscript: $h{a}
     # inputs[0]=target, inputs[1]=key, inputs[2]=Constant(style)
-    my $h_read  = $factory->make('Constant', value => '$h', const_type => 'variable');
+    my $h_read  = $factory->make('Constant', value => '%h', const_type => 'variable');
     my $key_a2  = $factory->make('Constant', value => 'a',  const_type => 'string');
     my $style   = $factory->make('Constant', value => 'hash', const_type => 'string');
     my $sub_ha  = $factory->make('Subscript',
@@ -1064,7 +1064,7 @@ sub _build_M22 {
     $var_r->set_control_in($start);
 
     # $r[0] — aggregate subscript
-    my $r_read  = $factory->make('Constant', value => '$r',   const_type => 'variable');
+    my $r_read  = $factory->make('Constant', value => '@r',   const_type => 'variable');
     my $idx_0   = $factory->make('Constant', value => '0',    const_type => 'integer');
     my $style_a = $factory->make('Constant', value => 'array', const_type => 'string');
     my $sub_r0  = $factory->make('Subscript', inputs => [$r_read, $idx_0, $style_a]);
@@ -1107,7 +1107,7 @@ sub _build_M23 {
     $var_h->set_control_in($start);
 
     # delete $h{a} — Call(delete, [Subscript($h, a, hash)])
-    my $h_lhs   = $factory->make('Constant', value => '$h',   const_type => 'variable');
+    my $h_lhs   = $factory->make('Constant', value => '%h',   const_type => 'variable');
     my $key_a2  = $factory->make('Constant', value => 'a',    const_type => 'string');
     my $style_h = $factory->make('Constant', value => 'hash', const_type => 'string');
     my $sub_ha  = $factory->make('Subscript', inputs => [$h_lhs, $key_a2, $style_h]);
@@ -1358,7 +1358,7 @@ sub _build_H3 {
     $var_r->set_control_in($start);
 
     # $r[0] — aggregate subscript
-    my $r_read  = $factory->make('Constant', value => '$r',   const_type => 'variable');
+    my $r_read  = $factory->make('Constant', value => '@r',   const_type => 'variable');
     my $idx_0   = $factory->make('Constant', value => '0',    const_type => 'integer');
     my $style_a = $factory->make('Constant', value => 'array', const_type => 'string');
     my $sub_r0  = $factory->make('Subscript', inputs => [$r_read, $idx_0, $style_a]);
@@ -1921,7 +1921,7 @@ sub _build_G3 {
     $var_a->set_control_in($start);
 
     # $a[0] — Subscript, style=array, aggregate var -> emits $a[0]
-    my $a_read  = $factory->make('Constant', value => '$a',   const_type => 'variable');
+    my $a_read  = $factory->make('Constant', value => '@a',   const_type => 'variable');
     my $idx_0   = $factory->make('Constant', value => '0',    const_type => 'integer');
     my $style_a = $factory->make('Constant', value => 'array', const_type => 'string');
     my $sub_a0  = $factory->make('Subscript', inputs => [$a_read, $idx_0, $style_a]);
@@ -1963,7 +1963,7 @@ sub _build_G4 {
     $var_h->set_control_in($start);
 
     # $h{k} — Subscript, style=hash, aggregate var -> emits $h{k}
-    my $h_read   = $factory->make('Constant', value => '$h',  const_type => 'variable');
+    my $h_read   = $factory->make('Constant', value => '%h',  const_type => 'variable');
     my $key_k2   = $factory->make('Constant', value => 'k',   const_type => 'string');
     my $style_h  = $factory->make('Constant', value => 'hash', const_type => 'string');
     my $sub_hk   = $factory->make('Subscript', inputs => [$h_read, $key_k2, $style_h]);
@@ -2471,7 +2471,7 @@ sub _build_C4 {
     $var_a->set_control_in($start);
 
     # Subscript: $a[0] (LHS)
-    my $a_lhs   = $factory->make('Constant', value => '$a', const_type => 'variable');
+    my $a_lhs   = $factory->make('Constant', value => '@a', const_type => 'variable');
     my $idx_0   = $factory->make('Constant', value => '0',  const_type => 'integer');
     my $style_a = $factory->make('Constant', value => 'array', const_type => 'string');
     my $sub_lhs = $factory->make('Subscript', inputs => [$a_lhs, $idx_0, $style_a]);
@@ -2483,7 +2483,7 @@ sub _build_C4 {
     $assign->set_control_in($var_a);
 
     # Return: $a[0]
-    my $a_read  = $factory->make('Constant', value => '$a', const_type => 'variable');
+    my $a_read  = $factory->make('Constant', value => '@a', const_type => 'variable');
     my $idx_0b  = $factory->make('Constant', value => '0',  const_type => 'integer');
     my $style_b = $factory->make('Constant', value => 'array', const_type => 'string');
     my $sub_ret = $factory->make('Subscript', inputs => [$a_read, $idx_0b, $style_b]);
@@ -2521,7 +2521,7 @@ sub _build_C5 {
     $var_h->set_control_in($start);
 
     # Subscript: $h{k} (LHS)
-    my $h_lhs    = $factory->make('Constant', value => '$h',   const_type => 'variable');
+    my $h_lhs    = $factory->make('Constant', value => '%h',   const_type => 'variable');
     my $key_k    = $factory->make('Constant', value => 'k',    const_type => 'string');
     my $style_h  = $factory->make('Constant', value => 'hash', const_type => 'string');
     my $sub_lhs  = $factory->make('Subscript', inputs => [$h_lhs, $key_k, $style_h]);
@@ -2533,7 +2533,7 @@ sub _build_C5 {
     $assign->set_control_in($var_h);
 
     # Return: $h{k}
-    my $h_read   = $factory->make('Constant', value => '$h',   const_type => 'variable');
+    my $h_read   = $factory->make('Constant', value => '%h',   const_type => 'variable');
     my $key_k2   = $factory->make('Constant', value => 'k',    const_type => 'string');
     my $style_h2 = $factory->make('Constant', value => 'hash', const_type => 'string');
     my $sub_ret  = $factory->make('Subscript', inputs => [$h_read, $key_k2, $style_h2]);
