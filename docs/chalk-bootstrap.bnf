@@ -216,13 +216,15 @@ CircumfixDeref ::= /@\{/ _ Expression _ /\}/
 
 UnaryExpression ::= /!/ _ Expression
     | /-[efdrwxRWXoOzslpSbcugktTBAMC]\b/ _ Expression
-    | /-/ _ Expression
-    | /\+/ _ Expression
+    | /-(?!-)/ _ Expression
+    | /\+(?!\+)/ _ Expression
     | /~/ _ Expression
     | /\\/ _ Expression
     | /not\b/ WS Expression
     | /undef\b/ _ /\(/ _ Variable _ /\)/
     | /undef\b/ WS Variable ;
+# (unary `-` and `+` are never the first half of `--` or `++`: perl reads
+# the longest operator, so `++$x` is a pre-increment, never + +$x)
 # (`undef VARIABLE`: perlfunc's undef of a variable, a named unary
 # operator; its operand is a variable, so no word after `undef` is one)
 

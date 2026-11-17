@@ -669,4 +669,17 @@ accepts('my $i = 1; undef($i);', 'undef($i)');
     like($@, qr/GAP: undef of an aggregate/, 'undef @a is refused by name');
 }
 
+# ============================================================================
+# §21 `++` and `--` are one token: `return ++$c` is a pre-increment, never
+# + +$c (IR/Graph.pm). perl reads the longest operator.
+# ============================================================================
+for my $src ('sub f { return ++$c; }', 'sub g { return --$c; }') {
+    my ($ir, $ties) = strings_of($src);
+    is($ties, 0, "one reading: $src");
+}
+for my $src ('my $x = ++$c;', 'my $y = --$c;') {
+    my ($ir) = strings_of($src);
+    ok((grep { $_->operation() eq 'CompoundAssign' } all_nodes($ir)), "$src steps \$c");
+}
+
 done_testing();
