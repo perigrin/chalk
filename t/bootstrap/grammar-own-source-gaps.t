@@ -583,4 +583,24 @@ for my $case ([ 'my $s = "a $x[$i - 1] b";', 'Subtract' ], [ 'my $s = "$h{$k . q
         "$src: the index is the $op the brackets hold");
 }
 
+# ============================================================================
+# §15 A block of code in a double-quoted string: "${\ EXPR}" interpolates the
+# scalar the block's value refers to, "@{[ LIST ]}" the array (perl reads
+# the block as code, as for an index above). Each is the PostfixDeref of the
+# block's expression (Target/C.pm: "${\  $self->_get_current_slug()}_$name").
+# ============================================================================
+for my $case ([ 'my $s = "a${\ $o->m()}b";', '$' ], [ 'my $s = "@{[ $n + 1 ]}";', '@' ]) {
+    my ($src, $sigil) = $case->@*;
+    my $ir = eval { ir_of($src) };
+    is($@, '', "parses: $src");
+    ok((grep { $_->operation() eq 'PostfixDeref' && $_->sigil() eq $sigil } all_nodes($ir)),
+        "$src: the block's value dereferenced by $sigil");
+}
+{
+    # `${name}` and `@{name}` stay the variable they name.
+    my $ir = ir_of('my $s = "${ x }-@{y}";');
+    my @v = map { $_->value() } grep { $_->operation() eq 'Constant' && ($_->const_type() // '') eq 'variable' } all_nodes($ir);
+    is_deeply([sort grep { $_ ne '$s' } @v], ['$x', '@y'], '"${ x }-@{y}" interpolates $x and @y');
+}
+
 done_testing();

@@ -1890,6 +1890,24 @@ class Chalk::Bootstrap::Perl::Actions {
         if ($$cref =~ /\G\$\{([a-zA-Z_]\w*|\d+|[!\@&.])\}/gc) {
             return _make_var_const($factory, '$' . $1);
         }
+        # `${ name }`, `@{name}`: the variable the braces name.
+        if ($$cref =~ /\G([\$\@])\{\s*([a-zA-Z_]\w*)\s*\}/gc) {
+            return _make_var_const($factory, $1 . $2);
+        }
+        # `${ CODE }`, `@{ CODE }` -- "${\ $o->m()}", "@{[ $n + 1 ]}": perl
+        # reads the block as code and interpolates the scalar or the array
+        # its value refers to. The block's expression is parsed, and the
+        # part is its PostfixDeref, as `(CODE)->$*` or `(CODE)->@*` would be.
+        if ($$cref =~ /\G([\$\@])\{(?!\^)/gc) {
+            my $sigil = $1;
+            my $code = $self->_dq_index_code($cref, '{', "$sigil\{ BLOCK }", $gap);
+            $$cref =~ /\G\}/gc;
+            $gap->("$sigil\{ BLOCK } followed by a subscript") if $$cref =~ /\G(?:[\[{]|->[\[{])/;
+            return $ctx->factory->make('PostfixDeref',
+                sigil  => $sigil,
+                inputs => [$code, _make_const($factory, $sigil)],
+            );
+        }
         if ($$cref =~ /\G\$((?:::)?[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)/gc) {
             my $name = $1;
             $gap->("\$${name}:: (a package-stash variable)") if $$cref =~ /\G::/;
@@ -1934,8 +1952,10 @@ class Chalk::Bootstrap::Perl::Actions {
         my $start = pos($$cref);
         my $depth = 0;
         while (1) {
-            if ($$cref =~ /\G'(?:[^'\\]|\\.)*'/gc || $$cref =~ /\G\\./gcs
-                    || $$cref =~ /\G[^\[\]{}()'\\]+/gc) {
+            # (in code a backslash is the reference operator, `\(...)`;
+            # only `\\` and `\"` are the string's escapes)
+            if ($$cref =~ /\G'(?:[^'\\]|\\.)*'/gc || $$cref =~ /\G\\[\\"]/gc
+                    || $$cref =~ /\G(?:[^\[\]{}()'\\]|\\(?![\\"]))+/gc) {
                 next;
             }
             if ($$cref =~ /\G([\[{(])/gc) { $depth++; next }
