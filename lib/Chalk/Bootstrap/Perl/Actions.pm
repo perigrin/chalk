@@ -2974,6 +2974,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $op;
         my $value;
         my $list_replaces;    # the bare node a list assignment supersedes
+        my $elem_targets;     # a list assignment's targets, some not variables
 
         for my $leaf (@leaves) {
             my $focus = $leaf->extract();
@@ -2982,10 +2983,24 @@ class Chalk::Bootstrap::Perl::Actions {
             # variables, assigned as a list. It is a ListAssign that
             # declares nothing (scope '').
             if (!defined $target && ref($focus) eq 'ARRAY') {
-                my @names = map {
-                    _declared_name_const($factory, $_)
-                        // die "GAP: a list assignment to something other than variables (`(\$h{k}, undef) = ...`) has no IR\n"
-                } $focus->@*;
+                my @names = map { _declared_name_const($factory, $_) } $focus->@*;
+                if (grep { !defined } @names) {
+                    # `( $b->{cur}, undef, $x ) = LIST`: some target is an
+                    # element (or a placeholder). B::SoN's wire spells it an
+                    # Assign of N targets then the values (targets => N):
+                    # built below once the value is in hand.
+                    $elem_targets = [ map {
+                        my $n = _declared_name_const($factory, $_);
+                        defined $n ? $n
+                        : (blessed($_) && ($_ isa Chalk::IR::Node::Subscript
+                                || $_ isa Chalk::IR::Node::PostfixDeref
+                                || ($_ isa Chalk::IR::Node::Constant && ($_->const_type() // '') eq 'undef')))
+                            ? $_
+                        : die "GAP: a list assignment to something other than variables, elements and undef has no IR\n"
+                    } $focus->@* ];
+                    $target = $focus;
+                    next;
+                }
                 $target = $ctx->factory->make('ListAssign', scope => '', inputs => [\@names, undef]);
                 $target->set_control_in($ctx->control_head // $factory->make('Start'));
                 next;
@@ -3006,6 +3021,18 @@ class Chalk::Bootstrap::Perl::Actions {
         }
 
         return undef unless defined $target && defined $op;
+
+        if (defined $elem_targets) {
+            die "GAP: a compound assignment to a list has no IR\n" unless $op->value() eq '=';
+            return undef unless defined $value;
+            my @values = ref($value) eq 'ARRAY' ? $value->@*
+                : $value isa Chalk::IR::Node::ExpressionList ? $value->items()->@*
+                : ($value);
+            return $ctx->factory->make('Assign',
+                targets => scalar $elem_targets->@*,
+                inputs  => [ $elem_targets->@*, @values ],
+            );
+        }
 
         # `($a) = LIST` and `(my $a) = LIST`: one parenthesized variable is
         # still a list assignment (the first element, not the count).

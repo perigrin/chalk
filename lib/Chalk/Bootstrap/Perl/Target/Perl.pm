@@ -1124,6 +1124,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
 
         # Typed fast-paths for computation nodes
         if ($node isa Chalk::IR::Node::Interpolate) { return $self->_emit_interpolated_string($node); }
+        if ($node isa Chalk::IR::Node::Assign && defined $node->targets) {
+            return $self->_emit_list_store($node);
+        }
         if ($node isa Chalk::IR::Node::BinOp)       { return $self->_emit_binary_expr($node); }
         if ($node isa Chalk::IR::Node::UnaryOp)     { return $self->_emit_unary_expr($node); }
         if ($node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'method') {
@@ -1175,6 +1178,17 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return "$scope $var = " . $self->_emit_init_expr($var, $init);
         }
         return "$scope $var";
+    }
+
+    # A list assignment of B::SoN's shape, `Assign(targets => N)`: the N
+    # targets (variables, elements, undef) then the values --
+    # `( $o->{cur}, undef, $x ) = ( 3, 4, 5 )`.
+    method _emit_list_store($node) {
+        my @in = $node->inputs()->@*;
+        my $n  = $node->targets;
+        my @t  = map { $self->_emit_expr($_) } @in[0 .. $n - 1];
+        my @v  = $self->_emit_operand_list(@in[$n .. $#in]);
+        return '(' . join(', ', @t) . ') = (' . join(', ', @v) . ')';
     }
 
     # Emit a ListAssign as `my ($a, $b) = (1, 2);` (with semicolon).
