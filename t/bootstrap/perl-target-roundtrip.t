@@ -241,6 +241,16 @@ my @cases = (
           "    sub v(\$x) { print \$x - 1; print \"\\n\"; return 1 }\n",
           "}\n"),
       q{print RT16::w(), "|"; RT16::v(5);} ],
+    [ 'a statement modifier over a comma expression guards both operands',
+      join('', "class RT17 {\n",
+          "    sub g(\$x, \$i) {\n",
+          "        my %by = (S => { op => 'T' });\n",
+          "        ( \$x = \$by{\$i} // {} ), \$i = \$x->{op} // ''\n",
+          "            if \$i eq 'S';\n",
+          "        return \$i;\n",
+          "    }\n",
+          "}\n"),
+      q{print RT17::g(undef, 'S'), RT17::g(undef, 'Q'), "\n";} ],
 );
 
 for my $case (@cases) {

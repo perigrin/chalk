@@ -203,6 +203,19 @@ accepts("out('x') unless \$c // out('a/b');", "// in a modifier, single-quoted '
 }
 
 # ============================================================================
+# §4b A statement modifier after a comma expression: `A, B if C;` is
+# `(A, B) if C` (perl -MO=Deparse). IR/Serialize/JSON.pm has one whose
+# operands hold `//` and strings. The grammar already took these (the
+# modifier attaches to SimpleStatement, after an ExpressionList); pinned.
+# ============================================================================
+
+accepts('$a = 1, $b = 2 if $c;',            'A, B if C');
+accepts('f(1), g(2) unless $c;',            'A, B unless C');
+accepts('$a, $b if $c;',                    'a bare comma list under a modifier');
+accepts(q{( $x = $by{ ( $x->{inputs} // [] )->[0] // '' } // {} ), $i = $x->{op} // ''
+    if $i eq 'Subscript';},                 'JSON.pm\'s form: // operands, a parenthesized assignment, the modifier on the next line');
+
+# ============================================================================
 # §5 qx// and backticks: a command whose output is the value. perl
 # interpolates the command as a double-quoted string; it becomes a
 # BacktickExpr over that string. Interpolation the double-quoted string
