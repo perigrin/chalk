@@ -645,4 +645,16 @@ for my $src ('sub h { my ($a, $b); ($a, $b) = $v->inputs; return $a }') {
     is($ties, 0, "a parenthesized list's list tag stays inside it: $src");
 }
 
+# ============================================================================
+# §19 `//` is one token after a term: never `/` then a pattern starting with
+# `/` (perlop; toke.c reads the longest operator). `( $n // '' ) eq '%' &&
+# ( $c // '' )` once read `/ '' ) eq ... ( $c /` as a regex
+# (LLVM/Builder/Variables.pm).
+# ============================================================================
+{
+    my ($ir, $ties) = strings_of(q{sub f { return 0 if $op eq 'P' && ( $n->s // '' ) eq '%' && $c->o eq 'H' && ( $c->t // '' ) eq 'HR'; }});
+    ok(defined $ir, 'two defined-ors in parens: parse');
+    is($ties, 0, 'two defined-ors in parens: one reading');
+}
+
 done_testing();

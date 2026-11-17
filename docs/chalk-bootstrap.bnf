@@ -225,8 +225,10 @@ UnaryExpression ::= /!/ _ Expression
 
 BinaryExpression ::= Expression _ BinaryOp _ Expression ;
 
+# (`/` is never the first half of `//`: perl reads the longest operator, so
+# after a term `//` is defined-or, never divide and a pattern from `/`.)
 BinaryOp ::= /\*\*/
-    | /[*\/%]/
+    | /[*%]|\/(?!\/)/
     | /x\b/
     | /[+-]/
     | /\.(?!\.)/
