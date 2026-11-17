@@ -1782,7 +1782,8 @@ class Chalk::Bootstrap::Perl::Actions {
     # Interpolate over its parts, or a plain Constant when it interpolates
     # nothing. A part is a literal run (a string Constant), a variable (a
     # `variable` Constant: `$name`, `$Pkg::name`, `${name}`, `$1`, `$!`,
-    # `$@`, `$&`, `$.`, `$0`, `$$`, `$^X`, `@name`), or an element of one (a
+    # `$@`, `$&`, `$.`, `$0`, `$<`, `$>`, `$$`, `$^X`, `@name`), or an
+    # element of one (a
     # Subscript: `$a[0]`, `$h{k}`, `$r->{k}[1]`). What perl would
     # interpolate that is none of these is refused by name, never kept as
     # text.
@@ -1888,7 +1889,7 @@ class Chalk::Bootstrap::Perl::Actions {
             return $self->_dq_element($ctx, $cref, '$' . $name, $gap);
         }
         if ($$cref =~ /\G\$(\d+)/gc
-                || $$cref =~ /\G\$([!\@&.0])/gc
+                || $$cref =~ /\G\$([!\@&.0<>])/gc
                 || $$cref =~ /\G\$(\$)(?![\w{\$:])/gc) {
             $gap->("\$$1 followed by a subscript") if $$cref =~ /\G(?:[\[{]|->[\[{])/;
             return _make_var_const($factory, '$' . $1);
@@ -1901,7 +1902,7 @@ class Chalk::Bootstrap::Perl::Actions {
         }
         if ($$cref =~ /\G\$/gc) {
             my ($next) = $$cref =~ /\G(\^\w|\{\^?\w*|.)/gcs;
-            $gap->('$' . ($next // '') . ' (only $name, ${name}, an element of one, $1.., $! $@ $& $. $0 $$ $^X are modelled)');
+            $gap->('$' . ($next // '') . ' (only $name, ${name}, an element of one, $1.., $! $@ $& $. $0 $< $> $$ $^X are modelled)');
         }
         if ($$cref =~ /\G\@([a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)/gc) {
             my $name = $1;
