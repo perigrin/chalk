@@ -248,4 +248,43 @@ for my $src ('my $o = qx($^X -e 1);', 'my $o = qx(echo @a);', 'my $o = qx(echo $
     like($@, qr/GAP: .*qx/, "... the actions refuse its interpolation as a GAP: $src");
 }
 
+# ============================================================================
+# §6 Circumfix dereference of any expression: @{ EXPR } and %{ EXPR }, the
+# aggregate EXPR refers to (perl: `EXPR->@*`, `EXPR->%*`). The sigil and its
+# brace are one token here (perl also takes `@ {`; lib/ never writes it).
+# ============================================================================
+
+accepts('my ( $lo, $hi ) = @{ shift @in };', '@{ shift @in }, as IR/Analysis.pm has it');
+accepts('my @a = @{$r};',                   '@{$r}');
+accepts('my @a = @{ $self->{items} };',     '@{ $self->{items} }');
+accepts('my @a = @{ $x->[0] // [] };',      '@{ EXPR // [] }');
+accepts('my %h = %{$r};',                   '%{$r}');
+accepts('my %h = %{ $self->{map} };',       '%{ $self->{map} }');
+accepts('my @k = keys %{ $self->{map} };',  'keys %{ ... }');
+accepts('my $n = scalar @{ $r };',          'scalar @{ ... }');
+accepts('for my $x (@{ $self->list() }) { }', '@{ ... } as a foreach list');
+accepts('push @{ $h{$k} }, $v;',            'push onto @{ ... }');
+accepts('my $n = @{$r} + 1;',               '@{ ... } as an operand');
+accepts('return %{$r};',                    'return %{ ... }');
+accepts('f(%{$r}, @{$s});',                 'both as call arguments');
+accepts('my @a = @{ $r }; my $m = $a % 2;', 'a % operator elsewhere stays an operator');
+rejects('my @a = @{ };',                    'rejects an empty @{ }');
+rejects('my @a = @{ $r ;',                  'rejects an unclosed @{');
+for my $case (['my @a = @{ shift @in };', '@', 'Call'],
+              ['my %h = %{ $self->{map} };', '%', 'Subscript']) {
+    my ($src, $sigil, $inner) = $case->@*;
+    my $ir = ir_of($src);
+    my ($d) = grep { $_->operation() eq 'PostfixDeref' } all_nodes($ir);
+    ok(defined $d, "$src builds a PostfixDeref");
+    is($d && $d->sigil(), $sigil, "... of sigil $sigil");
+    is($d && $d->inputs()->[0]->operation(), $inner, "... over the expression ($inner)");
+}
+# An element or slice of a circumfix deref (`@{$r}[0]`, `%{$h}{a}`) is not
+# modelled: refused by name rather than read as an element of the aggregate.
+for my $src ('my @v = @{$r}[0];', 'my %v = %{$h}{a};') {
+    ok($recognizer->parse($src), "recognized: $src");
+    eval { ir_of($src) };
+    like($@, qr/GAP: .*circumfix/, "... the actions refuse it as a GAP: $src");
+}
+
 done_testing();

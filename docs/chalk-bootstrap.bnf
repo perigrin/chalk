@@ -170,7 +170,8 @@ Atom ::= Variable
     | QwLiteral
     | AnonymousSub
     | /__SUB__\b/
-    | QualifiedIdentifier ;
+    | QualifiedIdentifier
+    | CircumfixDeref ;
 
 ParenExpr ::= /\(/ _ Expression _ /\)/
     | /\(/ _ ExpressionList _ /\)/
@@ -183,6 +184,12 @@ HashConstructor ::= /\{/ _ ExpressionList? _ /\}/ ;
 AnonymousSub ::= /sub\b/ _ Signature? _ Block ;
 
 QwLiteral ::= /qw\s*\([^)]*\)/ ;
+
+# @{ EXPR } and %{ EXPR }: the aggregate EXPR refers to (EXPR->@*, EXPR->%*).
+# The sigil and its brace are one token: `%{` after a term is still `%`
+# then a HashConstructor, and nothing reads `@{^NAME}` as `@{` then `^NAME`.
+CircumfixDeref ::= /@\{/ _ Expression _ /\}/
+    | /%\{/ _ Expression _ /\}/ ;
 
 # §14  UNARY EXPRESSIONS
 

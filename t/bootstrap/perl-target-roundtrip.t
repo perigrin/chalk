@@ -186,6 +186,17 @@ my @cases = (
           "    sub q3() { my \$o = qx{echo 'a b' 2>/dev/null}; return \$? . ':' . \$o }\n",
           "}\n"),
       q{print RT13::q1(), RT13::q2('two'), RT13::q3();} ],
+    [ '@{ EXPR } and %{ EXPR } are the aggregates EXPR refers to',
+      join('', "class RT14 {\n",
+          # (not `my ( $lo, $hi ) = ...` nor `sort keys %...`: a list
+          # declaration keeps only its first variable, and `sort keys %h`
+          # reads as `sort(keys % h)`, whatever the right side is)
+          "    sub firsts(\@in) { my \@p = \@{ shift \@in }; return join('-', \@p) }\n",
+          "    sub ks(\$r) { my \@k = keys %{ \$r->{h} }; return join(',', sort \@k) }\n",
+          "    sub n(\$r) { return scalar \@{ \$r->{a} // [] } }\n",
+          "    sub add(\$r) { push \@{ \$r->{a} }, 9; return \$r->{a}[-1] }\n",
+          "}\n"),
+      q{print RT14::firsts([1, 2], [3]), '|', RT14::ks({ h => { b => 1, a => 2 } }), '|', RT14::n({ a => [5, 6] }), RT14::n({}), '|', RT14::add({ a => [] }), "\n";} ],
 );
 
 for my $case (@cases) {

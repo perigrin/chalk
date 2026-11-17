@@ -348,7 +348,8 @@ Atom ::= Variable
     | HashConstructor
     | QwLiteral
     | AnonymousSub
-    | QualifiedIdentifier ;
+    | QualifiedIdentifier
+    | CircumfixDeref ;
 
 ParenExpr ::= /\(/ _ Expression _ /\)/
     | /\(/ _ ExpressionList _ /\)/
@@ -361,7 +362,15 @@ HashConstructor ::= /\{/ _ ExpressionList? _ /\}/ ;
 AnonymousSub ::= /sub\b/ _ Signature? _ Block ;
 
 QwLiteral ::= /qw\s*\([^)]*\)/ ;
+
+CircumfixDeref ::= /@\{/ _ Expression _ /\}/
+    | /%\{/ _ Expression _ /\}/ ;
 ```
+
+`CircumfixDeref` is `@{ EXPR }` and `%{ EXPR }`, the aggregate EXPR refers
+to (`EXPR->@*`, `EXPR->%*`); the sigil and brace are one token. Its brackets
+reset the precedence context, as a `ParenExpr`'s do. A slice of one
+(`@{$r}[0]`, `%{$h}{a}`) recognizes but its action refuses it as a GAP.
 
 `HashConstructor` and `Block` both match `{ ... }` — this is the
 block-vs-hash ambiguity resolved by the Structural semiring.

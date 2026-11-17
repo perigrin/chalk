@@ -22,7 +22,8 @@ class Chalk::Bootstrap::Semiring::TypeInference {
     my %_ctx_cache;
 
     # Rules that need $alt_idx passed to the Actions method via closure.
-    my $_needs_alt_idx = {PostfixDeref => true, Subscript => true, ExpressionList => true};
+    my $_needs_alt_idx = {PostfixDeref => true, Subscript => true, ExpressionList => true,
+                          CircumfixDeref => true};
 
     # Singleton for one(): a Context with { valid => true } focus and no children.
     my $_one_singleton;

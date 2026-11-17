@@ -309,6 +309,12 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Fixed return types
 
+    # CircumfixDeref: alt 0 is @{ EXPR }, an array; alt 1 %{ EXPR }, a hash
+    # (the aggregate, not the reference EXPR is).
+    method CircumfixDeref($ctx, $alt_idx = 0) {
+        return { valid => true, type => $alt_idx == 0 ? 'Array' : 'Hash' };
+    }
+
     method PostfixIncDec($ctx) {
         return { valid => true, type => 'Num' };
     }

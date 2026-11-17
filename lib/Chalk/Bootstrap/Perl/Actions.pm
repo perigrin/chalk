@@ -2030,6 +2030,20 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §13 ParenExpr — transparent
+    # §13 CircumfixDeref ::= /@\{/ _ Expression _ /\}/ | /%\{/ _ Expression _ /\}/
+    # The aggregate the expression refers to: a PostfixDeref, as EXPR->@*
+    # and EXPR->%* build.
+    method CircumfixDeref($ctx) {
+        my ($sigil) = ($ctx->scanned_text() // '') =~ /\A\s*([\@%])/;
+        my ($target) = grep { $_ isa Chalk::IR::Node } _collect_ir_values($ctx);
+        return undef unless defined $sigil && defined $target;
+        my $sigil_node = _make_const($factory, $sigil);
+        return $ctx->factory->make('PostfixDeref',
+            sigil  => $sigil,
+            inputs => [$target, $sigil_node],
+        );
+    }
+
     method ParenExpr($ctx) {
         my @values = _collect_ir_values($ctx);
         for my $val (@values) {
@@ -2372,6 +2386,12 @@ class Chalk::Bootstrap::Perl::Actions {
             }
         }
 
+        # `@{$r}[0]` and `%{$h}{a}` are slices of the aggregate, not an
+        # element of it: the target is the circumfix deref's PostfixDeref.
+        die "GAP: a slice of a circumfix dereference (\@{...}[...], %{...}{...}) has no IR here\n"
+            if $style ne 'call' && $target isa Chalk::IR::Node::PostfixDeref
+                && ($target->sigil() // '') =~ /\A[\@%]\z/
+                && $text =~ /\A\s*[\@%]\{/;
         return $ctx->factory->make('Subscript',
             inputs       => [$target, $index, _make_const($factory, $style)],
         );

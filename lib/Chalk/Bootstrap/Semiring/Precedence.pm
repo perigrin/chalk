@@ -73,8 +73,10 @@ class Chalk::Bootstrap::Semiring::Precedence {
         AssignmentExpression => [101, 'right'],   # lowest; = and compound ops are right-assoc
     };
 
-    # Rules that reset precedence context (parenthesized expressions)
-    my $RESETS = {ParenExpr => true, ArrayConstructor => true, HashConstructor => true};
+    # Rules that reset precedence context (bracketed expressions: the
+    # brackets of @{ EXPR } and %{ EXPR } close their expression too)
+    my $RESETS = {ParenExpr => true, ArrayConstructor => true, HashConstructor => true,
+                  CircumfixDeref => true};
 
     method zero() {
         return _intern(false, undef, undef, false);
