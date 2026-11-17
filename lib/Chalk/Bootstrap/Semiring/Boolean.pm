@@ -7,10 +7,11 @@ use experimental 'class';
 use Chalk::Bootstrap::Context;
 
 class Chalk::Bootstrap::Semiring::Boolean {
-    # Lazy singletons keep zero()/one() identity stable — useful for ref-eq checks
-    # in callers that hash-cons on semiring results. Boolean has only two atomic
-    # states; leaves (one) and failure (zero) are both content-free, so sharing
-    # the same Context object per state is safe and deterministic.
+    # Boolean has exactly two values, and each is one shared Context: zero()
+    # for failure, one() for a live parse. Every operation returns one of the
+    # two. Recognition asks only whether a parse exists, so no value records
+    # how it was derived; a Context per multiply or add would keep the whole
+    # derivation history of the input alive for nothing.
     my $ZERO_CTX;
     my $ONE_CTX;
 
@@ -43,36 +44,23 @@ class Chalk::Bootstrap::Semiring::Boolean {
         return $value->is_zero();
     }
 
-    # multiply combines two live parse branches. Both must be live for the
-    # product to be live (boolean AND). Returns a two-child Context so parse
-    # shape is preserved for Leo graph-equivalence testing, tagged with
-    # annotations->{boolean} = true so FilterComposite can read the slot.
+    # multiply combines two parse branches. Both must be live for the
+    # product to be live (boolean AND). Scan and completion events arrive
+    # as live right operands and leave the value as it is.
     method multiply($left, $right) {
         return $self->zero() if $left->is_zero();
         return $self->zero() if $right->is_zero();
-        return Chalk::Bootstrap::Context->new(
-            focus       => true,
-            children    => [$left, $right],
-            is_zero     => false,
-            annotations => { boolean => true },
-        );
+        return $self->one();
     }
 
-    # add combines two alternatives. For pure recognition we only care whether
-    # at least one alternative succeeded. When both are non-zero, Boolean has
-    # no opinion on which derivation to prefer — both are valid recognitions.
-    # Returning a synthesized Context (not $left, not $right) lets
-    # FilterComposite distinguish "Boolean abstains" from "Boolean picked left."
+    # add combines two alternatives. At least one must be live for the sum
+    # to be live (boolean OR). When both are live, Boolean has no opinion on
+    # which derivation to prefer: the sum is one(), which both inputs
+    # already are, so it singles out neither. FilterComposite reads a result
+    # identical to both inputs as "Boolean abstains".
     method add($left, $right) {
         return $self->zero() if $left->is_zero() && $right->is_zero();
-        return $right if $left->is_zero();
-        return $left  if $right->is_zero();
-        return Chalk::Bootstrap::Context->new(
-            focus       => true,
-            children    => [$left, $right],
-            is_zero     => false,
-            annotations => { boolean => true },
-        );
+        return $self->one();
     }
 
     # slot_name: Boolean reads/writes the 'boolean' annotation slot.

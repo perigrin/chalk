@@ -6,6 +6,7 @@ use Test::More;
 
 use lib 'lib';
 use Chalk::Bootstrap::Semiring::Boolean;
+use Scalar::Util qw(refaddr);
 
 # Create a semiring instance
 my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
@@ -155,10 +156,15 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     isa_ok($sr->add($zero, $zero), 'Chalk::Bootstrap::Context',
         'add(zero, zero) returns a Context');
 
-    # multiply preserves parse shape — operands appear as children.
+    # Boolean has two values. A product of live operands is the one()
+    # singleton itself: recognition needs no object per derivation.
     my $product = $sr->multiply($one, $one);
-    is(scalar($product->children->@*), 2,
-        'multiply builds structural Context with both operands as children');
+    is(refaddr($product), refaddr($one),
+        'multiply(one, one) is the one() singleton');
+    is(refaddr($sr->multiply($one, $zero)), refaddr($zero),
+        'multiply(one, zero) is the zero() singleton');
+    is(scalar($product->children->@*), 0,
+        'a product holds no reference to its operands');
 }
 
 # Test 11: multiply with scan Context returns non-zero value (ignores terminal text)
@@ -212,25 +218,51 @@ my $sr = Chalk::Bootstrap::Semiring::Boolean->new();
     ok($sr->is_zero($result2), "multiply with complete Context returns zero for zero input");
 }
 
-# Test 13: add(non_zero_a, non_zero_b) returns a Context distinct from both inputs.
+# Test 13: add(non_zero_a, non_zero_b) expresses no preference.
 # Boolean's contract: when both sides are live parses, it has no opinion on which
-# derivation to prefer. The result must NOT be refaddr-equal to either input so
-# FilterComposite cannot mistake "no opinion" for "left wins."
+# derivation to prefer. Every live value is the one() singleton, so the sum is
+# identical to both inputs at once: FilterComposite cannot mistake "no opinion"
+# for "left wins", which needs a result identical to one input and not the other.
 {
     use Chalk::Bootstrap::Context;
-    use Scalar::Util qw(refaddr);
 
-    my $a = $sr->multiply($sr->one(), $sr->one());  # distinct non-zero Context
-    my $b = $sr->multiply($sr->one(), $sr->one());  # another distinct non-zero Context
+    my $a = $sr->multiply($sr->one(), $sr->one());
+    my $b = $sr->multiply($sr->one(), $sr->one());
 
     my $result = $sr->add($a, $b);
 
     ok(!$sr->is_zero($result),
         'add(non_zero_a, non_zero_b): result is non-zero');
-    ok(refaddr($result) != refaddr($a),
-        'add(non_zero_a, non_zero_b): result is not refaddr-identical to left input');
-    ok(refaddr($result) != refaddr($b),
-        'add(non_zero_a, non_zero_b): result is not refaddr-identical to right input');
+    is(refaddr($result) == refaddr($a), refaddr($result) == refaddr($b),
+        'add(non_zero_a, non_zero_b): result does not single out one input');
+    is(refaddr($result), refaddr($sr->one()),
+        'add(non_zero_a, non_zero_b): result is the one() singleton');
+}
+
+# Test 14: scan and completion events leave a live value as the one() singleton,
+# and any live value from outside the semiring counts as one().
+{
+    use Chalk::Bootstrap::Context;
+    my $one = $sr->one();
+    my $scan_ctx = Chalk::Bootstrap::Context->new(
+        focus       => 'hello',
+        position    => 0,
+        annotations => { scan => true, rule_name => 'SomeRule', alt_idx => 0, predicted => {} },
+    );
+    my $complete_ctx = Chalk::Bootstrap::Context->new(
+        focus       => undef,
+        children    => [$one],
+        position    => 5,
+        annotations => { complete => true, rule_name => 'SomeRule', alt_idx => 0, pos => 5, origin => 0 },
+    );
+    is(refaddr($sr->multiply($one, $scan_ctx)), refaddr($one),
+        'multiply with a scan Context is the one() singleton');
+    is(refaddr($sr->multiply($one, $complete_ctx)), refaddr($one),
+        'multiply with a complete Context is the one() singleton');
+    is(refaddr($sr->add($scan_ctx, $sr->zero())), refaddr($one),
+        'add(live, zero) is the one() singleton');
+    is(refaddr($sr->add($sr->zero(), $scan_ctx)), refaddr($one),
+        'add(zero, live) is the one() singleton');
 }
 
 done_testing();
