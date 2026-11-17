@@ -15,6 +15,12 @@ class Chalk::IR::Node::Loop :isa(Chalk::IR::Node) {
     # annotations.
     field $region :reader = undef;
 
+    # The loop's label (`OUTER: for ...`), or undef: the name a `next`,
+    # `last` or `redo` LABEL names. Set by the CompoundStatement action,
+    # after the loop statement built the node.
+    field $label :reader = undef;
+    method set_label($l) { $label = $l; return }
+
     method operation() { 'Loop' }
     method staleness_kind() { 'opaque' }
 

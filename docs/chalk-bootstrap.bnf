@@ -50,7 +50,15 @@ CompoundStatement ::= Block
     | MethodDefinition
     | AdjustBlock
     | PhaserBlock
-    | TryCatchStatement ;
+    | TryCatchStatement
+    | LoopLabel _ WhileStatement
+    | LoopLabel _ ForStatement
+    | LoopLabel _ ForeachStatement
+    | LoopLabel _ Block ;
+
+# `LABEL:` before a loop or a bare block, the name next/last/redo LABEL
+# jump to. One token, colon included: not the head of `Foo::Bar`.
+LoopLabel ::= /[a-zA-Z_]\w*\s*:(?!:)/ ;
 
 # §4  EXPRESSION STATEMENTS
 

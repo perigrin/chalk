@@ -413,14 +413,17 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($form eq 'if') {
             return $self->_emit_if_head($node);
         }
+        # A labelled loop (`OUTER: for ...`) keeps its label.
+        my $label = $node isa Chalk::IR::Node::Loop && defined $node->label()
+            ? $node->label() . ': ' : '';
         if ($form eq 'while') {
-            return $self->_emit_while_head($node);
+            return $label . $self->_emit_while_head($node);
         }
         if ($form eq 'foreach') {
-            return $self->_emit_foreach_head($node);
+            return $label . $self->_emit_foreach_head($node);
         }
         if ($form eq 'for') {
-            return $self->_emit_for_head($node);
+            return $label . $self->_emit_for_head($node);
         }
         if ($form eq 'try') {
             return 'try {';
@@ -1066,7 +1069,7 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 return $val;
             }
             # Bare identifiers (class names, qualified names) emit without quoting
-            if ($ct eq 'bareword' || $ct eq 'filehandle') {
+            if ($ct eq 'bareword' || $ct eq 'filehandle' || $ct eq 'label') {
                 return $val;
             }
             # Numeric values
@@ -1528,6 +1531,14 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             return "$name $block_str";
         }
 
+        # `next LABEL`: the label is a word, not an expression (`next('L')`
+        # computes a label; `next(L)` is a bareword under strict).
+        if ($name =~ /\A(?:next|last|redo)\z/ && $args->@* == 1
+                && $args->[0] isa Chalk::IR::Node::Constant
+                && ($args->[0]->const_type() // '') eq 'label') {
+            return "$name " . $args->[0]->value();
+        }
+
         # `print FH LIST`: the handle is followed by the list, no comma.
         if ($args->@* && $args->[0] isa Chalk::IR::Node::Constant
                 && ($args->[0]->const_type() // '') eq 'filehandle') {
@@ -1646,6 +1657,8 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     method emit_cfg_loop($loop, $loop_if, $body_proj, $exit_proj,
                          $body_stmts = [], $iterator = undef, $list = undef) {
         my @lines;
+        my $label = defined $loop && $loop->can('label') && defined $loop->label()
+            ? $loop->label() . ': ' : '';
 
         if (defined $iterator && defined $list) {
             # Foreach loop: for my $var (list) { ... }
@@ -1656,12 +1669,12 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             } else {
                 $list_expr = $self->_emit_expr($list);
             }
-            push @lines, "for my $iter_expr ($list_expr) {";
+            push @lines, "${label}for my $iter_expr ($list_expr) {";
         } else {
             # While loop: while (cond) { ... }
             my $cond = $loop_if->inputs()->[1];
             my $cond_expr = $self->_emit_expr($cond);
-            push @lines, "while ($cond_expr) {";
+            push @lines, "${label}while ($cond_expr) {";
         }
 
         for my $stmt ($body_stmts->@*) {

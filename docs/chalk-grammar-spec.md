@@ -172,8 +172,22 @@ CompoundStatement ::= Block
     | ClassBlock
     | SubroutineDefinition
     | MethodDefinition
-    | AdjustBlock ;
+    | AdjustBlock
+    | PhaserBlock
+    | TryCatchStatement
+    | LoopLabel _ WhileStatement
+    | LoopLabel _ ForStatement
+    | LoopLabel _ ForeachStatement
+    | LoopLabel _ Block ;
+
+LoopLabel ::= /[a-zA-Z_]\w*\s*:(?!:)/ ;
 ```
+
+A loop may carry a label (`OUTER: for ...`), which `next`, `last` and `redo`
+name (`next OUTER`): the action sets it on the Loop node, and a jump's word
+is a `label` Constant. A label on a bare block recognizes, but its action
+refuses it as a GAP (the IR has no loop-once block); a label on a simple
+statement (perl allows one, for `goto`) is outside the subset.
 
 ### §3a Return Statement
 

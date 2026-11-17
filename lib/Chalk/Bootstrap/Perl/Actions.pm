@@ -533,8 +533,20 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # §3 CompoundStatement — transparent pass-through
+    # Alts 11-14 are `LoopLabel _ <loop or Block>`: the label goes on the
+    # Loop the statement built, the name a next/last/redo LABEL jumps to.
     method CompoundStatement($ctx) {
         my @values = _collect_ir_values($ctx);
+        my ($label) = ($ctx->scanned_text() // '') =~ /\A\s*([a-zA-Z_]\w*)\s*:(?!:)/;
+        if (defined $label) {
+            # (a C-style for with an init is [init, Loop]: the init runs
+            # before the loop, so the label stays on the Loop)
+            my ($loop) = grep { $_ isa Chalk::IR::Node::Loop }
+                map { ref($_) eq 'ARRAY' ? $_->@* : $_ } @values;
+            die "GAP: a label on a bare block ($label: { ... }) has no IR (no loop-once block to carry it)\n"
+                unless defined $loop;
+            $loop->set_label($label);
+        }
         for my $val (@values) {
             return $val if $val isa Chalk::IR::Node;
         }
@@ -1510,6 +1522,21 @@ class Chalk::Bootstrap::Perl::Actions {
             );
             $unwind->set_control_in($control);
             return $unwind;
+        }
+
+        # next/last/redo LABEL: the bareword is the loop's label, not a
+        # string or a call (perl reads the word after a loop jump as one).
+        if (defined $func_name && $func_name =~ /\A(?:next|last|redo)\z/ && @args == 1
+                && $args[0] isa Chalk::IR::Node::Constant
+                && ($ctx->scanned_text() // '') =~ /\A\s*\Q$func_name\E\s+([a-zA-Z_]\w*)\s*\z/
+                && ($args[0]->value() // '') eq $1) {
+            my $name_node = _make_const($factory, $func_name);
+            return $ctx->factory->make('Call',
+                dispatch_kind => 'builtin',
+                name          => $func_name,
+                inputs        => [$name_node,
+                    [$factory->make('Constant', const_type => 'label', value => $1)]],
+            );
         }
 
         # Generic builtin or function call → BuiltinCall

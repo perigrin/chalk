@@ -287,4 +287,41 @@ for my $src ('my @v = @{$r}[0];', 'my %v = %{$h}{a};') {
     like($@, qr/GAP: .*circumfix/, "... the actions refuse it as a GAP: $src");
 }
 
+# ============================================================================
+# §7 Loop labels: `LABEL: for/foreach/while/until ...`, and next/last/redo
+# LABEL. The label is the Loop's; a jump names it with a `label` Constant.
+# ============================================================================
+
+accepts('TIE: for my $t (@a) { next TIE unless $t; }', 'a labelled foreach and next LABEL, as IR/Analysis.pm has it');
+accepts('OUTER: while ($x) { INNER: for my $y (@a) { next OUTER if $y; last INNER; } }',
+                                            'nested labelled loops jumping out of the inner one');
+accepts('L: until ($d) { redo L if $x; }',  'a labelled until and redo LABEL');
+accepts('L: for (my $i = 0; $i < 3; $i++) { last L; }', 'a labelled C-style for');
+accepts('L: foreach (@a) { last L }',       'a labelled foreach with no iterator variable');
+accepts('L : for (@a) { }',                 'space before the label colon');
+accepts('l: for (@a) { next l }',           'a lower-case label');
+accepts('for (@a) { next; last; }',         'next and last without a label (pre-existing)');
+accepts('my $v = $c ? A : B;',              'a ternary over barewords stays a ternary');
+accepts('Foo::Bar->new;',                   'a package name at statement start is no label');
+rejects('L: ;',                             'rejects a label on an empty statement');
+{
+    my $ir = ir_of('TIE: for my $t (@a) { next TIE unless $t; }');
+    my ($loop) = grep { $_->operation() eq 'Loop' } all_nodes($ir);
+    ok(defined $loop, 'a labelled foreach builds a Loop');
+    is($loop && $loop->label(), 'TIE', '... carrying its label');
+}
+{
+    my $ir = ir_of('for (@a) { }');
+    my ($loop) = grep { $_->operation() eq 'Loop' } all_nodes($ir);
+    is($loop && $loop->label(), undef, 'an unlabelled Loop has no label');
+}
+# A label on a bare block (`L: { ... last L }`): the IR has no loop-once
+# block to carry it, so the actions refuse it by name.
+{
+    my $src = 'L: { last L; }';
+    ok($recognizer->parse($src), "recognized: $src");
+    eval { ir_of($src) };
+    like($@, qr/GAP: .*label.*block/, "... the actions refuse a labelled bare block as a GAP");
+}
+
 done_testing();
