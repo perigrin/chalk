@@ -367,14 +367,18 @@ StringLiteral ::= /'(?:[^'\\]|\\.)*'/
     | /"(?:[^"\\]|\\.)*"/
     | /q\s*\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}/
     | /q\s*\[(?:[^\]\\]|\\.)*\]/
+    | /q\s*\((?<P>(?:[^()\\]|\\.|\((?&P)\))*)\)/
     | /qq\s*\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}/
     | /qq\s*\[(?:[^\]\\]|\\.)*\]/
+    | /qq\s*\((?<P>(?:[^()\\]|\\.|\((?&P)\))*)\)/
     | /`(?:[^`\\]|\\.)*`/
     | /qx\s*\((?:[^)\\]|\\.)*\)/
     | /qx\s*\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}/
     | /qx\s*\[(?:[^\]\\]|\\.)*\]/ ;
     # q{} qq{} qx{} (and m{} s{}{} below) nest their braces, as perl's do:
     # `q{a{b}c}` is a{b}c. (B is the brace-balanced body.)
+    # q() and qq() nest their parens the same way: `q(a(b)c)` is a(b)c.
+    # (P is the paren-balanced body.)
     # Backticks and qx(...) qx{...} qx[...] (alts 6-9) run a command: the
     # action builds a BacktickExpr over the command, interpolated as a
     # double-quoted string is. (No nested delimiters inside qx.)

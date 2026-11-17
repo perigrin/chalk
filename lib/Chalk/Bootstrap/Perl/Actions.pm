@@ -1763,17 +1763,19 @@ class Chalk::Bootstrap::Perl::Actions {
         if ($text =~ /^"((?:[^"\\]|\\.)*)"$/) {
             return $self->_double_quoted($ctx, $1);
         }
-        # q{...} q[...]: single-quoted, the delimiters not part of the
-        # string. A backslash escapes a backslash or a delimiter only.
-        # (q{} nests its braces: the body is B.)
-        if ($text =~ /\Aq\s*(?:\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}|\[((?:[^\]\\]|\\.)*)\])\z/s) {
-            my ($content, $delims) = defined $+{B} ? ($+{B}, '{}') : ($2, '[]');
+        # q{...} q[...] q(...): single-quoted, the delimiters not part of
+        # the string. A backslash escapes a backslash or a delimiter only.
+        # (q{} nests its braces: the body is B; q() its parens: P.)
+        if ($text =~ /\Aq\s*(?:\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}|\[((?:[^\]\\]|\\.)*)\]|\((?<P>(?:[^()\\]|\\.|\((?&P)\))*)\))\z/s) {
+            my ($content, $delims) = defined $+{B} ? ($+{B}, '{}')
+                : defined $+{P} ? ($+{P}, '()') : ($2, '[]');
             $content =~ s/\\([\\\Q$delims\E])/$1/g;
             return _make_const($factory, $content);
         }
-        # qq{...} qq[...]: double-quoted, interpolated, delimiters dropped.
-        if ($text =~ /\Aqq\s*(?:\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}|\[((?:[^\]\\]|\\.)*)\])\z/s) {
-            return $self->_double_quoted($ctx, $+{B} // $2);
+        # qq{...} qq[...] qq(...): double-quoted, interpolated, delimiters
+        # dropped.
+        if ($text =~ /\Aqq\s*(?:\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}|\[((?:[^\]\\]|\\.)*)\]|\((?<P>(?:[^()\\]|\\.|\((?&P)\))*)\))\z/s) {
+            return $self->_double_quoted($ctx, $+{B} // $+{P} // $2);
         }
         # Backticks and qx(...) qx{...} qx[...]: run the command, its output
         # the value. perl interpolates the command as a double-quoted string.

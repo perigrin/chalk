@@ -444,8 +444,14 @@ rejects(q(my $s = q{a{b c};),               'rejects q{} with an unbalanced inne
     my $cmd = $bt && $bt->inputs()->[0];
     is($cmd && $cmd->value(), 'echo {a}', 'qx{echo {a}} runs `echo {a}`');
 }
+# q() and qq() nest their parens as q{} its braces do (lib/Chalk/IR/Node/*
+# spell `sub identity_kind { q(hash_consed) }`).
+accepts(q{sub k { q(hash_consed) }},        'q() as a sub body');
+accepts(q{my $s = q(a(b)c);},               'q() holding balanced parens');
+accepts(q{my $s = qq (a(b)c);},             'qq () holding balanced parens');
 for my $case ([q{my $s = q{a{b}c};}, 'a{b}c'], [q{my $s = qq{a{b}c};}, 'a{b}c'],
-              [q{my $s = q[a\]b];}, 'a]b'], [q{my $s = qq[a\tb];}, "a\tb"]) {
+              [q{my $s = q[a\]b];}, 'a]b'], [q{my $s = qq[a\tb];}, "a\tb"],
+              [q{my $s = q(a(b)\)c);}, 'a(b))c'], [q{my $s = qq(x\ty);}, "x\ty"]) {
     my ($src, $want) = $case->@*;
     my $ir = ir_of($src);
     my @strings = grep { $_->operation() eq 'Constant' && ($_->const_type() // '') eq 'string' }
