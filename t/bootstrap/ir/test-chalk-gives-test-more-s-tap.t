@@ -21,8 +21,9 @@ sub same_as_test_more ($body, $name) {
     close $gh;
     my $r = Chalk::CodeGen::Harness::TapDiff->compare($tc);
     my $want = { Chalk::CodeGen::Harness::TapDiff::_run("$^X $tm") };
-    # (the file name differs: the Test::More copy's is replaced by ours)
-    $want->{err} =~ s/\Q$tm\E/$tc/g;
+    # (the file name differs: the Test::More copy's is replaced by ours --
+    # on STDOUT too, where a TODO block's diagnostics go)
+    s/\Q$tm\E/$tc/g for $want->{err}, $want->{out};
     is $r->{verdict}, 'SAME', "$name: perl and T2 agree on Test::Chalk" or diag $r->{why};
     is_deeply $r->{llvm} // {}, $want, "$name: ... and give Test::More's bytes";
 }
@@ -78,6 +79,7 @@ same_as_test_more( qq{is_deeply([1,2,3], [1,2,3], 'same');\nis_deeply([1,2,3], [
 
 # subtest: a code ref run as a test of its own, its TAP indented.
 same_as_test_more( qq{subtest 'inner' => sub {\n    ok(1, 'i1');\n    ok(1, 'i2');\n};\nsubtest 'bad' => sub {\n    ok(0, 'b1');\n    diag("d");\n    note("n");\n};\nsubtest 'done' => sub { ok(1); done_testing; };\nok(1, 'after');\ndone_testing;\n}, 'subtest' );
+same_as_test_more( qq{subtest 'short' => sub {\n    plan tests => 2;\n    ok(1);\n};\nsubtest 'right' => sub {\n    plan tests => 1;\n    ok(1);\n};\ndone_testing;\n}, 'a subtest runs what it planned' );
 same_as_test_more( qq{subtest 'outer' => sub {\n    ok(1, 'o1');\n    subtest 'nested' => sub { ok(1, 'n1'); is(1, 2, 'n2'); };\n};\ndone_testing;\n}, 'nested subtests' );
 
 
@@ -85,5 +87,10 @@ same_as_test_more( qq{subtest 'outer' => sub {\n    ok(1, 'o1');\n    subtest 'n
 # (regexes as graphs), called where like matches.
 same_as_test_more( qq{like('abc', qr/b/, 'has b');\nlike('abc', qr/x/, 'has x');\nunlike('abc', qr/x/);\nunlike('abc', qr/b/, 'no b');\nlike(undef, qr/x/);\nunlike(undef, qr/x/, 'undef unlike');\ndone_testing;\n}, 'like and unlike' );
 same_as_test_more( qq{use v5.36;\nlike('a1b2', qr/^(\\\\w\\\\d)+\$/, 'pairs');\nlike('Hello', qr/hello/i, 'case');\nunlike("a\\\\nb", qr/a.b/, 'no newline');\ndone_testing;\n}, 'like with flags' );
+
+
+# $TODO: the calling package's, read by name; a failure in a TODO block is
+# not counted, and its diagnostics go to STDOUT.
+same_as_test_more( qq{our \$TODO;\nTODO: {\n    local \$TODO = 'later';\n    ok(0, 'x');\n    is(1, 2, 'y');\n}\nok(1, 'z');\ndone_testing;\n}, 'TODO' );
 
 done_testing;

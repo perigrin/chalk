@@ -7,6 +7,11 @@ package Test::Chalk;
 # (t/bootstrap/ir/test-chalk-gives-test-more-s-tap.t). Plain syntax: chalk's own
 # grammar must parse this file later.
 #
+# PERL FIRST, for what chalk's own tests call that T2 does not compile yet
+# (use_ok, require_ok, explain: each a string eval or a module loaded at run
+# time): proved against Test::More's bytes under perl, by
+# t/bootstrap/test-chalk-under-perl.t, so every test in t/ can use this file.
+#
 # WHAT RUNS WHEN. Only this file's SUBS are compiled with a program: its
 # top-level statements run at compile time under perl (B::SoN's run), never in
 # the compiled program. So no state is set up here -- a counter starts undef,
@@ -22,13 +27,20 @@ package Test::Chalk;
 our $VERSION = '1.302210';
 
 use Exporter 'import';
-our @EXPORT = qw(ok is isnt pass fail diag note plan done_testing BAIL_OUT isa_ok can_ok cmp_ok skip is_deeply subtest like unlike);
+our @EXPORT = qw(ok is isnt pass fail diag note plan done_testing BAIL_OUT isa_ok can_ok cmp_ok skip is_deeply subtest like unlike
+  use_ok require_ok explain $TODO);
 
 our $COUNT;     # tests run
 our $FAILED;    # of them, failed
 our $PLANNED;   # the plan's count, once one is printed
 our ( $DIFF_AT, $DIFF_GOT, $DIFF_EXP );   # is_deeply's first difference
 our $INDENT;    # four spaces a subtest deep
+# $TODO, exported as Test::More exports it, so `local $TODO = 'why'` in a
+# TODO: block compiles under strict. As Test::More, it is read as the CALLING
+# package's $TODO (a `local` replaces the exported alias): while it is true a
+# failure is not counted, and its diagnostics go to STDOUT.
+our $TODO;
+our $TODO_NOW;   # the last test's TODO reason, for its diagnostics
 
 # ok($test, $name) -- "ok N - name", or "not ok" and where it failed.
 sub ok {
@@ -55,7 +67,7 @@ sub is {
     my ( undef, $file, $line ) = caller;
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
     return 1 if _ok( $same, $name, $file, $line );
-    _err( "#          got: " . _shown($got) . "\n#     expected: " . _shown($expected) . "\n" );
+    _fdiag( "#          got: " . _shown($got) . "\n#     expected: " . _shown($expected) . "\n" );
     return 0;
 }
 
@@ -65,7 +77,7 @@ sub isnt {
     my ( undef, $file, $line ) = caller;
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
     return 1 if _ok( !$same, $name, $file, $line );
-    _err( "#          got: " . _shown($got) . "\n#     expected: anything else\n" );
+    _fdiag( "#          got: " . _shown($got) . "\n#     expected: anything else\n" );
     return 0;
 }
 
@@ -78,7 +90,7 @@ sub like {
     my $s = defined $got ? $got : '';
     my $ok = $s =~ $re ? 1 : 0;
     return 1 if _ok( $ok, $name, $file, $line );
-    _err( "#                   " . _shown($got) . "\n#     doesn't match '" . $re . "'\n" );
+    _fdiag( "#                   " . _shown($got) . "\n#     doesn't match '" . $re . "'\n" );
     return 0;
 }
 
@@ -88,7 +100,7 @@ sub unlike {
     my $s = defined $got ? $got : '';
     my $ok = $s !~ $re ? 1 : 0;
     return 1 if _ok( $ok, $name, $file, $line );
-    _err( "#                   " . _shown($got) . "\n#           matches '" . $re . "'\n" );
+    _fdiag( "#                   " . _shown($got) . "\n#           matches '" . $re . "'\n" );
     return 0;
 }
 
@@ -124,7 +136,7 @@ sub isa_ok {
         $diag  = $label . " isn't a '" . $class . "'";
     }
     return 1 if _ok( $ok, $label . " isa '" . $class . "'", $file, $line );
-    _err( "#     " . $diag . "\n" );
+    _fdiag( "#     " . $diag . "\n" );
     return 0;
 }
 
@@ -139,7 +151,7 @@ sub can_ok {
     }
     my $label = scalar(@methods) == 1 ? $class . "->can('" . $methods[0] . "')" : $class . "->can(...)";
     return 1 if _ok( $failed eq '', $label, $file, $line );
-    _err( $failed );
+    _fdiag( $failed );
     return 0;
 }
 
@@ -164,13 +176,13 @@ sub cmp_ok {
     else  { die "Test::Chalk: cmp_ok's $op is not supported\n" }
     return 1 if _ok( $ok, $name, $file, $line );
     if ( $op eq '==' || $op eq 'eq' ) {
-        _err( "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: " . _cmp_shown( $expected, $op ) . "\n" );
+        _fdiag( "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: " . _cmp_shown( $expected, $op ) . "\n" );
     }
     elsif ( $op eq '!=' || $op eq 'ne' ) {
-        _err( "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: anything else\n" );
+        _fdiag( "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: anything else\n" );
     }
     else {
-        _err( "#     " . _shown($got) . "\n#         " . $op . "\n#     " . _shown($expected) . "\n" );
+        _fdiag( "#     " . _shown($got) . "\n#         " . $op . "\n#     " . _shown($expected) . "\n" );
     }
     return 0;
 }
@@ -201,7 +213,7 @@ sub is_deeply {
     if ( !ref($got) && !ref($expected) ) {
         my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
         return 1 if _ok( $same, $name, $file, $line );
-        _err( "#          got: " . _shown($got) . "\n#     expected: " . _shown($expected) . "\n" );
+        _fdiag( "#          got: " . _shown($got) . "\n#     expected: " . _shown($expected) . "\n" );
         return 0;
     }
     my $ok;
@@ -212,7 +224,7 @@ sub is_deeply {
         $ok = _differ( '$FOO', $got, $expected, 0, 0 );
     }
     return 1 if _ok( $ok, $name, $file, $line );
-    _err( "#     Structures begin differing at:\n"
+    _fdiag( "#     Structures begin differing at:\n"
       . "#     " . _replace( $DIFF_AT, '$FOO', '     $got' ) . " = " . $DIFF_GOT . "\n"
       . "#     " . _replace( $DIFF_AT, '$FOO', '$expected' ) . " = " . $DIFF_EXP . "\n" );
     return 0;
@@ -313,7 +325,10 @@ sub _deep_shown {
 
 # diag(@msg) to STDERR and note(@msg) to STDOUT, each line "# "-prefixed.
 sub diag {
-    _err( _comment( join( '', @_ ) ) );
+    my ($pack) = caller;
+    my $t = _comment( join( '', @_ ) );
+    if ( _todo_of($pack) ) { _out($t) }   # (in a TODO block, to STDOUT)
+    else                   { _err($t) }
     return 0;
 }
 
@@ -368,19 +383,78 @@ sub subtest {
     $FAILED  = 0;
     $PLANNED = undef;
     $INDENT  = ( defined $indent ? $indent : '' ) . '    ';
+    # shortcut: the code is not run in an eval, so a skip_all in it ends the
+    # program, not the subtest, and an error leaves the subtest unfinished.
+    # Test::More's eval is what T2 cannot compile yet: a package variable the
+    # code writes is read stale after `eval { $code->(); 1 }` (it DIFFERS).
     $code->();
     my $n = $COUNT + 0;
     _out( "1.." . $n . "\n" ) unless defined $PLANNED;
+    # A PLAN NOT KEPT fails the subtest, as Test::More's.
+    my $extra = defined $PLANNED ? $n - $PLANNED : 0;
+    if ( $extra != 0 ) {
+        my $s = $PLANNED == 1 ? "" : "s";
+        _err( "# Looks like you planned " . $PLANNED . " test" . $s . " but ran " . $n . ".\n" );
+    }
     my $bad = $FAILED + 0;
     if ($bad) {
         my $tests = $bad == 1 ? "test" : "tests";
-        _err( "# Looks like you failed " . $bad . " " . $tests . " of " . $n . ".\n" );
+        my $run   = $extra == 0 ? "" : " run";
+        _err( "# Looks like you failed " . $bad . " " . $tests . " of " . $n . $run . ".\n" );
     }
     $COUNT   = $count;
     $FAILED  = $failed;
     $PLANNED = $planned;
     $INDENT  = $indent;
-    return _ok( !$bad && $n > 0, $name, $file, $line );
+    return _ok( !$bad && $n > 0 && $extra == 0, $name, $file, $line );
+}
+
+# use_ok($module, @imports) -- `use $module @imports` at run time, in the
+# caller's package, as a test named "use $module;"; on failure, the error.
+# (A string eval: under perl only, as Test::More's.)
+sub use_ok {
+    my ( $module, @imports ) = @_;
+    my ( $pack, $file, $line ) = caller;
+    $file =~ y/\n\r/_/;
+    my $import = ( scalar(@imports) == 1 && $imports[0] =~ /^\d+(?:\.\d+)?$/ ) ? $imports[0] : '@{$args[0]}';
+    my $code = "package " . $pack . ";\n#line " . $line . " " . $file . "\nuse " . $module . " " . $import . ";\n1;\n";
+    my ( $result, $error ) = _eval( $code, \@imports );
+    return 1 if _ok( $result, "use " . $module . ";", $file, $line );
+    chomp $error;
+    _fdiag( _comment( "    Tried to use '" . $module . "'.\n    Error:  " . $error . "\n" ) );
+    return 0;
+}
+
+# require_ok($module) -- `require $module` at run time (a file, if it is not
+# a module name), as a test named "require $module;".
+sub require_ok {
+    my ($module) = @_;
+    my ( $pack, $file, $line ) = caller;
+    my $name = $module;
+    ( my $bare = $module ) =~ s/\b::\b//g;
+    $name = "'" . $module . "'" unless $bare =~ /^[a-zA-Z]\w*$/;
+    my ( $result, $error ) = _eval( "package " . $pack . ";\nrequire " . $name . ";\n1;\n" );
+    return 1 if _ok( $result, "require " . $name . ";", $file, $line );
+    chomp $error;
+    _fdiag( _comment( "    Tried to require '" . $name . "'.\n    Error:  " . $error . "\n" ) );
+    return 0;
+}
+
+# _eval($code, @args) -- the code's value and error, $@ and $! left alone.
+sub _eval {
+    my ( $code, @args ) = @_;
+    local ( $@, $!, $SIG{__DIE__} );
+    my $result = eval $code;
+    return ( $result, $@ );
+}
+
+# explain(@things) -- each reference as Data::Dumper shows it (Indent 1,
+# Terse, keys sorted), anything else as itself.
+sub explain {
+    my @things = @_;
+    local ( $@, $! );
+    require Data::Dumper;
+    return map { ref $_ ? Data::Dumper->new( [$_] )->Indent(1)->Terse(1)->Sortkeys(1)->Dump : $_ } @things;
 }
 
 # BAIL_OUT($why) -- stop the whole run.
@@ -396,17 +470,23 @@ sub _ok {
     my $out = $test ? "ok $COUNT" : "not ok $COUNT";
     # A NAME'S # is escaped, so TAP does not read it as a directive.
     $out = $out . " - " . _replace( $name, '#', '\\#' ) if defined $name;
+    my ($pack) = caller(1);   # (who called the test function)
+    my $todo = _todo_of($pack);
+    $TODO_NOW = $todo;
+    $out = $out . " # TODO " . $todo if $todo;
     _out( $out . "\n" );
     return 1 if $test;
-    $FAILED = $FAILED + 1;
+    $FAILED = $FAILED + 1 unless $todo;
+    my $failed = $todo ? "Failed (TODO)" : "Failed";
     # UNDER A HARNESS a newline first (Test2::Formatter::TAP): a "Failed test"
     # line on STDERR after a write to STDOUT -- here, always the "not ok".
-    print STDERR "\n" if $ENV{HARNESS_ACTIVE};   # (never indented)
+    # (In a TODO block, where they go to STDOUT, none.)
+    print STDERR "\n" if $ENV{HARNESS_ACTIVE} && !$todo;   # (never indented)
     if ( defined $name ) {
-        _err( "#   Failed test '" . $name . "'\n#   at " . $file . " line " . $line . ".\n" );
+        _fdiag( "#   " . $failed . " test '" . $name . "'\n#   at " . $file . " line " . $line . ".\n" );
     }
     else {
-        _err( "#   Failed test at " . $file . " line " . $line . ".\n" );
+        _fdiag( "#   " . $failed . " test at " . $file . " line " . $line . ".\n" );
     }
     return 0;
 }
@@ -415,6 +495,20 @@ sub _ok {
 # indent in.
 sub _out { my ($t) = @_; print _indented($t); return 1 }
 sub _err { my ($t) = @_; print STDERR _indented($t); return 1 }
+
+# _fdiag($text) -- the last test's failure diagnostics: to STDERR, or in a
+# TODO block to STDOUT.
+sub _fdiag {
+    my ($t) = @_;
+    return _out($t) if $TODO_NOW;
+    return _err($t);
+}
+
+# _todo_of($package) -- that package's $TODO.
+sub _todo_of {
+    my ($pack) = @_;
+    return ${ $pack . '::TODO' };
+}
 
 sub _indented {
     my ($t) = @_;
