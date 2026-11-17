@@ -85,4 +85,28 @@ check( 'sort { $a <=> $b } @x',   'block', 'perl: sort {$a <=> $b} @x' );
 check( 'map { "\L$_" => 1 } @x', 'block', 'PERL REJECTS: guesses EXPR' );
 check( 'map { 1 }, @x',          'expr',  'PERL REJECTS: guesses BLOCK' );
 
+# A builtin with one signature, EXPR LIST, has no BLOCK form: its `{` is an
+# anonymous hash, whatever follows the `}`. (Only map, grep and sort have
+# two; print and say take a block as their filehandle.)
+#   perl -MO=Deparse: bless {%args}, $class  ->  bless({%args}, $class)
+{
+    my $src = 'class B1 { sub new($class, %args) { return bless {%args}, $class } }';
+    $parser->semiring->flush_tie_log;
+    $parser->semiring->reset_cache;
+    my $mop = Chalk::Bootstrap::Semiring::SemanticAction::current_mop();
+    my $r   = $parser->parse_value($src);
+    ok defined $r && !$r->is_zero, 'bless {%args}, $class: parses';
+    is scalar $parser->semiring->tie_log->@*, 0, 'bless {%args}, $class: one reading, no tie';
+    my $out = Chalk::Bootstrap::Perl::Target::Perl->new->generate($mop);
+    $out = join '', values $out->%* if ref $out eq 'HASH';
+    like $out, qr/bless\(\{\s*%args\s*\}, \$class\)/, 'bless {%args}, $class: the { is an anonymous hash';
+}
+{
+    my $src = 'class B2 { method m($fh) { print {$fh} "x"; say {$fh} "y"; return 1 } }';
+    $parser->semiring->flush_tie_log;
+    $parser->semiring->reset_cache;
+    my $r = $parser->parse_value($src);
+    ok defined $r && !$r->is_zero, 'print {$fh} LIST and say {$fh} LIST still parse';
+}
+
 done_testing;

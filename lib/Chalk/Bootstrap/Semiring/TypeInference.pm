@@ -429,6 +429,10 @@ class Chalk::Bootstrap::Semiring::TypeInference {
                     # checked against the one its alternative spells: a
                     # Block in alts 2 and 3, an EXPR and its comma in 0, 1.
                     my $block_form = ($alt_idx == 2 || $alt_idx == 3);
+                    # A builtin with one signature has no BLOCK form: after
+                    # `bless`, `{` opens an anonymous hash (perlfunc gives a
+                    # BLOCK only to the builtins whose `forms` name one).
+                    return undef if $block_form && !$sig->{forms};
                     my $form = $sig->{forms}
                         ? $sig->{forms}{ $block_form ? 'block' : 'expr' }
                         : $sig;

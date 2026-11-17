@@ -258,8 +258,14 @@ class Chalk::Grammar::Perl::TypeLibrary {
         bless   => { min_arity => 1, arg_types => ['Ref', 'Str'],               return_type => 'Object' },
 
         # I/O (variadic)
-        print   => { min_arity => 0, arg_types => ['List'],                       return_type => 'Boolean' },
-        say     => { min_arity => 0, arg_types => ['List'],                       return_type => 'Boolean' },
+        # Two forms (perlfunc): `print LIST` and `print {FILEHANDLE} LIST`,
+        # the block the filehandle, the LIST optional ($_ when it is empty).
+        print   => { min_arity => 0, arg_types => ['List'],                       return_type => 'Boolean',
+                     forms => { block => { min_arity => 1, arg_types => ['Code', 'List'] },
+                                expr  => { min_arity => 0, arg_types => ['List'] } } },
+        say     => { min_arity => 0, arg_types => ['List'],                       return_type => 'Boolean',
+                     forms => { block => { min_arity => 1, arg_types => ['Code', 'List'] },
+                                expr  => { min_arity => 0, arg_types => ['List'] } } },
 
         # Flow control (variadic: return LIST)
         return  => { min_arity => 0, arg_types => ['List'],                       return_type => 'List' },
