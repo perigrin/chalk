@@ -186,11 +186,7 @@ SKIP: {
         'lib/Chalk'
     );
 
-    my %todo_files = (
-        'lib/Chalk/Bootstrap/IR/Optimizer.pm'      => 'Complex regex/string patterns exceed grammar capacity',
-        'lib/Chalk/Bootstrap/Perl/Target/EmitHelpers.pm' => 'Large file (2249 lines) exceeds parse timeout',
-        'lib/Chalk/Bootstrap/Perl/Target/C.pm'     => 'Large file (1818 lines) exceeds parse timeout',
-    );
+    my %todo_files;
 
     for my $file (sort @pm_files) {
         open my $fh, '<:utf8', $file or do {
