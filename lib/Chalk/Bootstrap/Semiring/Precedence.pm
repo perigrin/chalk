@@ -76,6 +76,9 @@ class Chalk::Bootstrap::Semiring::Precedence {
     my $EXPR_LEVELS = {
         PostfixExpression    => [-2,  undef  ],  # higher than any binary op
         UnaryExpression      => [-1,  undef  ],  # higher than any binary op
+        # a prefix ++/-- (L3) is looser than `->` (L2): marked as a unary,
+        # it is no postfix's target -- `++$b->{seq}` is ++($b->{seq})
+        PreIncDec            => [-1,  undef  ],
         # BinaryExpression uses the operator's level from PrecedenceTable
         TernaryExpression    => [100, 'right'],   # lower than any binary op; ?: is right-assoc
         AssignmentExpression => [101, 'right'],   # lowest; = and compound ops are right-assoc

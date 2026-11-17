@@ -814,4 +814,12 @@ subtest 'L5 unary + over a postfix deref: keys +($h // {})->%*' => sub {
     is($call->name(), 'keys', 'the call is keys');
 };
 
+# L3 prefix ++ is looser than L2 `->`: `++$b->{seq}` steps the element
+# (LLVM/Builder/Control.pm).
+subtest 'L3 ++ over L2 ->: ++$b->{seq}' => sub {
+    my $expr = parse_expr('++$b->{seq}');
+    my $ca = isa_with_shape($expr, 'Chalk::IR::Node::CompoundAssign', 'top is the increment') or return;
+    isa_with_shape($ca->inputs()->[1], 'Chalk::IR::Node::Subscript', 'of the element');
+};
+
 done_testing;
