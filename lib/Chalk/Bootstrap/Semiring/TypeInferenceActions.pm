@@ -145,7 +145,60 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
 
     # Rich rules: compute type from operator/signature
 
+    # keys, values and each take a hash; none of them is a term on its own
+    # (perl: "Not enough arguments for keys"). After one of them perl
+    # expects a term, so a `%` there starts the hash: `sort keys %h` is
+    # sort(keys(%h)), never (sort keys) % h nor sort(keys % h).
+    my %NEEDS_HASH_ARG = map { $_ => true } qw(keys values each);
+
+    # The rule's own symbols, in order: the named children reached through
+    # the unnamed item-prefix nodes that chain them.
+    my sub _rule_symbols($ctx) {
+        my @out;
+        my @todo = $ctx->children()->@*;
+        while (@todo) {
+            my $c = shift @todo;
+            if (defined $c->rule()) { push @out, $c }
+            else                    { unshift @todo, $c->children()->@* }
+        }
+        return @out;
+    }
+
+    # The last token a subtree scanned, with the rules that enclose it
+    # (outermost first): [text, [rules]]. undef when the subtree ends in
+    # something that is not a scanned token.
+    my sub _last_token($n, $rules = []) {
+        my @kids = $n->children()->@*;
+        if (!@kids) {
+            my $f = $n->focus();
+            return undef if ref $f;
+            return defined $f && $f =~ /\S/ ? [$f, $rules] : false;
+        }
+        my $inner = defined $n->rule() ? [$rules->@*, $n->rule()] : $rules;
+        for my $c (reverse @kids) {
+            my $r = __SUB__->($c, $inner);
+            return $r if !defined $r || $r;
+        }
+        return false;
+    }
+
+    # True when a BinaryExpression's left operand ends in a bare keys,
+    # values or each read as a term (Atom > QualifiedIdentifier) -- not a
+    # method name, not a hash key in braces (those end in `}`).
+    my sub _left_ends_in_bare_hash_op($ctx) {
+        my ($left) = grep { $_->rule() eq 'Expression' } _rule_symbols($ctx);
+        return false unless defined $left;
+        my $tok = _last_token($left);
+        return false unless $tok;
+        my ($text, $rules) = $tok->@*;
+        return $NEEDS_HASH_ARG{$text}
+            && $rules->@* >= 2
+            && $rules->[-1] eq 'QualifiedIdentifier'
+            && $rules->[-2] eq 'Atom';
+    }
+
     method BinaryExpression($ctx) {
+        return undef if _left_ends_in_bare_hash_op($ctx);
         my $op = _get_op_text($ctx);
         my $result_type;
         if (defined $op) {
