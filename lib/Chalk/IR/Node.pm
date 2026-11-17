@@ -3,6 +3,7 @@
 use 5.42.0;
 use utf8;
 use experimental 'class';
+use Scalar::Util ();   # (refaddr, in remove_consumer)
 
 #
 # TWO GATES, AND BOTH ARE LOAD-BEARING.
