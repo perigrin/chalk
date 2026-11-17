@@ -1463,14 +1463,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 push @items, $val;
             }
         }
-        # `die => 1`, `time => 1`: a bare word before a fat comma is its
-        # string.
-        my $text = $ctx->scanned_text() // '';
-        @items = map {
-            my $word = $self->_bare_word_of($_);
-            defined $word && $text =~ /(?<![\w\$\@%>:-])\Q$word\E\s*=>/
-                ? $self->_quoted_bare_word($_) : $_
-        } @items;
         return $ctx->factory->make('ExpressionList',
             inputs       => [\@items],
         );
@@ -1493,8 +1485,10 @@ class Chalk::Bootstrap::Perl::Actions {
     # §13 Atom — transparent pass-through
     method Atom($ctx) {
         my @values = _collect_ir_values($ctx);
+        # (a word before `=>` is FatCommaWord's string, no call)
+        my $is_word = grep { ($_->rule() // '') eq 'QualifiedIdentifier' } _collect_ir_leaves($ctx);
         for my $val (@values) {
-            if ($val isa Chalk::IR::Node::Constant
+            if ($is_word && $val isa Chalk::IR::Node::Constant
                     && ($ctx->scanned_text() // '') =~ /\A\s*([a-zA-Z_]\w*)\s*\z/
                     && _is_bare_builtin($1)) {
                 return $self->_bare_word_call($ctx, $1);
@@ -1504,12 +1498,19 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
-    # A bare `die` or `warn` as a term (`open(...) or die`, `$x // warn`):
-    # perl calls it with an empty list -- it is no string. Where a bare word
-    # is quoted instead (a hash key `{die}`, `die => ...`), Subscript and
-    # ExpressionList put the string back; %bare_word_call records which
-    # nodes they may.
-    field %bare_word_call;
+    # A word perl quotes: before `=>` (FatCommaWord) or alone in a hash
+    # subscript's braces (BareKey). Its string, whatever word it is.
+    method FatCommaWord($ctx) {
+        return _make_const($factory, ($ctx->scanned_text() // '') =~ s/^\s+|\s+$//gr);
+    }
+    method BareKey($ctx) {
+        return _make_const($factory, ($ctx->scanned_text() // '') =~ s/^\s+|\s+$//gr);
+    }
+
+    # A bare builtin as a term (`open(...) or die`, `return time`): perl
+    # calls it with no operand -- it is no string. Where perl quotes the word
+    # instead (`{time}`, `time => 1`), the grammar reads it as BareKey or
+    # FatCommaWord, never as this term.
     method _bare_word_call($ctx, $word) {
         my $node;
         if ($word eq 'die') {
@@ -1523,20 +1524,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 inputs        => [_make_const($factory, $word), []],
             );
         }
-        $bare_word_call{ refaddr($node) } = $word;
         return $node;
-    }
-
-    # The word a node was called by as a bare term, or undef.
-    method _bare_word_of($node) {
-        return blessed($node) ? $bare_word_call{ refaddr($node) } : undef;
-    }
-
-    # The string a bare word stands for where perl quotes it, else the node.
-    method _quoted_bare_word($node) {
-        return $node unless blessed($node);
-        my $word = $bare_word_call{ refaddr($node) };
-        return defined $word ? _make_const($factory, $word) : $node;
     }
 
     # §16 CallExpression — detect return/die builtins, produce IR nodes
@@ -2755,10 +2743,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 last;
             }
         }
-
-        # `$h{die}`: a bare word alone in a hash subscript is its string.
-        $index = $self->_quoted_bare_word($index)
-            if $style eq 'hash' && $text =~ /\{\s*[a-zA-Z_]\w*\s*\}\z/;
 
         # `@{$r}[0]` and `%{$h}{a}` are slices of the aggregate, not an
         # element of it: the target is the circumfix deref's PostfixDeref.

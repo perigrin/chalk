@@ -490,4 +490,50 @@ for my $src (q{my $s = "$r->@*";}, q{my $s = "$r->@[0]";}, q{my $s = "$r->$*";},
     ok(scalar @lits, q{"$r->%*" keeps ->%* as text, as perl does});
 }
 
+# ============================================================================
+# §11 A word perl quotes: before `=>` (perlop: "forces a word to its left to
+# be interpreted as a string") and alone in a hash subscript's braces
+# (perldata: "a simple identifier within such curlies is forced to be a
+# string"). A keyword is no exception -- Regex/Parse.pm's `s => [...]`,
+# Target/Perl.pm's `not => 30` and `$PREC_TERM{not}`, JSON.pm's
+# `$f->{local}` -- and the word is the string, with one reading.
+# perl -MO=Deparse: ('s', 1, 'undef', 2, 'not', 3, 'sub', 4, 'm', 5),
+# $h{'s'}, $h{'undef'}, $h->{'not'}; `sub f { undef }` stays undef.
+# ============================================================================
+
+local $ENV{CHALK_COUNT_FILTER_TIES} = 1;
+my sub strings_of($src) {
+    $parser->semiring->flush_tie_log();
+    my $ir = ir_of($src);
+    my $ties = scalar $parser->semiring->tie_log()->@*;
+    return ($ir, $ties, map { $_->value() }
+        grep { $_->operation() eq 'Constant' && ($_->const_type() // '') eq 'string' } all_nodes($ir));
+}
+for my $case (
+    [ 'my %h = (s => 1, m => 2, undef => 3, not => 4, sub => 5, time => 6, foo => 7);',
+      [qw(s m undef not sub time foo)] ],
+    [ 'my %h = (a => 1, -b => 2, q => 3, local => 4, __PACKAGE__ => 5);',
+      [qw(a b q local __PACKAGE__)] ],
+    [ 'my $v = $h{s} . $h{undef} . $r->{not} . $h{time} . $r->{local} . $h{ m } . $h{key};',
+      [qw(s undef not time local m key)] ],
+) {
+    my ($src, $want) = $case->@*;
+    my ($ir, $ties, @strings) = eval { strings_of($src) };
+    is($@, '', "parses: $src");
+    ok(defined $ir, "to IR: $src");
+    is($ties, 0, "one reading: $src");
+    my %have = map { $_ => 1 } @strings;
+    is_deeply([grep { !$have{$_} } $want->@*], [], "each word is its string: $src")
+        or diag('strings: ' . join(', ', @strings));
+}
+{
+    # The word stays what it is where perl does not quote it.
+    my ($ir, $ties, @strings) = strings_of('sub f { undef } my $x = { s => 1 }; my %m = ($o->name => 1, $o->s => 2);');
+    is($ties, 0, 'a keyword in a block, a method name before =>: one reading');
+    ok(!(grep { $_ eq 'undef' } @strings), 'sub f { undef } is undef, not a string')
+        or diag('strings: ' . join(', ', @strings));
+    my @calls = grep { $_->operation() eq 'Call' && $_->dispatch_kind() eq 'method' } all_nodes($ir);
+    is(scalar @calls, 2, '$o->name => 1 and $o->s => 2 call their methods');
+}
+
 done_testing();

@@ -266,7 +266,29 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
     # alt 2 = ExpressionList => Expression (arity = child + 1)
     # alt 3 = trailing comma (arity preserved)
 
+    # True when an ExpressionList ends in a bare word that is not read as
+    # the FatCommaWord string: an Atom > QualifiedIdentifier, or a keyword's
+    # own rule (`undef` a Literal, `sub` an AnonymousSub). A method name
+    # (`$o->name =>`) is no word perl quotes there.
+    my sub _ends_in_unquoted_word($list) {
+        my $tok = _last_token($list);
+        return false unless $tok;
+        my ($text, $rules) = $tok->@*;
+        return false unless $text =~ /\A\s*[a-zA-Z_]\w*\s*\z/;
+        return false if $rules->[-1] eq 'FatCommaWord';
+        return false if $rules->@* >= 2 && $rules->[-1] eq 'QualifiedIdentifier'
+            && $rules->[-2] eq 'MethodCall';
+        return true;
+    }
+
     method ExpressionList($ctx, $alt_idx = 0) {
+        # Alt 2, `LIST => EXPR`: a word before `=>` is its string (perlop:
+        # `=>` "forces a word to its left to be interpreted as a string"),
+        # read by FatCommaWord; no other reading of it survives.
+        if ($alt_idx == 2) {
+            my ($left) = grep { $_->rule() eq 'ExpressionList' } _rule_symbols($ctx);
+            return undef if defined $left && _ends_in_unquoted_word($left);
+        }
         my ($arity, $item_types);
         if ($alt_idx == 0) {
             $arity = 1;
@@ -343,14 +365,42 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
             && $rules->[-2] eq 'Atom';
     }
 
+    # The scanned tokens of a subtree, in order (whitespace and comments
+    # left out).
+    my sub _tokens($n) {
+        my @kids = $n->children()->@*;
+        if (!@kids) {
+            my $f = $n->focus();
+            return () if ref $f || !defined $f;
+            return $f =~ /\A(?:\s|#[^\n]*)*\z/ ? () : ($f);
+        }
+        return map { __SUB__->($_) } @kids;
+    }
+
+    # True when a subtree is one bare word and nothing else.
+    my sub _is_lone_word($n) {
+        my @t = _tokens($n);
+        return @t == 1 && $t[0] =~ /\A\s*[a-zA-Z_]\w*\s*\z/;
+    }
+
     method Subscript($ctx, $alt_idx = 0) {
-        # Alts 3 and 4 subscript without an arrow (`$a[0]`, `$h{k}`): perl
+        # Alts 3, 4 and 6 subscript without an arrow (`$a[0]`, `$h{k}`): perl
         # takes `[` or `{` straight after a term as a subscript only after a
         # variable or another subscript -- never after a bare word. `map {`
         # is map and its block, not an element of a hash named map.
-        return undef if ($alt_idx == 3 || $alt_idx == 4) && _left_is_bare_word($ctx);
+        return undef if ($alt_idx == 3 || $alt_idx == 4 || $alt_idx == 6)
+            && _left_is_bare_word($ctx);
+        # A word alone in a hash subscript's braces is its string (perldata:
+        # "a simple identifier within such curlies is forced to be a
+        # string"): alts 5 and 6 (BareKey) read it so; alts 1 and 4 may not
+        # read it as an expression -- `$h{s}` is no substitution, `$h{time}`
+        # no call.
+        if ($alt_idx == 1 || $alt_idx == 4) {
+            my (undef, $index) = grep { $_->rule() eq 'Expression' } _rule_symbols($ctx);
+            return undef if defined $index && _is_lone_word($index);
+        }
         my $sub_type;
-        if ($alt_idx <= 1) {
+        if ($alt_idx <= 1 || $alt_idx == 5) {
             # alt 0 = [...] (array), alt 1 = {...} (hash) → element is Scalar
             $sub_type = 'Scalar';
         }

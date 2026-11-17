@@ -179,7 +179,14 @@ Atom ::= Variable
     | AnonymousSub
     | /__SUB__\b/
     | QualifiedIdentifier
-    | CircumfixDeref ;
+    | CircumfixDeref
+    | FatCommaWord ;
+
+# A word before `=>` is its string, whatever else it could be (perlop: `=>`
+# "forces a word to its left to be interpreted as a string"): `s => 1`,
+# `undef => 2`, `time => 3`. TypeInference rejects any other reading of a
+# lone word there, so this is the word's one reading.
+FatCommaWord ::= /[a-zA-Z_]\w*(?=(?:\s|#[^\n]*)*=>)/ ;
 
 ParenExpr ::= /\(/ _ Expression _ /\)/
     | /\(/ _ ExpressionList _ /\)/
@@ -258,7 +265,14 @@ Subscript ::= Expression _ /->/ _ /\[/ _ Expression _ /\]/
     | Expression _ /->/ _ /\{/ _ Expression _ /\}/
     | Expression _ /->/ _ /\(/ _ ExpressionList? _ /\)/
     | Expression _ /\[/ _ Expression _ /\]/
-    | Expression _ /\{/ _ Expression _ /\}/ ;
+    | Expression _ /\{/ _ Expression _ /\}/
+    | Expression _ /->/ _ /\{/ _ BareKey _ /\}/
+    | Expression _ /\{/ _ BareKey _ /\}/ ;
+# Alts 5 and 6: a word alone in a hash subscript's braces is its string
+# (perldata: "a simple identifier within such curlies is forced to be a
+# string"): `$h{s}`, `$r->{not}`. TypeInference rejects alts 1 and 4 with a
+# lone word as the index, so this is its one reading.
+BareKey ::= /[a-zA-Z_]\w*(?=(?:\s|#[^\n]*)*\})/ ;
 
 PostfixDeref ::= Expression _ /->/ _ /@\*/
     | Expression _ /->/ _ /%\*/
