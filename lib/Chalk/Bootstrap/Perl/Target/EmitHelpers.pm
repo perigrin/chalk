@@ -1585,6 +1585,17 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         return "sv_2mortal(newSVpvs(\"$escaped\"))";
     }
 
+    # The C target models an interpolated part that is a literal or a plain
+    # `$name` (or `$1`); an element (`$a[0]`), an array (`@a`) or a
+    # punctuation variable (`$!`) is refused by name.
+    method _refuse_unmodelled_interp_part($part) {
+        die "GAP: the C target has no lowering for an interpolated element (\$a[0], \$h{k})\n"
+            unless $part isa Chalk::IR::Node::Constant;
+        die "GAP: the C target has no lowering for interpolating " . $part->value() . "\n"
+            if $part->const_type() eq 'variable' && $part->value() !~ /\A\$\w+\z/;
+        return;
+    }
+
     method _emit_interp_expr($node, $declared_vars) {
         my $parts = $node->inputs()->[0];
         return '&PL_sv_undef' unless $parts->@*;
@@ -1596,6 +1607,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $first = true;
 
         for my $part ($parts->@*) {
+            $self->_refuse_unmodelled_interp_part($part);
             if ($part->const_type() eq 'variable') {
                 my $var = $part->value();
                 $var =~ s/^\$//;

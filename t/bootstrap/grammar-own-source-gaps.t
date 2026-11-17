@@ -218,9 +218,10 @@ accepts(q{( $x = $by{ ( $x->{inputs} // [] )->[0] // '' } // {} ), $i = $x->{op}
 # ============================================================================
 # §5 qx// and backticks: a command whose output is the value. perl
 # interpolates the command as a double-quoted string; it becomes a
-# BacktickExpr over that string. Interpolation the double-quoted string
-# action does not model (a punctuation variable, an array, an element)
-# would be passed to the shell as text: it is refused as a GAP instead.
+# BacktickExpr over that string, interpolated as a double-quoted string
+# is (an array, an element too). What the double-quoted string action does
+# not model (a caret variable) is refused as a GAP, never handed to the
+# shell as text.
 # ============================================================================
 
 accepts('my $o = qx(ls -la);',              'qx(...)');
@@ -255,10 +256,17 @@ ok(!defined eval { ir_of('my $o = qx ls;') }, 'the full parser refuses qx with n
     my $cmd = $bt && $bt->inputs()->[0];
     ok($cmd && $cmd->operation() eq 'Interpolate', 'qx(echo $name) interpolates the command');
 }
-for my $src ('my $o = qx($^X -e 1);', 'my $o = qx(echo @a);', 'my $o = qx(echo $h{k});') {
+for my $src ('my $o = qx(echo @a);', 'my $o = qx(echo $h{k});') {
+    my $ir = ir_of($src);
+    my ($bt) = grep { $_->operation() eq 'BacktickExpr' } all_nodes($ir);
+    my $cmd = $bt && $bt->inputs()->[0];
+    ok($cmd && $cmd->operation() eq 'Interpolate', "$src interpolates the command");
+}
+{
+    my $src = 'my $o = qx($^X -e 1);';
     ok($recognizer->parse($src), "recognized: $src");
     eval { ir_of($src) };
-    like($@, qr/GAP: .*qx/, "... the actions refuse its interpolation as a GAP: $src");
+    like($@, qr/GAP: .*\$\^X/, "... the actions refuse its interpolation as a GAP: $src");
 }
 
 # ============================================================================

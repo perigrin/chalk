@@ -1039,14 +1039,25 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         my $result = '"';
         for my $i (0 .. $parts->$#*) {
             my $part = $parts->[$i];
-            if ($part->const_type() eq 'variable') {
-                # `$name` before `::`, a word character, `[`, `{` or `->[`
-                # would read as another variable or an element: brace it.
-                my $next = $i < $parts->$#* && $parts->[$i + 1]->const_type() ne 'variable'
-                    ? $parts->[$i + 1]->value() // '' : '';
+            # The literal text after this part, if the next part is literal.
+            my $after = $parts->[$i + 1];
+            my $next = $i < $parts->$#* && $after isa Chalk::IR::Node::Constant
+                    && $after->const_type() ne 'variable'
+                ? $after->value() // '' : '';
+            if (!($part isa Chalk::IR::Node::Constant)) {
+                # An element (`$a[0]`, `$h{k}`): its value, spelled as an
+                # expression. A `[`, `{` or `->` after it would subscript
+                # the anonymous array; the literal escapes its first one.
+                $result .= '@{[ ' . $self->_emit_expr($part) . ' ]}';
+                $result .= '\\' if $next =~ /\A(?:[\[{]|->)/;
+            } elsif ($part->const_type() eq 'variable') {
+                # A variable before `::`, a word character, `[`, `{` or `->[`
+                # would read as another variable or an element: brace it
+                # (`${name}`, `${!}`, `${1}`, `@{name}`).
                 my $var = $part->value();
-                $var = '${' . substr($var, 1) . '}'
-                    if $var =~ /\A\$\w+\z/ && $next =~ /\A(?:[\w\[{]|::|->[\[{])/;
+                $var = substr($var, 0, 1) . '{' . substr($var, 1) . '}'
+                    if $var =~ /\A[\$\@](?:\w+(?:::\w+)*|[^\w\s{])\z/
+                    && $next =~ /\A(?:[\w\[{]|::|->[\[{])/;
                 $result .= $var;
             } else {
                 # Literal string — escape for double-quoted context

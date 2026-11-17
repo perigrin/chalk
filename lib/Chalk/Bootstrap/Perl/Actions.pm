@@ -216,6 +216,11 @@ class Chalk::Bootstrap::Perl::Actions {
         return $factory->make('Constant', const_type => 'string', value => $value);
     }
 
+    # A variable named in a double-quoted string: a `variable` Constant.
+    my sub _make_var_const($factory, $name) {
+        return $factory->make('Constant', const_type => 'variable', value => $name);
+    }
+
     # The variable Constant a declaration names, from what a Variable action
     # returned: the Constant itself, or -- where the scope already bound the
     # name -- that binding's name. undef for anything else.
@@ -1707,32 +1712,6 @@ class Chalk::Bootstrap::Perl::Actions {
         return undef;
     }
 
-    # The first thing in double-quoted CONTENT that perl would interpolate
-    # but _double_quoted keeps as text -- a punctuation or caret variable
-    # (`$^X`, `$!`, `$$`), `${ EXPR }`, an array (`@a`, `@{...}`), an element
-    # or a dereference after a variable (`$h{k}`, `$a[0]`, `$r->[0]`) -- or
-    # undef when there is none.
-    my sub _uninterpolated($content) {
-        while ($content =~ /\G(?:[^\\\$\@]|\\.)*?([\$\@])/gcs) {
-            my $sigil = $1;
-            my $rest  = substr($content, pos($content));
-            if ($sigil eq '@') {
-                return "the array \@$1" if $rest =~ /\A([\w:]+|\{)/;
-                next;
-            }
-            if ($rest =~ /\A(?:[a-zA-Z_]\w*(?:::\w+)*|\d+)/) {
-                my $after = substr($rest, $+[0]);
-                return 'an element or a dereference after a variable'
-                    if $after =~ /\A(?:[\[\{]|->[\[\{])/;
-                next;
-            }
-            next if $rest =~ /\A\{[a-zA-Z_]\w*\}/;    # ${name}
-            return 'the variable $' . ($rest =~ /\A(\^.|.)/s ? $1 : '')
-                if length $rest;                       # $^X $! $$ ${ EXPR }
-        }
-        return undef;
-    }
-
     # §19 StringLiteral — extract string content
     # For double-quoted strings with $variable interpolation, returns
     # Constructor:InterpolatedString. Otherwise returns a plain Constant.
@@ -1756,12 +1735,6 @@ class Chalk::Bootstrap::Perl::Actions {
                 || $text =~ /\Aqx\s*(?:\(((?:[^)\\]|\\.)*)\)|\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}|\[((?:[^\]\\]|\\.)*)\])\z/s) {
             # (qx{} nests its braces: the body is B)
             my $command = $1 // $+{B} // $3;
-            # _double_quoted models a plain `$name` (or `${name}`) only;
-            # anything else perl would interpolate it keeps as text, which
-            # the shell would then be handed. Refuse that by name.
-            my $unmodelled = _uninterpolated($command);
-            die "GAP: a qx// (or backtick) command interpolating $unmodelled has no IR (only a plain \$name is modelled)\n"
-                if defined $unmodelled;
             return $ctx->factory->make('BacktickExpr',
                 inputs => [$self->_double_quoted($ctx, $command)],
             );
@@ -1770,60 +1743,124 @@ class Chalk::Bootstrap::Perl::Actions {
     }
 
     # The value of a double-quoted string's CONTENT (quotes stripped): an
-    # Interpolate over its literal runs and `$name` variables, or a plain
-    # Constant when it interpolates nothing.
+    # Interpolate over its parts, or a plain Constant when it interpolates
+    # nothing. A part is a literal run (a string Constant), a variable (a
+    # `variable` Constant: `$name`, `$Pkg::name`, `${name}`, `$1`, `$!`,
+    # `$@`, `$&`, `$.`, `$0`, `$$`, `@name`), or an element of one (a
+    # Subscript: `$a[0]`, `$h{k}`, `$r->{k}[1]`). What perl would
+    # interpolate that is none of these is refused by name, never kept as
+    # text.
     method _double_quoted($ctx, $content) {
-        # Process escape sequences for double-quoted strings
-        if ($content =~ /\$\{?[a-zA-Z_\d]/) {
-            # Has variable interpolation — build InterpolatedString.
-            # `${name}` is the variable `$name` (braced so `::` or a word
-            # after it is text); it is kept as `$name`, and the emitter
-            # braces it again where the text after it needs that.
-            my @parts;
-            my $remaining = $content;
-            while ($remaining =~ /\G((?:[^\$\\]|\\.)*?)(\$(?:[a-zA-Z_]\w*|\d+)|\$\{[a-zA-Z_]\w*\})/gc) {
-                my ($literal, $var) = ($1, $2);
-                $var =~ s/\A\$\{(\w+)\}\z/\$$1/;
-                if (length($literal) > 0) {
-                    my $lit = $self->_unescape_double_quote($literal);
-                    push @parts, $factory->make('Constant',
-                        const_type => 'string', value => $lit);
-                }
-                push @parts, $factory->make('Constant',
-                    const_type => 'variable', value => $var);
+        my @parts;
+        my $lit = '';
+        my $flush = sub {
+            push @parts, _make_const($factory, $lit) if length $lit;
+            $lit = '';
+        };
+        my $gap = sub ($what) {
+            die "GAP: a double-quoted string interpolating $what has no IR\n";
+        };
+        pos($content) = 0;
+        while (pos($content) < length $content) {
+            if ($content =~ /\G\\/gc) {
+                $lit .= $self->_dq_escape(\$content);
             }
-            # Remaining literal after last variable
-            my $tail = substr($remaining, pos($remaining) // 0);
-            if (length($tail) > 0) {
-                my $lit = $self->_unescape_double_quote($tail);
-                push @parts, $factory->make('Constant',
-                    const_type => 'string', value => $lit);
+            elsif ($content =~ /\G\$\{([a-zA-Z_]\w*|\d+|[!\@&.])\}/gc) {
+                $flush->();
+                push @parts, _make_var_const($factory, '$' . $1);
             }
-            return $ctx->factory->make('Interpolate',
-                inputs       => [\@parts],
-            );
+            elsif ($content =~ /\G\$((?:::)?[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)/gc) {
+                my $name = $1;
+                $gap->("\$${name}:: (a package-stash variable)") if $content =~ /\G::/;
+                $flush->();
+                push @parts, $self->_dq_element($ctx, \$content, '$' . $name, $gap);
+            }
+            elsif ($content =~ /\G\$(\d+)/gc) {
+                $gap->("\$$1 followed by a subscript") if $content =~ /\G(?:[\[{]|->[\[{])/;
+                $flush->();
+                push @parts, _make_var_const($factory, '$' . $1);
+            }
+            elsif ($content =~ /\G\$([!\@&.0])/gc
+                    || $content =~ /\G\$(\$)(?![\w{\$:])/gc) {
+                $gap->("\$$1 followed by a subscript") if $content =~ /\G(?:[\[{]|->[\[{])/;
+                $flush->();
+                push @parts, _make_var_const($factory, '$' . $1);
+            }
+            elsif ($content =~ /\G\$/gc) {
+                my ($next) = $content =~ /\G(\^\w|\{\^?\w*|.)/gcs;
+                $gap->('$' . ($next // '') . ' (only $name, ${name}, an element of one, $1.., $! $@ $& $. $0 $$ are modelled)');
+            }
+            elsif ($content =~ /\G\@([a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)/gc) {
+                my $name = $1;
+                $gap->("\@$name followed by a subscript (a slice)")
+                    if $content =~ /\G(?:[\[{]|->)/;
+                $flush->();
+                push @parts, _make_var_const($factory, '@' . $name);
+            }
+            elsif ($content =~ /\G\@(?=[\{\$:+\-\d])/gc) {
+                my ($next) = $content =~ /\G(.)/s;
+                $gap->("\@$next");
+            }
+            elsif ($content =~ /\G([^\\\$\@]+|\@)/gc) {
+                $lit .= $1;
+            }
         }
-        # No interpolation — plain constant
-        $content =~ s/\\\\/\x00BS\x00/g;
-        $content =~ s/\\n/\n/g;
-        $content =~ s/\\t/\t/g;
-        $content =~ s/\\"/"/g;
-        $content =~ s/\\\$/\$/g;
-        $content =~ s/\\\@/\@/g;
-        $content =~ s/\x00BS\x00/\\/g;
-        return _make_const($factory, $content);
+        return _make_const($factory, $lit) unless @parts;
+        $flush->();
+        return $ctx->factory->make('Interpolate', inputs => [\@parts]);
     }
 
-    # Process escape sequences in double-quoted string content
-    method _unescape_double_quote($str) {
-        $str =~ s/\\\\/\x00BS\x00/g;
-        $str =~ s/\\n/\n/g;
-        $str =~ s/\\t/\t/g;
-        $str =~ s/\\"/"/g;
-        $str =~ s/\\\$/\$/g;
-        $str =~ s/\\\@/\@/g;
-        $str =~ s/\x00BS\x00/\\/g;
-        return $str;
+    # After `$name` in a double-quoted string: the variable, or the element
+    # its subscripts name -- `[INDEX]`, `{KEY}`, then `[...]`, `{...}`,
+    # `->[...]`, `->{...}` as perl continues them. An index is an integer or
+    # a `$name`; a key is a bare word, an integer, a `$name` or a
+    # 'single-quoted' string. Any other subscript is refused.
+    method _dq_element($ctx, $cref, $var, $gap) {
+        my $node = _make_var_const($factory, $var);
+        while (1) {
+            $$cref =~ /\G->(?=[\[{])/gc;
+            last unless $$cref =~ /\G([\[{])/gc;
+            my $open = $1;
+            my $style = $open eq '[' ? 'array' : 'hash';
+            my $index;
+            if ($$cref =~ /\G\s*(-?\d+)\s*/gc) {
+                $index = _make_const($factory, $1);
+            } elsif ($$cref =~ /\G\s*\$([a-zA-Z_]\w*)/gc) {
+                $index = $self->_dq_element($ctx, $cref, '$' . $1, $gap);
+                $$cref =~ /\G\s*/gc;
+            } elsif ($style eq 'hash' && $$cref =~ /\G\s*(-?[a-zA-Z_]\w*)\s*/gc) {
+                $index = _make_const($factory, $1);
+            } elsif ($style eq 'hash' && $$cref =~ /\G\s*'((?:[^'\\]|\\.)*)'\s*/gc) {
+                ($index = $1) =~ s/\\(['\\])/$1/g;
+                $index = _make_const($factory, $index);
+            } else {
+                $gap->("$var with a subscript other than an integer, a \$name, a word or a 'string'");
+            }
+            my $close = $open eq '[' ? ']' : '}';
+            $$cref =~ /\G\Q$close\E/gc
+                or $gap->("$var with a subscript other than an integer, a \$name, a word or a 'string'");
+            $node = $ctx->factory->make('Subscript',
+                inputs => [$node, $index, _make_const($factory, $style)]);
+        }
+        return $node;
+    }
+
+    # One escape in a double-quoted string, the backslash already consumed:
+    # the character(s) it stands for. Case modifiers (\u \L \Q ...) and
+    # control characters (\cX) are refused by name.
+    my %DQ_SIMPLE = (n => "\n", t => "\t", r => "\r", f => "\f", e => "\e", a => "\a");
+    method _dq_escape($cref) {
+        return $DQ_SIMPLE{$1}              if $$cref =~ /\G([ntrfea])/gc;
+        return chr(hex $1)                 if $$cref =~ /\Gx\{\s*([0-9a-fA-F]+)\s*\}/gc;
+        return chr(hex($1 // 0))           if $$cref =~ /\Gx([0-9a-fA-F]{1,2})?/gc;
+        return chr(oct $1)                 if $$cref =~ /\Go\{([0-7]+)\}/gc;
+        return chr(oct $1)                 if $$cref =~ /\G([0-7]{1,3})/gc;
+        return chr(hex $1)                 if $$cref =~ /\GN\{U\+([0-9a-fA-F]+)\}/gc;
+        if ($$cref =~ /\G([a-zA-Z])/gc) {
+            die "GAP: the escape \\$1 in a double-quoted string has no IR\n";
+        }
+        return $1 if $$cref =~ /\G(.)/gcs;
+        die "GAP: a double-quoted string ending in a lone backslash\n";
     }
 
     # §19 NumericLiteral — return as Constant

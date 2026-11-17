@@ -1638,6 +1638,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         # Build the result SV by concatenation
         my $first = true;
         for my $part ($parts->@*) {
+            $self->_refuse_unmodelled_interp_part($part);
             if ($part->const_type() eq 'variable') {
                 my $var = $part->value();
                 $var =~ s/^\$//;
