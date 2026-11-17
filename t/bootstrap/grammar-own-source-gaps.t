@@ -657,4 +657,16 @@ for my $src ('sub h { my ($a, $b); ($a, $b) = $v->inputs; return $a }') {
     is($ties, 0, 'two defined-ors in parens: one reading');
 }
 
+# ============================================================================
+# §20 `undef EXPR` as a statement: of a scalar, the scalar becomes undef
+# (perlfunc; B::SoN rebinds it to undef). Of an aggregate it empties the
+# container, a different operation, refused by name.
+# ============================================================================
+accepts('my $i = 1; undef $i;', 'undef $i');
+accepts('my $i = 1; undef($i);', 'undef($i)');
+{
+    eval { ir_of('my @a = (1); undef @a;') };
+    like($@, qr/GAP: undef of an aggregate/, 'undef @a is refused by name');
+}
+
 done_testing();

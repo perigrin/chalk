@@ -2573,6 +2573,28 @@ class Chalk::Bootstrap::Perl::Actions {
     # Returns Constructor:UnaryExpr with op and operand
     method UnaryExpression($ctx) {
         my $text = $ctx->scanned_text();
+        # `undef $x`, `undef($x)`: the scalar becomes undef -- for a scalar
+        # the same as `$x = undef`, as B::SoN lowers it. Of an aggregate it
+        # empties the container (`@a = undef` is one undef element), a
+        # different operation; of anything else, unmodelled.
+        if ($text =~ /\A\s*undef\b\s*(\()?\s*(.*?)\s*(?(1)\))\s*\z/s) {
+            my $operand_text = $2;
+            die "GAP: undef of an aggregate ($operand_text: emptying the container) has no IR\n"
+                if $operand_text =~ /\A[\@%]/;
+            die "GAP: undef of something other than a scalar variable ($operand_text) has no IR\n"
+                unless $operand_text =~ /\A(\$(?:::)?[a-zA-Z_]\w*(?:::\w+)*)\z/;
+            my $var = _make_var_const($factory, $1);
+            my $op  = _make_const($factory, '=');
+            my $assign = $ctx->factory->make('Assign',
+                inputs => [$op, $var, _make_keyword_const($factory, 'undef')],
+                left   => $var,
+                right  => _make_keyword_const($factory, 'undef'),
+            );
+            my $sa = Chalk::Bootstrap::Semiring::SemanticAction->current_instance();
+            my $scope = _ctx_scope($ctx);
+            $sa->update_scope($scope->define($var->value(), $assign)) if defined $sa && defined $scope;
+            return $assign;
+        }
         my $op;
         if ($text =~ /^\s*(!)/) {
             $op = $1;
