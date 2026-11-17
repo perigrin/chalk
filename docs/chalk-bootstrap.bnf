@@ -365,14 +365,16 @@ NumericLiteral ::= /0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*/
 
 StringLiteral ::= /'(?:[^'\\]|\\.)*'/
     | /"(?:[^"\\]|\\.)*"/
-    | /q\s*\{(?:[^}\\]|\\.)*\}/
+    | /q\s*\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}/
     | /q\s*\[(?:[^\]\\]|\\.)*\]/
-    | /qq\s*\{(?:[^}\\]|\\.)*\}/
+    | /qq\s*\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}/
     | /qq\s*\[(?:[^\]\\]|\\.)*\]/
     | /`(?:[^`\\]|\\.)*`/
     | /qx\s*\((?:[^)\\]|\\.)*\)/
-    | /qx\s*\{(?:[^}\\]|\\.)*\}/
+    | /qx\s*\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}/
     | /qx\s*\[(?:[^\]\\]|\\.)*\]/ ;
+    # q{} qq{} qx{} (and m{} s{}{} below) nest their braces, as perl's do:
+    # `q{a{b}c}` is a{b}c. (B is the brace-balanced body.)
     # Backticks and qx(...) qx{...} qx[...] (alts 6-9) run a command: the
     # action builds a BacktickExpr over the command, interpolated as a
     # double-quoted string is. (No nested delimiters inside qx.)
@@ -381,8 +383,8 @@ RegexLiteral ::= /\/(?:[^\/\\\n]|\\.)*\/[msixpodualngcer]*/
     | /m\s*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
     | /qr\s*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
     | /s\s*\/(?:[^\/\\]|\\.)*\/(?:[^\/\\]|\\.)*\/[msixpodualngcer]*/
-    | /s\s*\{(?:[^}\\]|\\.)*\}\s*\{(?:[^}\\]|\\.)*\}[msixpodualngcer]*/
-    | /m\s*\{(?:[^}\\]|\\.)*\}[msixpodualngcer]*/
+    | /s\s*\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}\s*\{(?&B)\}[msixpodualngcer]*/
+    | /m\s*\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}[msixpodualngcer]*/
     | /tr\s*\/(?:[^\/\\]|\\.)*\/(?:[^\/\\]|\\.)*\/[cdsr]*/
     | /y\s*\/(?:[^\/\\]|\\.)*\/(?:[^\/\\]|\\.)*\/[cdsr]*/ ;
 

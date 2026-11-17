@@ -586,6 +586,10 @@ Backticks and `qx(...)`, `qx{...}`, `qx[...]` are commands: the action
 builds a `BacktickExpr` over the command, interpolated as a double-quoted
 string is (`qx` is a keyword, so `qx(...)` is never a call of a sub `qx`).
 
+The brace-delimited forms (`q{}`, `qq{}`, `qx{}`, `m{}`, `s{}{}`) nest their
+braces, as perl's do (`q{a{b}c}` is `a{b}c`); `docs/chalk-bootstrap.bnf`
+spells them with a recursive group.
+
 `RegexLiteral` covers bare regex (`/pattern/flags`), explicit match
 (`m/.../flags`), quoted regex (`qr/.../flags`), and substitution
 (`s/pat/repl/flags` with both `//` and `{}` delimiters).

@@ -417,4 +417,24 @@ rejects('print $x .5;',                     'rejects print $x .5 (no .5 literal)
 accepts('my @a = (join $sep, @b);',         'join with a scalar first argument stays a call');
 accepts('push @a, $x -1;',                  'push with a later $x -1 is a subtraction');
 
+# ============================================================================
+# §9 Brace-delimited quote-likes nest their braces, as perl's do:
+# Bootstrap/Perl/Target/Perl.pm has `s{...}{... sprintf('\\x{%x}', ...)}ge`.
+# ============================================================================
+
+accepts(q{$str =~ s{([\x00-\x1f])}{$E{$1} // sprintf('\\x{%x}', ord $1)}ge;},
+                                            's{}{}e whose replacement nests braces, as Target/Perl.pm has it');
+accepts(q{my $ok = $x =~ m{a{2}b};},        'm{} with a {n} quantifier');
+accepts(q{my $ok = $x =~ s{a{2}}{b}r;},     's{}{} with a {n} quantifier in the pattern');
+accepts(q{my $s = q{a{b}c};},               'q{} holding balanced braces');
+accepts(q{my $s = qq{a{b}c};},              'qq{} holding balanced braces');
+accepts(q{my $o = qx{echo {a}};},           'qx{} holding balanced braces');
+rejects(q(my $s = q{a{b c};),               'rejects q{} with an unbalanced inner brace');
+{
+    my $ir = ir_of(q{my $o = qx{echo {a}};});
+    my ($bt) = grep { $_->operation() eq 'BacktickExpr' } all_nodes($ir);
+    my $cmd = $bt && $bt->inputs()->[0];
+    is($cmd && $cmd->value(), 'echo {a}', 'qx{echo {a}} runs `echo {a}`');
+}
+
 done_testing();

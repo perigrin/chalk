@@ -1690,8 +1690,9 @@ class Chalk::Bootstrap::Perl::Actions {
         # Backticks and qx(...) qx{...} qx[...]: run the command, its output
         # the value. perl interpolates the command as a double-quoted string.
         if ($text =~ /\A`((?:[^`\\]|\\.)*)`\z/s
-                || $text =~ /\Aqx\s*(?:\(((?:[^)\\]|\\.)*)\)|\{((?:[^}\\]|\\.)*)\}|\[((?:[^\]\\]|\\.)*)\])\z/s) {
-            my $command = $1 // $2 // $3;
+                || $text =~ /\Aqx\s*(?:\(((?:[^)\\]|\\.)*)\)|\{(?<B>(?:[^{}\\]|\\.|\{(?&B)\})*)\}|\[((?:[^\]\\]|\\.)*)\])\z/s) {
+            # (qx{} nests its braces: the body is B)
+            my $command = $1 // $+{B} // $3;
             # _double_quoted models a plain `$name` (or `${name}`) only;
             # anything else perl would interpolate it keeps as text, which
             # the shell would then be handed. Refuse that by name.
