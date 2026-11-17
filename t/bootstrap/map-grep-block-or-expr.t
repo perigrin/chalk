@@ -79,6 +79,12 @@ check( 'sort { $a <=> $b } @x',   'block', 'perl: sort {$a <=> $b} @x' );
 # A bare word is never subscripted: `map {` is never the element of a hash
 # named by the word map, so a map inside a map's block leaves one reading.
 check( 'map { join(q(,), map { $_ } $_) } @x', 'block', q{perl: map({join(',', map({$_;} $_));} @x)} );
+# A `{` followed by an operator rather than a comma: as EXPR the anonymous
+# hash would be the left operand of `+`; perl guesses BLOCK (its first
+# token is no word or string before `,` or `=>`), and so does chalk: of
+# two calls over the same tokens, the BLOCK reading is preferred
+# (Builder/Containers.pm: `grep { ... } +($b->{own_nodes} // [])->@*`).
+check( 'grep { $_ > 1 } +(@x)', 'block', q{perl: grep({$_ > 1;} @x)} );
 
 # PERL REJECTS these: its guess is made before the comma (or its absence) is
 # seen, and the guess is wrong. The signatures admit exactly one reading of

@@ -182,7 +182,7 @@ class Chalk::Bootstrap::Semiring::Structural {
             # Alts 0 and 5 are bounded by their parens (5: `print($fh LIST)`);
             # the rest are bare list-operator calls.
             my $bare = ($alt_idx == 0 || $alt_idx == 5) ? 0 : STRUCT_IS_BARECALL;
-            return STRUCT_IS_CALL | $bare | ($value & STRUCT_IS_BLOCK);
+            return STRUCT_IS_CALL | $bare | ($value & STRUCT_IS_BLOCK) | ($value & STRUCT_IS_HASH);
         }
 
         # Tag MethodCall completions with parens (alts 0, 2) — preferred over
@@ -419,6 +419,21 @@ class Chalk::Bootstrap::Semiring::Structural {
         # Chained BinaryExpressions with hash subscripts on both sides
         # produce two Expression alternatives that differ only in grouping.
         # The non-binop alternative is the correct simpler parse.
+        # Two calls over the same tokens, one taking a BLOCK and one an
+        # anonymous hash where the `{` is: the BLOCK. After map, grep or sort
+        # perl guesses BLOCK unless the first token inside is a word or
+        # string followed by `,` or `=>` -- and where a comma follows the `}`
+        # the BLOCK reading has no parse anyway (`map { a => 1 }, @x`).
+        # (`grep { ... } +(LIST)`: never `grep({...} + LIST)`.)
+        if ($left_call && $right_call) {
+            my $lb = ($left  & STRUCT_IS_BLOCK) && !($left  & STRUCT_IS_HASH);
+            my $rb = ($right & STRUCT_IS_BLOCK) && !($right & STRUCT_IS_HASH);
+            my $lh = ($left  & STRUCT_IS_HASH)  && !($left  & STRUCT_IS_BLOCK);
+            my $rh = ($right & STRUCT_IS_HASH)  && !($right & STRUCT_IS_BLOCK);
+            return $left  if $lb && $rh;
+            return $right if $rb && $lh;
+        }
+
         if (!$left_call && !$right_call) {
             if ($right_binop && !$left_binop) {
                 return $left;
