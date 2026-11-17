@@ -1075,8 +1075,9 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::Constant) {
             my $val = $node->value();
             my $ct = $node->const_type();
-            # Variables and special values don't get quoted
-            if ($ct eq 'variable' || $val =~ /^[\$\@\%]/) {
+            # A variable is its name; a string is quoted whatever it starts
+            # with (`sprintf "%s"` is no hash %s).
+            if ($ct eq 'variable') {
                 return $val;
             }
             # Bare identifiers (class names, qualified names) emit without quoting

@@ -1462,7 +1462,8 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         my $ct  = $node->const_type();
 
         # Variable reference — look up from hash or local C var
-        if ($ct eq 'variable' || $val =~ /^[\$\@\%]/) {
+        # (A string is no variable whatever it starts with: `printf "%s"`.)
+        if ($ct eq 'variable') {
             my $var = $val;
             $var =~ s/^[\$\@\%]//;
             # $#$arrayref — last index of array referenced by scalar

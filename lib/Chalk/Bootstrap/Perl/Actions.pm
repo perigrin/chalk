@@ -1415,7 +1415,7 @@ class Chalk::Bootstrap::Perl::Actions {
         my $text = $ctx->scanned_text();
         # Extract just the variable name (first $word)
         if ($text =~ /(\$\w+)/) {
-            return _make_const($factory, $1);
+            return _make_var_const($factory, $1);
         }
         return undef;
     }
@@ -1424,7 +1424,7 @@ class Chalk::Bootstrap::Perl::Actions {
     method SlurpySignatureParam($ctx) {
         my $text = $ctx->scanned_text();
         if ($text =~ /([@%]\w+)/) {
-            return _make_const($factory, $1);
+            return _make_var_const($factory, $1);
         }
         return undef;
     }
@@ -3834,7 +3834,7 @@ class Chalk::Bootstrap::Perl::Actions {
     method IteratorVariable($ctx) {
         my $text = $ctx->scanned_text();
         if ($text =~ /(\$\w+)/) {
-            return _make_const($factory, $1);
+            return _make_var_const($factory, $1);
         }
         return undef;
     }
