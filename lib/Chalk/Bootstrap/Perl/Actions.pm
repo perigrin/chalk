@@ -2281,7 +2281,10 @@ class Chalk::Bootstrap::Perl::Actions {
         # through the control_in decoration — the previous side-effect
         # node, or a fresh Start if this is the first.
         my $control = $ctx->control_head // $factory->make('Start');
+        # (`state $n`, `our $g`, `local $v`: the declarator is the node's
+        # scope -- each is a different declaration from `my`)
         my $var_decl = $ctx->factory->make('VarDecl',
+            scope        => $declarator,
             inputs       => [$var_name, undef],
         );
         $var_decl->set_control_in($control);
@@ -2949,6 +2952,7 @@ class Chalk::Bootstrap::Perl::Actions {
                 # in the cache, so nodes() filters it out). Control is a
                 # hash-excluded decoration copied via set_control_in.
                 my $result = $ctx->factory->make('VarDecl',
+                    scope        => $target->scope(),
                     inputs       => [$name_in, $init_value],
                 );
                 $result->set_control_in($ctrl_in) if defined $ctrl_in;

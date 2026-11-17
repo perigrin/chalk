@@ -529,9 +529,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if (blessed($node) && $node isa Chalk::IR::Node::VarDecl) {
             my $name = $node->name->value;
             my $init = $node->init;
+            my $scope = $node->scope();
             return defined $init
-                ? "my $name = " . $self->_emit_expr($init)
-                : "my $name";
+                ? "$scope $name = " . $self->_emit_expr($init)
+                : "$scope $name";
         }
         return $self->_emit_expr($node);
     }
@@ -1152,24 +1153,19 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
     }
 
     method _emit_var_decl($node) {
-        my $var  = $node->name()->value();
-        my $init = $node->init();
-
-        if (defined $init) {
-            return "my $var = " . $self->_emit_init_expr($var, $init) . ";";
-        }
-        return "my $var;";
+        return $self->_emit_var_decl_expr($node) . ";";
     }
 
     # VarDecl as expression (no semicolon)
     method _emit_var_decl_expr($node) {
-        my $var  = $node->name()->value();
-        my $init = $node->init();
+        my $var   = $node->name()->value();
+        my $init  = $node->init();
+        my $scope = $node->scope();   # my, our, state or local
 
         if (defined $init) {
-            return "my $var = " . $self->_emit_init_expr($var, $init);
+            return "$scope $var = " . $self->_emit_init_expr($var, $init);
         }
-        return "my $var";
+        return "$scope $var";
     }
 
     # Emit a ListAssign as `my ($a, $b) = (1, 2);` (with semicolon).
