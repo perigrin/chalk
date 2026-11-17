@@ -15,6 +15,9 @@ class Chalk::Bootstrap::Earley {
     my %CLOSER_PATTERNS = map { $_ => 1 }
         '\\)', '\\]', '\\}', '\\;', ')', ']', '}', ';';
 
+    # The reachability sweep runs at most once per this many new chart rows.
+    my $SWEEP_MIN_ROWS = 256;
+
     field $grammar  :param :reader;
     field $semiring :param :reader;
     field $_recover :param(recover) = false;
@@ -26,6 +29,12 @@ class Chalk::Bootstrap::Earley {
     # for all semirings (proven by t/bootstrap/leo-graph-equivalence.t);
     # the override exists solely to run the comparison.
     field $_leo_enabled :param(leo_enabled) = true;
+
+    # Reachability sweep enable flag (see _free_unreachable_rows). Always
+    # true in production. Freeing a row nothing can reach changes no parse
+    # value; the override exists so tests can compare a parse with the
+    # sweep on against the same parse with it off.
+    field $_chart_gc :param(chart_gc) = true;
 
     # Source file path for diagnostics (set per parse_value call)
     field $_parse_file;
@@ -312,6 +321,96 @@ class Chalk::Bootstrap::Earley {
         return true;
     }
 
+    # Reachability sweep: free every chart row that no live item can reach.
+    #
+    # A row is read again only by the completion of an item whose origin is
+    # that row's position: _complete looks there for the items waiting on
+    # the completed rule. So a row is needed only while some item that can
+    # still complete, or an item derived from one, has that origin. Every
+    # item derived from now on comes from an item in a row at or after the
+    # position being processed: scanned from it (same origin), predicted by
+    # it (origin = the row it is in), or advanced by its completion (the
+    # origin of an item waiting in the row at its origin). The rows needed
+    # are therefore those reachable from the rows at or after $pos, going
+    # from a row to the origins of its items. In a row already processed
+    # only the items still waiting count: its completed items have been
+    # propagated.
+    #
+    # Everything else is dead: the row, its scan results, the completions
+    # indexed at that origin, and the Leo items stored there (a Leo item is
+    # looked up by the origin of a completing item). Freeing them changes
+    # no parse value; it only bounds what a long input keeps.
+    #
+    # $held_rows lists the positions whose rows the chart holds, oldest
+    # first; the rows that survive stay in it.
+    method _free_unreachable_rows($chart, $pos, $furthest_pos, $held_rows) {
+        my $held = scalar($held_rows->@*);
+        $_gc_stats{rows_held_max} = $held if $held > $_gc_stats{rows_held_max};
+
+        # Roots: the row being processed, the rows scanning has reached
+        # beyond it, and the last row that held items (error recovery
+        # restarts from that one).
+        my %reachable;
+        my @pending;
+        for my $root ($pos .. $furthest_pos, $_last_active_pos) {
+            next if $reachable{$root};
+            next unless defined $_chart_rd_list[$root];
+            $reachable{$root} = true;
+            push @pending, $root;
+        }
+
+        my $ci_completions = $_ci_completions;
+        while (@pending) {
+            my $row_pos = pop @pending;
+            my $rd_lists = $_chart_rd_list[$row_pos];
+            next unless defined $rd_lists;
+            my $row = $chart->[$row_pos];
+            my $is_root = $row_pos >= $pos || $row_pos == $_last_active_pos;
+            for my $core_id (0 .. $rd_lists->$#*) {
+                my $rd_list = $rd_lists->[$core_id];
+                next unless defined $rd_list;
+                if (!$is_root) {
+                    next if $ci_completions->[$core_id];
+                }
+                my $cell = $row->[$core_id];
+                for my $rd ($rd_list->@*) {
+                    next unless defined $cell->[$rd];
+                    my $origin = $row_pos - $rd;
+                    next if $reachable{$origin};
+                    $reachable{$origin} = true;
+                    push @pending, $origin;
+                }
+            }
+        }
+
+        my @kept;
+        my @dead;
+        for my $row_pos ($held_rows->@*) {
+            if ($reachable{$row_pos} || $row_pos >= $pos) {
+                push @kept, $row_pos;
+                next;
+            }
+            push @dead, $row_pos;
+            $_gc_stats{unreachable_freed}++ if $chart->[$row_pos]->@*;
+            $chart->[$row_pos] = [];
+            $_chart_rd_list[$row_pos] = undef;
+            delete $_scan_cache{$row_pos};
+            my $rules = delete $completed_at_origin_rules{$row_pos};
+            if (defined $rules) {
+                for my $rule_name (keys $rules->%*) {
+                    delete $completed_at{$rule_name}{$row_pos};
+                }
+            }
+        }
+        if (@dead) {
+            for my $by_origin (values %leo_items) {
+                delete $by_origin->@{@dead};
+            }
+        }
+        $held_rows->@* = @kept;
+        return;
+    }
+
     # Debug: dump the minimum origin at each active chart position.
     # Called after parse to inspect what's keeping positions alive.
     method debug_chart_origins($chart_ref) {
@@ -485,7 +584,12 @@ class Chalk::Bootstrap::Earley {
         @_chart_rd_list = ();
         %leo_items = ();
         %_scan_cache = ();
-        %_gc_stats = (positions_freed => 0, safe_sets_found => 0);
+        %_gc_stats = (
+            positions_freed   => 0,
+            safe_sets_found   => 0,
+            unreachable_freed => 0,
+            rows_held_max     => 0,
+        );
         %_scan_stats = (total_matches => 0, cache_hits => 0, clustered_scans => 0);
         %_profile_data = ();
         @_chart_snapshot = ();
@@ -513,6 +617,14 @@ class Chalk::Bootstrap::Earley {
         my $on_epoch_commit = sub ($origin, $end) {
             push @pending_sweeps, [$origin, $end];
         };
+
+        # Reachability sweep: the positions whose rows the chart holds,
+        # oldest first, and the number held after the last sweep. The next
+        # sweep runs once that many rows again have been added (at least
+        # $SWEEP_MIN_ROWS), so the sweeps together cost time linear in the
+        # rows processed.
+        my @held_rows;
+        my $held_after_sweep = 0;
 
         # Track the furthest chart position that has entries (from scanning).
         # Multi-character terminal scans can jump from pos P to pos P+N,
@@ -625,6 +737,12 @@ class Chalk::Bootstrap::Earley {
             if (@agenda) {
                 $_last_active_pos = $pos;
                 $furthest_chart_pos = $pos if $pos > $furthest_chart_pos;
+                # Every row that holds items is processed here once, so
+                # this lists the rows the chart holds (see
+                # _free_unreachable_rows).
+                if (!@held_rows || $held_rows[-1] != $pos) {
+                    push @held_rows, $pos;
+                }
             }
 
             @_processed = ();
@@ -1077,6 +1195,16 @@ class Chalk::Bootstrap::Earley {
                 $_gc_stats{safe_sets_found}++;
             }
 
+            # Reachability sweep: free the rows no live item can reach.
+            if ($_chart_gc) {
+                my $added = scalar(@held_rows) - $held_after_sweep;
+                if ($added >= $SWEEP_MIN_ROWS && $added >= $held_after_sweep) {
+                    $self->_free_unreachable_rows(
+                        \@chart, $pos, $furthest_chart_pos, \@held_rows);
+                    $held_after_sweep = scalar(@held_rows);
+                }
+            }
+
             # Debug: compute true minimum origin across all active positions
             if ($ENV{EARLEY_ORIGIN_DEBUG} && $pos > 0 && $pos % 10 == 0) {
                 my $true_min = $pos;
@@ -1130,6 +1258,8 @@ class Chalk::Bootstrap::Earley {
             $pos++;
         }
         $_processed_pos = -1;
+        $_gc_stats{rows_held_max} = scalar(@held_rows)
+            if scalar(@held_rows) > $_gc_stats{rows_held_max};
 
         if ($ENV{CHALK_CHART_PROFILE}) {
             for my $p (0 .. $#chart) {
