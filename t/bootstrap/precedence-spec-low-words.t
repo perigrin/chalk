@@ -213,10 +213,12 @@ subtest 'L21 => parses identically to , in a parenthesized list' => sub {
     my $with_comma = parse_expr("('key', 'val')");
     my $with_arrow = parse_expr("('key' => 'val')");
 
-    isa_with_shape($with_arrow, 'Chalk::IR::Node::HashLiteral',
-        '("key" => "val") is a HashRef-shaped list');
-    isa_with_shape($with_comma, 'Chalk::IR::Node::HashLiteral',
-        '("key", "val") is a HashRef-shaped list');
+    # (the helper assigns to a scalar, `my $_ = LIST`: the comma operator's
+    # list, an ExpressionList -- not a hash, which a `%` variable would make)
+    isa_with_shape($with_arrow, 'Chalk::IR::Node::ExpressionList',
+        '("key" => "val") is a list');
+    isa_with_shape($with_comma, 'Chalk::IR::Node::ExpressionList',
+        '("key", "val") is a list');
     is(shape_of($with_arrow), shape_of($with_comma),
         '=> and , produce identical IR shape');
 };
@@ -231,15 +233,15 @@ subtest 'L21 => parses identically to , in a parenthesized list' => sub {
 # changes.
 # ============================================================================
 
-subtest 'L21 , in a parenthesized list flattens to an n-ary HashRef child list' => sub {
-    # Probed: (1, 2, 3) currently produces HashRef with arrayref child
-    # [Const(1), Const(2), Const(3)] — flat, not nested. Lock that in.
+subtest 'L21 , in a parenthesized list flattens to an n-ary list' => sub {
+    # (1, 2, 3) assigned to a scalar is an ExpressionList of the three
+    # items -- flat, not nested. (It was a HashRef, whatever the variable.)
     my $expr = parse_expr('(1, 2, 3)');
 
-    my $hr = isa_with_shape($expr, 'Chalk::IR::Node::HashLiteral',
-        'top is HashRef') or return;
+    my $hr = isa_with_shape($expr, 'Chalk::IR::Node::ExpressionList',
+        'top is an ExpressionList') or return;
     my $items = $hr->inputs()->[0];
-    ok(ref($items) eq 'ARRAY', 'HashRef child is an arrayref of items')
+    ok(ref($items) eq 'ARRAY', 'its child is an arrayref of items')
         or do { diag('  got shape: ' . shape_of($expr)); return };
     is(scalar($items->@*), 3, 'three items in the list');
     is($items->[0]->value(), '1', 'item 0 is 1');
