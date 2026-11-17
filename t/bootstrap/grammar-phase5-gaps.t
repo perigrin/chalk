@@ -159,4 +159,21 @@ rejects('my @v = $r->@{};',                 'rejects an empty postfix slice');
         '... the aggregate last: the hash $r refers to');
 }
 
+# ============================================================================
+# §4 `//` before a string holding a `/`. A regex literal read from the second
+# `/` of `//` ends inside the string; the chart GC took that for a safe set
+# and freed the string's origin (earley-chart-gc.t has the grammar-free case).
+# ============================================================================
+
+accepts('my $x = $c // out("a/b");',        '// then a call whose string holds a /');
+accepts('my $x = $c // ("a/b");',           '// then a parenthesized string holding a /');
+accepts('my $x = $c // $d->f("a/b");',      '// then a method call whose string holds a /');
+accepts('my $x = $c // f(" / ");',          '// then a string holding a spaced /');
+accepts("out('x') unless \$c // out('a/b');", "// in a modifier, single-quoted 'a/b'");
+{
+    my $ir = ir_of('my $x = $c // out("a/b");');
+    my ($dor) = grep { $_->operation() eq 'DefinedOr' } all_nodes($ir);
+    ok(defined $dor, '$c // out("a/b") builds a defined-or');
+}
+
 done_testing();

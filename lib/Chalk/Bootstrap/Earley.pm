@@ -1016,6 +1016,33 @@ class Chalk::Bootstrap::Earley {
                             }
                         }
                     }
+                    # Items a multi-character scan already placed past
+                    # $pos are live too: their origins can lie in the
+                    # window, and completing them (complete or not yet)
+                    # reads chart[origin]. A token scanned from inside the
+                    # window that ends after $pos (the string in
+                    # `$c // f("a/b")`, while a regex read from the second
+                    # `/` makes $pos look safe) keeps the window alive.
+                    for my $q ($pos + 1 .. $furthest_chart_pos) {
+                        last unless $safe_to_free;
+                        my $later = $chart[$q];
+                        next unless defined $later;
+                        # origin in (last_safe_pos, pos) means
+                        # rel_dist in (q - pos, q - last_safe_pos)
+                        my $min_rd = $q - $pos + 1;
+                        my $max_rd = $q - $last_safe_pos - 1;
+                        for my $oh ($later->@*) {
+                            next unless defined $oh;
+                            my $top = $max_rd < $oh->$#* ? $max_rd : $oh->$#*;
+                            for my $rd ($min_rd .. $top) {
+                                if (defined $oh->[$rd]) {
+                                    $safe_to_free = false;
+                                    last;
+                                }
+                            }
+                            last unless $safe_to_free;
+                        }
+                    }
                     if ($safe_to_free) {
                         for my $sp ($last_safe_pos + 1 .. $pos - 1) {
                             if (defined $chart[$sp] && $chart[$sp]->@*) {

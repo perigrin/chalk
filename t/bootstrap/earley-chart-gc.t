@@ -572,4 +572,32 @@ subtest 'safe-set GC statistics scale with input' => sub {
     }
 };
 
+# === A token scanned ahead keeps its origin alive ===
+subtest 'safe-set GC keeps origins of items already scanned past it' => sub {
+    # Input x("a/b"). The right reading scans Str from 2 to 7, leaving a
+    # Str item at 7 whose origin is 2. A wrong reading scans W ("a/ from 1
+    # to 5, and position 5 then looks like a safe set. Freeing 2..4 there
+    # took chart[2], where S waits for Str, so the right reading died when
+    # Str completed at 7. (In perl source: `$c // f("a/b")`, where a regex
+    # literal read from the second / of // ends inside the string.)
+    my sub nt($v) { Chalk::Grammar::Symbol->new(type => 'reference', value => $v) }
+    my sub tm($v) { Chalk::Grammar::Symbol->new(type => 'terminal',  value => $v) }
+    my sub rule($name, @alts) {
+        Chalk::Grammar::Rule->new(name => $name, expressions => [@alts]);
+    }
+    my $grammar = [
+        rule('S', [nt('X'), tm('\('), nt('Str'), tm('\)')],
+                  [nt('X'), nt('W'), tm('zzz')]),
+        rule('X',   [tm('x')]),
+        rule('Str', [tm('"[^"]*"')]),
+        rule('W',   [tm('\("a\/')]),
+    ];
+    my $parser = Chalk::Bootstrap::Earley->new(
+        grammar => $grammar, semiring => Chalk::Bootstrap::Semiring::Boolean->new(),
+    );
+    ok($parser->parse('x("a/b")'), 'accepts x("a/b") although a wrong token ends inside the string');
+    ok($parser->parse('x("ab")'),  'accepts x("ab")');
+    ok($parser->parse('x("a/zzz'), 'accepts the other reading, x ("a/ zzz');
+};
+
 done_testing;
