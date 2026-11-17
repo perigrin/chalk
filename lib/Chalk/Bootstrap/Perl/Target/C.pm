@@ -264,7 +264,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             map { $factory->make('Constant', const_type => 'variable', value => $_) }
                 $method->params->@*
         ];
-        my $func_name = "${\  $self->_get_current_slug()}_${name}";
+        my $func_name = $self->_get_current_slug() . "_${name}";
 
         my $scheduler = Chalk::IR::Scheduler::EagerPinning->new;
         my $schedule  = $scheduler->schedule($method);
@@ -346,7 +346,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my @helper;
         push @helper, "SV * ${func_name}(pTHX_ " . join(', ', @c_params) . ") {";
         for my $p (@c_params) {
-            push @helper, "    PERL_UNUSED_ARG(${\($p =~ s/^SV \*//r)});"
+            push @helper, "    PERL_UNUSED_ARG(" . ($p =~ s/^SV \*//r) . ");"
                 unless $p =~ /^SV \*self$/;
         }
         push @helper, "    return $c_expr;";
@@ -483,7 +483,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         $self->_set_return_context($prev_return_context);
 
         my @helper;
-        my $func_name = "${\  $self->_get_current_slug()}_${name}";
+        my $func_name = $self->_get_current_slug() . "_${name}";
         my $c_ret_type = $has_return ? $self->_xs_c_type_for($ir_return_type) : 'void';
         push @helper, "$c_ret_type ${func_name}(pTHX_ " . join(', ', @xs_params) . ") {";
 
@@ -587,7 +587,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     # Empty sub: emit `static SV *NAME(pTHX) { return &PL_sv_undef; }`.
     method _emit_simple_empty_sub($name) {
         my @helper;
-        my $helper_name = "${\  $self->_get_current_slug()}_${name}";
+        my $helper_name = $self->_get_current_slug() . "_${name}";
         push @helper, "static SV * $helper_name(pTHX) {";
         push @helper, '    return &PL_sv_undef;';
         push @helper, '}';
@@ -611,7 +611,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             $pname =~ s/^[\$\@\%]//;
             push @xs_params, "SV *$pname";
         }
-        my $helper_name = "${\  $self->_get_current_slug()}_${name}";
+        my $helper_name = $self->_get_current_slug() . "_${name}";
         my $param_str = @xs_params ? 'pTHX_ ' . join(', ', @xs_params) : 'pTHX';
         my @helper;
         push @helper, "static SV * $helper_name($param_str) {";
@@ -633,7 +633,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
             $pname =~ s/^[\$\@\%]//;
             push @xs_params, "SV *$pname";
         }
-        my $helper_name = "${\  $self->_get_current_slug()}_${name}";
+        my $helper_name = $self->_get_current_slug() . "_${name}";
         my $param_str = @xs_params ? 'pTHX_ ' . join(', ', @xs_params) : 'pTHX';
         my @helper;
         push @helper, "static SV * $helper_name($param_str) {";
@@ -711,7 +711,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         }
 
         my @helper;
-        my $helper_name = "${\  $self->_get_current_slug()}_${name}";
+        my $helper_name = $self->_get_current_slug() . "_${name}";
         my $param_str = @xs_params ? 'pTHX_ ' . join(', ', @xs_params) : 'pTHX';
         push @helper, "static SV * $helper_name($param_str) {";
         push @helper, '    SV *retval = NULL;';
@@ -988,7 +988,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my $body_items  = $node->inputs()->[1] // [];
 
         my $idx = $_anon_sub_counter++;
-        my $fn_name = "_anon_${\  $self->_get_current_slug()}_${idx}";
+        my $fn_name = "_anon_" . $self->_get_current_slug() . "_${idx}";
         my $cv_var  = "_cv_${fn_name}";
 
         # Build parameter list for the static function
@@ -1563,7 +1563,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
             if ($self->_get_class_subs()->{$name}{compiled}) {
                 # Direct C call to compiled helper (static, slug-namespaced)
-                my $helper_name = "${\  $self->_get_current_slug()}_${name}";
+                my $helper_name = $self->_get_current_slug() . "_${name}";
                 # Pad missing args with &PL_sv_undef for default params
                 my $expected = $self->_get_class_subs()->{$name}{params} // [];
                 while (scalar @c_args < scalar $expected->@*) {
@@ -1634,7 +1634,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
     # Emit CompoundAssign as statement
     method _emit_interp_return($method_name, $interp_node) {
         my $parts = $interp_node->inputs()->[0];
-        my $func_name = "${\  $self->_get_current_slug()}_${method_name}";
+        my $func_name = $self->_get_current_slug() . "_${method_name}";
 
         my @body;
         # Build the result SV by concatenation
@@ -1651,7 +1651,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
                 } else {
                     # Fallback for non-field variables
                     my $escaped = $self->_escape_c_string($var);
-                    $src = "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
+                    $src = "get_sv(\"" . $self->module_name() . "::$escaped\", GV_ADD)";
                 }
                 if ($first) {
                     push @body, "    SV *retval = newSVsv($src);";
@@ -2129,7 +2129,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
         my @lines;
 
         # Preamble
-        push @lines, "/* ABOUTME: Thin XS wrapper for ${\$self->module_name()} (generated by Target::C). */";
+        push @lines, "/* ABOUTME: Thin XS wrapper for " . $self->module_name() . " (generated by Target::C). */";
         push @lines, "/* ABOUTME: XSUBs delegate to ${slug}_*() functions in chalk.so. */";
         push @lines, '#include "EXTERN.h"';
         push @lines, '#include "perl.h"';
@@ -2174,7 +2174,7 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
         # MODULE line
         my $escaped_module = $self->_escape_c_string($self->module_name());
-        push @lines, "MODULE = ${\$self->module_name()}  PACKAGE = ${\$self->module_name()}";
+        push @lines, "MODULE = " . $self->module_name() . "  PACKAGE = " . $self->module_name();
         push @lines, '';
         push @lines, 'PROTOTYPES: DISABLE';
         push @lines, '';
@@ -2230,9 +2230,9 @@ class Chalk::Bootstrap::Perl::Target::C :isa(Chalk::Bootstrap::Perl::Target::Emi
 
             # Function signature line: name(param1, param2, ...)
             if (@param_names) {
-                push @lines, "${\($fname =~ s/^${slug}_//r)}(" . join(', ', @param_names) . ')';
+                push @lines, ($fname =~ s/^${slug}_//r) . "(" . join(', ', @param_names) . ')';
             } else {
-                push @lines, "${\($fname =~ s/^${slug}_//r)}()";
+                push @lines, ($fname =~ s/^${slug}_//r) . "()";
             }
 
             # Parameter type declarations (XS format: type\nname per param, after self)

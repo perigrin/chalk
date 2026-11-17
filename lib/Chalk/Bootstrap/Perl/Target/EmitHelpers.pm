@@ -1498,7 +1498,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                     my $idx = $self->_get_field_map()->{$inner};
                     $inner_expr = "ObjectFIELDS(SvRV(self))[$idx]";
                 } else {
-                    $inner_expr = "get_sv(\"${\$self->module_name()}::$inner\", GV_ADD)";
+                    $inner_expr = "get_sv(\"" . $self->module_name() . "::$inner\", GV_ADD)";
                 }
                 return "sv_2mortal(newSViv(av_len((AV*)SvRV($inner_expr))))";
             }
@@ -1537,7 +1537,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
             }
             # Package global or unknown variable — use get_sv for package lookup
             my $escaped = $self->_escape_c_string($var);
-            return "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
+            return "get_sv(\"" . $self->module_name() . "::$escaped\", GV_ADD)";
         }
 
         # Numeric values — sv_2mortal prevents leaks when used as sub-expressions
@@ -1595,7 +1595,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
         # Without this, constants like STRUCT_IS_LIST become string literals
         # in the generated C, producing "isn't numeric" warnings and wrong results.
         if ($self->_get_use_constants()->%* && exists $self->_get_use_constants()->{$val}) {
-            return "sv_2mortal(newSViv(${\$self->_get_use_constants()->{$val}}))";
+            return "sv_2mortal(newSViv(" . $self->_get_use_constants()->{$val} . "))";
         }
 
         # String literal — sv_2mortal prevents leaks when used as sub-expressions
@@ -1648,7 +1648,7 @@ class Chalk::Bootstrap::Perl::Target::EmitHelpers :isa(Chalk::Bootstrap::Target)
                     $src = "ObjectFIELDS(SvRV(self))[$idx]";
                 } else {
                     my $escaped = $self->_escape_c_string($var);
-                    $src = "get_sv(\"${\$self->module_name()}::$escaped\", GV_ADD)";
+                    $src = "get_sv(\"" . $self->module_name() . "::$escaped\", GV_ADD)";
                 }
                 if ($first) {
                     push @stmts, "SV *_r = newSVsv($src)";

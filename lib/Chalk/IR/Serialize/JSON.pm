@@ -114,7 +114,7 @@ sub _extract_fields ($node, $id_remap) {
     if ($op eq 'Constant') {
         return {
             const_type => $node->const_type,
-            value      => defined $node->value ? "${\$node->value}" : undef,
+            value      => defined $node->value ? '' . $node->value : undef,
             ( defined $node->flags ? ( flags => $node->flags ) : () ),
         };
     }
