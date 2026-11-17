@@ -1418,20 +1418,22 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
             }
         }
 
+        # An element of a named aggregate (`$x[0]` is @x's, `$_[0]` @_'s):
+        # the target is the aggregate's variable.
+        if (blessed($target) && $target isa Chalk::IR::Node::Constant
+                && ($target->const_type() // '') eq 'variable'
+                && ($target->value() // '') =~ /\A[\@%](.+)\z/s && $style ne 'call') {
+            my $name = $1;
+            my ($o, $c) = $style eq 'array' ? ('[', ']') : ('{', '}');
+            return "\$$name$o" . $self->_emit_expr($index) . $c;
+        }
+
         my $tgt = defined $target
             ? $self->_emit_operand($target, $PREC_TERM{arrow}) : '$self';
 
-        # Direct hash/array element: if the target is a $ variable whose name
-        # was declared with % or @ sigil, emit direct subscript (no arrow).
-        # $hash{key} for %hash, $arr[idx] for @array.
-        if ($tgt =~ /^\$(.+)/ && %_aggregate_vars && exists $_aggregate_vars{$1}) {
-            if ($style eq 'array') {
-                return "$tgt\[" . $self->_emit_expr($index) . "]";
-            }
-            if ($style ne 'call') {
-                return "$tgt\{" . $self->_emit_expr($index) . "}";
-            }
-        }
+        # (An element of a named aggregate was handled above, by its IR:
+        # `$x->[0]` through a scalar is never guessed into `$x[0]` by
+        # whether an @x is in scope.)
 
         if ($style eq 'array') {
             return "$tgt\->[" . $self->_emit_expr($index) . "]";

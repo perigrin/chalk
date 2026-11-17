@@ -1990,11 +1990,17 @@ class Chalk::Bootstrap::Perl::Actions {
 
     method _dq_element($ctx, $cref, $var, $gap) {
         my $node = _make_var_const($factory, $var);
+        my $first = true;
         while (1) {
-            $$cref =~ /\G->(?=[\[{])/gc;
+            my $arrow = $$cref =~ /\G->(?=[\[{])/gc;
             last unless $$cref =~ /\G([\[{])/gc;
             my $open = $1;
             my $style = $open eq '[' ? 'array' : 'hash';
+            # `"$x[0]"`, `"$h{k}"`: an element of @x or %h, as outside a
+            # string (Subscript); `"$x->[0]"` is through $x.
+            $node = _make_var_const($factory, ($style eq 'array' ? '@' : '%') . substr($var, 1))
+                if $first && !$arrow && $var =~ /\A\$/;
+            $first = false;
             my $index;
             my $close = $open eq '[' ? ']' : '}';
             my $start = pos($$cref);
@@ -2818,6 +2824,25 @@ class Chalk::Bootstrap::Perl::Actions {
     #                 | Expression _ /\[/ _ Expression _ /\]/
     #                 | Expression _ /\{/ _ Expression _ /\}/
     # Returns Constructor:SubscriptExpr with target from first child Expression
+    # The aggregate a subscript's text names when it is one arrowless
+    # subscript straight after a scalar-sigil variable name -- `$x[...]` is
+    # @x, `$h{...}` is %h -- else undef.
+    my sub _arrowless_aggregate($text, $style) {
+        return undef unless $text =~ /\A\s*\$((?:::)?[a-zA-Z_]\w*(?:::[a-zA-Z_]\w*)*)\s*([\[{])/;
+        my ($name, $open) = ($1, $2);
+        return undef if ($open eq '[') != ($style eq 'array');
+        # the bracket after the name must be the one that closes the text
+        my $at = $+[2];
+        my $depth = 1;
+        pos($text) = $at;
+        while ($depth && $text =~ /\G(?:'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|([\[{(])|([\]})])|[^\[\]{}()'"]+)/gc) {
+            $depth++ if defined $1;
+            $depth-- if defined $2;
+        }
+        return undef if $depth || $text !~ /\G\s*\z/;
+        return ($style eq 'array' ? '@' : '%') . $name;
+    }
+
     method Subscript($ctx) {
         my $text = $ctx->scanned_text();
         # Determine style by the LAST bracket type in the scanned text.
@@ -2856,10 +2881,18 @@ class Chalk::Bootstrap::Perl::Actions {
             if $style ne 'call' && $target isa Chalk::IR::Node::PostfixDeref
                 && ($target->sigil() // '') =~ /\A[\@%]\z/
                 && $text =~ /\A\s*[\@%]\{/;
+        # `$x[0]` and `$h{k}` (no arrow) are elements of @x and %h -- not of
+        # what $x or $h hold, which is `$x->[0]`. As on B::SoN's wire, the
+        # target is then the aggregate itself: `$_[0]` indexes @_.
+        if ($style ne 'call') {
+            my $agg = _arrowless_aggregate($text, $style);
+            $target = _make_var_const($factory, $agg) if defined $agg;
+        }
         return $ctx->factory->make('Subscript',
             inputs       => [$target, $index, _make_const($factory, $style)],
         );
     }
+
 
     # §16 PostfixDeref ::= Expression _ /->/ _ /@\*/
     #                     | Expression _ /->/ _ /%\*/
