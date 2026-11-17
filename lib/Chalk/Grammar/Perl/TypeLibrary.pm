@@ -269,6 +269,16 @@ class Chalk::Grammar::Perl::TypeLibrary {
                      forms => { block => { min_arity => 1, arg_types => ['Code'] },
                                 expr  => { min_arity => 1, arg_types => ['Str'] } } },
 
+        # No arguments at all (perlfunc: time, times, wantarray, wait, fork,
+        # getppid): each is a term, so what follows is never its operand --
+        # `time - 1` is time() - 1, never time(-1).
+        time      => { min_arity => 0, max_arity => 0, arg_types => [], return_type => 'Int' },
+        times     => { min_arity => 0, max_arity => 0, arg_types => [], return_type => 'List' },
+        wantarray => { min_arity => 0, max_arity => 0, arg_types => [] },
+        wait      => { min_arity => 0, max_arity => 0, arg_types => [], return_type => 'Int' },
+        fork      => { min_arity => 0, max_arity => 0, arg_types => [] },
+        getppid   => { min_arity => 0, max_arity => 0, arg_types => [], return_type => 'Int' },
+
         # OO
         bless   => { min_arity => 1, arg_types => ['Ref', 'Str'],               return_type => 'Object' },
 
