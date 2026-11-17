@@ -107,7 +107,11 @@ VariableDeclaration ::= /(?:my|our|state|local|field)\b/ WS Variable AttributeLi
     | /(?:my|our|state|local|field)\b/ WS /\(/ _ VariableList _ /\)/ ;
 
 VariableList ::= Variable
-    | VariableList _ /,/ _ Variable ;
+    | VariableList _ /,/ _ Variable
+    | /undef\b/
+    | VariableList _ /,/ _ /undef\b/ ;
+# (alts 2, 3: `my (undef, $x) = LIST` -- undef holds a place, skipping a
+# value, and declares nothing)
 
 # §9  DEFINITIONS
 

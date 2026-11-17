@@ -603,4 +603,19 @@ for my $case ([ 'my $s = "a${\ $o->m()}b";', '$' ], [ 'my $s = "@{[ $n + 1 ]}";'
     is_deeply([sort grep { $_ ne '$s' } @v], ['$x', '@y'], '"${ x }-@{y}" interpolates $x and @y');
 }
 
+# ============================================================================
+# §16 undef in a list declaration: `my (undef, $sg) = $b->field_of($n);`
+# (LLVM/Builder/Containers.pm, Values.pm) skips the first value. perl
+# -MO=Deparse: my(undef, $sg) = $b->field_of($n). The placeholder is the
+# keyword undef in the ListAssign's names, and declares nothing.
+# ============================================================================
+{
+    my $ir = eval { ir_of('my (undef, $sg) = f();') };
+    is($@, '', 'my (undef, $sg) = f(): parses');
+    my ($la) = grep { $_->operation() eq 'ListAssign' && defined $_->init() } all_nodes($ir);
+    is_deeply([map { [$_->const_type(), $_->value()] } ($la ? $la->names()->@* : ())],
+        [['undef', 'undef'], ['variable', '$sg']], 'its names: the undef placeholder, then $sg')
+        or diag(join ', ', map { $_->value() } ($la ? $la->names()->@* : ()));
+}
+
 done_testing();

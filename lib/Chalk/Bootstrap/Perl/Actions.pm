@@ -2449,7 +2449,9 @@ class Chalk::Bootstrap::Perl::Actions {
         return unless defined $sa;
         my $scope = _ctx_scope($ctx);
         if (defined $scope) {
-            $scope = $scope->define($_->value(), $decl) for $decl->names()->@*;
+            # (an undef placeholder declares nothing)
+            $scope = $scope->define($_->value(), $decl)
+                for grep { ($_->const_type() // '') ne 'undef' } $decl->names()->@*;
             $sa->update_scope($scope);
             $sa->update_control_head($decl);
         }
@@ -4053,6 +4055,13 @@ class Chalk::Bootstrap::Perl::Actions {
         my @names;
         for my $val (_collect_ir_values($ctx)) {
             for my $v (ref($val) eq 'ARRAY' ? $val->@* : $val) {
+                # `undef` holds a place in the list: the keyword's Constant
+                if ((!ref $v && defined $v && $v =~ /\A\s*undef\s*\z/)
+                        || ($v isa Chalk::IR::Node::Constant && ($v->const_type() // '') =~ /\A(?:undef|string)\z/
+                            && ($v->value() // '') eq 'undef')) {
+                    push @names, _make_keyword_const($factory, 'undef');
+                    next;
+                }
                 next unless ref $v;    # a terminal's text (the comma)
                 my $name = _declared_name_const($factory, $v);
                 die "GAP: a declaration list holding something other than a variable has no IR\n"
