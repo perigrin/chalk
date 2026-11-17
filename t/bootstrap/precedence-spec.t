@@ -726,4 +726,16 @@ for my $src ('$l[1][$p - 1]', '$l->[1][$p - 1]', '$l[1]->[$p - 1]', '$h{a}{$k . 
     };
 }
 
+# A ternary index, the loosest an index gets short of assignment: the
+# brackets still delimit it (Analysis.pm: `$slot->{ $self_arm ? 'self' :
+# 'reprs' }->@*`, `$wants{...}{ $c->want // 'unknown' }`).
+for my $src ('$h{ $b ? 1 : 2 }', '$h{a}{ $b ? 1 : 2 }', '$r->{ $b ? 1 : 2 }->@*') {
+    subtest "a ternary index is a whole expression: $src" => sub {
+        my $expr = parse_expr($src);
+        ok(defined $expr, "parses: $src") or return;
+        like(shape_of($expr), qr/Subscript\(.*TernaryExpr/, 'the ternary is the index')
+            or diag(shape_of($expr));
+    };
+}
+
 done_testing;

@@ -638,6 +638,11 @@ class Chalk::Bootstrap::Semiring::Precedence {
         # that level must survive so PostfixExpression can reject it:
         # `($x = $h){$k}` is invalid without parens.
         if ($rule_name eq 'Subscript') {
+            # A bracketed subscript (every alt but 2, `->(...)`) checked its
+            # target at the bracket and reset the level there: what is left
+            # is the index's, which the brackets delimit -- `$r->{ $c ? 1 : 2 }`
+            # is a term.
+            return $self->one() if defined $alt_idx && $alt_idx != 2;
             if (defined($value->{level}) && $value->{level} >= 100) {
                 return _intern(true, $value->{level}, $value->{assoc}, false);
             }
