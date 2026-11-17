@@ -55,6 +55,10 @@ same_as_test_more( qq{subtest 's' => sub {\n    TODO: {\n        local \$TODO = 
     same_as_test_more( qq{ok(1);\nTODO: {\n    local \$TODO = 'h';\n    ok(0, 'x');\n}\nok(0, 'y');\ndone_testing;\n}, 'TODO under a harness' );
 }
 
+# $Test::Builder::Level: a helper that raises it is looked through, for the
+# line a failure is reported at and for the $TODO it is in.
+same_as_test_more( qq{package Helper;\nsub check {\n    local \$Test::Builder::Level = \$Test::Builder::Level + 1;\n    main::ok(\$_[0], \$_[1]);\n    main::is(\$_[0], 1, 'is');\n    main::diag('d');\n}\npackage main;\nHelper::check(0, 'here');\nTODO: {\n    local \$TODO = 'via a helper';\n    Helper::check(0, 'todo');\n}\nok(0, 'plain');\ndone_testing;\n}, 'Test::Builder::Level' );
+
 # A subtest's plan is checked: one that runs other than it planned fails.
 same_as_test_more( qq{subtest 'short' => sub {\n    plan tests => 2;\n    ok(1);\n};\nsubtest 'long' => sub {\n    plan tests => 1;\n    ok(1);\n    ok(1);\n};\nsubtest 'right' => sub {\n    plan tests => 1;\n    ok(1);\n};\ndone_testing;\n}, 'a subtest runs what it planned' );
 

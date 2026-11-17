@@ -42,29 +42,35 @@ our $INDENT;    # four spaces a subtest deep
 our $TODO;
 our $TODO_NOW;   # the last test's TODO reason, for its diagnostics
 
+# $Test::Builder::Level STARTS AT 1, as Test::More sets it, so a helper's
+# `local $Test::Builder::Level = $Test::Builder::Level + 1` makes it 2.
+# shortcut: set at compile time under perl; a compiled program starts it
+# undef, so there the helper's bump is lost.
+$Test::Builder::Level = 1 unless defined $Test::Builder::Level;
+
 # ok($test, $name) -- "ok N - name", or "not ok" and where it failed.
 sub ok {
     my ( $test, $name ) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     return _ok( $test, $name, $file, $line );
 }
 
 sub pass {
     my ($name) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     return _ok( 1, $name, $file, $line );
 }
 
 sub fail {
     my ($name) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     return _ok( 0, $name, $file, $line );
 }
 
 # is($got, $expected, $name) -- eq, with undef equal only to undef.
 sub is {
     my ( $got, $expected, $name ) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
     return 1 if _ok( $same, $name, $file, $line );
     _fdiag( "#          got: " . _shown($got) . "\n#     expected: " . _shown($expected) . "\n" );
@@ -74,7 +80,7 @@ sub is {
 # isnt($got, $expected, $name) -- the negation of is.
 sub isnt {
     my ( $got, $expected, $name ) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
     return 1 if _ok( !$same, $name, $file, $line );
     _fdiag( "#          got: " . _shown($got) . "\n#     expected: anything else\n" );
@@ -86,7 +92,7 @@ sub isnt {
 # calling these is refused there, by name.)
 sub like {
     my ( $got, $re, $name ) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     my $s = defined $got ? $got : '';
     my $ok = $s =~ $re ? 1 : 0;
     return 1 if _ok( $ok, $name, $file, $line );
@@ -96,7 +102,7 @@ sub like {
 
 sub unlike {
     my ( $got, $re, $name ) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     my $s = defined $got ? $got : '';
     my $ok = $s !~ $re ? 1 : 0;
     return 1 if _ok( $ok, $name, $file, $line );
@@ -108,7 +114,7 @@ sub unlike {
 # reference by its type; named as Test::More names each.
 sub isa_ok {
     my ( $thing, $class, $name ) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     my $what = !defined $thing ? 'undef' : ref $thing ? ( _blessed($thing) ? 'object' : 'reference' ) : 'class';
     my $ok;
     if    ( $what eq 'undef' )     { $ok = 0 }
@@ -143,7 +149,7 @@ sub isa_ok {
 # can_ok($class_or_object, @methods) -- each method found by ->can.
 sub can_ok {
     my ( $proto, @methods ) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     my $class = ref($proto) ? ref($proto) : $proto;
     my $failed = '';
     for my $m (@methods) {
@@ -159,7 +165,7 @@ sub can_ok {
 # Test::More's diagnostic for it.
 sub cmp_ok {
     my ( $got, $op, $expected, $name ) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     my $ok;
     if    ( $op eq '==' ) { $ok = $got == $expected }
     elsif ( $op eq '!=' ) { $ok = $got != $expected }
@@ -209,7 +215,7 @@ sub skip {
 # so with two keys differing Test::More may name the other one first.
 sub is_deeply {
     my ( $got, $expected, $name ) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     if ( !ref($got) && !ref($expected) ) {
         my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
         return 1 if _ok( $same, $name, $file, $line );
@@ -325,7 +331,7 @@ sub _deep_shown {
 
 # diag(@msg) to STDERR and note(@msg) to STDOUT, each line "# "-prefixed.
 sub diag {
-    my ($pack) = caller;
+    my ($pack) = caller( _level() - 1 );
     my $t = _comment( join( '', @_ ) );
     if ( _todo_of($pack) ) { _out($t) }   # (in a TODO block, to STDOUT)
     else                   { _err($t) }
@@ -373,7 +379,7 @@ sub done_testing {
 # "No tests run" diagnostic.
 sub subtest {
     my ( $name, $code ) = @_;
-    my ( undef, $file, $line ) = caller;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
     _out( "# Subtest: " . $name . "\n" );
     my $count   = $COUNT;
     my $failed  = $FAILED;
@@ -470,7 +476,7 @@ sub _ok {
     my $out = $test ? "ok $COUNT" : "not ok $COUNT";
     # A NAME'S # is escaped, so TAP does not read it as a directive.
     $out = $out . " - " . _replace( $name, '#', '\\#' ) if defined $name;
-    my ($pack) = caller(1);   # (who called the test function)
+    my ($pack) = caller( _level() );   # (who called the test function)
     my $todo = _todo_of($pack);
     $TODO_NOW = $todo;
     $out = $out . " # TODO " . $todo if $todo;
@@ -502,6 +508,14 @@ sub _fdiag {
     my ($t) = @_;
     return _out($t) if $TODO_NOW;
     return _err($t);
+}
+
+# _level() -- how far up the stack a test function's caller is: 1, or more
+# under a helper that raised $Test::Builder::Level, as Test::More reads it
+# (for the line a failure is reported at, and whose $TODO it is in).
+sub _level {
+    my $level = $Test::Builder::Level;
+    return defined $level ? $level : 1;
 }
 
 # _todo_of($package) -- that package's $TODO.
