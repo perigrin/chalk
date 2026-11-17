@@ -49,7 +49,7 @@ sub print_module {
     push @L, 'define i32 @main(i32 %argc, i8** %argv) {', _blocks($bld->{blocks}), '}', '';
     # AN END BLOCK'S atexit(3) ENTRY: void(), its function called.
     if ( my @x = +($bld->{atexit} // [])->@* ) {
-        push @L, "define internal void \@x_$_() {", "  %r = call %Slot " . $x[$_ - 1] . "()", '  ret void', '}', '' for 1 .. @x;
+        push @L, "define internal void \@x_$_() {", "  %r = call %Slot $x[$_ - 1]()", '  ret void', '}', '' for 1 .. @x;
     }
     # EACH SUB A FUNCTION: `%Slot (%Slot %a0, ...)`, its blocks printed alike.
     for my $fn (sort { $a->{name} cmp $b->{name} } values +($bld->{funcs} // {})->%*) {

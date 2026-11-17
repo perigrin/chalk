@@ -553,14 +553,14 @@ sub replacement ( $repl, $ngroups ) {
     for ( my $i = 0; $i <= $#c; $i++ ) {
         my $ch = $c[$i];
         if ( $ch eq '\\' && $i < $#c ) {
-            die "GAP: s/// replacement escape \\" . $c[ $i + 1 ] . " is not lowered\n" if $c[ $i + 1 ] =~ /[A-Za-z0-9]/;
+            die "GAP: s/// replacement escape \\$c[$i+1] is not lowered\n" if $c[ $i + 1 ] =~ /[A-Za-z0-9]/;
             $lit .= $c[ ++$i ];
             next;
         }
         if ( $ch eq '$' && $i < $#c ) {
             my $n = $c[ $i + 1 ];
             die "GAP: s/// replacement \$$n is not lowered (only \$1..\$9)\n" unless $n =~ /\A[1-9]\z/;
-            die "GAP: s/// replacement \$$n" . $c[ $i + 2 ] . " (a group past 9) is not lowered\n" if ( $c[ $i + 2 ] // '' ) =~ /\A\d\z/;
+            die "GAP: s/// replacement \$$n$c[$i+2] (a group past 9) is not lowered\n" if ( $c[ $i + 2 ] // '' ) =~ /\A\d\z/;
             die "GAP: s/// replacement \$$n of a pattern of $ngroups group(s)\n" if $n > $ngroups;
             $flush->();
             push @segs, { kind => 'cap', n => 0 + $n };
