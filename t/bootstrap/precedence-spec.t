@@ -68,6 +68,7 @@ use Chalk::IR::Node::Not;
 use Chalk::IR::Node::Negate;
 use Chalk::IR::Node::Defined;
 use Chalk::IR::Node::Subscript;
+use Chalk::IR::Node::BinOp;
 use Chalk::IR::Node::PostfixDeref;
 use Chalk::IR::Node::Call;
 use Chalk::IR::Node::VarDecl;
@@ -706,5 +707,23 @@ subtest 'L17 || looser than L10 named-unary: defined $a || 0 is Or(Call(defined,
         'left of Or is Call (defined)') or return;
     is($call->name(), 'defined', 'callee is defined');
 };
+
+# --- L2 subscripts: a bracket is a delimiter ---
+# perlop: an index is a whole expression, whatever binds inside it. A chained
+# subscript's index is no different from the first one's: `$l[1][$p - 1]` is
+# Subscript(Subscript($l, 1), Subtract($p, 1)) -- the outer target's L2 level
+# does not reach into the brackets (Earley.pm: `$_late[$core_id][$pos - $origin]`).
+
+for my $src ('$l[1][$p - 1]', '$l->[1][$p - 1]', '$l[1]->[$p - 1]', '$h{a}{$k . $j}') {
+    subtest "an index after a subscript is a whole expression: $src" => sub {
+        my $expr = parse_expr($src);
+        my $outer = isa_with_shape($expr, 'Chalk::IR::Node::Subscript',
+            'top is Subscript') or return;
+        isa_with_shape($outer->inputs()->[0], 'Chalk::IR::Node::Subscript',
+            'its target is the inner Subscript');
+        ok($outer->inputs()->[1] isa Chalk::IR::Node::BinOp, 'its index is the binary expression')
+            or diag(shape_of($outer->inputs()->[1]));
+    };
+}
 
 done_testing;

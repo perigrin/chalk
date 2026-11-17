@@ -375,6 +375,16 @@ class Chalk::Bootstrap::Semiring::Precedence {
             return $self->zero();
         }
 
+        # Past those checks the bracket opens a delimited index: what binds
+        # inside it answers to the bracket, not to the target's own level. A
+        # target that is itself a subscript or a call (`$l[1]`, level -2)
+        # would otherwise reach in and reject every looser index:
+        # `$l[1][$p - 1]` had no reading.
+        if (($rule_name eq 'Subscript' || $rule_name eq 'PostfixDeref')
+                && $matched_text =~ /^[\[\{]$/) {
+            return $self->one();
+        }
+
         # Non-operator scan: multiply with one (transparent)
         return $self->_prec_multiply($existing, $self->one());
     }
