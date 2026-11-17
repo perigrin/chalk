@@ -87,6 +87,10 @@ my %UNOP_MAP = (
     '\\'      => 'Ref',
 );
 
+# The logical operators a statement can be (`A or B;`): evaluated for their
+# operands' effects, they go on the control chain as the statement.
+my %SHORT_CIRCUIT_STATEMENT_OPS = map { $_ => 1 } qw(And Or DefinedOr Xor);
+
 class Chalk::Bootstrap::Perl::Actions {
     # class_bindings($mop_class) -> the bindings of a class's own lexicals.
     sub class_bindings ($cls) { return $CLASS_BINDINGS{ refaddr($cls) } // Chalk::Bootstrap::Bindings->new }
@@ -1904,6 +1908,7 @@ class Chalk::Bootstrap::Perl::Actions {
         # the during-parse threading built on its own. Node-into-graph merges
         # still run unconditionally so reachability walks see the statements.
         my $do_rewrite = $_control_rebuild_enabled;
+        my %seen_short_circuit;
         for my $i (0..$#stmts) {
             my $s = $stmts[$i];
             next unless blessed($s);
@@ -1948,6 +1953,23 @@ class Chalk::Bootstrap::Perl::Actions {
                 # late-binding control_in setter inherited from Chalk::IR::Node;
                 # merge into the graph so $graph->nodes and reachability
                 # walks see it.
+                $graph->merge($s);
+                if ($do_rewrite
+                        && (!defined $s->control_in
+                        || refaddr($s->control_in) != refaddr($current_control))) {
+                    $s->set_control_in($current_control);
+                }
+                $current_control = $s;
+            } elsif ($s isa Chalk::IR::Node
+                        && $SHORT_CIRCUIT_STATEMENT_OPS{ $s->operation }) {
+                # `open(...) or die`, `$x and print ...`: a logical operator
+                # evaluated for the effects of its operands. It is a value
+                # node, but at statement position it is the statement: on
+                # the chain, or the scheduler never reaches it and it is
+                # dropped. It is hash-consed by content, so one node cannot
+                # be two statements of the same body.
+                die "GAP: two identical short-circuit statements in one block share one IR node\n"
+                    if $seen_short_circuit{ refaddr($s) }++;
                 $graph->merge($s);
                 if ($do_rewrite
                         && (!defined $s->control_in

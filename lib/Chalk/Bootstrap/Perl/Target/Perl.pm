@@ -1116,6 +1116,14 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
         if ($node isa Chalk::IR::Node::ExpressionList) {
             return '(' . join(', ', $self->_emit_operand_list($node->items->@*)) . ')';
         }
+        # die and return as an operand (`open(...) or die 'x'`, `$x // return`):
+        # the statement's text without its semicolon.
+        if ($node isa Chalk::IR::Node::Unwind
+                || ($node isa Chalk::IR::Node::Return && !$node->synthetic)) {
+            my $code = $node isa Chalk::IR::Node::Unwind
+                ? $self->_emit_die_call($node) : $self->_emit_return_stmt($node);
+            return $code =~ s/;\z//r;
+        }
 
         return $self->_emit_node($node);
     }
@@ -1235,6 +1243,10 @@ class Chalk::Bootstrap::Perl::Target::Perl :isa(Chalk::Bootstrap::Target) {
                 || $node isa Chalk::IR::Node::ListAssign) {
             return defined $node->init() ? $PREC_TERM{assign} : $PREC_TERM{term};
         }
+        # die LIST and return LIST are rightward list operators.
+        return $PREC_TERM{list_op}
+            if $node isa Chalk::IR::Node::Unwind
+            || ($node isa Chalk::IR::Node::Return && !$node->synthetic);
         if ($node isa Chalk::IR::Node::Call && $node->dispatch_kind() eq 'builtin') {
             my $name = $node->inputs()->[0]->value();
             my $args = $node->inputs()->[1];
