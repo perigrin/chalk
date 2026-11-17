@@ -584,6 +584,13 @@ class Chalk::Bootstrap::Earley {
     method _run_parse($input) {
         my $n = length($input);
 
+        # Terminals are matched against this one string in place, and
+        # scanned text is read from it, through this reference. Handing
+        # the string itself to a sub copies it, and a copy of a UTF-8
+        # string has no character-position cache: every match and every
+        # substr on it is then linear in the position.
+        my $input_ref = \$input;
+
         # Chart: $chart[$pos][$core_id]{$rel_dist} = $value
         # where rel_dist = pos - origin. Values are stored directly — no item hashref wrappers.
         # core_id encodes (rule_name, alt_idx, dot); CoreItemIndex provides O(1) lookups.
@@ -800,7 +807,7 @@ class Chalk::Bootstrap::Earley {
                         next if $seen_patterns{$pstr}++;
                         next if exists $_scan_cache{$pos} && exists $_scan_cache{$pos}{$pstr};
                         my $pattern = $regex_cache{$pstr} //= qr/$pstr/;
-                        $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+                        $_scan_cache{$pos}{$pstr} = Chalk::Bootstrap::Terminal::match_at($input_ref, $pos, $pattern);
                         $_scan_stats{clustered_scans}++;
                     }
                 }
@@ -1024,7 +1031,7 @@ class Chalk::Bootstrap::Earley {
                         );
                     } else {
                         # Scan (allow at end of input for zero-width matches)
-                        $self->_scan($core_id, $origin, $value, $symbol, $pos, $input, \@chart, $n, \@agenda, \%predicted_at);
+                        $self->_scan($core_id, $origin, $value, $symbol, $pos, $input_ref, \@chart, $n, \@agenda, \%predicted_at);
                     }
                 }
             }
@@ -1598,8 +1605,9 @@ class Chalk::Bootstrap::Earley {
     }
 
     # Scan: match terminal and advance to next position.
-    # Takes core_id, origin, and value directly (no item hashref).
-    method _scan($core_id, $origin, $value, $symbol, $pos, $input, $chart, $n, $agenda = undef, $predicted_at = undef) {
+    # Takes core_id, origin, and value directly (no item hashref), and the
+    # input as a reference to the string being parsed (see _run_parse).
+    method _scan($core_id, $origin, $value, $symbol, $pos, $input_ref, $chart, $n, $agenda = undef, $predicted_at = undef) {
         my $pattern_str = $symbol->value();
 
         # Check scan result cache before attempting regex match.
@@ -1611,7 +1619,7 @@ class Chalk::Bootstrap::Earley {
             $_scan_stats{cache_hits}++;
         } else {
             my $pattern = $regex_cache{$pattern_str} //= qr/$pattern_str/;
-            $end_pos = Chalk::Bootstrap::Terminal::match($input, $pos, $pattern);
+            $end_pos = Chalk::Bootstrap::Terminal::match_at($input_ref, $pos, $pattern);
             $_scan_cache{$pos}{$pattern_str} = $end_pos;
         }
         $_scan_stats{total_matches}++;
@@ -1619,7 +1627,7 @@ class Chalk::Bootstrap::Earley {
         return unless defined $end_pos;
 
         # Capture matched text
-        my $matched = substr($input, $pos, $end_pos - $pos);
+        my $matched = substr($input_ref->$*, $pos, $end_pos - $pos);
 
         # Build an annotated scan Context carrying matched text and metadata.
         # predicted_at tracks which rules have been predicted at this position,
