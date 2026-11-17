@@ -2003,7 +2003,7 @@ class Chalk::Bootstrap::Perl::Actions {
                     $index = $self->_dq_element($ctx, $cref, '$' . $1, $gap);
                     $$cref =~ /\G\s*/gc;
                     if ($$cref !~ /\G\Q$close\E/) {
-                        undef $index;
+                        $index = undef;
                         pos($$cref) = $start;
                     }
                 }
