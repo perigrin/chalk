@@ -28,19 +28,25 @@ our $VERSION = '1.302210';
 
 use Exporter 'import';
 our @EXPORT = qw(ok is isnt pass fail diag note plan done_testing BAIL_OUT isa_ok can_ok cmp_ok skip is_deeply subtest like unlike
-  use_ok require_ok explain $TODO);
+  use_ok require_ok explain $TODO ref_ok dies lives);
 
 our $COUNT;     # tests run
 our $FAILED;    # of them, failed
 our $PLANNED;   # the plan's count, once one is printed
 our ( $DIFF_AT, $DIFF_GOT, $DIFF_EXP );   # is_deeply's first difference
 our $INDENT;    # four spaces a subtest deep
+our $SKIP_ALL;  # why the subtest running said plan skip_all
 # $TODO, exported as Test::More exports it, so `local $TODO = 'why'` in a
 # TODO: block compiles under strict. As Test::More, it is read as the CALLING
 # package's $TODO (a `local` replaces the exported alias): while it is true a
 # failure is not counted, and its diagnostics go to STDOUT.
 our $TODO;
 our $TODO_NOW;   # the last test's TODO reason, for its diagnostics
+# A FAILED lives' exception (Test2's pending diagnostic): shown after the
+# next test's diagnostics if that test fails, dropped by the next test or
+# diag either way.
+our $PENDING;
+our $HELD;      # the pending one the last test failed with, still to show
 
 # $Test::Builder::Level STARTS AT 1, as Test::More sets it, so a helper's
 # `local $Test::Builder::Level = $Test::Builder::Level + 1` makes it 2.
@@ -52,19 +58,25 @@ $Test::Builder::Level = 1 unless defined $Test::Builder::Level;
 sub ok ($;$) {
     my ( $test, $name ) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
-    return _ok( $test, $name, $file, $line );
+    my $r = _ok( $test, $name, $file, $line );
+    _held();
+    return $r;
 }
 
 sub pass (;$) {
     my ($name) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
-    return _ok( 1, $name, $file, $line );
+    my $r = _ok( 1, $name, $file, $line );
+    _held();
+    return $r;
 }
 
 sub fail (;$) {
     my ($name) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
-    return _ok( 0, $name, $file, $line );
+    my $r = _ok( 0, $name, $file, $line );
+    _held();
+    return $r;
 }
 
 # is($got, $expected, $name) -- eq, with undef equal only to undef.
@@ -73,7 +85,7 @@ sub is ($$;$) {
     my ( undef, $file, $line ) = caller( _level() - 1 );
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
     return 1 if _ok( $same, $name, $file, $line );
-    _fdiag( "#          got: " . _shown($got) . "\n#     expected: " . _shown($expected) . "\n" );
+    _fdiag( _comment( "         got: " . _shown($got) . "\n    expected: " . _shown($expected) . "\n" ) );
     return 0;
 }
 
@@ -83,7 +95,7 @@ sub isnt ($$;$) {
     my ( undef, $file, $line ) = caller( _level() - 1 );
     my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
     return 1 if _ok( !$same, $name, $file, $line );
-    _fdiag( "#          got: " . _shown($got) . "\n#     expected: anything else\n" );
+    _fdiag( _comment( "         got: " . _shown($got) . "\n    expected: anything else\n" ) );
     return 0;
 }
 
@@ -96,7 +108,7 @@ sub like ($$;$) {
     my $s = defined $got ? $got : '';
     my $ok = $s =~ $re ? 1 : 0;
     return 1 if _ok( $ok, $name, $file, $line );
-    _fdiag( "#                   " . _shown($got) . "\n#     doesn't match '" . $re . "'\n" );
+    _fdiag( _comment( "                  " . _shown($got) . "\n    doesn't match '" . $re . "'\n" ) );
     return 0;
 }
 
@@ -106,15 +118,21 @@ sub unlike ($$;$) {
     my $s = defined $got ? $got : '';
     my $ok = $s !~ $re ? 1 : 0;
     return 1 if _ok( $ok, $name, $file, $line );
-    _fdiag( "#                   " . _shown($got) . "\n#           matches '" . $re . "'\n" );
+    _fdiag( _comment( "                  " . _shown($got) . "\n          matches '" . $re . "'\n" ) );
     return 0;
 }
 
 # isa_ok($thing, $class, $name) -- an object or a class by ->isa, a plain
 # reference by its type; named as Test::More names each.
+#
+# isa_ok($thing, [classes], $name) -- Test2's: the thing an object or a
+# class name, each class by ->isa, every one it is not listed. (Test2's
+# isa_ok($thing, @classes) is Test::More's when there are two or three
+# arguments: the third is a name there.)
 sub isa_ok ($$;$) {
     my ( $thing, $class, $name ) = @_;
     my ( undef, $file, $line ) = caller( _level() - 1 );
+    return _isa_ok2( $thing, $class, $name, $file, $line ) if ref($class) eq 'ARRAY';
     my $what = !defined $thing ? 'undef' : ref $thing ? ( _blessed($thing) ? 'object' : 'reference' ) : 'class';
     my $ok;
     if    ( $what eq 'undef' )     { $ok = 0 }
@@ -144,6 +162,107 @@ sub isa_ok ($$;$) {
     return 1 if _ok( $ok, $label . " isa '" . $class . "'", $file, $line );
     _fdiag( "#     " . $diag . "\n" );
     return 0;
+}
+
+sub _isa_ok2 {
+    my ( $thing, $classes, $name, $file, $line ) = @_;
+    my $shown = !defined $thing ? '<undef>' : ref $thing ? _render_ref($thing) : "" . $thing;
+    $shown = _replace( $shown, "\n", "\\n" );
+    $shown = _replace( $shown, '#', '' );
+    $shown = _no_address($shown);
+    my @classes = @$classes;
+    $name = scalar(@classes) == 1 ? $shown . "->isa('" . $classes[0] . "')" : $shown . "->isa(...)" unless $name;
+    unless ( defined $thing && ( ref $thing ? _blessed($thing) : length $thing ) ) {
+        my $what = !defined $thing ? '<undef>' : ref $thing ? ref $thing : "'" . $thing . "'";
+        _ok( 0, $name, $file, $line, 1 );
+        _fdiag( "# " . $what . " is neither a blessed reference or a package name.\n" );
+        return 0;
+    }
+    my $bad = '';
+    for my $c (@classes) {
+        $bad = $bad . "# Failed: " . $shown . "->isa('" . $c . "')\n" unless $thing->isa($c);
+    }
+    return 1 if _ok( $bad eq '', $name, $file, $line, 1 );
+    _fdiag($bad);
+    return 0;
+}
+
+# ref_ok($thing, $type, $name) -- Test2's: a reference, of $type if one is
+# given (what it is underneath, for an object).
+sub ref_ok ($;$$) {
+    my ( $thing, $want, $name ) = @_;
+    my ( undef, $file, $line ) = caller( _level() - 1 );
+    my $type = _rtype($thing);
+    my $why;
+    if    ( $type eq '' )                 { $why = "# '" . _render_ref($thing) . "' is not a reference\n" }
+    elsif ( $want && $type ne $want )     { $why = "# '" . _render_ref($thing) . "' is not a '" . $want . "' reference\n" }
+    return 1 if _ok( !defined $why, $name, $file, $line, 1 );
+    _fdiag($why);
+    return 0;
+}
+
+# dies { ... } -- Test2's: the block's exception, or undef if it did not
+# die; $@, $! and $? left as they were.
+# shortcut: no warning in void context, nor for an exception that is false.
+sub dies (&) {
+    my ($code) = @_;
+    local ( $@, $!, $? );
+    my $ok  = eval { $code->(); 1 };
+    my $err = $@;
+    return undef if $ok;
+    return $err;
+}
+
+# lives { ... } -- Test2's: true if the block did not die; else false, its
+# exception left in $@ and shown after the next test's diagnostics if that
+# test fails.
+# shortcut: no warning in void context.
+sub lives (&) {
+    my ($code) = @_;
+    my $err;
+    {
+        local ( $@, $!, $? );
+        my $ok = eval { $code->(); 1 };
+        return 1 if $ok;
+        $err = $@;
+    }
+    $PENDING = "Exception: " . $err;
+    $@ = $err;
+    return 0;
+}
+
+# _rtype($thing) -- Test2's rtype: what a reference is underneath ('' for
+# no reference; a pattern's REGEXP).
+sub _rtype {
+    my ($r) = @_;
+    return '' unless ref $r;
+    my $t = _type($r);
+    return 'REGEXP' if $t eq 'Regexp';
+    return $t;
+}
+
+# _render_ref($thing) -- Test2's render_ref: undef as undef, a plain value as
+# itself, a reference as TYPE(0x...) after its class.
+# shortcut: an object with overloaded "" or 0+ shows as those make it.
+sub _render_ref {
+    my ($r) = @_;
+    return 'undef' unless defined $r;
+    return "" . $r unless ref $r;
+    return 'Regexp=REGEXP(0x' . sprintf( '%x', 0 + $r ) . ')' if _rtype($r) eq 'REGEXP';
+    return "" . $r;
+}
+
+# _no_address($s) -- every (0x...) taken out of it.
+sub _no_address {
+    my ($s) = @_;
+    my $at = index( $s, '(0x' );
+    while ( $at >= 0 ) {
+        my $end = index( $s, ')', $at );
+        last if $end < 0;
+        $s  = substr( $s, 0, $at ) . substr( $s, $end + 1 );
+        $at = index( $s, '(0x' );
+    }
+    return $s;
 }
 
 # can_ok($class_or_object, @methods) -- each method found by ->can.
@@ -182,13 +301,13 @@ sub cmp_ok ($$$;$) {
     else  { die "Test::Chalk: cmp_ok's $op is not supported\n" }
     return 1 if _ok( $ok, $name, $file, $line );
     if ( $op eq '==' || $op eq 'eq' ) {
-        _fdiag( "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: " . _cmp_shown( $expected, $op ) . "\n" );
+        _fdiag( _comment( "         got: " . _cmp_shown( $got, $op ) . "\n    expected: " . _cmp_shown( $expected, $op ) . "\n" ) );
     }
     elsif ( $op eq '!=' || $op eq 'ne' ) {
-        _fdiag( "#          got: " . _cmp_shown( $got, $op ) . "\n#     expected: anything else\n" );
+        _fdiag( _comment( "         got: " . _cmp_shown( $got, $op ) . "\n    expected: anything else\n" ) );
     }
     else {
-        _fdiag( "#     " . _shown($got) . "\n#         " . $op . "\n#     " . _shown($expected) . "\n" );
+        _fdiag( _comment( "    " . _shown($got) . "\n        " . $op . "\n    " . _shown($expected) . "\n" ) );
     }
     return 0;
 }
@@ -219,7 +338,7 @@ sub is_deeply {
     if ( !ref($got) && !ref($expected) ) {
         my $same = defined $got ? ( defined $expected && $got eq $expected ) : !defined $expected;
         return 1 if _ok( $same, $name, $file, $line );
-        _fdiag( "#          got: " . _shown($got) . "\n#     expected: " . _shown($expected) . "\n" );
+        _fdiag( _comment( "         got: " . _shown($got) . "\n    expected: " . _shown($expected) . "\n" ) );
         return 0;
     }
     my $ok;
@@ -230,9 +349,11 @@ sub is_deeply {
         $ok = _differ( '$FOO', $got, $expected, 0, 0 );
     }
     return 1 if _ok( $ok, $name, $file, $line );
-    _fdiag( "#     Structures begin differing at:\n"
-      . "#     " . _replace( $DIFF_AT, '$FOO', '     $got' ) . " = " . $DIFF_GOT . "\n"
-      . "#     " . _replace( $DIFF_AT, '$FOO', '$expected' ) . " = " . $DIFF_EXP . "\n" );
+    # (every line four spaces in, a value's own lines too, as Test::More's)
+    my $out = "Structures begin differing at:\n"
+      . _replace( $DIFF_AT, '$FOO', '     $got' ) . " = " . $DIFF_GOT . "\n"
+      . _replace( $DIFF_AT, '$FOO', '$expected' ) . " = " . $DIFF_EXP;
+    _fdiag( _comment( "    " . _replace( $out, "\n", "\n    " ) . "\n" ) );
     return 0;
 }
 
@@ -348,6 +469,7 @@ sub _deep_shown {
 
 # diag(@msg) to STDERR and note(@msg) to STDOUT, each line "# "-prefixed.
 sub diag {
+    $PENDING = undef;
     my ($pack) = caller( _level() - 1 );
     my $t = _comment( join( '', @_ ) );
     if ( _todo_of($pack) ) { _out($t) }   # (in a TODO block, to STDOUT)
@@ -356,16 +478,21 @@ sub diag {
 }
 
 sub note {
+    $PENDING = undef;
     _out( _comment( join( '', @_ ) ) );
     return 0;
 }
 
-# plan(tests => N) prints the plan first; plan(skip_all => $why) skips them all.
+# plan(tests => N) prints the plan first; plan(skip_all => $why) skips them
+# all -- the program's, or IN A SUBTEST that subtest's (as Test::More: a die
+# the subtest catches, its reason left in $SKIP_ALL).
 sub plan {
     my ( $kind, $arg ) = @_;
     if ( $kind eq 'skip_all' ) {
         _out( "1..0 # SKIP " . $arg . "\n" );
-        exit 0;
+        exit 0 unless defined $INDENT && length $INDENT;
+        $SKIP_ALL = $arg;
+        die "Test::Chalk: skip_all\n";
     }
     die "Test::Chalk: plan $kind is not supported\n" unless $kind eq 'tests';
     $PLANNED = $arg;
@@ -392,6 +519,9 @@ sub done_testing {
 
 # subtest($name, $code) -- the code run as a test of its own, its TAP four
 # spaces in, its plan after it; then one test here, passing when it did.
+# The code runs in an eval, as Test::More's: a plan skip_all in it skips the
+# subtest ("ok N # skip why": a test it failed before is reported, and
+# hidden), and a die in it finishes the subtest and goes on dying.
 # shortcut: a subtest that runs no test fails without Test::More's
 # "No tests run" diagnostic.
 sub subtest {
@@ -406,12 +536,26 @@ sub subtest {
     $FAILED  = 0;
     $PLANNED = undef;
     $INDENT  = ( defined $indent ? $indent : '' ) . '    ';
-    # shortcut: the code is not run in an eval, so a skip_all in it ends the
-    # program, not the subtest, and an error leaves the subtest unfinished.
-    # Test::More's eval is what T2 cannot compile yet: a package variable the
-    # code writes is read stale after `eval { $code->(); 1 }` (it DIFFERS).
-    $code->();
+    $SKIP_ALL = undef;
+    my $ran  = eval { $code->(); 1 };
+    my $err  = $@;
+    my $skip = $SKIP_ALL;
+    $SKIP_ALL = undef;
     my $n = $COUNT + 0;
+    if ( !$ran && defined $skip ) {
+        my $failed_here = $FAILED + 0;
+        if ($failed_here) {
+            my $tests = $failed_here == 1 ? "test" : "tests";
+            _err( "# Looks like you failed " . $failed_here . " " . $tests . " of " . $n . ".\n" );
+        }
+        $COUNT   = $count;
+        $FAILED  = $failed;
+        $PLANNED = $planned;
+        $INDENT  = $indent;
+        $COUNT   = $COUNT + 1;
+        _out( "ok " . $COUNT . " # skip " . $skip . "\n" );
+        return 1;
+    }
     _out( "1.." . $n . "\n" ) unless defined $PLANNED;
     # A PLAN NOT KEPT fails the subtest, as Test::More's.
     my $extra = defined $PLANNED ? $n - $PLANNED : 0;
@@ -429,7 +573,10 @@ sub subtest {
     $FAILED  = $failed;
     $PLANNED = $planned;
     $INDENT  = $indent;
-    return _ok( !$bad && $n > 0 && $extra == 0, $name, $file, $line );
+    my $r = _ok( !$bad && $n > 0 && $extra == 0, $name, $file, $line );
+    _held();
+    die $err unless $ran;
+    return $r;
 }
 
 # use_ok($module, @imports) -- `use $module @imports` at run time, in the
@@ -487,8 +634,11 @@ sub BAIL_OUT {
     exit 255;
 }
 
+# (a fifth argument: Test2's tool, whose failure says so as Test2 does)
 sub _ok {
-    my ( $test, $name, $file, $line ) = @_;
+    my ( $test, $name, $file, $line, $test2 ) = @_;
+    my $pending = $PENDING;
+    $PENDING = undef;
     $COUNT = $COUNT + 1;
     my $out = $test ? "ok $COUNT" : "not ok $COUNT";
     # A NAME'S # is escaped, so TAP does not read it as a directive.
@@ -505,11 +655,13 @@ sub _ok {
     # line on STDERR after a write to STDOUT -- here, always the "not ok".
     # (In a TODO block, where they go to STDOUT, none.)
     print STDERR "\n" if $ENV{HARNESS_ACTIVE} && !$todo;   # (never indented)
+    $HELD = $pending;
+    my $in = $test2 ? "# " : "#   ";
     if ( defined $name ) {
-        _fdiag( "#   " . $failed . " test '" . $name . "'\n#   at " . $file . " line " . $line . ".\n" );
+        _fdiag_raw( $in . $failed . " test '" . $name . "'\n" . $in . "at " . $file . " line " . $line . ".\n" );
     }
     else {
-        _fdiag( "#   " . $failed . " test at " . $file . " line " . $line . ".\n" );
+        _fdiag_raw( $in . $failed . " test at " . $file . " line " . $line . ".\n" );
     }
     return 0;
 }
@@ -520,11 +672,25 @@ sub _out { my ($t) = @_; print _indented($t); return 1 }
 sub _err { my ($t) = @_; print STDERR _indented($t); return 1 }
 
 # _fdiag($text) -- the last test's failure diagnostics: to STDERR, or in a
-# TODO block to STDOUT.
+# TODO block to STDOUT; then a failed lives' exception it was held for.
 sub _fdiag {
+    my ($t) = @_;
+    _fdiag_raw($t);
+    return _held();
+}
+
+sub _fdiag_raw {
     my ($t) = @_;
     return _out($t) if $TODO_NOW;
     return _err($t);
+}
+
+# _held() -- a failed lives' exception the last test failed with, shown.
+sub _held {
+    return 1 unless defined $HELD;
+    my $h = $HELD;
+    $HELD = undef;
+    return _fdiag_raw( _comment($h) );
 }
 
 # _level() -- how far up the stack a test function's caller is: 1, or more

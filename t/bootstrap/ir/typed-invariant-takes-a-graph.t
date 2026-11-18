@@ -2,7 +2,8 @@
 # ABOUTME: check_nodes is the fragment escape hatch and says so in its own diagnostics.
 
 use 5.42.0;
-use Test2::V0;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::Graph;
 use Chalk::IR::Graph::TypedInvariant;
