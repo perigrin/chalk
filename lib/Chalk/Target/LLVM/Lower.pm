@@ -9,6 +9,7 @@ use Chalk::Target::LLVM::Builder;
 use Chalk::Target::LLVM::Printer;
 use Chalk::IR::Value;      # narrow_num tests operands with isa
 use Chalk::IR::Analysis;   # not_a_value_type, is_fractional_constant: T1's facts
+use Chalk::IR::ReferenceFlow;   # may a reference's value reach a deref: T1's question
 
 # lower_program($return_node) -> the module's text, or undef when T2 refuses
 # the program.
@@ -56,20 +57,27 @@ sub lower_program {
                                            || $_->operation =~ /\A(?:ArrayLiteral|HashLiteral|EntryDef)\z/ && ( $_->can('sigil') ? $_->sigil // '' : '' ) ne '$' ) }
                          $a->inputs->@[ 0 .. $a->targets - 1 ]
         } Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
-        # A SCALAR DEREF where a reference T2 does not make may reach it (to an
-        # element, `\(@a)`, `\$_[0]`): refused, not stopped at run time. T2
-        # makes one to a `my` scalar kept in memory, a literal (read-only), a
-        # choice of such, an array's, a hash's, an array's or a hash's element
-        # (or refuses it by name where it makes it).
-        Chalk::Target::LLVM::Builder::out('a scalar deref where a reference T2 does not make may reach it')
-            if ( grep { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' && !$_->alias_element } Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret) )
-            && grep { $_->operation eq 'Ref' && !( ( $_->stamp // '' ) =~ /\A(?:ArrayRef|HashRef)\z/
+        # A SCALAR DEREF A REFERENCE T2 DOES NOT MAKE MAY REACH (a glob's, a
+        # field's): refused, not read wrong at run time. T2 makes one to a `my`
+        # scalar kept in memory, a literal (read-only), a choice of such, an
+        # array or a hash (`\(@a)` and `\$_[0]` among them), an array's or a
+        # hash's element, a named sub (\&name: a code value, tag 8 -- a scalar
+        # deref of it dies as perl's). Whether one's value MAY REACH the
+        # deref is T1's question (Chalk::IR::ReferenceFlow): through stores,
+        # calls and returns, conservatively -- not merely that both are in the
+        # program (Symbol::gensym's `\*{...}`, loaded by File::Temp, refused
+        # every program that loaded it).
+        {
+            my @all = Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
+            my @unmade = grep { $_->operation eq 'Ref' && !( ( $_->stamp // '' ) =~ /\A(?:ArrayRef|HashRef)\z/
                           || $_->is_alias_ref || $_->is_element_ref || $_->is_hash_element_ref
-                          # (\&name: a code value, tag 8 -- a scalar deref of it dies as perl's)
                           || blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'Constant' && ( $_->inputs->[0]->const_type // '' ) eq 'code'
-                          # (a `my` scalar kept in memory, a literal, a choice of such: scalar_ref)
-                          || Chalk::Target::LLVM::Builder::_scalar_ref_of( $_->inputs->[0] ) ) }
-                     Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
+                          || Chalk::Target::LLVM::Builder::_scalar_ref_of( $_->inputs->[0] ) ) } @all;
+            # (the walk is asked only where both are there)
+            Chalk::Target::LLVM::Builder::out('a scalar deref where a reference T2 does not make may reach it')
+                if @unmade && ( grep { $_->operation eq 'PostfixDeref' && ( $_->sigil // '' ) eq '$' && !$_->alias_element } @all )
+                && defined Chalk::IR::ReferenceFlow->new( nodes => \@all, mop => $opt{mop} )->scalar_deref_reached(@unmade);
+        }
         $b->build($ret); 1 };
     unless ($ok) { $PATH = { path => 'refused', why => ( $@ =~ s/\n.*//sr ) }; return undef }
     # A PRINTING FAILURE (a conversion T2 lacks) is a refusal too, by its reason:

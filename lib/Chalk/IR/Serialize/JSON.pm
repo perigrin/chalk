@@ -745,6 +745,16 @@ sub _deserialize_graph ($method_data) {
                 my %by_sigil = ('$' => 'ScalarRef', '@' => 'ArrayRef', '%' => 'HashRef');
                 $nd->{stamp} = $by_sigil{ $inputs[0]->sigil // '' } // 'Unknown';
             }
+            # A REFERENCE TO AN @ OR % VARIABLE is an ArrayRef or a HashRef,
+            # WHATEVER THE WIRE SAYS: B::SoN stamps the variable by the value
+            # of the op that reads it -- `!@a` reads @a as a count, so `my @a`
+            # arrives Scalar (fixed above) and `\@a` ScalarRef (Earley.pm's
+            # `\@held_rows`, tested by `!@held_rows`). (`\(@a)` is a
+            # reference to each element: its stamp is not the array's.)
+            if (!$fields->{each} && blessed($inputs[0]) && $inputs[0]->operation eq 'PadAccess'
+                    && ( $inputs[0]->sigil // '' ) =~ /\A[@%]\z/) {
+                $nd->{stamp} = $inputs[0]->sigil eq '@' ? 'ArrayRef' : 'HashRef';
+            }
         }
         elsif ($op eq 'Parameter') {
             # index is REQUIRED -- it is the node's identity. A missing one is a
