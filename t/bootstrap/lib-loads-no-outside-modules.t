@@ -9,7 +9,7 @@ use File::Find;
 
 # THE PRAGMAS lib/ may say, and Chalk's own modules. Everything else lib/ loads
 # must be listed below with why it is still there -- and the list only shrinks.
-my %PRAGMA = map { ( $_ => 1 ) } qw(strict warnings utf8 feature experimental constant builtin);
+my %PRAGMA = map { ( $_ => 1 ) } qw(strict warnings utf8 feature experimental constant integer builtin);
 
 # STILL LOADED, under review (perigrin, 2026-11-18). Each entry is a file and the
 # module it loads; a file not listed here may load none of them.
@@ -17,8 +17,7 @@ my %KNOWN = (
     # the loader reads B::SoN's JSON wire until it moves to Sereal (Chalk::Loader::Sereal)
     'lib/Chalk/IR/Serialize/JSON.pm'  => [qw(JSON::PP Exporter)],
     'lib/Chalk/Impl.pm'               => [qw(JSON::PP File::Spec File::Path File::Basename Digest::SHA)],
-    'lib/Chalk/IR/Analysis.pm'        => [qw(Hash::Util::FieldHash Math::BigInt)],
-    'lib/Chalk/Target/LLVM/Builder/Values.pm' => [qw(Math::BigInt)],
+    'lib/Chalk/IR/Analysis.pm'        => [qw(Hash::Util::FieldHash)],
     'lib/Chalk/IR/Graph/TypedInvariant.pm'    => [qw(Carp)],
     'lib/Chalk/Target/LLVM.pm'        => [qw(parent)],
     'lib/Chalk/Bootstrap/BNF/Target/XS.pm' => [qw(XSLoader)],
