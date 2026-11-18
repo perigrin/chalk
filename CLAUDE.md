@@ -222,6 +222,16 @@ See **`docs/chalk-parse-perl-plan.md`** for the detailed 9-phase roadmap:
    - Stable helper-rule naming (derive from source position)
    - Content-based node IDs (not creation order)
 4. **Progressive Testing**: Test each layer independently before integration
+5. **No outside modules in lib/**: lib/ loads only Chalk's own modules and
+   pragmas that compile to nothing at run time -- `use VERSION` (its builtin
+   bundle: `blessed`, `refaddr`, `trim`, ...), `strict`, `warnings`, `utf8`,
+   `feature`. No CPAN, and no core modules either (Scalar::Util, List::Util,
+   JSON::PP, Carp, Exporter, parent, constant, experimental, Math::BigInt, ...):
+   whatever lib/ loads, chalk must compile when it compiles itself, and every
+   module is one more thing on that path. Need what a module gives? Use a
+   builtin, or write the few lines in Chalk. `experimental` becomes
+   `use feature 'class'; no warnings 'experimental::class';`. Tests and
+   tools/ may use core modules; lib/ may not.
 
 ## Key Files
 
