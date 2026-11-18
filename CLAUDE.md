@@ -251,6 +251,13 @@ See **`docs/chalk-parse-perl-plan.md`** for the detailed 9-phase roadmap:
    reach is not in the output (no `%SIG` touched, no `Signals`). Only true
    primitives (a system call, an allocation, an `i128` multiply) stay outside
    the graph, as leaf nodes. Hand-written runtime text shrinks toward them.
+   - **The leaves are libc** (and LLVM intrinsics): chalk links the C
+     library and calls it for what perl itself takes from it -- number
+     formatting and parsing (`snprintf`, `strtod`, so output matches perl's),
+     `qsort`, `localtime_r`/`strftime`, `setjmp`/`longjmp`, the allocator, and
+     the OS (`write`, `opendir`, `getenv`, ...). No raw system calls. Only
+     entry points every target's libc has: not glibc-only names such as
+     `__errno_location` (macOS spells it `__error`).
 
 ## Key Files
 
