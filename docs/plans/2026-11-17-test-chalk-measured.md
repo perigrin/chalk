@@ -5,11 +5,13 @@
 **Head:** chalk 9e56dcf4 (bson/llvm-corpus); B::SoN from /home/user/repo/lib.
 **Env, every run:** `ulimit -v 4000000; HOME=/home/runner PERL5_SON_LIB=/home/user/repo/lib LLI=/usr/bin/lli`, at most 4 heavy processes.
 **Follows:** `plan-test-chalk.md` (memory), measurement item 5 of 2026-11-11.
-**Data:** `2026-11-17-test-imports-summary.tsv` (one row per test), the run
-AFTER the migration below (901 tests). The before run (900 tests) is that file
-at 0db4c6b2. The full table, one row per test x module (151,765 rows after,
-194,696 before; 46 MB), is not committed: `tools/test-imports/run.sh OUTDIR`
-rebuilds it, with the summary, in OUTDIR.
+**Data:** `2026-11-17-test-imports.tsv` (one row per test x module: path,
+bytes, source lines, class, XS, compile/run phase, who required it, the test
+line that brought it in, under_test; 150,127 rows, 41 MB) and
+`2026-11-17-test-imports-summary.tsv` (one row per test), both the run on the
+final tree (902 tests, Part D). `2026-11-17-test-imports-summary-before.tsv`
+is the run on 9e56dcf4, before the migration (899 tests). `tools/test-imports/run.sh
+OUTDIR` rebuilds any of them.
 
 ## Headline
 
@@ -193,7 +195,6 @@ but it no longer decides the verdict.
   - t/grammar-conformance.t: hit the 2400 s limit 4-wide (430 of 434 ok).
     Rerun alone, it passed 434/434 in 2145 s; its row is from that rerun.
 - **Paths in the TSV:** core paths are written `$privlib/` and `$archlib/`.
-  The file is 46 MB.
 
 ### Size per test (all 900)
 
@@ -487,33 +488,39 @@ mode2-extractor.t, grammar-conformance.t and chalk-recognizes-its-own-source.t.
 
 Both trees, with the corrected INCdump (Part A, "under_test"):
 - **before:** 9e56dcf4, Test::More, every `.t` but mode2-extractor.t (899);
-- **after:** this commit's tree, every `.t` but mode2-extractor.t (901).
+- **after:** the final tree (0251bb0c: no Test::More or Test2::V0 left),
+  every `.t` but mode2-extractor.t (902).
 
-Every test gave a row (899 and 901). t2-census-cases.t exited 1 under the
-runner in both, failing case jumps:2 only. The runner's fault, not chalk's:
-run.sh exported its tools directory as `T`, and jumps:2 reads `$ENV{T}` as its
-`goto` target. run.sh now hands T and OUT to each test as arguments; through
-it the file passes 426/426, as it does in the suite. Its module rows are
-unaffected (the failure was the case's output, not what it loads).
-`2026-11-17-test-imports-summary.tsv` is the after run;
+Every test gave a row (899 and 902). In the after run every test exited 0. In
+the before run t2-census-cases.t exited 1, failing case jumps:2 only: the
+runner's fault, not chalk's -- run.sh exported its tools directory as `T`, and
+jumps:2 reads `$ENV{T}` as its `goto` target. run.sh now hands T and OUT to
+each test as arguments; its module rows were unaffected (the failure was the
+case's output, not what it loads).
+`2026-11-17-test-imports.tsv` and `-summary.tsv` are the after run;
 `2026-11-17-test-imports-summary-before.tsv` is the before run.
 
 ### Before and after
 
 | per test | before median | p90 | max | after median | p90 | max |
 |---|---:|---:|---:|---:|---:|---:|
-| modules loaded (END) | 246 | 248 | 306 | 200 | 202 | 306 |
-| modules at compile time (INIT) | 78 | 239 | 290 | 31 | 192 | 259 |
-| source lines, all loaded | 88,168 | 88,613 | 103,644 | 71,701 | 72,145 | 103,639 |
-| source lines at compile time | 34,980 | 82,150 | 98,445 | 18,216 | 66,538 | 87,673 |
-| artifact modules | 58 | 70 | 137 | 12 | 16 | 137 |
-| artifact lines | 22,671 | 29,022 | 51,200 | 6,204 | 9,223 | 50,408 |
+| modules loaded (END) | 246 | 248 | 306 | 200 | 202 | 208 |
+| modules at compile time (INIT) | 78 | 239 | 290 | 31 | 185 | 207 |
+| source lines, all loaded | 88,168 | 88,613 | 103,644 | 71,871 | 72,222 | 76,162 |
+| source lines at compile time | 34,980 | 82,150 | 98,445 | 18,382 | 66,105 | 75,529 |
+| artifact modules | 58 | 70 | 137 | 12 | 16 | 41 |
+| artifact lines | 22,671 | 29,022 | 51,200 | 6,370 | 7,433 | 24,085 |
 | XS-backed modules | 9 | 9 | 12 | 7 | 7 | 10 |
 
-| totals over all tests | before (899) | after (901) |
+| totals over all tests | before (899) | after (902) |
 |---|---:|---:|
-| test x module rows | 194,607 | 151,688 |
-| of them at compile time | 123,560 | 80,409 |
+| test x module rows | 194,607 | 150,127 |
+| of them at compile time | 123,560 | 78,685 |
+
+The maxima fell once the last Test2::V0 files moved (137 -> 41 artifact
+modules): the largest now is harvest-pin.t (41), whose `use File::Temp
+qw(tempdir)` brings File::Temp's chain plus File::Path, Cwd, Fcntl, Encode
+and Storable.
 
 The first run said 53 -> 7 artifact modules (median). It missed File::Temp's
 chain (IO::Handle, IO::Seekable, Symbol, SelectSaver, Errno, Carp::Heavy), in
