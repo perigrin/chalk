@@ -5,10 +5,11 @@
 **Head:** chalk 9e56dcf4 (bson/llvm-corpus); B::SoN from /home/user/repo/lib.
 **Env, every run:** `ulimit -v 4000000; HOME=/home/runner PERL5_SON_LIB=/home/user/repo/lib LLI=/usr/bin/lli`, at most 4 heavy processes.
 **Follows:** `plan-test-chalk.md` (memory), measurement item 5 of 2026-11-11.
-**Data:** `2026-11-17-test-imports.tsv` (one row per test x module),
-`2026-11-17-test-imports-summary.tsv` (one row per test). Both now hold the
-run AFTER the migration below (151,765 rows; 901 tests). The before run
-(194,696 rows; 900 tests) is these files at 9442fa3a.
+**Data:** `2026-11-17-test-imports-summary.tsv` (one row per test), the run
+AFTER the migration below (901 tests). The before run (900 tests) is that file
+at 0db4c6b2. The full table, one row per test x module (151,765 rows after,
+194,696 before; 46 MB), is not committed: `tools/test-imports/run.sh OUTDIR`
+rebuilds it, with the summary, in OUTDIR.
 
 ## Headline
 
@@ -155,7 +156,7 @@ but it no longer decides the verdict.
 
 - **The run:** every `.t` under t/ (900 files), under perl as the suite runs
   them: `perl -Ilib -It/lib`, cwd the worktree, the env above.
-- **The dumper:** a scratch `INCdump.pm`, loaded with `-M`. It loads no modules
+- **The dumper:** `tools/test-imports/INCdump.pm`, loaded with `-M`. It loads no modules
   of its own, and it records:
   - every `require`, through `${^HOOK}{require__before}`: who required it, the
     file and line, the phase, and whether this was the first load;
@@ -443,7 +444,9 @@ mode2-extractor.t, grammar-conformance.t and chalk-recognizes-its-own-source.t.
 
 ## Reproduce
 
-The scratch scripts were not committed: INCdump.pm, analyze.pl, swapm.pl, stage2.pl.
+Part A is `tools/test-imports/run.sh OUTDIR` (INCdump.pm, analyze.pl; dist.pl
+prints median/p90/max from a summary). The Part B scripts, swapm.pl and
+stage2.pl, were not committed.
 
 - **Part A:** for each test, run
   `INCDUMP_OUT=x.inc perl -Ilib -It/lib -I<dir> -MINCdump t/....t`.
