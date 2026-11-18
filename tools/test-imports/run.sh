@@ -7,10 +7,11 @@ set -u
 OUT=${1:?usage: run.sh OUTDIR}
 mkdir -p "$OUT/runs"
 T=$(cd "$(dirname "$0")" && pwd)
-export HOME=${SUITE_HOME:-/home/runner} PERL5_SON_LIB=${PERL5_SON_LIB:-/home/user/repo/lib} LLI=${LLI:-/usr/bin/lli} T OUT
+export HOME=${SUITE_HOME:-/home/runner} PERL5_SON_LIB=${PERL5_SON_LIB:-/home/user/repo/lib} LLI=${LLI:-/usr/bin/lli}
+# (T and OUT go to each test as arguments, not the environment: a corpus case reads $ENV{T})
 
 one() {
-    f=$1; id=$(echo "$f" | tr '/.' '__'); R=$OUT/runs
+    f=$1; T=$2; OUT=$3; id=$(echo "$f" | tr '/.' '__'); R=$OUT/runs
     [ -e "$R/$id.meta" ] && return    # resumable: a test with its .meta is done
     rm -f "$R/$id.inc"
     ulimit -v 4000000
@@ -25,6 +26,6 @@ one() {
 export -f one
 
 # mode2-extractor.t needs ~/dev/perl5; the suite excludes it too.
-find t -name '*.t' ! -name mode2-extractor.t | sort | xargs -P 4 -I{} bash -c 'one {}'
+find t -name '*.t' ! -name mode2-extractor.t | sort | xargs -P 4 -I{} bash -c 'one "$@"' _ {} "$T" "$OUT"
 git checkout -q HEAD -- paad/worklist.json 2>/dev/null; rm -f .out.pl
 perl "$T/analyze.pl" "$OUT/runs" . "$OUT/test-imports.tsv" "$OUT/test-imports-summary.tsv" "$OUT/report.txt"
