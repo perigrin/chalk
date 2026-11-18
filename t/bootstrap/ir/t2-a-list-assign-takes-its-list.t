@@ -1,5 +1,5 @@
 # ABOUTME: `my ($x, undef, $y) = LIST` through T2: each target its element by place,
-# ABOUTME: undef past the end. A target that takes the rest (an array) is refused.
+# ABOUTME: undef past the end. A target that takes the rest (an array), left off the chain, is refused.
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;

@@ -448,7 +448,7 @@ sub elem_restore {
 # targets (`targets` of them) and then the list's items: the list is made, and
 # each target is its element by place (undef past the end, as perl's). A
 # target is the node later reads are, so its value is that element; one kept in
-# memory is stored too. An array or hash target (which takes the rest) is not T2's.
+# memory is stored too. A `my` array or hash target takes the rest.
 sub list_assign {
     my ($b, $s) = @_;
     out('a local') if $s->can('local') && $s->local;
@@ -490,19 +490,54 @@ sub list_assign {
         push $b->{passed}->@*, $s;
         return;
     }
+    # AN ARRAY OR HASH TARGET (`my ($f, @rest) = f()`) takes the rest: a `my`
+    # one, where the assign is placed (Assign::is_placed) -- its reads are
+    # made after it. Another (a package's, a closure's) is not T2's.
+    my $placed = $s->is_placed;
     out('a list assignment to an array or hash') if grep {
         !( blessed($_) && ( $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$'
-                            || $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'undef' ) )
+                            || $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'undef'
+                            || $placed && ( $_->is_my_array || $_->is_my_hash ) && !( $_->can('shared') && $_->shared ) ) )
     } @t;
     my $list = $b->emit(op => 'NewArray', type => '%Array*');
     for my $e (grep { blessed($_) } @in) {
         if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $list, $b->array_of($e) ]) }
         else { $b->emit(op => 'APush', type => 'void', inputs => [ $list, $b->as($b->value($e), '%Slot') ]) }
     }
+    # (its value in scalar context: the count of the list assigned)
+    $b->{memo}{ refaddr($s) } = $b->emit(op => 'ALen', type => 'i64', inputs => [$list]) if grep { $_->operation eq 'PadAccess' && ( $_->sigil // '' ) ne '$' } @t;
     my %val;
-    for my $i (0 .. $#t) {
-        my $t = $t[$i];
+    my $at = 0;
+    for my $t (@t) {
+        my $i = $at++;
         next unless $t->operation eq 'PadAccess';
+        if (( $t->sigil // '' ) ne '$') {
+            # THE REST, into the variable's own array or hash (in place: a
+            # read made before it is made first); nothing is left for a
+            # target after it (undef, or empty).
+            my $h = $t->sigil eq '%';
+            # (A `my` IN A LOOP BODY is a new one each pass, which the wire
+            # does not say this is: a reference kept past the pass would see
+            # the next pass's -- "3 6 6" for "3 2 6")
+            out('a list assignment to an array or hash a reference is taken of, in a loop')
+                if $b->{fresh_pass} && grep { blessed($_) && $_->operation eq 'Ref' } ( $t->consumers // [] )->@*;
+            my $rest = $b->emit(op => 'ArgsFrom', type => '%Array*', inputs => [ $list, $b->emit(op => 'Const', type => 'i64', attr => { value => $i }) ]);
+            # AN ODD LIST INTO A HASH: the last key's value undef, as perl's --
+            # which warns of it where warnings may be on, and chalk raises none:
+            # stopped there at run time, not answered without the warning.
+            if ( $h && Chalk::Impl::warnings_may_be_on( _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) ) ) {
+                my $odd = $b->emit(op => 'Arith', type => 'i64', attr => { op => 'and' },
+                    inputs => [ $b->emit(op => 'ALen', type => 'i64', inputs => [$rest]), $b->emit(op => 'Const', type => 'i64', attr => { value => 1 }) ]);
+                $b->emit(op => 'StopUnless', type => 'void', inputs => [
+                    $b->emit(op => 'Cmp', type => 'i1', inputs => [ $odd, $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }) ], attr => { op => 'eq' }),
+                    $b->const_str("an odd number of elements in a hash assignment (perl warns): stopped (chalk, T2)\n") ]);
+            }
+            $b->hash_reads_settled('a whole assign');
+            $b->reads_before($_) for $b->{passed}->@*;
+            $b->emit(op => $h ? 'HAssign' : 'AAssign', type => 'void', inputs => [ $h ? $b->hash_of($t) : $b->array_of($t), $rest ]);
+            ( $list, $at ) = ( $b->emit(op => 'NewArray', type => '%Array*'), 0 );
+            next;
+        }
         my $v = $b->emit(op => 'AGet', type => '%Slot', inputs => [ $list, $b->emit(op => 'Const', type => 'i64', attr => { value => $i }) ]);
         $val{ $t->symbol } = $v;
         $b->{lvals}{ $t->symbol } = $v;
@@ -512,7 +547,7 @@ sub list_assign {
     # A READ MADE AFTER IT (its input this Assign): the target's element; a
     # variable it does not assign, what the last list assign before it gave
     # (`my ($t) = @_; my ($f) = caller; ... $t`: $t's version is this Assign).
-    for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' } ( $s->consumers // [] )->@*) {
+    for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' } ( $s->consumers // [] )->@*) {
         next if $b->{memo}{ refaddr($r) } || $b->{args}{ refaddr($r) };
         next if $r->is_assign_target;
         next unless grep { blessed($_) && refaddr($_) == refaddr($s) } $r->inputs->@*;
