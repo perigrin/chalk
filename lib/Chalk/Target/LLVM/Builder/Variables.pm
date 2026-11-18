@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::Target::LLVM::Builder;
 
-use Scalar::Util qw(blessed refaddr);
 
 # hash_reads_settled($what): before what may store through a reference (a
 # store, a call), no read through one, of a version it replaces, may still be

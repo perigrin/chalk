@@ -4,7 +4,6 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Scalar::Util 'refaddr';
 use Chalk::IR::Node::Phi;
 use Chalk::Bootstrap::Bindings::Sentinel;
 

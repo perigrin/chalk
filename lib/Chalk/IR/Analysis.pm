@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::IR::Analysis;
 
-use Scalar::Util qw(blessed refaddr);
 
 use Chalk::IR::Value;
 use Chalk::IR::Graph;

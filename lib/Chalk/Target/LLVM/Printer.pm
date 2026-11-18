@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::Target::LLVM::Printer;
 
-use Scalar::Util qw(refaddr);
 use Chalk::Target::LLVM::Runtime;
 
 # THE CONVERSIONS T2 HAS, from>to: the builder asks here before it makes one

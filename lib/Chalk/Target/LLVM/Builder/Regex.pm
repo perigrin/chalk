@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::Target::LLVM::Builder;
 
-use Scalar::Util qw(blessed refaddr);
 
 # REGEXES ARE GRAPHS. regex_result($match) -> the %Slot its matcher returns
 # ([start, end, g1s, g1e, ...] or undef), made once where the match is.

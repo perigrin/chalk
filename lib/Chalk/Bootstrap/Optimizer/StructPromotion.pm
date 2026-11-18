@@ -4,7 +4,6 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Scalar::Util qw(blessed);
 
 use Chalk::Bootstrap::Optimizer::Pass;
 use Chalk::IR::NodeFactory;

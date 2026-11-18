@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::Target::LLVM::Lower;
 
-use Scalar::Util qw(blessed refaddr);
 use Chalk::Target::LLVM::Builder;
 use Chalk::Target::LLVM::Printer;
 use Chalk::IR::Value;      # narrow_num tests operands with isa

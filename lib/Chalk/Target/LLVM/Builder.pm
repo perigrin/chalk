@@ -28,7 +28,6 @@ require Chalk::IR::Serialize::JSON;
 use Chalk::IR::Graph;   # program_nodes, own_nodes, component: whose nodes are whose
 require Chalk::IR::Analysis;   # integer_intervals, int_is_iv: T1's integer intervals
 
-use Scalar::Util qw(blessed refaddr);
 
 require Chalk::Target::LLVM::Node;
 require Chalk::Target::LLVM::Printer;   # its %CONVERT: which conversions there are

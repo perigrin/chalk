@@ -4,7 +4,6 @@ package Chalk::Target::LLVM::Builder::Args;
 use 5.42.0;
 use utf8;
 
-use Scalar::Util qw(blessed refaddr);
 
 # Builder/Calls.pm asks, for a sub it calls:
 #
