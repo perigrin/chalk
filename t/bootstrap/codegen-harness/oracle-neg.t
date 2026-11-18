@@ -3,8 +3,8 @@
 use 5.42.0;
 use utf8;
 
-use Test2::V0;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness::RunUnderPerl;
 use Chalk::CodeGen::Harness::BehaviorRecord;
@@ -178,12 +178,12 @@ END_SNIPPET
     # Both runs must produce the same normalized structure regardless of hash seed.
     my $norm1 = $record1->normalize_return_values( $record1->return_values );
     my $norm2 = $record2->normalize_return_values( $record2->return_values );
-    is( $norm1, $norm2, 'hash_order normalization produces stable return_values across runs' );
+    is_deeply( $norm1, $norm2, 'hash_order normalization produces stable return_values across runs' );
 
     # The normalized hashref must have sorted keys (a before b).
     my $href = $norm1->[0];
     ref_ok( $href, 'HASH', 'normalized return value is a hashref' );
-    is( [ sort keys %$href ], [sort keys %$href], 'normalized hash keys are sorted' );
+    is_deeply( [ sort keys %$href ], [sort keys %$href], 'normalized hash keys are sorted' );
 }
 
 # --- Negative test 9: wantarray context is captured correctly ---

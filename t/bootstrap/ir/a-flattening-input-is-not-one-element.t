@@ -1,9 +1,9 @@
 # ABOUTME: A container input that expands to many elements defeats a static bounds check.
 # ABOUTME: Counting input SLOTS as elements stamps a real read Undef -- a miscompile, not a gap.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 use Chalk::CodeGen::Pipeline;
 

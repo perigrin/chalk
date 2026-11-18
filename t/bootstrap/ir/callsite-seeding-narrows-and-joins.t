@@ -1,8 +1,8 @@
 # ABOUTME: Callsite reprs JOIN across sites, then MEET against the prior stamp.
 # ABOUTME: Joining the prior stamp in lets an absence of evidence outrank evidence.
 use 5.42.0;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::Serialize::JSON;
 

@@ -1,8 +1,8 @@
 # ABOUTME: A folded sort's comparison kind and direction survive deserialization.
 # ABOUTME: The loader silently drops wire fields no node declares, by design.
 use 5.42.0;
-use Test::More;
-use lib 'lib';
+use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::IR::Serialize::JSON;
 

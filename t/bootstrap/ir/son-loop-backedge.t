@@ -2,11 +2,11 @@
 # ABOUTME: A loop's Phi<->backedge data cycle forces one forward ref in any JSON node order.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use JSON::PP;
 use File::Temp qw(tempfile);
 
-use lib 'lib';
 use Chalk::IR::Serialize::JSON ();
 
 # A while loop's header Phi consumes its backedge value (Add/Subtract) and the

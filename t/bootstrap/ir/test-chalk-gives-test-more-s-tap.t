@@ -76,11 +76,20 @@ same_as_test_more( qq{my \$one = 1;\ncmp_ok(\$one, '==', 1, 'eq num');\ncmp_ok(\
 # is compared here).
 same_as_test_more( qq{is_deeply([1,2,3], [1,2,3], 'same');\nis_deeply([1,2,3], [1,2,4], 'arr');\nis_deeply({a=>1,b=>[1,2]}, {a=>1,b=>[1,3]}, 'hash');\nis_deeply([1,2], [1,2,3], 'len');\nis_deeply([1,2,3], [1,2], 'shorter');\nis_deeply({a=>1}, {a=>1,b=>1}, 'keys');\nis_deeply('x', 'y', 'scalar');\nis_deeply([undef], [0]);\nis_deeply([undef], [undef], 'undefs');\nis_deeply({a=>[{b=>[1]}]}, {a=>[{b=>[1]}]}, 'deep');\nis_deeply({a=>[{b=>[1]}]}, {a=>[{b=>[2]}]}, 'deep differ');\ndone_testing;\n}, 'is_deeply' );
 
+# A VALUE OF SEVERAL LINES in a failure's diagnostics: each line "# "-prefixed
+# (is_deeply's four spaces in, as Test::More's).
+same_as_test_more( qq{is("a\\nb", "c", 'is');\nis_deeply(["a\\nb"], ["c"], 'is_deeply');\ndone_testing;\n}, 'a value of several lines' );
+
 
 # subtest: a code ref run as a test of its own, its TAP indented.
 same_as_test_more( qq{subtest 'inner' => sub {\n    ok(1, 'i1');\n    ok(1, 'i2');\n};\nsubtest 'bad' => sub {\n    ok(0, 'b1');\n    diag("d");\n    note("n");\n};\nsubtest 'done' => sub { ok(1); done_testing; };\nok(1, 'after');\ndone_testing;\n}, 'subtest' );
 same_as_test_more( qq{subtest 'short' => sub {\n    plan tests => 2;\n    ok(1);\n};\nsubtest 'right' => sub {\n    plan tests => 1;\n    ok(1);\n};\ndone_testing;\n}, 'a subtest runs what it planned' );
 same_as_test_more( qq{subtest 'outer' => sub {\n    ok(1, 'o1');\n    subtest 'nested' => sub { ok(1, 'n1'); is(1, 2, 'n2'); };\n};\ndone_testing;\n}, 'nested subtests' );
+
+# plan skip_all IN A SUBTEST skips that subtest: the code runs in an eval,
+# skip_all dies, the subtest catches it ("ok N # skip why"). A test the
+# subtest failed before is reported, and hidden.
+same_as_test_more( qq{subtest 'skipped' => sub {\n    plan skip_all => 'not here';\n    ok(1, 'never');\n};\nsubtest 'some then skip' => sub {\n    ok(1, 'one');\n    plan skip_all => 'later';\n};\nsubtest 'fail then skip' => sub {\n    ok(0, 'lower() does not die');\n    plan skip_all => 'lowering failed';\n};\nsubtest 'outer' => sub {\n    ok(1, 'o1');\n    subtest 'inner' => sub { plan skip_all => 'deep'; };\n    ok(1, 'o2');\n};\nok(1, 'after');\ndone_testing;\n}, 'skip_all in a subtest' );
 
 
 # like/unlike: each qr// a value whose matcher is its pattern's own graph

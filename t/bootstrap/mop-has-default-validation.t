@@ -2,9 +2,9 @@
 # ABOUTME: Guards against the 2c-recon footgun where a malformed IR silently read as a compiler miscompile (zhi 019f378f).
 
 use 5.42.0;
-use Test2::V0;
-
 use lib 'lib', 't/lib';
+use Test::Chalk;
+
 use Chalk::CodeGen::Harness::Rooted qw(rooted);
 require Chalk::CodeGen::Harness::MdtestCorpus;
 require Chalk::Target::LLVM;

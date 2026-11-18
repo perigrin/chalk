@@ -2,8 +2,8 @@
 # ABOUTME: Verifies the wrapped program runs under perl 5.42 and yields a non-empty record.
 use 5.42.0;
 
-use Test2::V0;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 
 use Chalk::CodeGen::Harness::RunUnderPerl;
 

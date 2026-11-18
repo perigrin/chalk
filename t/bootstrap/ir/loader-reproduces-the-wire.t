@@ -2,7 +2,8 @@
 # ABOUTME: Decode then re-encode: any difference is the loader doing something else.
 
 use 5.42.0;
-use Test2::V0;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use JSON::PP ();   # no import: its to_json/from_json collide with Chalk's
 use File::Temp;
 
@@ -117,7 +118,7 @@ my $total = 0;
 for my $name (sort keys %programs) {
     subtest $name => sub {
         my $wire = wire_for($programs{$name});
-        skip_all "producer emitted no JSON for $name" unless $wire;
+        plan skip_all => "producer emitted no JSON for $name" unless $wire;
 
         my $graphs = from_json($wire);
         # NOT `ok $graphs`: an empty hashref is truthy, so that assertion held
