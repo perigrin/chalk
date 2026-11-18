@@ -1,7 +1,6 @@
 # ABOUTME: a sub whose returned value is a call made in its caller's context: called
 # ABOUTME: for a scalar it gives the callee's scalar face -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: script/t2-case judges a case declared in t/data/census-deviations.tsv by its
 # ABOUTME: declared output alone, and calls it DEVIATES -- never SAME (Harness::Deviation).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -7,7 +7,6 @@ use lib 'lib', 't/lib';
 use Test::Chalk;
 
 use Chalk::CodeGen::Harness::MdtestCorpus;
-use Chalk::CodeGen::Harness::LLVMDriver;
 
 my $LLI = '/usr/lib/llvm-15/bin/lli';
 

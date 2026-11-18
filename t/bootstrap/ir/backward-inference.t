@@ -1,7 +1,6 @@
 # ABOUTME: Backward inference fills a hole from a use site -- and never
 # ABOUTME: preempts a node whose type has an authoritative source elsewhere.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

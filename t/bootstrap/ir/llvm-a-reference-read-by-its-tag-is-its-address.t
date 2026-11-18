@@ -1,7 +1,6 @@
 # ABOUTME: a reference held in a tagged slot reads as perl reads it: KIND(0x...) (with
 # ABOUTME: Class= when blessed) as a string, its address as a number -- not "" and 0.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

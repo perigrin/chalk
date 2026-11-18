@@ -4,7 +4,6 @@
 # ABOUTME: input, the same Call node); without caching its result, the
 # ABOUTME: callee's effects and result subgraph are inlined twice.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use Chalk::CodeGen::Harness::Rooted qw(rooted);

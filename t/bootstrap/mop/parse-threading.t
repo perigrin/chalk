@@ -1,7 +1,6 @@
 # ABOUTME: Tests that Chalk::MOP is threaded through the parse pipeline.
 # ABOUTME: Verifies $ctx->mop() is defined and is a Chalk::MOP instance after parsing.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: A package's symbols on its Class: each name its stash holds and the slots its glob fills;
 # ABOUTME: names whose presence is not known; and none claimed where no symbol table was given.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

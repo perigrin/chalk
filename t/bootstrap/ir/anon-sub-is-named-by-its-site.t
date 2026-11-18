@@ -1,7 +1,6 @@
 # ABOUTME: A non-capturing anon sub's body is a methods entry named by its site.
 # ABOUTME: Two enclosing subs with the same pad slot must not collide into one key.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

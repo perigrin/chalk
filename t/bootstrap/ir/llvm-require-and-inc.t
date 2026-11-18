@@ -1,7 +1,6 @@
 # ABOUTME: require of a core pragma is true; whether %INC holds a key is known
 # ABOUTME: where the program required or used it; what it holds is a path.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

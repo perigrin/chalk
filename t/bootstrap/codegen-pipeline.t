@@ -1,7 +1,6 @@
 # ABOUTME: Full pipeline integration test for Phase 3 code generation.
 # ABOUTME: Parses 10-rule BNF meta-grammar, generates Perl, evals, compares to BNF.pm.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

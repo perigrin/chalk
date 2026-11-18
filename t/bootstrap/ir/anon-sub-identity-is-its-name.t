@@ -1,7 +1,6 @@
 # ABOUTME: An AnonSub reaching the wire keeps its name, and its name IS its identity.
 # ABOUTME: A reloaded AnonSub must hash identically to the graph that produced it.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

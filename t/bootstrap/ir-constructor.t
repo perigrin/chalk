@@ -1,7 +1,6 @@
 # ABOUTME: Tests for typed IR node construction (post-Shim migration) for Perl IR types.
 # ABOUTME: Verifies typed Chalk::IR::Node::* constructors work for VarDecl, BinaryExpr, etc.
 use 5.42.0;
-use utf8;
 
 use lib 'lib', 't/lib';
 use Test::Chalk;

@@ -1,7 +1,6 @@
 # ABOUTME: T2 runs between the loader and the backend, so the backend reads LLVM types.
 # ABOUTME: Wiring it is what turns _repr_to_llvm_type from a lookup into a pass-through.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

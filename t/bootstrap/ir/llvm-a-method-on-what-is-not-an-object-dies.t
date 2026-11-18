@@ -1,7 +1,6 @@
 # ABOUTME: A method called on undef or a plain value dies, as perl's does, inside an eval
 # ABOUTME: whose error nothing reads; one whose message would be seen is refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

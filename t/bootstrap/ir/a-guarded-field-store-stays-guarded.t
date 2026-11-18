@@ -1,7 +1,6 @@
 # ABOUTME: A one-armed `if` guarding a field store must run only when the guard holds.
 # ABOUTME: The producer built no If for this shape, so the store ran unconditionally.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

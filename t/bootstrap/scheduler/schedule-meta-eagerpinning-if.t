@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::Scheduler::EagerPinning::If schedule_data.
 # ABOUTME: Carries is_loop_jump set by PostfixModifier action for `next if` / `last unless`.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

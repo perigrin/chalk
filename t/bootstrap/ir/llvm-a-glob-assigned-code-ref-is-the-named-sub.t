@@ -1,7 +1,6 @@
 # ABOUTME: *name = sub { ... } once, before calls to name() in the same graph, makes those
 # ABOUTME: calls that anonymous sub; anything less certain stays refused: perl == lli.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: The C target reads the keywords undef/true/false from a Constant's type,
 # ABOUTME: never from its value: the strings 'undef', 'true', 'false' stay strings.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

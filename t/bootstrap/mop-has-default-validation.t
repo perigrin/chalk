@@ -2,7 +2,6 @@
 # ABOUTME: Guards against the 2c-recon footgun where a malformed IR silently read as a compiler miscompile (zhi 019f378f).
 
 use 5.42.0;
-use utf8;
 use Test2::V0;
 
 use lib 'lib', 't/lib';

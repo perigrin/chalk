@@ -1,7 +1,6 @@
 # ABOUTME: Unit tests for the Target base class (code generation abstraction).
 # ABOUTME: Verifies Target loads, constructs, and enforces abstract generate() contract.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: a die whose message may not end in a newline gets " at FILE line N."
 # ABOUTME: appended, as perl's does -- from the site B::SoN records for it.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: A resolved direct Call carries its callee METAOBJECT, not a bare graph.
 # ABOUTME: target is the MOP handle; resolved_graph was the flat-graph fallback.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempdir);

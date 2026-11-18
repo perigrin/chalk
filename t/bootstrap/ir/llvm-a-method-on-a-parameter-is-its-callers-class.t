@@ -1,7 +1,6 @@
 # ABOUTME: A method called on a sub's parameter dispatches on the class the call site passed:
 # ABOUTME: inlined there, its object's class is static: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

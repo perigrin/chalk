@@ -1,7 +1,6 @@
 # ABOUTME: An inlined callee reads its own lexicals, never a caller's that shares an id:
 # ABOUTME: a callee VarDecl#1 next to a caller VarDecl#1 still yields the callee's value.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use Chalk::CodeGen::Harness::Rooted qw(rooted);

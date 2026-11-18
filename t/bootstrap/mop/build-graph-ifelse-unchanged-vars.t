@@ -1,7 +1,6 @@
 # ABOUTME: Tests that vars unchanged in both branches get no Phi.
 # ABOUTME: Per Phase 3b, only divergent bindings produce a Phi.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use lib 't/bootstrap/lib';

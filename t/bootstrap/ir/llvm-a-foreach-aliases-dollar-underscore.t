@@ -1,7 +1,6 @@
 # ABOUTME: A foreach whose callees read $_ aliases $_ to each element: reads and writes
 # ABOUTME: by name reach the element, and the pass restores $_ -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

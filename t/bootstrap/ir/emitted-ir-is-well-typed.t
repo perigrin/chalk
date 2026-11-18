@@ -6,7 +6,6 @@ use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);
 
-use JSON::PP;
 use Chalk::IR::Serialize::JSON;
 use Chalk::Target::LLVM;
 

@@ -1,7 +1,6 @@
 # ABOUTME: A merge whose arm is a call to a sub is a value merge when the producer says
 # ABOUTME: so: `$p ? one() : 4` reads the call -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

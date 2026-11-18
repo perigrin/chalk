@@ -1,7 +1,6 @@
 # ABOUTME: Verifies that code generation produces byte-identical output across runs.
 # ABOUTME: Tests determinism by generating the same IR twice and comparing results.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

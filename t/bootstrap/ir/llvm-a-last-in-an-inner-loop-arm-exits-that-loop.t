@@ -1,7 +1,6 @@
 # ABOUTME: `last` in an if arm of an inner loop whose header opens blocks of its own
 # ABOUTME: leaves that loop with what the header made: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

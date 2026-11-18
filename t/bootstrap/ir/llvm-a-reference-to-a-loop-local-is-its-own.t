@@ -1,7 +1,6 @@
 # ABOUTME: a reference to a my variable taken in a loop body names that pass's
 # ABOUTME: variable (perl makes a fresh one each pass): perl's answer, or refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

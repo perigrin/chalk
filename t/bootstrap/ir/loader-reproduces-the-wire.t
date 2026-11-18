@@ -2,7 +2,6 @@
 # ABOUTME: Decode then re-encode: any difference is the loader doing something else.
 
 use 5.42.0;
-use utf8;
 use Test2::V0;
 use JSON::PP ();   # no import: its to_json/from_json collide with Chalk's
 use File::Temp;

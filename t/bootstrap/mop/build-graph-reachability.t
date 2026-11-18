@@ -1,7 +1,6 @@
 # ABOUTME: Tests that ANY valid method body reaches every stmt from start via inputs().
 # ABOUTME: Per Phase 3c, generalizes the linear-only reachability check from 3a.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use lib 't/bootstrap/lib';

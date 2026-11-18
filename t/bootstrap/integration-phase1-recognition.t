@@ -1,7 +1,6 @@
 # ABOUTME: Integration test for Phase 1a - Earley parser recognition with BNF meta-grammar
 # ABOUTME: Verifies that the Earley parser with Boolean semiring can parse valid BNF inputs
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: `my ($a, $b) = ($r->[0], $r->[1])` reads elements into scalars; it stores no
 # ABOUTME: element, so a later element read is not refused: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: A ternary or other merge whose arms are a number (or string) and undef is a
 # ABOUTME: Scalar, each arm boxed: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: Tests for IR use-def chains - verifies producer-consumer relationships
 # ABOUTME: Ensures bidirectional graph traversal works correctly
 use 5.42.0;
-use utf8;
 
 use lib 'lib', 't/lib';
 use Test::Chalk;

@@ -1,7 +1,6 @@
 # ABOUTME: an array a loop re-makes (`@p = ()` in its body) is a loop phi of
 # ABOUTME: arrays: pushed onto, counted and walked as the pass's own.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

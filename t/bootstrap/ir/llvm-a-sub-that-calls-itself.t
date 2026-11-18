@@ -1,7 +1,6 @@
 # ABOUTME: a sub that calls itself is emitted once as a function and called, not inlined:
 # ABOUTME: through B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

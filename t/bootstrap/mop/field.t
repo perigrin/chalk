@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::MOP::Field metaobject.
 # ABOUTME: Verifies accessors: name, sigil, fieldix, param_name, has_default, attributes, class.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

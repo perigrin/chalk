@@ -1,7 +1,6 @@
 # ABOUTME: `\$_[N]` in an inlined sub is a reference to the caller's argument -- its
 # ABOUTME: variable or element -- or refused by name: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

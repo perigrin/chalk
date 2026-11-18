@@ -1,7 +1,6 @@
 # ABOUTME: A block eval or try/catch inside an if arm is a branch there as on the main
 # ABOUTME: chain: its die is caught, the catch runs: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

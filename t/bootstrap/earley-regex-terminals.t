@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::Bootstrap::Earley with regex terminal patterns.
 # ABOUTME: Layer 3: Validates pattern matching for BNF meta-grammar terminals.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::Scheduler::EagerPinning::TryCatch schedule_data.
 # ABOUTME: Carries catch_var, try_stmts, catch_stmts set by TryStatement action.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: Widened behavior record capturing all observable axes of a perl method invocation.
 # ABOUTME: Each axis has a written normalization/comparison POLICY documented inline.
 use 5.42.0;
-use utf8;
 use feature 'class';
 no warnings 'experimental::class';
 

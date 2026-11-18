@@ -1,7 +1,6 @@
 # ABOUTME: Tests that zero-valued completions don't propagate through _complete.
 # ABOUTME: Prevents nondeterministic parse failures from agenda ordering of zero items.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

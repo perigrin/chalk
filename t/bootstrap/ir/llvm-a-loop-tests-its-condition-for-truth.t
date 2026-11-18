@@ -1,7 +1,6 @@
 # ABOUTME: A loop whose condition is a truth test, not a comparison -- `while (my $n = $h{$k})`,
 # ABOUTME: `while (defined $x)` -- tests it each pass: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

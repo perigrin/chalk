@@ -1,7 +1,6 @@
 # ABOUTME: `exit N` lowers to the process exit status, not a value.
 # ABOUTME: A program's contract is stdout + exit status; exit sets the status.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

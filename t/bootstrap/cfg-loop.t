@@ -1,7 +1,6 @@
 # ABOUTME: Tests that ForeachLoop produces Loop/Phi CFG nodes via parse-time cfg_state.
 # ABOUTME: Verifies Sea of Nodes CFG structure from parsed loop statements.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

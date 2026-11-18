@@ -1,7 +1,6 @@
 # ABOUTME: a call with too few or too many arguments for its signature, inside
 # ABOUTME: an eval nothing reads $@ of, dies there and the eval catches it.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

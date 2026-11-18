@@ -1,7 +1,6 @@
 # ABOUTME: An ArrayLiteral the producer stamps `List` must load as an Array, not as nothing.
 # ABOUTME: The rescue existed for builtin Calls only, so grep/map's source list arrived untyped.
 use 5.42.0;
-use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';

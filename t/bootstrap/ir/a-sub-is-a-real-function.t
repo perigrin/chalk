@@ -1,7 +1,6 @@
 # ABOUTME: A named sub emits a real LLVM define and its calls are real calls.
 # ABOUTME: Inlining is an optimization; it was standing in for the mechanism itself.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

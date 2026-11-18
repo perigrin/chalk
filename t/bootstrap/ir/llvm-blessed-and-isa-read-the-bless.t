@@ -1,7 +1,6 @@
 # ABOUTME: blessed($x) is the class bless recorded for a reference (undef for anything
 # ABOUTME: else) and `$x isa C` asks whether it is C: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

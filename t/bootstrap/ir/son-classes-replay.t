@@ -1,7 +1,6 @@
 # ABOUTME: Tests the 4c-2 MOP replay: from_json consumes a B::SoN classes section.
 # ABOUTME: A declarative classes JSON section is replayed via declare_*/seal into a sealed MOP.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use JSON::PP;

@@ -1,7 +1,6 @@
 # ABOUTME: Coerce[Scalar -> X] reads the %Slot tag instead of dying; Coerce[X -> Scalar] writes it.
 # ABOUTME: Verified by running the emitted module under lli -- the VALUE must be right, not just the types.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

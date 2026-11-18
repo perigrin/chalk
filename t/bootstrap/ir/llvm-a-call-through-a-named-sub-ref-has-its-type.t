@@ -1,7 +1,6 @@
 # ABOUTME: a call through a reference to a named sub (`my $r = \&f; $r->()`) has f's
 # ABOUTME: return type, so a method returning it is typed: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

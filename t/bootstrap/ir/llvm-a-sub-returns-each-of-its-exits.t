@@ -1,7 +1,6 @@
 # ABOUTME: A sub with several early returns returns each one: its merges nest, and
 # ABOUTME: an inner merge's phi is an outer arm's value -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: Tests for CoreItemIndex which enumerates (rule_name, alt_idx, dot) triples as integer IDs.
 # ABOUTME: Verifies registration, lookup, advance, and build_from_grammar operations.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

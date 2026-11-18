@@ -1,7 +1,6 @@
 # ABOUTME: A shared callee's argument read is stamped with the JOIN of every
 # ABOUTME: callsite's argument, not with whichever callsite is walked first.
 use 5.42.0;
-use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';

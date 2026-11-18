@@ -1,7 +1,6 @@
 # ABOUTME: a block eval (or try/catch) inside a loop body is a branch there: a die in it --
 # ABOUTME: from an inlined call too -- goes to that eval's end: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

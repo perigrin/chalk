@@ -1,7 +1,6 @@
 # ABOUTME: Integration test for Phase 0 - BNF meta-grammar data model representation
 # ABOUTME: Verifies that the 10-rule BNF meta-grammar can be correctly represented as Rule/Symbol objects
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

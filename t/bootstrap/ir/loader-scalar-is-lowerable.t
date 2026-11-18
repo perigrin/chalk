@@ -1,7 +1,6 @@
 # ABOUTME: Scalar is a lowerable stamp -- it has a machine encoding (%Slot),
 # ABOUTME: so the loader must carry it through rather than dropping it.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

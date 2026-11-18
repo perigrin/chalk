@@ -1,7 +1,6 @@
 # ABOUTME: a direct call of a sub no one defines runs its package's AUTOLOAD, with
 # ABOUTME: $AUTOLOAD set to the full name: B::SoN -> chalk -> lli == perl, or refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

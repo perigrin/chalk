@@ -1,7 +1,6 @@
 # ABOUTME: MOP unit tests for Chalk::MOP::Class.declare_use_constant.
 # ABOUTME: Verifies `use constant { K => V };` decls are recorded as named/value pairs.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

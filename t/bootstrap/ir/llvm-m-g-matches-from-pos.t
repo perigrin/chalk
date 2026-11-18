@@ -1,7 +1,6 @@
 # ABOUTME: a scalar m//g on a variable matches from its pos() and leaves pos() at the end
 # ABOUTME: of the match (undef on a miss): B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

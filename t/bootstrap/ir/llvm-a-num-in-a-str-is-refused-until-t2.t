@@ -1,7 +1,6 @@
 # ABOUTME: a number read from a Str merge or list element a Num reaches is refused by
 # ABOUTME: name until T2 boxes it -- read as %Str it was its printed digits (eq for ne).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -2,7 +2,6 @@
 # ABOUTME: the store's key is the loop's, not made before the if.
 our $LAST_LL;
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

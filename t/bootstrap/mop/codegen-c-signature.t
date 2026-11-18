@@ -1,7 +1,6 @@
 # ABOUTME: Tests Target::C::generate($mop) returns HashRef[Str] with .c and .xs entries.
 # ABOUTME: Per Phase 4, the C target accepts a MOP and emits both .c and .xs files.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::IR::Node::BinOp hierarchy.
 # ABOUTME: Verifies intermediate base class accessors and all 29 leaf node types.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

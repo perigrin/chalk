@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::Scheduler::ScheduleMeta abstract base.
 # ABOUTME: Verifies the base class exists, carries a $node ref, and is subclassable.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

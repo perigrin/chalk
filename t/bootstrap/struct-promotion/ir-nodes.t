@@ -1,7 +1,6 @@
 # ABOUTME: Tests for StructRef and FieldAccess IR node types used by struct promotion.
 # ABOUTME: Verifies creation via NodeFactory, correct class values, and hash consing.
 use 5.42.0;
-use utf8;
 
 use lib 'lib', 't/lib';
 use Test::Chalk;

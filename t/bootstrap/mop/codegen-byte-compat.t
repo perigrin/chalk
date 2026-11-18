@@ -1,7 +1,6 @@
 # ABOUTME: Tests Target::Perl::generate($mop) byte-identical to pre-Phase 4 goldens.
 # ABOUTME: Per Phase 4, the MOP-driven codegen preserves determinism vs legacy path.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Glob qw(bsd_glob);

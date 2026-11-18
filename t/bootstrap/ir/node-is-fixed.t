@@ -1,7 +1,6 @@
 # ABOUTME: Effectfulness is a property of the NODE TYPE, not a lookup in a name registry.
 # ABOUTME: is_fixed must agree with %STATEMENT_EFFECT_OPS everywhere the registry is right.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

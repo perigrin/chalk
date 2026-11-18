@@ -1,7 +1,6 @@
 # ABOUTME: values %h is each value of the hash, in the order keys gives the keys, and
 # ABOUTME: their count in scalar context: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

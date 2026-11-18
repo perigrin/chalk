@@ -1,7 +1,6 @@
 # ABOUTME: Tests that scope containment works correctly through Context fields.
 # ABOUTME: A structural action that doesn't propagate scope produces a result with no scope.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use experimental 'class';

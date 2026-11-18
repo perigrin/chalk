@@ -173,14 +173,14 @@ but it no longer decides the verdict.
   requires reaches it, through any require edge, first load or not. `no` is an
   artifact. `unknown` is reached only from a string eval (Math::BigInt::Calc,
   which Math::BigInt loads with `eval "require ..."`, and what Calc loads).
-  - **KNOWN OVER-COUNT (found 2026-11-18):** an edge is credited to the file
-    that ran the `require`, and for `use parent` that is `parent.pm`.
-    Chalk::Target::LLVM says `use parent` (LLVM.pm:11), so parent.pm is
-    `yes`, and so is everything parent.pm ever loaded in that test --
-    File::Temp's IO::Seekable, IO::Handle and Symbol among them, though no
-    lib/ file requires any of them (the tests' `use File::Temp` does). The
-    artifact counts below are therefore LOW. Fix: INCdump skips parent.pm and
-    base.pm frames to the real caller; then rerun.
+  - **CORRECTED 2026-11-18 (Part D).** The first run credited a `use parent`
+    load to `parent.pm`, the file that ran the `require`. Chalk::Target::LLVM
+    says `use parent` (LLVM.pm:11), so parent.pm was `yes`, and so was
+    everything parent.pm ever loaded in that test -- File::Temp's
+    IO::Seekable, IO::Handle and Symbol among them, though no lib/ file
+    requires them. INCdump now skips parent.pm and base.pm frames to the real
+    caller (`t/docs/test-imports-incdump.t`), both trees were measured again,
+    and the artifact numbers in Parts A and C are superseded by Part D.
 - **Results:**
   - 899 of 900 completed inside 2400 s; t/grammar-conformance.t is covered in
     the next bullet.
@@ -360,7 +360,8 @@ it (a `use lib` line moved up or widened). By hand:
 
 The migration also turned up a lib bug. `Chalk::IR::Node::remove_consumer`
 called `Scalar::Util::refaddr`, but Node.pm never loaded Scalar::Util; it
-worked only because Test::More did. Node.pm now loads it.
+worked only because Test::More did. It now calls the builtin `refaddr` that
+`use 5.42.0` imports, as the rest of Node.pm does.
 
 ### Kept, and what Test::Chalk lacks for them
 
@@ -449,6 +450,80 @@ mode2-extractor.t, grammar-conformance.t and chalk-recognizes-its-own-source.t.
 - The two long files ran alone under perl, through the Part A runner:
   - grammar-conformance.t: 434/434, exit 0, 2083 s.
   - chalk-recognizes-its-own-source.t: 275/275, exit 0, 992 s.
+
+## Part D: the artifacts, measured again with the `use parent` fix (2026-11-18)
+
+Both trees, with the corrected INCdump (Part A, "under_test"):
+- **before:** 9e56dcf4, Test::More, every `.t` but mode2-extractor.t (899);
+- **after:** this commit's tree, every `.t` but mode2-extractor.t (901).
+
+Every test gave a row (899 and 901). t2-census-cases.t exited 1 under the
+4-wide runner in both; it passes in the suite (it is load-sensitive).
+`2026-11-17-test-imports-summary.tsv` is the after run;
+`2026-11-17-test-imports-summary-before.tsv` is the before run.
+
+### Before and after
+
+| per test | before median | p90 | max | after median | p90 | max |
+|---|---:|---:|---:|---:|---:|---:|
+| modules loaded (END) | 246 | 248 | 306 | 200 | 202 | 306 |
+| modules at compile time (INIT) | 78 | 239 | 290 | 31 | 192 | 259 |
+| source lines, all loaded | 88,168 | 88,613 | 103,644 | 71,701 | 72,145 | 103,639 |
+| source lines at compile time | 34,980 | 82,150 | 98,445 | 18,216 | 66,538 | 87,673 |
+| artifact modules | 58 | 70 | 137 | 12 | 16 | 137 |
+| artifact lines | 22,671 | 29,022 | 51,200 | 6,204 | 9,223 | 50,408 |
+| XS-backed modules | 9 | 9 | 12 | 7 | 7 | 10 |
+
+| totals over all tests | before (899) | after (901) |
+|---|---:|---:|
+| test x module rows | 194,607 | 151,688 |
+| of them at compile time | 123,560 | 80,409 |
+
+The first run said 53 -> 7 artifact modules (median). It missed File::Temp's
+chain (IO::Handle, IO::Seekable, Symbol, SelectSaver, Errno, Carp::Heavy), in
+both trees.
+
+### Every artifact line: removed, or kept and why
+
+Grouped by the line in the test that brings it in (`tools/test-imports/by-line.pl`
+over the full table). Lines in 3 or more tests after, then everything removed.
+
+| line | tests before -> after | artifact modules | decision |
+|---|---|---:|---|
+| `use Test::More;` | 840 -> 19 | 48 | removed (Part C); 19 kept: skip_all in a subtest |
+| `use Test2::V0;` | 58 -> 9 | 102 | removed (Part C); 9 kept: Test2-only functions or skip_all in a subtest |
+| `use Test::Chalk;` | 0 -> 873 | 1 | kept: the test framework, one module of 607 lines |
+| `use lib 'lib', 't/lib';` and kin (lib.pm, Config) | all | 1-2 | kept: a test runs as `perl -Ilib t/x.t` and under TapDiff/B::SoN with no `-I`, and Test::Chalk lives in t/lib |
+| `use File::Temp qw(tempfile);` / `require File::Temp;` / `qw(tempdir)` | 464 / 15 / 8 | 8-17 | kept: each calls tempfile, tempdir or tmpnam -- the test writes its probe program and the `.ll` to files for B::SoN and lli. Its chain (IO::Handle, IO::Seekable, Symbol, SelectSaver, Errno, Carp::Heavy) goes when a test hands text to a subprocess without a file, or when chalk compiles globs (task: globs as metaclass objects) |
+| `require Chalk::CodeGen::Pipeline;` / `use` | 352 | 1 | kept: the t/lib driver each one calls (`->run_detail`) |
+| `use TestPipeline ...;` | 97 | 1 | kept: each calls the functions it imports |
+| `require Chalk::CodeGen::Harness::TapDiff;` | 60 | 2 | kept: each calls `TapDiff->compare` |
+| `use Chalk::CodeGen::Harness::Rooted ...;` | 32 | 1 | kept: each calls `rooted` |
+| `use Chalk::CodeGen::Harness;` | 22 | 28 | kept: each calls `->run_entry` |
+| `use Chalk::CodeGen::Harness::MdtestCorpus;` | 22 | 13 | kept: each calls `->run_case`/`->run_file` |
+| `use utf8;` | 816 files -> 300 | 2 | removed from 516 files with no byte above 0x7F (header line only; never inside a program a test builds, nor in fixtures); kept in the 300 whose source has non-ASCII text |
+| `use PrecedenceSpecHelpers ...;` | 6 | 2 | kept: each calls `parse_expr`/`isa_with_shape` |
+| `require Chalk::CodeGen::Harness::T2Case;` | 5 | 3 | kept: each calls it |
+| Comparator, HandGraphs, ProgramRunner, LLVMDriver, RunUnderPerl, GapMap, TestPerlHelpers, TestXSHelpers, the worklists, BehaviorRecord, Deviation, Mode2Adapter, HarvestPin, Tier2, Phase5LibCoverage, ReturnNodePerlDriver | 1-29 each | 1-28 | kept where the test calls it (checked against each module's subs and exports) |
+| `use Chalk::CodeGen::Harness::LLVMDriver;` in corpus/host.t, regex.t, subs.t, ir/llvm-mop-classes.t, llvm-mop-registry.t | 5 | 10 | removed: never called (MdtestCorpus loads it where it is used) |
+| `use Chalk::CodeGen::Harness::Mode2Extractor;` in corpus/mode2-adapter.t | 1 | 1 | removed: never called |
+| `use Scalar::Util qw(blessed refaddr reftype weaken)` | 93 files | 0-2 | removed: `use 5.42.0` imports these four as builtins, lexically, ahead of the package import. `looks_like_number` is not a builtin in 5.42.0, so RunUnderPerl and Comparator keep it (they compare chalk's values with perl's) |
+| `use Scalar::Util qw(looks_like_number)` in the two programs RunUnderPerl writes | 2 | 0 | removed: never called there |
+| `use JSON::PP;` in ir/emitted-ir-is-well-typed.t, llvm-a-print-is-maybe-boolean.t, element-repr-joins-stores.t, mop/mop-carries-the-graph-registry.t | 4 | 2 | removed: never called (they read the wire with Chalk::IR::Serialize::JSON) |
+| `use JSON::PP;` elsewhere (26 tests) | 26 | 2 | kept: each decodes or encodes JSON with it |
+| `use Time::HiRes qw(time)` | 4 | 1 | kept: each times a parse |
+| `use File::Find` | 6 | 1-9 | kept: each walks lib/ with `find` |
+| `use Digest::SHA qw(sha1_hex)` | 1 | 6 | kept: leo-graph-equivalence.t hashes contexts |
+| `use Pod::Functions` | 2 | 1 | kept: the oracle for perl's builtin list (t2-no-builtin-lists.t, a-builtin-call-answers-perl-facts.t) |
+| `use File::Basename qw(basename)` | 1 | 1 | kept: called |
+| `binmode STDOUT, ':encoding(UTF-8)'` (PerlIO::encoding) | 4 | 2 | kept: those tests print non-ASCII TAP |
+
+### Verified
+
+- chalk suite, every `.t` but mode2-extractor.t: 901 files, 0 failures.
+- corpus gate: gate-green 222, t2-gate-green 222.
+- chalk lib is unchanged since the last census (ROUNDTRIP 426, DIFFERS 0,
+  LLI_FAIL 0), probe run (no new WRONG) and producer suite (clean).
 
 ## Reproduce
 

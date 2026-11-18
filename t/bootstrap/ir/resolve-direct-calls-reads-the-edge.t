@@ -1,7 +1,6 @@
 # ABOUTME: _resolve_direct_calls reaches its callee through the Call's target
 # ABOUTME: edge whenever that edge exists, not through the graph-name hash.
 use 5.42.0;
-use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';

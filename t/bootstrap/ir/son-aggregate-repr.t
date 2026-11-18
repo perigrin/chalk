@@ -1,7 +1,6 @@
 # ABOUTME: Tests loader repr-inference for aggregate reads (RC1) in NON-class graphs.
 # ABOUTME: ArrayRef/HashRef get their aggregate repr; Subscript gets the element type.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use JSON::PP;

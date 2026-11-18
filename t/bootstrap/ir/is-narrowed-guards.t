@@ -2,7 +2,6 @@
 # ABOUTME: `Unknown` in the field means undecided, so a guard must not treat it as an answer.
 
 use 5.42.0;
-use utf8;
 use lib 't/lib';
 use Test::Chalk;
 

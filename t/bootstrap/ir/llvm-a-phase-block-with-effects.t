@@ -1,7 +1,6 @@
 # ABOUTME: A BEGIN or END block with effects of its own is refused, not dropped; a
 # ABOUTME: `use` -- only a require and an import -- leaves the program as it was.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

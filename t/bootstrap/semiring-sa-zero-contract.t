@@ -1,7 +1,6 @@
 # ABOUTME: Verifies SemanticAction.zero() honors the (Context, Context) -> Context contract.
 # ABOUTME: Per Decision 4 in 2026-04-24-semiring-contract-drift.md, SA-zero is the cheapest violator to migrate.
 use 5.42.0;
-use utf8;
 use lib 't/lib';
 use Test::Chalk;
 use Chalk::Bootstrap::Semiring::SemanticAction;

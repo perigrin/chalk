@@ -1,7 +1,6 @@
 # ABOUTME: Tests codegen consumes a hand-constructed MOP and produces valid output.
 # ABOUTME: Per Phase 4, codegen reads only via MOP's public API - no parser-specific coupling.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

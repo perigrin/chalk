@@ -1,7 +1,6 @@
 # ABOUTME: Tests that nested loops produce correct Phis at each loop header.
 # ABOUTME: Per Phase 3c, every loop header that has loop-carried vars gets a Phi.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use lib 't/bootstrap/lib';

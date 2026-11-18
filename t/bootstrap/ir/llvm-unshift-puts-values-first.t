@@ -1,7 +1,6 @@
 # ABOUTME: unshift @a, LIST puts LIST before what @a holds (an array in it, its elements)
 # ABOUTME: and yields the new count: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

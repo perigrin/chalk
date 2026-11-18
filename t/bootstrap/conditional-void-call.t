@@ -2,7 +2,6 @@
 # ABOUTME: `$c->inc if $x>3` must execute the call when taken (lli == perl).
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

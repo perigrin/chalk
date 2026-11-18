@@ -1,7 +1,6 @@
 # ABOUTME: An undef in a list literal is an element: its slot is there, undefined --
 # ABOUTME: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

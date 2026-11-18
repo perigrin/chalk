@@ -1,7 +1,6 @@
 # ABOUTME: A field read happens where perl reads it: before a later store to the field,
 # ABOUTME: through B::SoN -> chalk -> lli == perl, never re-read at its use.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

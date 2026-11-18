@@ -1,7 +1,6 @@
 # ABOUTME: An if over a sub parameter nothing typed tests the value the call passed, by
 # ABOUTME: that value's own truthiness: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

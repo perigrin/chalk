@@ -1,7 +1,6 @@
 # ABOUTME: A hash literal holds what it was given -- a copy of a hash spread in it, an undef,
 # ABOUTME: a missed element, a value read by its tag: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

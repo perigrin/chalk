@@ -1,7 +1,6 @@
 # ABOUTME: Tests the abstract Pass base defines a run($X) -> $X contract.
 # ABOUTME: Per Phase 5, every concrete pass must conform to its declared scope level.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

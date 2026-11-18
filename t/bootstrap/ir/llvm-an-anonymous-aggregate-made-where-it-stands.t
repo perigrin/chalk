@@ -2,7 +2,6 @@
 # ABOUTME: after it stores into the same one, not a fresh copy per use.
 our $LAST_LL;
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

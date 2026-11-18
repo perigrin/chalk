@@ -1,7 +1,6 @@
 # ABOUTME: Tests for the named-unary table additions to PrecedenceTable.pm.
 # ABOUTME: Verifies is_named_unary, named_unary_level, and named_unary_assoc.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

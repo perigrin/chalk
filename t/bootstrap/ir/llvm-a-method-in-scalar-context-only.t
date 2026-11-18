@@ -1,7 +1,6 @@
 # ABOUTME: a method returning a list assignment to a field, called only in scalar
 # ABOUTME: context, gives the right side's count -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

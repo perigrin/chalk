@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::Bootstrap::Earley with ambiguous grammars.
 # ABOUTME: Layer 2: Verifies parser completes without crashing on ambiguous inputs.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

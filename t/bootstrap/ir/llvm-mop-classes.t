@@ -11,7 +11,6 @@ use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
-use Chalk::CodeGen::Harness::LLVMDriver;
 
 my $P = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $LLI = '/usr/lib/llvm-15/bin/lli';

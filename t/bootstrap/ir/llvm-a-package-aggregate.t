@@ -1,7 +1,6 @@
 # ABOUTME: a package array or hash (`our @a`, `@::a`, `%Pkg::h`) is one
 # ABOUTME: aggregate every graph reads and writes; perl's own are refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

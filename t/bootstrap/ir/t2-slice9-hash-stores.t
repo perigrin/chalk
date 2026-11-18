@@ -2,7 +2,6 @@
 # ABOUTME: across one is refused, never made after it (it would see the new value).
 our $LAST_LL;
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

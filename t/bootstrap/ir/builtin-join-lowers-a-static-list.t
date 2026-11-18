@@ -1,7 +1,6 @@
 # ABOUTME: join lowers when its list argument has statically known arity.
 # ABOUTME: A runtime-arity list argument GAPs rather than guessing an element count.
 use 5.42.0;
-use utf8;
 use Test::More;
 use lib 'lib';
 

@@ -1,7 +1,6 @@
 # ABOUTME: Tests Chalk::MOP::Class->all_nodes() walks every graph-owner.
 # ABOUTME: Per Phase 7, class-level traversal aggregates method + sub graphs.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

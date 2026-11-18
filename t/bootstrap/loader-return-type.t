@@ -2,7 +2,6 @@
 # ABOUTME: declaration onto MOP::Sub and may only NARROW it, never weaken it.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

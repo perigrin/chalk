@@ -1,7 +1,6 @@
 # ABOUTME: A value the right side of // makes is made in that arm only: a second // over
 # ABOUTME: the same node makes its own, so the module dominates: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

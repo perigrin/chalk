@@ -1,7 +1,6 @@
 # ABOUTME: \(@a) in a list is a reference to each element of the array, in order, each
 # ABOUTME: the element's own slot: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

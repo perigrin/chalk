@@ -1,7 +1,6 @@
 # ABOUTME: Tests lazy Phi creation in postfix loop constructs (EXPR for LIST, EXPR while COND)
 # ABOUTME: Verifies PostfixModifier scope forking collects body variable refs into side table
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

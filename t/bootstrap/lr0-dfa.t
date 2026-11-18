@@ -1,7 +1,6 @@
 # ABOUTME: Tests for LR(0) DFA construction from grammar for Aycock prediction optimization.
 # ABOUTME: Verifies DFA states, transitions, and nonkernel prediction lookups.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

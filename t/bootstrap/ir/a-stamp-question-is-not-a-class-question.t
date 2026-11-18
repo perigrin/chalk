@@ -3,7 +3,6 @@
 # ABOUTME: Guards the class of bug that made 0cc04737 a miscompile, twice.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

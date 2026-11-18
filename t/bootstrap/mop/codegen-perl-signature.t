@@ -1,7 +1,6 @@
 # ABOUTME: Tests Target::Perl::generate($mop) returns HashRef[Str].
 # ABOUTME: Per Phase 4, codegen accepts a MOP and emits a per-file hashref.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::IR::Node->schedule_data field.
 # ABOUTME: Lazy-init: undef by default, set via set_schedule_data, excluded from content_hash.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

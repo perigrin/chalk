@@ -1,7 +1,6 @@
 # ABOUTME: each %h walks a hash one entry per call -- (key, value), then the empty list
 # ABOUTME: once, and again from the start; keys and values reset it. Perl's answer.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

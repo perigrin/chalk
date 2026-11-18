@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Call(dispatch_kind='method', name='new') construction in LLVM lowering.
 # ABOUTME: Verifies Call(new) resolves class structure through the sealed-MOP class registry.
 use 5.42.0;
-use utf8;
 
 use lib 'lib', 't/lib';
 use Test::Chalk;

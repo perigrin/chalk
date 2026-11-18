@@ -1,7 +1,6 @@
 # ABOUTME: Tests for CFG subgraph patterns (if/else and while loop control flow)
 # ABOUTME: Verifies that If/Region/Phi/Loop nodes compose into expected graph shapes
 use 5.42.0;
-use utf8;
 use lib 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: sort compares each element by its own reading: a string sort stringifies a
 # ABOUTME: number as perl does, a numeric one numifies a string -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

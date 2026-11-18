@@ -1,7 +1,6 @@
 # ABOUTME: <DATA> reads the text after __DATA__ / __END__, as a handle open on it from the
 # ABOUTME: start: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

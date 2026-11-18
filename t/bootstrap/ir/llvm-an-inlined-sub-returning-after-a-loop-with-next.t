@@ -2,7 +2,6 @@
 # ABOUTME: holding a loop of its own (pvm 205): the loop's exit merge dominates it.
 our $LAST_LL;
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

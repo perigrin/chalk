@@ -1,7 +1,6 @@
 # ABOUTME: keys %h lowers to the hash's key list in a deterministic order.
 # ABOUTME: perl's own key order is randomised, so only order-independent uses are honest.
 use 5.42.0;
-use utf8;
 use Test::More;
 use lib 'lib';
 

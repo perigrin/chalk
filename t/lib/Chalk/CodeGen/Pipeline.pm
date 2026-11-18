@@ -1,7 +1,6 @@
 # ABOUTME: The one end-to-end seam: wire JSON -> load -> select units -> lower each.
 # ABOUTME: Every full-sequence assembler routes through here so later phases edit ONE site.
 use 5.42.0;
-use utf8;
 use experimental 'class';
 
 use Chalk::IR::Serialize::JSON ();

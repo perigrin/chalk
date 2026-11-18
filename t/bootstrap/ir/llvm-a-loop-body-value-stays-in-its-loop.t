@@ -1,7 +1,6 @@
 # ABOUTME: A value made inside a loop body is not served after the loop: the body need not
 # ABOUTME: run, so it does not dominate the exit: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

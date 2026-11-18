@@ -1,7 +1,6 @@
 # ABOUTME: an arm that dies never reaches the merge, so its value is no phi entry:
 # ABOUTME: through B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

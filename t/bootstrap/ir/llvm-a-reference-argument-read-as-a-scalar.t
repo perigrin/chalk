@@ -1,7 +1,6 @@
 # ABOUTME: a reference passed to a Scalar argument read is read as the reference it is:
 # ABOUTME: through B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

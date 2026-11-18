@@ -1,7 +1,6 @@
 # ABOUTME: Integration test for Phase 2a - grammar data model construction for BNF
 # ABOUTME: Verifies that Grammar::Symbol and Grammar::Rule represent the BNF meta-grammar correctly
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

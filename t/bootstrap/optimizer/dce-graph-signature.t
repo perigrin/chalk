@@ -1,7 +1,6 @@
 # ABOUTME: Tests that DCE::run accepts a Chalk::IR::Graph and returns one.
 # ABOUTME: Per Phase 5, the pass contract is run($X) -> $X at the same scope.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

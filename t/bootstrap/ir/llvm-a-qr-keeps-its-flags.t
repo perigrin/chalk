@@ -1,7 +1,6 @@
 # ABOUTME: a qr// value keeps its flags: a match through it uses them, and it prints as
 # ABOUTME: perl stringifies it, (?^FLAGS:pattern): B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: `&&` and `||` whose merge is Scalar lower through the %Slot ABI like any other repr.
 # ABOUTME: The guard refusing them predated Scalar having a machine type at all.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

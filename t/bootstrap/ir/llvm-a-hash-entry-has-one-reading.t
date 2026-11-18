@@ -1,7 +1,6 @@
 # ABOUTME: A %HashEntry carries no tag, so a hash has one reading for its values:
 # ABOUTME: a hash whose values disagree, or a read with none, is refused -- never wrong.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

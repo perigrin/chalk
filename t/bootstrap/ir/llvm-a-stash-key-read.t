@@ -1,7 +1,6 @@
 # ABOUTME: a constant-key read of %main:: answers as perl does where nothing the
 # ABOUTME: program runs can change the stash; elsewhere it is refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

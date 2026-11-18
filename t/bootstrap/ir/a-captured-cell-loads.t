@@ -1,7 +1,6 @@
 # ABOUTME: The four closure-capture node types load from the wire and keep their identity.
 # ABOUTME: A capture is a shared mutable cell, so MakeCell must be per-call, never hash-consed.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

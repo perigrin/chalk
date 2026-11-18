@@ -1,7 +1,6 @@
 # ABOUTME: glob and <*.x> list the files a pattern matches, through libc glob(3), sorted as
 # ABOUTME: perl sorts them: B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

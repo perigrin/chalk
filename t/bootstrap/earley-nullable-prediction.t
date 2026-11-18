@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Earley parser nullable nonterminal prediction fix.
 # ABOUTME: Exercises _advance_from_completed for repeated nullable symbols in rules.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

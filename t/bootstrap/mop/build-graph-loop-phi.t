@@ -1,7 +1,6 @@
 # ABOUTME: Tests that loop headers produce Phi nodes for loop-carried variables.
 # ABOUTME: Per Phase 3c, WhileStatement and ForeachStatement insert Phis at the loop header.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use lib 't/bootstrap/lib';

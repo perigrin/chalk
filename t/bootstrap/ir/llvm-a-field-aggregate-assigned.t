@@ -1,7 +1,6 @@
 # ABOUTME: a list assignment to a field array or hash (`@l = (9)`, `%h = ()`,
 # ABOUTME: `%h = $r->%*`) replaces its contents in place, as perl does.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

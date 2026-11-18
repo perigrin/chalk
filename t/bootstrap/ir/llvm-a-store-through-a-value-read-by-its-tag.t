@@ -1,7 +1,6 @@
 # ABOUTME: an element store through a value read by its tag -- a reference passed in, an
 # ABOUTME: element that may be undef (autovivified) -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

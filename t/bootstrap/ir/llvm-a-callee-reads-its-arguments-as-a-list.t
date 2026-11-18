@@ -1,7 +1,6 @@
 # ABOUTME: An inlined callee that reads @_ as a list reads an array of the call's
 # ABOUTME: arguments; one that writes through @_, or shifts it first, is refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

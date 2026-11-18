@@ -3,7 +3,6 @@
 # ABOUTME: Its contract is STRICTER than GREEN: it must lower, run, and match a declared string.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

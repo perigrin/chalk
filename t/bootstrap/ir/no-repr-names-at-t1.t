@@ -1,7 +1,6 @@
 # ABOUTME: T1 is the type axis; a representation name must never appear in it.
 # ABOUTME: `Slot` is an encoding, not a Chalk type, and nothing at T1 may name it.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

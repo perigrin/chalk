@@ -1,7 +1,6 @@
 # ABOUTME: Tests the loader wires Region.head + reshapes Region-controlled Returns (RC2).
 # ABOUTME: B::SoN emits control-flow bodies as If/Proj/Region/Phi/Return(Region,value).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use JSON::PP;

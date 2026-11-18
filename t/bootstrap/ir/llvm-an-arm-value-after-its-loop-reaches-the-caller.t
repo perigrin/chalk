@@ -1,7 +1,6 @@
 # ABOUTME: A sub whose early return leaves the rest of it as an else arm returns what that
 # ABOUTME: arm made after a loop in it: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

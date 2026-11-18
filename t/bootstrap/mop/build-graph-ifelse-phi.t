@@ -1,7 +1,6 @@
 # ABOUTME: Tests that if/else merge creates Phi for vars that differ between branches.
 # ABOUTME: Per Phase 3b, IfStatement inserts Phi at the Region for divergent bindings.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use lib 't/bootstrap/lib';

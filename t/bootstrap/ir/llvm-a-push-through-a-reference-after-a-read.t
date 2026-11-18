@@ -1,7 +1,6 @@
 # ABOUTME: push through a reference while a read through a reference waits to
 # ABOUTME: be made: the read may be of the same array -- refused, not misread.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

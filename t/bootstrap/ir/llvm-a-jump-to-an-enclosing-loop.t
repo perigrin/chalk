@@ -1,7 +1,6 @@
 # ABOUTME: A jump to an enclosing loop (`next OUTER`, `last OUTER`) runs as perl does
 # ABOUTME: or is refused by name -- never lowered as the inner loop's own next or last.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

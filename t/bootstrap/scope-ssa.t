@@ -1,7 +1,6 @@
 # ABOUTME: Unit tests for Scope SSA (Static Single Assignment) reassignment behavior
 # ABOUTME: Verifies that define() overwrites bindings and that Scope is immutable
 use 5.42.0;
-use utf8;
 
 use lib 'lib', 't/lib';
 use Test::Chalk;

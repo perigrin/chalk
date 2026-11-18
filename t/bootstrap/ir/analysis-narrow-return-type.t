@@ -1,7 +1,6 @@
 # ABOUTME: Whole-program analysis settles a sub's or a method's return type on its metaobject:
 # ABOUTME: it may only narrow what is there, never weaken it (Chalk::IR::Analysis::narrow_return_type).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

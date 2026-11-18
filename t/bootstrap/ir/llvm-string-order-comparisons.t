@@ -1,7 +1,6 @@
 # ABOUTME: lt gt le ge order strings by their bytes, as cmp does: B::SoN -> chalk -> lli
 # ABOUTME: == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

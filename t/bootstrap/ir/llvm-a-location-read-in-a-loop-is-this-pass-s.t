@@ -1,7 +1,6 @@
 # ABOUTME: a read of a variable kept in memory, at a loop's memory, is this pass's value even
 # ABOUTME: when its user is lowered after the pass's store: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

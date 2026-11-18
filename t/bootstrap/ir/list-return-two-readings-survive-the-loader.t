@@ -1,7 +1,6 @@
 # ABOUTME: A list-returning sub's two readings and a call's context survive the loader.
 # ABOUTME: The list face is Return inputs[0]; the scalar face is inputs[1]; Call carries want.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: a reference read as a string is KIND(0x...) or Class=KIND(0x...), one string per
 # ABOUTME: referent: B::SoN -> chalk -> lli == perl (addresses compared only for equality).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

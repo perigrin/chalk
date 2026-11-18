@@ -2,7 +2,6 @@
 # ABOUTME: Box::v reads $v through a PadAccess; the type is in the MOP either way.
 
 use 5.42.0;
-use utf8;
 use lib 't/lib';
 use Test::Chalk;
 

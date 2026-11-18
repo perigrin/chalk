@@ -1,7 +1,6 @@
 # ABOUTME: 4-argument and lvalue substr replace part of a variable kept in memory, and
 # ABOUTME: yield the part replaced: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

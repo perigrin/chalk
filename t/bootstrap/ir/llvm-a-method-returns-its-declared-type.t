@@ -1,7 +1,6 @@
 # ABOUTME: A method body returns what its declared type says -- a bare `return` is an
 # ABOUTME: empty list -- or is refused by name; never a module lli rejects.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

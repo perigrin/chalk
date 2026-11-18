@@ -1,7 +1,6 @@
 # ABOUTME: An inlined sub binds every argument it reads -- by shift, by $_[N], by my (...) = @_:
 # ABOUTME: through B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

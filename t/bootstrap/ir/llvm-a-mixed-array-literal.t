@@ -1,7 +1,6 @@
 # ABOUTME: an array literal of numbers and strings keeps each element as what it is:
 # ABOUTME: read as a Scalar, a Num stays the number it was and prints as perl prints it.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

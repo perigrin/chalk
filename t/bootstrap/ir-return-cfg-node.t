@@ -1,7 +1,6 @@
 # ABOUTME: Tests that ReturnStatement action produces Chalk::IR::Node::Return CFG nodes.
 # ABOUTME: Verifies Bootstrap::IR::NodeFactory::make_cfg and migration from Constructor:ReturnStmt.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

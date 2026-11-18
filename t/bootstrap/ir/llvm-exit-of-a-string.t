@@ -1,7 +1,6 @@
 # ABOUTME: exit with a string or a non-integer status exits with its integer value, as perl
 # ABOUTME: does: B::SoN -> chalk -> lli exit code == perl's.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

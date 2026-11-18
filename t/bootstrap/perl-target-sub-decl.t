@@ -1,7 +1,6 @@
 # ABOUTME: Unit tests for SubDecl emission in Perl::Target::Perl.
 # ABOUTME: Validates sub declarations (package, my, our, state) emit correct Perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

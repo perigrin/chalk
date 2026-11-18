@@ -2,7 +2,6 @@
 # ABOUTME: `my @a=(...); my $r=\@a; $r->[0]=42; $a[0]` -- \@a and @a share backing storage, so the store is visible.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

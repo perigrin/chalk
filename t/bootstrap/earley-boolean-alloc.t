@@ -1,7 +1,6 @@
 # ABOUTME: A Boolean recognition keeps no Context per derivation, however long the input.
 # ABOUTME: Counts the Context objects alive after a parse while its result is still held.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

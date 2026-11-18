@@ -1,7 +1,6 @@
 # ABOUTME: a reference to a constant (`\1`, folded by perl) is a slot of its
 # ABOUTME: own; a program that stores through a scalar reference is refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

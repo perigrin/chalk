@@ -1,7 +1,6 @@
 # ABOUTME: a sub with a signature called with no arguments takes its defaults (and a
 # ABOUTME: default that calls a sub runs only then): B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

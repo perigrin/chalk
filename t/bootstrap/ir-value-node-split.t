@@ -2,7 +2,6 @@
 # ABOUTME: nodes stay on Chalk::IR::Node and have no type field at all.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

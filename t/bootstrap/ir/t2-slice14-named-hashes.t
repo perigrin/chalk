@@ -2,7 +2,6 @@
 # ABOUTME: exists, delete, keys and values, a hash from a list (my %o = @_), exists through a reference.
 our $LAST_LL;
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

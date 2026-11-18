@@ -1,7 +1,6 @@
 # ABOUTME: print to a bareword handle the program never opens writes nothing and is false:
 # ABOUTME: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

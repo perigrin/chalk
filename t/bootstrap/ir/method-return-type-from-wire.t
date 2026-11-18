@@ -2,7 +2,6 @@
 # ABOUTME: Validate-and-refine, not discard-and-rebuild: a divergence must be loud, not silent.
 
 use 5.42.0;
-use utf8;
 use Test2::V0;
 
 use Chalk::IR::Serialize::JSON ();

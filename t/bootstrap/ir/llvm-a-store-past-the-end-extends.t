@@ -1,7 +1,6 @@
 # ABOUTME: A store past an array's end extends it, the gap undef; a negative index counts
 # ABOUTME: from the end -- B::SoN -> chalk -> lli == perl (backlog 4d7c2e19).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

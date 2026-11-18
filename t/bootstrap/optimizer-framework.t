@@ -1,7 +1,6 @@
 # ABOUTME: Tests for the optimizer framework: Pass base class and Optimizer orchestrator.
 # ABOUTME: Verifies abstract interface, pass chaining, and correct execution order.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

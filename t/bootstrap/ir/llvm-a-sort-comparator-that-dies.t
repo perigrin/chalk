@@ -1,7 +1,6 @@
 # ABOUTME: a sort comparator that can die: perl's answer through B::SoN -> chalk -> lli,
 # ABOUTME: or refused by name -- never the die dropped and the sort finished.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: Tests that the DFA provides correct structural information for parsing.
 # ABOUTME: Verifies DFA states, prediction, and parse correctness across resets.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

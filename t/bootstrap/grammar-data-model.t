@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::Grammar::Symbol and Chalk::Grammar::Rule data model.
 # ABOUTME: Verifies construction, accessors, and basic predicates work correctly.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

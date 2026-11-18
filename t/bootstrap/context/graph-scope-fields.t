@@ -1,7 +1,6 @@
 # ABOUTME: Tests that Context carries graph and scope as first-class fields.
 # ABOUTME: Verifies multiply propagates them left-to-right and extend propagates from children.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use experimental 'class';

@@ -3,7 +3,6 @@
 # ABOUTME: Without this a spec can assert a shape the IR forbids and still read green.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

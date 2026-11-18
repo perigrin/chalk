@@ -1,7 +1,6 @@
 # ABOUTME: tie of a lexical scalar to a class the program declares: TIESCALAR on a
 # ABOUTME: run-time class name, a read is FETCH, tied() its object; else refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

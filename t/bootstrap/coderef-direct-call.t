@@ -2,7 +2,6 @@
 # ABOUTME: `sub foo { return 1 } foo()` must lower end-to-end and print 1.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

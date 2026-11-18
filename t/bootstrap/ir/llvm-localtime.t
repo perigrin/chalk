@@ -1,7 +1,6 @@
 # ABOUTME: localtime is the nine fields of struct tm in a list, the ctime string in a
 # ABOUTME: scalar: B::SoN -> chalk -> lli == perl (fixed times, same libc and TZ).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

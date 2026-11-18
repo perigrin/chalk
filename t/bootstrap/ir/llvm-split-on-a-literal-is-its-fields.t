@@ -1,7 +1,6 @@
 # ABOUTME: split on a literal separator, on " " (awk mode) or on // gives perl's fields,
 # ABOUTME: trailing empty ones dropped: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

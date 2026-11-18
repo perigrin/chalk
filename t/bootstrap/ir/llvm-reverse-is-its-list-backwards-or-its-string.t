@@ -1,7 +1,6 @@
 # ABOUTME: reverse in a list is its list backwards; in scalar context it is its arguments
 # ABOUTME: joined and the string reversed: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

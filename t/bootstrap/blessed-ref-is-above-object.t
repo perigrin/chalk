@@ -2,7 +2,6 @@
 # ABOUTME: instance under it; Regex (a qr//) is a sibling of Object, not under it.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

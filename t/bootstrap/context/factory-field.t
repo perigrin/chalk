@@ -1,7 +1,6 @@
 # ABOUTME: Tests that Context carries factory as a first-class field.
 # ABOUTME: Verifies extend propagates it and allows overrides via opts.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use experimental 'class';

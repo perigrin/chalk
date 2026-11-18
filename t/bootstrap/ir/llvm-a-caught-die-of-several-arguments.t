@@ -1,7 +1,6 @@
 # ABOUTME: a caught die of several arguments sets $@ to them joined, where the
 # ABOUTME: last ends in a newline (else perl appends the file and line).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

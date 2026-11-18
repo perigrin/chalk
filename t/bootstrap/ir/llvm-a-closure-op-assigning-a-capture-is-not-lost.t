@@ -1,7 +1,6 @@
 # ABOUTME: a closure that op-assigns what it captured (`$t += 1`) gives perl's answer
 # ABOUTME: or is refused by name -- never the write lost: B::SoN -> chalk -> lli.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

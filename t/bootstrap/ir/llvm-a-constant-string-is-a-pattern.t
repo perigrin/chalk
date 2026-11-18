@@ -1,7 +1,6 @@
 # ABOUTME: `$s =~ /$p/` where $p is a constant string matches with that string as the
 # ABOUTME: pattern, as perl compiles it: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

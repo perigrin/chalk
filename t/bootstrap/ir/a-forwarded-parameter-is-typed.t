@@ -1,7 +1,6 @@
 # ABOUTME: A parameter passed onward reads as PadAccess, and must still get a type.
 # ABOUTME: Only a Parameter node was seeded, so a forwarded parameter reached the backend untyped.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

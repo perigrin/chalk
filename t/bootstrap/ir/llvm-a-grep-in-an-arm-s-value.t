@@ -1,7 +1,6 @@
 # ABOUTME: an arm whose value is made by a loop (a grep, a map) inside it: the loop is
 # ABOUTME: lowered where the arm's value is: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

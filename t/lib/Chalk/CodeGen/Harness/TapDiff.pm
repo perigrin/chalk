@@ -3,7 +3,6 @@
 package Chalk::CodeGen::Harness::TapDiff;
 
 use 5.42.0;
-use utf8;
 
 use File::Temp qw(tempfile);
 use Chalk::CodeGen::Pipeline;

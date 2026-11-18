@@ -1,7 +1,6 @@
 # ABOUTME: The per-position processed table is indexed by relative distance, not origin.
 # ABOUTME: A row indexed by origin is as long as the input position: quadratic work on long inputs.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

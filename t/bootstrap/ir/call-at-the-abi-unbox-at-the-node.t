@@ -1,7 +1,6 @@
 # ABOUTME: A method call is emitted at the ABI type and unboxed to the node's repr.
 # ABOUTME: Calling at the narrower type reads the callee's %Slot as a raw i64.
 use 5.42.0;
-use utf8;
 use Test::More;
 use lib 'lib';
 

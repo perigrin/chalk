@@ -1,7 +1,6 @@
 # ABOUTME: an argument nothing typed (it is tested for undef, or handed on)
 # ABOUTME: is read as what the caller passed: compared, pushed, a hash key.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

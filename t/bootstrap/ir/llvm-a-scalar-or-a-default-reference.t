@@ -1,7 +1,6 @@
 # ABOUTME: `$s // []` (and `{}`) where $s is read by its tag: the reference it holds, or
 # ABOUTME: the default -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

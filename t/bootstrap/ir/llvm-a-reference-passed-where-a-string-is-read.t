@@ -2,7 +2,6 @@
 # ABOUTME: (pvm 082): each reader reads the reference -- `ref` its kind, a string op KIND(0x...).
 our $LAST_LL;
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

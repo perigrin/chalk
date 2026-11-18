@@ -1,7 +1,6 @@
 # ABOUTME: An anonymous sub called while the sub that made it runs -- passed down as an
 # ABOUTME: argument, or held in a lexical -- runs its body, reading what it captured.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

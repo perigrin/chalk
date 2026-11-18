@@ -1,7 +1,6 @@
 # ABOUTME: Tests for previously-missing operator typed nodes.
 # ABOUTME: Verifies Repeat, Match, NotMatch, DefinedOr, Xor, Range, Yada, IsaOp, UnaryPlus, Ref.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

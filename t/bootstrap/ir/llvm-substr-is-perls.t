@@ -1,7 +1,6 @@
 # ABOUTME: substr as a value: offset from either end, length to the end, past it, or
 # ABOUTME: short of it -- B::SoN -> chalk -> lli == perl; outside the string, refused at run time.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

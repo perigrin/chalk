@@ -1,7 +1,6 @@
 # ABOUTME: A direct call to a sub whose body branches, loops or stores is inlined whole:
 # ABOUTME: through B::SoN -> chalk -> lli == perl, or refused for a narrower reason.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

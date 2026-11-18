@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::Bootstrap::Earley parser with Boolean semiring.
 # ABOUTME: Layer 1: Unambiguous grammars without left recursion.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

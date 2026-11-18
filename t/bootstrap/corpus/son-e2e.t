@@ -1,7 +1,6 @@
 # ABOUTME: Phase 4b-3 end-to-end runner: corpus source -> B::SoN -> JSON -> Chalk -> lli == perl.
 # ABOUTME: Validates the producible-now slice through the real producer (not the IR-block builder).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use JSON::PP;

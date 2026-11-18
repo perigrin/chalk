@@ -3,7 +3,6 @@
 # ABOUTME: BuiltinTable), and an EntryDef whether its name is perl's own: no backend keeps the lists.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

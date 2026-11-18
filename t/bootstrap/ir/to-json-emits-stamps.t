@@ -2,7 +2,6 @@
 # ABOUTME: Without it chalk cannot hand a typed graph to anything, including a future chalk.
 
 use 5.42.0;
-use utf8;
 use lib 't/lib';
 use Test::Chalk;
 use JSON::PP ();   # no import: its to_json/from_json collide with Chalk's

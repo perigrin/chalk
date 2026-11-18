@@ -1,7 +1,6 @@
 # ABOUTME: A blessed reference knows its class: bless records it, ref() reads it back, and a
 # ABOUTME: method call on it reaches its package's sub: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

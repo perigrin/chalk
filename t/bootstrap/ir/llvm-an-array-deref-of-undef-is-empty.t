@@ -1,7 +1,6 @@
 # ABOUTME: @{ $h{missing} } of an element read known undef is an empty list, as perl's
 # ABOUTME: rvalue @{ undef } is; COUNTED it is undef, so a count is refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

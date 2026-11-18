@@ -1,7 +1,6 @@
 # ABOUTME: s/// whose replacement the program computes -- from a capture, or by /e --
 # ABOUTME: splices that value in at the first match: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

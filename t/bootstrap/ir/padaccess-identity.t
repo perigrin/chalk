@@ -1,7 +1,6 @@
 # ABOUTME: Tests the Chalk PadAccess cross-graph identity contract (Phase 4b-2).
 # ABOUTME: A pad slot's identity is its variable name, not the CV-local pad index (targ).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

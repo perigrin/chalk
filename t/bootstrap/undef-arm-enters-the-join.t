@@ -2,7 +2,6 @@
 # ABOUTME: join like every other arm, and Undef joined with Int is Scalar.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: Mode-1 widening (I9): drive the I4 runner over the perl5 t/cmd, t/opbasic,
 # ABOUTME: and cherry-picked framework-free t/comp rings; per-ring worklist + combined histogram.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

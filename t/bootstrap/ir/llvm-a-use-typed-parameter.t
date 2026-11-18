@@ -1,7 +1,6 @@
 # ABOUTME: a parameter typed by its use (`$v =~`, `$n + 1`) takes a caller's
 # ABOUTME: undef or number as that reading, where every reader agrees.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

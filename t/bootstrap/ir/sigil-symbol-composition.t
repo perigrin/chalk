@@ -1,7 +1,6 @@
 # ABOUTME: Pins that PadAccess/EntryDef expose one sigil-qualified name accessor.
 # ABOUTME: The wire splits sigil from symbol; consumers must never re-compose it by hand.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

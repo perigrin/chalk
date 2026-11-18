@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::MOP::Import metaobject.
 # ABOUTME: Verifies accessors: module, args, class.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: Runner for the variables mdtest corpus topic (constructive format).
 # ABOUTME: Exercises A1/A4 (decl+read), A5 (field GAP), C1/C2 (reassign/compound-assign) verdicts.
 use 5.42.0;
-use utf8;
 
 use lib 'lib', 't/lib';
 use Test::Chalk;

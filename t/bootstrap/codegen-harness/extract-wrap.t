@@ -1,7 +1,6 @@
 # ABOUTME: Tests the extract+wrap step: turns a === TAG corpus snippet into a runnable program.
 # ABOUTME: Verifies the wrapped program runs under perl 5.42 and yields a non-empty record.
 use 5.42.0;
-use utf8;
 
 use Test2::V0;
 use lib 'lib', 't/lib';

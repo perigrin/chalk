@@ -1,7 +1,6 @@
 # ABOUTME: An if arm in a loop body owns only the statements on its own control
 # ABOUTME: chain -- not the next pass's, reached through a memory phi.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

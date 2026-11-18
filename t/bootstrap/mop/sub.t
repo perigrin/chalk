@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::MOP::Sub metaobject.
 # ABOUTME: Verifies accessors: name, class, params, return_type, graph.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

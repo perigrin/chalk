@@ -1,7 +1,6 @@
 # ABOUTME: a closure that calls itself through the variable it is stored in is a real
 # ABOUTME: function: its cells passed by pointer, called from its maker and from itself.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

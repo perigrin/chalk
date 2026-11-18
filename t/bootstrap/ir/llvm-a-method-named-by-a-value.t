@@ -1,7 +1,6 @@
 # ABOUTME: a method named by a value (`$o->$m`): a run-time dispatch of the method
 # ABOUTME: its value names; a name read at run time, or one no package declares, as perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

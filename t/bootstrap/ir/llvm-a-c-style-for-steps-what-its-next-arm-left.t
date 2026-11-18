@@ -1,7 +1,6 @@
 # ABOUTME: an arm with statements before its `next` or `last` jumps where that says -- the
 # ABOUTME: latch with the values it left, or the exit: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

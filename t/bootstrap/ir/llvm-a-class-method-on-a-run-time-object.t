@@ -1,7 +1,6 @@
 # ABOUTME: a method on an object of a `class` that is known only at run time:
 # ABOUTME: the one class that has it runs, or perl dies; else refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

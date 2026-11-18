@@ -6,7 +6,6 @@ use lib 'lib', 't/lib';
 use Test::Chalk;
 
 use Chalk::CodeGen::Harness::Mode2Adapter;
-use Chalk::CodeGen::Harness::Mode2Extractor;
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";

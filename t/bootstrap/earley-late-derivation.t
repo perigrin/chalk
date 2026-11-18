@@ -1,7 +1,6 @@
 # ABOUTME: A derivation reaching an already-processed item is kept, whatever follows it.
 # ABOUTME: Counts derivations with a counting semiring; a dropped one shows as a lower count.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

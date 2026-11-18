@@ -3,7 +3,6 @@
 # ABOUTME: Pins the defect the producer's 2b-3 refusal has been covering.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

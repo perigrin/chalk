@@ -1,7 +1,6 @@
 # ABOUTME: Division and modulus by zero die, as perl's do, rather than give Inf or crash:
 # ABOUTME: B::SoN -> chalk -> lli exits 255 where perl does; inside an eval, refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

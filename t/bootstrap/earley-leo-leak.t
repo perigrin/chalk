@@ -1,7 +1,6 @@
 # ABOUTME: A parse must not keep its values alive after the next parse starts.
 # ABOUTME: A Leo item that refers to itself is never freed, nor is the value it holds.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

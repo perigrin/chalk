@@ -1,7 +1,6 @@
 # ABOUTME: A recursive call's return type is unresolved, and unresolved is None, not absent.
 # ABOUTME: None is the join identity, so the base case decides and the ternary types.
 use 5.42.0;
-use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
 

@@ -1,7 +1,6 @@
 # ABOUTME: Tests for CFG IR nodes - If, Proj, Region, Phi, Loop
 # ABOUTME: Verifies control flow graph construction with hash consing
 use 5.42.0;
-use utf8;
 
 use lib 'lib', 't/lib';
 use Test::Chalk;

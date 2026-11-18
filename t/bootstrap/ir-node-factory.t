@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::IR::NodeFactory hash consing and node creation.
 # ABOUTME: Verifies make/make_cfg, deduplication, and CFG uniqueness.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

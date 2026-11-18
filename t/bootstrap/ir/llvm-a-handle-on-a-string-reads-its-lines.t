@@ -1,7 +1,6 @@
 # ABOUTME: A handle opened for reading on a reference to a string reads its lines -- one at
 # ABOUTME: a time or all that are left -- and says eof at the end: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

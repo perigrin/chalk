@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::IR::Graph::merge() hash-consing and next_cfg_id().
 # ABOUTME: Verifies per-graph isolation and content-hash deduplication within a graph.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

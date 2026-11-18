@@ -1,7 +1,6 @@
 # ABOUTME: A method call on a package (blessed-hash OO, not `class`) runs the package's sub
 # ABOUTME: with the invocant first -- B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

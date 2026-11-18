@@ -1,7 +1,6 @@
 # ABOUTME: an element store under an if/next inside a loop writes the aggregate declared
 # ABOUTME: before the loop -- one aggregate, made once: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

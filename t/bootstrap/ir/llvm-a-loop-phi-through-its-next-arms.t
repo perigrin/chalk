@@ -1,7 +1,6 @@
 # ABOUTME: a loop phi nothing typed whose back-edge comes through the body's
 # ABOUTME: merges and `next` arms is what its init and those arms carry.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Call, Aggregate, Regex, and remaining computation nodes.
 # ABOUTME: Verifies all non-BinOp/UnaryOp/Access computation node types.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

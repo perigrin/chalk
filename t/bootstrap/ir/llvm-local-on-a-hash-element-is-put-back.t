@@ -1,7 +1,6 @@
 # ABOUTME: `local $h{k} = v` is seen by what runs in its scope and put back where it ends
 # ABOUTME: (deleted if the key was not there): B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

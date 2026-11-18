@@ -1,7 +1,6 @@
 # ABOUTME: Tests for slot_name() method on all five semiring classes.
 # ABOUTME: Verifies each semiring reports its annotation slot for FilterComposite.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

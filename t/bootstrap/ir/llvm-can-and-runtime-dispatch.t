@@ -1,7 +1,6 @@
 # ABOUTME: a method on a run-time class, and a call of what ->can found, do what
 # ABOUTME: perl does: the sub's value, or perl's death (its exit; stdout as perl's).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

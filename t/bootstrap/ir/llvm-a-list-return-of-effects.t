@@ -1,7 +1,6 @@
 # ABOUTME: a list return's scalar reading is not a trailing effect, though its last value is one:
 # ABOUTME: through B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

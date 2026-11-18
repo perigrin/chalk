@@ -3,7 +3,6 @@
 # ABOUTME: The pairing half of the Phi/Region contract, which arity cannot check.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

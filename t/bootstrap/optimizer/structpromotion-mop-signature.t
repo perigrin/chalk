@@ -1,7 +1,6 @@
 # ABOUTME: Tests that StructPromotion::run accepts a Chalk::MOP and returns one.
 # ABOUTME: Per Phase 5, schemas live as a side-structure / annotation on the MOP.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

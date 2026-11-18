@@ -1,7 +1,6 @@
 # ABOUTME: perl's IV/UV/NV forms where chalk might deviate under the 2026-11-16 ruling: T2
 # ABOUTME: matches perl unless chalk's answer is the provably exact one (Harness::Deviation).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

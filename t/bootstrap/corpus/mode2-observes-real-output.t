@@ -1,7 +1,6 @@
 # ABOUTME: Mode2Adapter's behavior oracle must read REAL printed program output.
 # ABOUTME: Pins the seam is reached and that lli actually printed, not printed nothing.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

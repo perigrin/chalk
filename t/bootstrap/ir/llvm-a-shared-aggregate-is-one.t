@@ -1,7 +1,6 @@
 # ABOUTME: A file-level array or hash a sub shares is one aggregate, read and written by
 # ABOUTME: every graph through a module global -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

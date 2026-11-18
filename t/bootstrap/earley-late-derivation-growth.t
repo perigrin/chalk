@@ -1,7 +1,6 @@
 # ABOUTME: Semiring work must stay polynomial in input length on an ambiguous grammar.
 # ABOUTME: Late derivations of one item are summed and processed once, not once per derivation.
 use 5.42.0;
-use utf8;
 use experimental 'class';
 use lib 'lib', 't/lib';
 use Test::Chalk;

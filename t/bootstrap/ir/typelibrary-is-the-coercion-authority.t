@@ -3,7 +3,6 @@
 # ABOUTME: Pins that it answers only where it HAS authority, and declines elsewhere.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

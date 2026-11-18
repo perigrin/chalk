@@ -1,7 +1,6 @@
 # ABOUTME: Smoke test for frontend-agnostic MOP construction.
 # ABOUTME: Constructs a complete MOP without any parser involvement to validate the API surface.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

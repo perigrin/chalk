@@ -2,7 +2,6 @@
 # ABOUTME: not a value the expression can yield, so it must not enter the join.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

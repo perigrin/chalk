@@ -1,7 +1,6 @@
 # ABOUTME: Negative/adversarial tests for Chalk::CodeGen::Harness::HandGraphs.
 # ABOUTME: Guards against JSON routing, under-wired graphs, loose-Graph return, and mis-authored graphs.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

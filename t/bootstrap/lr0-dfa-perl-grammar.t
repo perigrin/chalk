@@ -1,7 +1,6 @@
 # ABOUTME: Integration test for LR0DFA with the real 63-rule Perl grammar.
 # ABOUTME: Verifies DFA construction, state count, and invariants on a production-scale grammar.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

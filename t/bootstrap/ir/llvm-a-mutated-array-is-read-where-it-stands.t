@@ -1,7 +1,6 @@
 # ABOUTME: An array a loop pushes to or drains is read elsewhere at its own point in the
 # ABOUTME: program: before the loop, after it, or walked -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

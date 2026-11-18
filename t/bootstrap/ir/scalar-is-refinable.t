@@ -1,7 +1,6 @@
 # ABOUTME: `Scalar` is the top of the scalar spine, not a commitment -- the
 # ABOUTME: fixpoint must be free to refine it when the graph proves narrower.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

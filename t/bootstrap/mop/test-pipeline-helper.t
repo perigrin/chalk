@@ -1,7 +1,6 @@
 # ABOUTME: Test for TestPipeline::parse_perl_source convenience helper.
 # ABOUTME: Verifies it returns (ir, sa, ctx) for a minimal Perl source string.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

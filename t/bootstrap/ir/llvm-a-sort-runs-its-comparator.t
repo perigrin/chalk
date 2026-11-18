@@ -1,7 +1,6 @@
 # ABOUTME: sort with a comparator block runs the block for each comparison, $a and $b
 # ABOUTME: the two elements, and keeps equal elements in order: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

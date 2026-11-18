@@ -1,7 +1,6 @@
 # ABOUTME: Tests that nested if/else produces correct Phi at each merge point.
 # ABOUTME: Per Phase 3b, an inner Phi's result feeds the outer merge correctly.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use lib 't/bootstrap/lib';

@@ -1,7 +1,6 @@
 # ABOUTME: a range of letter strings counts by perl's magic increment, up to the end
 # ABOUTME: string or past its length: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

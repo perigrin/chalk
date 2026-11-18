@@ -1,7 +1,6 @@
 # ABOUTME: wantarray is the context its call was made in -- 1, false, undef -- and undef
 # ABOUTME: at the top level: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: Tests that a Call node's target is a Chalk::MOP::Method reference, not a string.
 # ABOUTME: Per Phase 4, CallExpression resolves the callee via $mop->find_method().
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use lib 't/bootstrap/lib';

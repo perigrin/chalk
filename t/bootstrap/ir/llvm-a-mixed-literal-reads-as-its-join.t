@@ -1,7 +1,6 @@
 # ABOUTME: An array literal of Ints and Nums is read as Num, so its Ints are stored
 # ABOUTME: as Nums: through B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

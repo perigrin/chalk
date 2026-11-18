@@ -1,7 +1,6 @@
 # ABOUTME: grep keeps the elements its block finds true, by perl's truth, whatever
 # ABOUTME: the block yields: through B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

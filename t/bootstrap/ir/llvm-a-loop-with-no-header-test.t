@@ -1,7 +1,6 @@
 # ABOUTME: a loop with no header test (`while (1)`, left by `last` alone) runs until a
 # ABOUTME: `last`: through B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

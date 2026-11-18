@@ -1,7 +1,6 @@
 # ABOUTME: sort orders an %Array in place by the producer's folded comparator.
 # ABOUTME: join over a runtime-arity array loops rather than refusing.
 use 5.42.0;
-use utf8;
 use Test::More;
 use lib 'lib';
 

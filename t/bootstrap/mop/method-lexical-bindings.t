@@ -1,7 +1,6 @@
 # ABOUTME: Tests that MethodDefinition registers VarDecl IR nodes as lexical bindings.
 # ABOUTME: Per Phase 3a-migration, MethodInfo+MOP::Method expose body VarDecls as metadata.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use lib 't/bootstrap/lib';

@@ -1,7 +1,6 @@
 # ABOUTME: `method plus($k)` -- the most common declaration in lib/Chalk -- must lower.
 # ABOUTME: The vtable ABI was invocant-only, so every method with a signature refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

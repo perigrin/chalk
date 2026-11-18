@@ -1,7 +1,6 @@
 # ABOUTME: push of a value read by its tag (an element of an untyped array, undef) appends
 # ABOUTME: it as it is, tag and all: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

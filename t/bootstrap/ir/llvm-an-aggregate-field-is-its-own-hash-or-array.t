@@ -1,7 +1,6 @@
 # ABOUTME: a `field %h` or `field @a` is an aggregate of the object's own, made empty by
 # ABOUTME: new and reached by the methods: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

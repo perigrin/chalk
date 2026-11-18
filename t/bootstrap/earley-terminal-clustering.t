@@ -1,7 +1,6 @@
 # ABOUTME: Tests for terminal clustering optimization (Component 7, #656).
 # ABOUTME: Verifies scan phase uses core set terminal maps for batch matching.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

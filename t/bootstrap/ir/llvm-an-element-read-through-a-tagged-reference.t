@@ -1,7 +1,6 @@
 # ABOUTME: An element read through a value read by its tag (a shared lexical, a merge holding
 # ABOUTME: a reference) reads the array or hash it refers to: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

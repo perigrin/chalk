@@ -1,7 +1,6 @@
 # ABOUTME: T2 rewrites a Chalk-typed graph into an LLVM-typed one, in place.
 # ABOUTME: The sharp question is not "is this stamp sound" but "which vocabulary is it in".
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

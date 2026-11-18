@@ -1,7 +1,6 @@
 # ABOUTME: `my $n = shift @a` of an Int array, which may be undef, is stored as a Scalar
 # ABOUTME: that keeps it: B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

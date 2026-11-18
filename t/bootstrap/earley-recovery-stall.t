@@ -1,7 +1,6 @@
 # ABOUTME: Tests that error recovery does not false-trigger on scanner-skipped positions.
 # ABOUTME: Multi-character terminals skip intermediate positions which should not be treated as stalls.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

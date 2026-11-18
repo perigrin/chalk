@@ -1,7 +1,6 @@
 # ABOUTME: Tests that TryCatchStatement produces cfg_state with try_node key.
 # ABOUTME: Verifies Perl target emits try { ... } catch ($e) { ... } from cfg_state.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -3,7 +3,6 @@
 # ABOUTME: into the IR, the parser, the grammar or a target; they depend on it, never the reverse.
 
 use 5.42.0;
-use utf8;
 use lib 't/lib';
 use Test::Chalk;
 use File::Find;

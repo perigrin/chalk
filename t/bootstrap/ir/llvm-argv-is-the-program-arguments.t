@@ -1,7 +1,6 @@
 # ABOUTME: @ARGV is the program's arguments, from main's argv: through B::SoN ->
 # ABOUTME: chalk -> lli, with and without arguments, == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Earley context annotation helpers _make_scan_context and _make_complete_context.
 # ABOUTME: Verifies scan-via-multiply protocol for all semirings and correct scan Context annotations.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

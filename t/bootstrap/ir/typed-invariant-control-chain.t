@@ -1,7 +1,6 @@
 # ABOUTME: Tests for TypedInvariant's control-chain leg (unbroken effect chain).
 # ABOUTME: Verifies Print/Assign/Return/Call/Unwind nodes with undef control_in are flagged.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

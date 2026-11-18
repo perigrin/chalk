@@ -1,7 +1,6 @@
 # ABOUTME: Verifies IfStatement / ElsifChain / PostfixModifier populate
 # ABOUTME: EagerPinning::If with then_stmts and else_stmts. Phase 1 mig 5.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

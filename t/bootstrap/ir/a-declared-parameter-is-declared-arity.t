@@ -1,7 +1,6 @@
 # ABOUTME: A method's arity is what it DECLARES, not what its body happens to read.
 # ABOUTME: Deriving it from Parameter nodes undercounts an unused or forwarded parameter.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

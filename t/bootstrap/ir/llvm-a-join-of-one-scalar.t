@@ -1,7 +1,6 @@
 # ABOUTME: "@l" of a one-element array B::SoN forwards as its element is a
 # ABOUTME: join of that one scalar; push of an array appends its elements.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

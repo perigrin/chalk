@@ -1,7 +1,6 @@
 # ABOUTME: Phase-5 self-hosting coverage: measures how much real chalk lib/ code
 # ABOUTME: lowers through B::SoN -> from_json -> LLVM, so progress is measured not guessed.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

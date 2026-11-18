@@ -1,7 +1,6 @@
 # ABOUTME: warn under an empty $SIG{__WARN__} handler writes nothing and is true; with no
 # ABOUTME: handler it writes to STDERR, with one it calls it (%SIG's metaobject, Chalk::Impl::SIG).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

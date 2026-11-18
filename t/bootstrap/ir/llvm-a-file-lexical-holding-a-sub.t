@@ -1,7 +1,6 @@
 # ABOUTME: a file lexical that only ever holds one anonymous sub is called
 # ABOUTME: from a sub as that sub; any other use of the variable is refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

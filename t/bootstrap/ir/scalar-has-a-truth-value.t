@@ -1,7 +1,6 @@
 # ABOUTME: Every inhabitant of Scalar has a boolean reading, so Scalar -> Boolean is a real coercion.
 # ABOUTME: T1 had no Scalar row at all, which blocked && and || over a tagged cell.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

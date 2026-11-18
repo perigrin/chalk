@@ -1,7 +1,6 @@
 # ABOUTME: & | ^ ~ on what may be a string: perl combines bytes when neither operand
 # ABOUTME: holds a number, else numbers -- through B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

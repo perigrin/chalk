@@ -1,7 +1,6 @@
 # ABOUTME: a ternary or merge nothing typed, of a scalar and a reference (or
 # ABOUTME: two scalar readings), is a Scalar each arm is boxed into.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

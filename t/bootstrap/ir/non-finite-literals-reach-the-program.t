@@ -1,7 +1,6 @@
 # ABOUTME: A program printing Inf or NaN matches perl, whatever type the wire gives them.
 # ABOUTME: The producer moved them Num -> Str; chalk must be right either way.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: tr/// maps each byte of its from-list to its to-list (ranges; a short to-list
 # ABOUTME: repeats its last) and counts the matches: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

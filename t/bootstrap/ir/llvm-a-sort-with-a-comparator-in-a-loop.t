@@ -1,7 +1,6 @@
 # ABOUTME: a sort with a comparator inside a loop, its result walked by a map: the sort
 # ABOUTME: is a memory version, not a value merged by a phi -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

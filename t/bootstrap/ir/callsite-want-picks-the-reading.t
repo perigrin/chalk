@@ -1,7 +1,6 @@
 # ABOUTME: A callsite's want selects which of a callee's two return readings it takes.
 # ABOUTME: scalar takes Return inputs[1]; list and void take inputs[0].
 use 5.42.0;
-use utf8;
 use Test::More;
 use lib 'lib';
 

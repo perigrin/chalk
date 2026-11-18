@@ -1,7 +1,6 @@
 # ABOUTME: A callee that writes $_[N] writes its caller's argument: the variable or the
 # ABOUTME: element it aliases, stored back after the inline -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

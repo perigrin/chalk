@@ -1,7 +1,6 @@
 # ABOUTME: Coerce(Num->Str) renders Inf/-Inf/NaN the way perl does, not the way C does.
 # ABOUTME: The fixup lived in the deleted return-value epilogue; a real program reaches the Coerce.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

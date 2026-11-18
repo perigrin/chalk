@@ -1,7 +1,6 @@
 # ABOUTME: scalar(@a) is a Count; length($s) is a Length. One node served both,
 # ABOUTME: and Count SUBTRACTS the aggregate cases rather than adding new ones.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use Chalk::IR::NodeFactory;

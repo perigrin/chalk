@@ -1,7 +1,6 @@
 # ABOUTME: A handle opened for writing on a reference to a scalar appends what is printed or
 # ABOUTME: said to it into the scalar: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

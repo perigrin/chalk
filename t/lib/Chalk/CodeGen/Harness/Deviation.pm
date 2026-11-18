@@ -2,7 +2,6 @@
 # ABOUTME: correct:), the census's declared-deviations file, and the verdict a case gets.
 package Chalk::CodeGen::Harness::Deviation;
 use v5.42.0;
-use utf8;
 use File::Basename qw(dirname);
 use File::Spec;
 use Exporter 'import';

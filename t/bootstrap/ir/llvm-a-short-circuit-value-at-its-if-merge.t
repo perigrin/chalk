@@ -1,7 +1,6 @@
 # ABOUTME: an # ABOUTME: an arm that dies never reaches the merge, so its value is no phi entry:# ABOUTME: an arm that dies never reaches the merge, so its value is no phi entry: whose right side runs in an if arm is that if's merge, not a second short-circuit:
 # ABOUTME: through B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: a loop test that reads an effect of its own (`while (my $n = shift @w)`) runs it each pass:
 # ABOUTME: through B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

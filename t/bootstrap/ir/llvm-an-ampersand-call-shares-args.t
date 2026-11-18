@@ -1,7 +1,6 @@
 # ABOUTME: `&name;` calls name with its caller's own @_: empty at the top
 # ABOUTME: level, the inlined caller's arguments in a sub; a shift refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

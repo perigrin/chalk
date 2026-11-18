@@ -2,7 +2,6 @@
 # ABOUTME: The RMW-as-VALUE forms (post=old, pre=new, +=n=summed) are covered alongside read-after-store; lli == perl.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: `next LABEL` and `last LABEL` from an inner loop jump to the
 # ABOUTME: enclosing loop's latch or exit, carrying what that loop carries.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

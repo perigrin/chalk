@@ -1,7 +1,6 @@
 # ABOUTME: Tests for two-tier error recovery in the Earley parser (Section 8.3).
 # ABOUTME: Covers stall detection, brace-depth sync, error collection, and Ruby Slippers.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

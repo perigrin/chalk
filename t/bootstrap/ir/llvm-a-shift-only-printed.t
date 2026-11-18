@@ -1,7 +1,6 @@
 # ABOUTME: shift/pop of an Int array whose value is only coerced (printed,
 # ABOUTME: concatenated) is read as its Slot: an empty array's undef prints "".
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: a match in list context assigned to a list is its captures (or 1
 # ABOUTME: with no groups) when it matches, and an empty list when it misses.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

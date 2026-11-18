@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Earley parser diagnostic output on parse failure.
 # ABOUTME: Verifies Rust-style error messages with line:col, source context, and expected tokens.
 use 5.42.0;
-use utf8;
 use lib 't/bootstrap/lib';
 
 use lib 'lib', 't/lib';

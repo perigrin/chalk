@@ -1,7 +1,6 @@
 # ABOUTME: a loop phi carrying a reference (a walk down a linked structure) is
 # ABOUTME: a Scalar each reference is boxed into by its tag.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

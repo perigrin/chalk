@@ -1,7 +1,6 @@
 # ABOUTME: unpack with a constant C template (C, Cn, C*) in a list: the bytes as
 # ABOUTME: numbers, through B::SoN -> chalk -> lli == perl; other templates refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

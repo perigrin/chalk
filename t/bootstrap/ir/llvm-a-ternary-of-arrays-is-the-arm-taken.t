@@ -1,7 +1,6 @@
 # ABOUTME: `C ? @a : @b` in list context is the taken arm's elements, the other arm
 # ABOUTME: never evaluated: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -2,7 +2,6 @@
 # ABOUTME: to one write -- not because the join converges. Pins that dependency.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

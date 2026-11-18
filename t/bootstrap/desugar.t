@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::Bootstrap::Desugar quantifier desugaring utility.
 # ABOUTME: Verifies grammar transformation that expands X+ and X* into helper rules (? passes through).
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: An array in a list flattens into it: each element its own slot, in order, a
 # ABOUTME: reference staying one element -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

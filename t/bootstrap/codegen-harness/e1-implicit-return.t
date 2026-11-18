@@ -1,7 +1,6 @@
 # ABOUTME: Focused regression test for E1 (implicit-return idiom) miscompile fix.
 # ABOUTME: Asserts run_entry('E1') yields PASS: generated code returns 1, not '$x'.
 use 5.42.0;
-use utf8;
 
 use lib 'lib', 't/lib';
 use Test::Chalk;

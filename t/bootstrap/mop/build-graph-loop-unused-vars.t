@@ -1,7 +1,6 @@
 # ABOUTME: Tests that variables only READ in loops don't get Phis.
 # ABOUTME: Per Phase 3c, only loop-carried (modified) variables get a header Phi.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use lib 't/bootstrap/lib';

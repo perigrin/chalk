@@ -1,7 +1,6 @@
 # ABOUTME: a method that returns $self returns an object of its class, so a chained
 # ABOUTME: call on its result dispatches: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

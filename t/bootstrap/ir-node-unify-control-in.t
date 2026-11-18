@@ -2,7 +2,6 @@
 # ABOUTME: a void statement-effect emitted AFTER its Return consumer must round-trip.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: A call may pass fewer or more arguments than its callee reads: a missing one
 # ABOUTME: is undef, or its signature default; extras are ignored -- B::SoN -> chalk -> lli.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

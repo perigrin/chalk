@@ -1,7 +1,6 @@
 # ABOUTME: map/grep/sort `{` is a BLOCK or an EXPR by the builtin's two signatures --
 # ABOUTME: BLOCK LIST (no comma) and EXPR, LIST (a comma) -- one reading, no tie.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

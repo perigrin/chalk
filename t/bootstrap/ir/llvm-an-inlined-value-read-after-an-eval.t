@@ -1,7 +1,6 @@
 # ABOUTME: an inlined sub whose value is read after a block eval in its body: the eval's
 # ABOUTME: join is on the body's main path -- B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

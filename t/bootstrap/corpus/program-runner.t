@@ -1,7 +1,6 @@
 # ABOUTME: ProgramRunner contract tests: a file is compiled AS ITSELF and judged on
 # ABOUTME: stdout AND exit status, and a blocked file names its OWN entry blocker.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

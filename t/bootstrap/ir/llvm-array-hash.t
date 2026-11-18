@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Array/Hash/Ref LLVM lowering (G4 value-rep group).
 # ABOUTME: Validates R1-R8 corpus cases plus adversarial OOB/missing-key cases.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use Chalk::CodeGen::Harness::Rooted qw(rooted);

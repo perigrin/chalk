@@ -2,7 +2,6 @@
 # ABOUTME: its class known only at run time, is a Scalar when every candidate returns one.
 our $LAST_LL;
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

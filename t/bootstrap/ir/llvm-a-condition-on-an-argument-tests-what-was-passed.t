@@ -1,7 +1,6 @@
 # ABOUTME: !, ?: and && on a sub's my ($k) = @_ variable test the caller's value by
 # ABOUTME: perl's truth: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

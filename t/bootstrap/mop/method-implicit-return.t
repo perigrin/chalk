@@ -1,7 +1,6 @@
 # ABOUTME: Tests that MethodDefinition synthesizes/collects Return nodes correctly.
 # ABOUTME: Per Phase 3a-migration, fall-through synthesizes Return; explicit Returns preserved.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use lib 't/bootstrap/lib';

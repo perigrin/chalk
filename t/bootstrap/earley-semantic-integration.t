@@ -1,7 +1,6 @@
 # ABOUTME: Integration test for Earley parser with semantic actions building IR
 # ABOUTME: Verifies parser can build IR graphs from simple grammar inputs
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

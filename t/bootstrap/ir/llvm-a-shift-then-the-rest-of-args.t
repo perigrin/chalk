@@ -1,7 +1,6 @@
 # ABOUTME: a callee that shifts @_ and then reads the rest of it as a list -- the
 # ABOUTME: package constructor's `shift; bless {@_}` -- gets the arguments past the shifted.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: a closure that writes what it captured stores through the cell -- the
 # ABOUTME: variable's own location -- and a frame writing its own cell is not a capture.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

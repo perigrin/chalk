@@ -2,7 +2,6 @@
 # ABOUTME: sub reads and writes; perl's own ($/, $", $0...) and local are not this.
 our $LAST_LL;
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

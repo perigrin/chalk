@@ -1,7 +1,6 @@
 # ABOUTME: a regex under `use v5.36` (unicode_strings: the u flag) whose pattern has no
 # ABOUTME: class u changes (\w \s \d, POSIX, /i) matches as without it; one with one is refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

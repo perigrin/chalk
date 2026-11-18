@@ -2,7 +2,6 @@
 # ABOUTME: false value -- its count, 0 -- as a one-element list (pvm 089).
 our $LAST_LL;
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

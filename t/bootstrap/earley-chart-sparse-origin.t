@@ -1,7 +1,6 @@
 # ABOUTME: A chart cell stores one entry per item, however far back the item's origin is.
 # ABOUTME: A cell indexed densely by distance costs one slot per position back to the origin.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

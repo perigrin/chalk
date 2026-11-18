@@ -1,7 +1,6 @@
 # ABOUTME: An array element holds what was stored in it, whatever its reading: a Num or
 # ABOUTME: a Scalar stored into an array of Ints reads back as itself -- B::SoN -> chalk -> lli.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

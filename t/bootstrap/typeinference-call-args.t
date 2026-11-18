@@ -1,7 +1,6 @@
 # ABOUTME: A CallExpression's argument collectors read the call's OWN arguments:
 # ABOUTME: `push(@a, 1)` reaches the signature check as (Array, Int), arity 2.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

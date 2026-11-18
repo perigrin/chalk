@@ -1,7 +1,6 @@
 # ABOUTME: Progressive validation test tracking bootstrap compiler progress across phases.
 # ABOUTME: Tests each phase independently to identify exactly where implementation is complete.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

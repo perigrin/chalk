@@ -1,7 +1,6 @@
 # ABOUTME: main is a package like any other: the loader builds main's Class from its record on the
 # ABOUTME: wire, its symbols (imports and all) among it. Needs B::SoN's main package record.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

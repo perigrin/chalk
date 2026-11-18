@@ -1,7 +1,6 @@
 # ABOUTME: Tests Perl target emission for If/Region/Phi/Loop CFG node subgraphs.
 # ABOUTME: Verifies Perl code output contains correct if/else and loop structures.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

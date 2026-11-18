@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::Bootstrap::Terminal regex matching at \G position.
 # ABOUTME: Validates scanless parsing with anchored terminal matching.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

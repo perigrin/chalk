@@ -1,7 +1,6 @@
 # ABOUTME: Tests for Chalk::IR CFG node classes.
 # ABOUTME: Verifies Start, Return, Unwind, If, Proj, Region, Loop.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

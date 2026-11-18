@@ -1,7 +1,6 @@
 # ABOUTME: An element read at a dynamic index or key may not be there: defined()
 # ABOUTME: and // take its own defined bit, whatever the read is stamped.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

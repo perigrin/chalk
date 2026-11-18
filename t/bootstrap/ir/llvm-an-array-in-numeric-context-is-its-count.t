@@ -1,7 +1,6 @@
 # ABOUTME: an array read as a number (`$i < @_`, `@ARGV + 3`) is its element count, @_ in an
 # ABOUTME: inlined sub included: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

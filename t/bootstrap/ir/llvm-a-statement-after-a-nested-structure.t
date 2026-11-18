@@ -1,7 +1,6 @@
 # ABOUTME: A statement after a nested if or loop, inside a loop body or an if arm, runs:
 # ABOUTME: through B::SoN -> chalk -> lli == perl, or is refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

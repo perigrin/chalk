@@ -1,7 +1,6 @@
 # ABOUTME: grep/map over an array slice or a computed range walk its elements: the count
 # ABOUTME: and each element are read off the list made once: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

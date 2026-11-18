@@ -1,7 +1,6 @@
 # ABOUTME: a % or @ field with a list default is a hash or an array of that list:
 # ABOUTME: through B::SoN -> chalk -> lli == perl, or refused by name.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

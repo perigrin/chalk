@@ -1,7 +1,6 @@
 # ABOUTME: Perl's ++ on a value not proven a number: by its tag at run time, with the
 # ABOUTME: magic string increment ("Az" -> "Ba") -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: Tests lazy Phi sentinel mechanism in Scope for loop-carried dependencies
 # ABOUTME: Covers fork_for_loop, resolve_sentinel, raw_lookup, and sentinel lifecycle
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

@@ -1,7 +1,6 @@
 # ABOUTME: Every lattice edge is DERIVED from perl -- membership and substitutability, both measured.
 # ABOUTME: The verdict is computed, not declared, and the type table must agree with it.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

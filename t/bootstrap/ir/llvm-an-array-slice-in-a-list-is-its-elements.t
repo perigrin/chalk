@@ -1,7 +1,6 @@
 # ABOUTME: An array slice in a list is a copy of each element it names, in order -- from
 # ABOUTME: the end when negative, undef past it -- and one perl would alias is refused.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

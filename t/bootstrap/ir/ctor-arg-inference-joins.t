@@ -1,7 +1,6 @@
 # ABOUTME: A :param field's type joins over EVERY construction site, not the first.
 # ABOUTME: Taking the first makes the answer depend on graph iteration order.
 use 5.42.0;
-use utf8;
 use Test::More;
 use lib 'lib';
 

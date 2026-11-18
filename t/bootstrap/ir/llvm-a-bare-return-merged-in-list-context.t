@@ -2,7 +2,6 @@
 # ABOUTME: (pvm 174): each arm is an array -- () or the one value.
 our $LAST_LL;
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

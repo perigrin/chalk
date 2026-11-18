@@ -1,7 +1,6 @@
 # ABOUTME: uc, lc, ucfirst and lcfirst map ASCII letters as perl does, a number by its
 # ABOUTME: string; a byte past ASCII is refused at run time -- B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

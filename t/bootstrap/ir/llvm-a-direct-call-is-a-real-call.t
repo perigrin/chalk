@@ -1,7 +1,6 @@
 # ABOUTME: a direct call to a sub with scalar parameters is a real call to its define,
 # ABOUTME: not an inlined copy of its body: through B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

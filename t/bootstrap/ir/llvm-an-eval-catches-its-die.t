@@ -1,7 +1,6 @@
 # ABOUTME: A block eval catches a die in its body -- inline, in an arm, or in a sub it
 # ABOUTME: inlines -- and sets $@ as perl does: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

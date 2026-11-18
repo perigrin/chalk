@@ -1,7 +1,6 @@
 # ABOUTME: A method called on an object whose class is known only at run time runs the sub
 # ABOUTME: of the package its bless names: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

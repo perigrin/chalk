@@ -1,7 +1,6 @@
 # ABOUTME: Tests for binary expressions inside chained subscripts.
 # ABOUTME: Tracks disambiguation bug where $a->[$x][$y - 1] fails without parens.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 

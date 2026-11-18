@@ -1,7 +1,6 @@
 # ABOUTME: A Str-typed field written by the constructor must read back as that Str.
 # ABOUTME: The read's tag dispatch dropped its Str arm, so the cell fell to the undef path.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,10 +1,8 @@
 # ABOUTME: A container's element repr is the join of its initializers AND every
 # ABOUTME: store into it -- not the initializers alone.
 use 5.42.0;
-use utf8;
 use Test::More;
 use lib 'lib', 't/lib';
-use JSON::PP;
 use File::Temp qw(tempfile);
 use Chalk::IR::Serialize::JSON ();
 use Chalk::IR::Analysis ();

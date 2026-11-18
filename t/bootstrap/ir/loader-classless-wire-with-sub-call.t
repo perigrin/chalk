@@ -1,7 +1,6 @@
 # ABOUTME: A wire with no `classes` key and a sub call must load -- a SEEDED
 # ABOUTME: `main` is not evidence the wire declared anything about it.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use JSON::PP;

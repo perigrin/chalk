@@ -1,7 +1,6 @@
 # ABOUTME: %{ $x } of a value read by its tag (an object's field, a merge) takes the
 # ABOUTME: hash its HashRef tag names; undef is an empty hash: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -3,7 +3,6 @@
 # ABOUTME: builtin are the IR's (Call methods over BuiltinTable/TypeLibrary); T2 asks them.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Find;

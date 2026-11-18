@@ -2,7 +2,6 @@
 # ABOUTME: A store whose value's repr is derived by the propagation pass must type the Assign.
 
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

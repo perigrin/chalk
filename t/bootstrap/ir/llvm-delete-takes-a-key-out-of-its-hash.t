@@ -1,7 +1,6 @@
 # ABOUTME: delete $h{k} takes the key out of the hash and yields its value, or undef for a
 # ABOUTME: key that is not there: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

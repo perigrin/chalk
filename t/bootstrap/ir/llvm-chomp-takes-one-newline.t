@@ -1,7 +1,6 @@
 # ABOUTME: chomp is its string without one trailing newline (its value: how many it took),
 # ABOUTME: chop without its last character: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

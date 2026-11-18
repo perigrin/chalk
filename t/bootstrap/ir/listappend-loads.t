@@ -1,7 +1,6 @@
 # ABOUTME: Tests that the producer's ListAppend node (map/grep block lowering) loads.
 # ABOUTME: Covers grep's 3-input predicate shape, map's 2-input shape, and arity 1.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use JSON::PP;

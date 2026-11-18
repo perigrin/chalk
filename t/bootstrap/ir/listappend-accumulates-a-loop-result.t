@@ -1,7 +1,6 @@
 # ABOUTME: ListAppend is map/grep's loop-carried accumulator; it must lower and count correctly.
 # ABOUTME: Arity does NOT identify shape -- grep's third input is a gate, map's is a contribution.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: @h{...} / @{$h}{...} in a list is each key's value in order, undef for a
 # ABOUTME: missing one: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

@@ -1,7 +1,6 @@
 # ABOUTME: A `return` from inside a loop leaves the sub there, with its value, skipping the
 # ABOUTME: rest of the loop and what follows it: B::SoN -> chalk -> lli == perl.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempfile);

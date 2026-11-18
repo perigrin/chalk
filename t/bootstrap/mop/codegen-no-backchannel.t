@@ -1,7 +1,6 @@
 # ABOUTME: Tests that Target::Perl and Target::C have no methods taking ($sa, $ctx) args.
 # ABOUTME: Per Phase 4, the SA/Context backchannel is removed from the public codegen API.
 use 5.42.0;
-use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 
