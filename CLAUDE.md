@@ -240,8 +240,17 @@ See **`docs/chalk-parse-perl-plan.md`** for the detailed 9-phase roadmap:
    `feature 'class'`): state in fields, behaviour in methods, inheritance by
    `:isa`. No `package` blocks, no subs called on a class name, no `@ISA`
    or `use parent`. A pass that takes options is an object that holds them
-   (`Chalk::Target::LLVM->new(mop => $mop)->lower($ret)`), not a class method
-   handed a hash.
+   (`Chalk::Target::LLVM->new->lower($program)`), not a class method handed a
+   hash.
+7. **The runtime is part of the IR graph**: chalk's runtime (the container
+   metaobjects `Chalk::MOP::Signals`, `Chalk::MOP::Includes`, the stash
+   class, the helpers in Target/LLVM/Runtime.pm) is graphs in the same
+   `Chalk::MOP` as the program, not a library linked beside it. Lowering is
+   one reachability walk from `main::__PROGRAM__`: what it reaches is
+   compiled -- program, module or runtime alike -- and what it does not
+   reach is not in the output (no `%SIG` touched, no `Signals`). Only true
+   primitives (a system call, an allocation, an `i128` multiply) stay outside
+   the graph, as leaf nodes. Hand-written runtime text shrinks toward them.
 
 ## Key Files
 
