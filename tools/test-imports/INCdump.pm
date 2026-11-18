@@ -12,7 +12,10 @@ our $INIT_DONE = 0;
 ${^HOOK}{require__before} = sub {
     my $name = $_[0];
     return if ref $name;
-    my @c = caller(0);
+    # (a `use parent`/`use base` load is the module's that said it, not parent.pm's)
+    my $i = 0;
+    my @c = caller($i);
+    @c = caller(++$i) while @c && ( $c[1] // '' ) =~ m{(?:\A|/)(?:parent|base)\.pm\z} && caller($i + 1);
     # R = first load of this file; E = a later require of an already-loaded file
     push @REQ, join "\t", ( exists $INC{$name} ? 'E' : 'R' ), $name, ( $c[1] // '?' ), ( $c[2] // '?' ), ${^GLOBAL_PHASE};
     return;

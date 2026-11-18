@@ -2,6 +2,7 @@
 # ABOUTME: Rebuild the test x module table: run every .t under perl with INCdump,
 # ABOUTME: then analyze.pl writes the full TSV, the per-test summary and a report.
 #   tools/test-imports/run.sh OUTDIR    (cwd = chalk root; the full TSV is not committed)
+# Rerunning with the same OUTDIR resumes: tests that already wrote a .meta are skipped.
 set -u
 OUT=${1:?usage: run.sh OUTDIR}
 mkdir -p "$OUT/runs"
@@ -10,6 +11,7 @@ export HOME=${SUITE_HOME:-/home/runner} PERL5_SON_LIB=${PERL5_SON_LIB:-/home/use
 
 one() {
     f=$1; id=$(echo "$f" | tr '/.' '__'); R=$OUT/runs
+    [ -e "$R/$id.meta" ] && return    # resumable: a test with its .meta is done
     rm -f "$R/$id.inc"
     ulimit -v 4000000
     s=$(date +%s.%N)
