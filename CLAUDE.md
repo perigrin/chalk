@@ -262,6 +262,11 @@ See **`docs/chalk-parse-perl-plan.md`** for the detailed 9-phase roadmap:
      libraries at run time, no `dlopen`. XS will be handled another way, not
      by loading native objects. Cosmopolitan libc (one binary for Linux,
      macOS, Windows, the BSDs) is the first candidate to try.
+8. **Signatures, not @_**: every sub and method in lib/ declares its
+   parameters in a signature (`method lower($program)`, `sub inc_key ($name)`).
+   No `my ($x, @y) = @_;`, no `shift`, no reading `@_` at all. The class
+   conversion (constraint 6) brings T2's Builder subs, which still unpack
+   `@_`, in line.
 
 ## Key Files
 
