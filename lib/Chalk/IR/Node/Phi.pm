@@ -77,7 +77,11 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Value) {
             # a direct call: an inlined sub may store any of those
             # ...or a method call, which runs one (taking the producer's flag
             # wholesale instead let an arm walk that cycles through, pvm 124)
-            return 1 if $in->operation eq 'Call' && ($in->dispatch_kind // '') =~ /\A(?:direct|method)\z/
+            # ...or a call through a code ref, which runs one too (left out, an
+            # eval's join past `$code->()` was a value phi, and a package
+            # scalar the sub wrote was read at its first use -- after the next
+            # store to it: 0 for 2)
+            return 1 if $in->operation eq 'Call' && $in->is_sub_call
                 && !( defined $memory && !$memory );
             # ...or a builtin that versions memory (a push, a sort that runs code),
             # on a phi the producer says is memory (a value phi may merge a
