@@ -173,6 +173,14 @@ but it no longer decides the verdict.
   requires reaches it, through any require edge, first load or not. `no` is an
   artifact. `unknown` is reached only from a string eval (Math::BigInt::Calc,
   which Math::BigInt loads with `eval "require ..."`, and what Calc loads).
+  - **KNOWN OVER-COUNT (found 2026-11-18):** an edge is credited to the file
+    that ran the `require`, and for `use parent` that is `parent.pm`.
+    Chalk::Target::LLVM says `use parent` (LLVM.pm:11), so parent.pm is
+    `yes`, and so is everything parent.pm ever loaded in that test --
+    File::Temp's IO::Seekable, IO::Handle and Symbol among them, though no
+    lib/ file requires any of them (the tests' `use File::Temp` does). The
+    artifact counts below are therefore LOW. Fix: INCdump skips parent.pm and
+    base.pm frames to the real caller; then rerun.
 - **Results:**
   - 899 of 900 completed inside 2400 s; t/grammar-conformance.t is covered in
     the next bullet.
