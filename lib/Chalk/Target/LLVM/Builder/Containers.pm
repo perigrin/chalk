@@ -6,7 +6,6 @@ use utf8;
 package Chalk::Target::LLVM::Builder;
 
 require Chalk::Impl;
-use Scalar::Util qw(blessed refaddr);
 
 # make_constant_arrays(@nodes): an array whose literal holds only constants
 # (`my @a = (1, 2)`, `my @a`) is made in the entry block -- first made where it

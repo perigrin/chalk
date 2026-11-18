@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::Target::LLVM::Builder;
 
-use Scalar::Util qw(blessed refaddr);
 
 # walk($ctl): the statements after $ctl, in order, to a Return or the end of
 # a body. A statement of a kind T2 does not have makes the program fall back:

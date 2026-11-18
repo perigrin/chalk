@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::Target::LLVM::Builder;
 
-use Scalar::Util qw(blessed refaddr);
 
 our $FRAMES;   # the program reads caller: every call of a sub says where it is
 sub emit_call {

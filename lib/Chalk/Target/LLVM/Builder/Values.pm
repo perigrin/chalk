@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::Target::LLVM::Builder;
 
-use Scalar::Util qw(blessed refaddr);
 
 # Undef and a Scalar nothing narrowed are each a %Slot: its tag says which.
 my %SCALAR = (Int => 'i64', Num => 'double', Str => '%Str', Boolean => 'i1', Undef => '%Slot', Scalar => '%Slot');

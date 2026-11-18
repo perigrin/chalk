@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::IR::Transform::BackwardInference;
 
-use Scalar::Util qw(blessed);
 use Chalk::Grammar::Perl::TypeLibrary ();
 
 # A DELIBERATE MIRROR of perl5-son's `_infer_backward` (lib/B/SoN.pm).

@@ -4,7 +4,6 @@ package Chalk::IR::Graph::TypedInvariant;
 use 5.42.0;
 use utf8;
 
-use Scalar::Util qw(blessed);
 
 use Chalk::IR::Node::Coerce;
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: Int <: Num

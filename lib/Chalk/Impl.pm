@@ -10,7 +10,6 @@ use File::Basename qw(dirname);
 use File::Spec;
 use File::Path qw(make_path);
 use JSON::PP ();
-use Scalar::Util ();
 use Chalk::IR::Node::EntryDef;
 
 # docs/plans/2026-11-15-perls-special-hashes-have-mop-metaobjects.md, step 1:
@@ -102,21 +101,21 @@ sub warn_handlers_do_nothing ($root, @nodes) {
     my $start = $start[0];
     my %empty_op = map { ( $_ => 1 ) } qw(Start Return Constant MemStart);
     my $does_nothing = sub ($v) {
-        return 0 unless Scalar::Util::blessed($v) && $v->operation eq 'AnonSub' && !grep { Scalar::Util::blessed($_) } $v->inputs->@*;
+        return 0 unless blessed($v) && $v->operation eq 'AnonSub' && !grep { blessed($_) } $v->inputs->@*;
         my $sub = $v->sub;
-        return 0 unless Scalar::Util::blessed($sub) && $sub->can('graph') && $sub->graph;
+        return 0 unless blessed($sub) && $sub->can('graph') && $sub->graph;
         return !grep { !$empty_op{ $_->operation } } $sub->graph->component;
     };
     for my $sig (grep { $_->operation eq 'EntryDef' && ( $_->metaobject_class // '' ) eq 'Chalk::Impl::SIG' } @nodes) {
-        for my $el (grep { Scalar::Util::blessed($_) } ( $sig->consumers // [] )->@*) {
+        for my $el (grep { blessed($_) } ( $sig->consumers // [] )->@*) {
             my ($h, $k) = $el->inputs->@*;
-            return 0 unless $el->operation eq 'Subscript' && Scalar::Util::refaddr($h) == Scalar::Util::refaddr($sig)
-                && Scalar::Util::blessed($k) && $k->operation eq 'Constant' && defined $k->value;
+            return 0 unless $el->operation eq 'Subscript' && refaddr($h) == refaddr($sig)
+                && blessed($k) && $k->operation eq 'Constant' && defined $k->value;
             next unless $k->value eq '__WARN__';
-            for my $u (grep { Scalar::Util::blessed($_) } ( $el->consumers // [] )->@*) {
+            for my $u (grep { blessed($_) } ( $el->consumers // [] )->@*) {
                 my ($t, $v) = $u->inputs->@*;
-                next if $u->operation eq 'Assign' && Scalar::Util::refaddr($t) == Scalar::Util::refaddr($el) && $does_nothing->($v)
-                    && Scalar::Util::blessed( $u->control_in ) && Scalar::Util::refaddr( $u->control_in ) == Scalar::Util::refaddr($start);
+                next if $u->operation eq 'Assign' && refaddr($t) == refaddr($el) && $does_nothing->($v)
+                    && blessed( $u->control_in ) && refaddr( $u->control_in ) == refaddr($start);
                 return 0;
             }
         }

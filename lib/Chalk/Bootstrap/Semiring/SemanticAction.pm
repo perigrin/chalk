@@ -7,7 +7,6 @@ use experimental 'class';
 use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;
-use Scalar::Util qw(refaddr);
 
 class Chalk::Bootstrap::Semiring::SemanticAction {
     field $actions :param = undef;

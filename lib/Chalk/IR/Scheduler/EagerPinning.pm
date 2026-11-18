@@ -5,7 +5,6 @@ use utf8;
 use experimental 'class';
 no warnings 'experimental::class';
 
-use Scalar::Util qw(blessed refaddr);
 use Chalk::IR::Schedule;
 use Chalk::IR::Schedule::Item;
 use Chalk::IR::Node::If;
