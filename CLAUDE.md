@@ -234,6 +234,14 @@ See **`docs/chalk-parse-perl-plan.md`** for the detailed 9-phase roadmap:
    - **One exception, temporary:** JSON::PP, for the loader to read B::SoN's
      JSON wire. It goes when the wire moves to Sereal and
      `Chalk::Loader::Sereal` reads it.
+   - t/bootstrap/lib-loads-no-outside-modules.t enforces this; its list of
+     modules still under review only shrinks.
+6. **All classes, no packages**: every module in lib/ is a `class` (Perl's
+   `feature 'class'`): state in fields, behaviour in methods, inheritance by
+   `:isa`. No `package` blocks, no subs called on a class name, no `@ISA`
+   or `use parent`. A pass that takes options is an object that holds them
+   (`Chalk::Target::LLVM->new(mop => $mop)->lower($ret)`), not a class method
+   handed a hash.
 
 ## Key Files
 
