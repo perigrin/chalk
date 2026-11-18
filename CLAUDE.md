@@ -258,6 +258,10 @@ See **`docs/chalk-parse-perl-plan.md`** for the detailed 9-phase roadmap:
      the OS (`write`, `opendir`, `getenv`, ...). No raw system calls. Only
      entry points every target's libc has: not glibc-only names such as
      `__errno_location` (macOS spells it `__error`).
+   - **Output is statically linked** (perigrin, 2026-11-18): no shared
+     libraries at run time, no `dlopen`. XS will be handled another way, not
+     by loading native objects. Cosmopolitan libc (one binary for Linux,
+     macOS, Windows, the BSDs) is the first candidate to try.
 
 ## Key Files
 
