@@ -19,7 +19,15 @@ use Encode ();
 #
 # Re-record (only with an analysis known sound, and say why in the commit):
 #   CHALK_RECORD_INTERVALS=1 prove -l -It/lib t/bootstrap/ir/t1-integer-intervals-prove-nothing-new.t
-my $LOST_ALLOWED = 0;
+#
+# LOST, 9 (2026-11-18, bounds saturating at the IV range): all in own:edges,
+# each a value that leaves the IV range and comes back -- (IV_MAX + 1) - 1,
+# (IV_MAX + 1) - IV_MAX, 0 - (IV_MAX + 1), -(IV_MAX + 1), (IV_MAX + 1) * -1,
+# (IV_MAX + IV_MAX + 1) - (IV_MAX + 1), IV_MIN + IV_MIN * -1. The oracle
+# bounded the UV between exactly; the analysis keeps no bound past IV_MAX,
+# so T2 takes perl's general path for them (as perl, still). None in the
+# census corpus.
+my $LOST_ALLOWED = 9;
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

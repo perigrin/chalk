@@ -77,6 +77,25 @@ sub tap ($src) {
     is interval($sum), '0..+inf', 'an accumulator of unbounded passes: widened, its lower bound kept';
 }
 
+# THE IV RANGE'S EDGES: a bound is exact up to IV_MAX and down to IV_MIN
+# (3037000499 ** 2 is the largest square an IV holds); one that would leave
+# the range bounds nothing. (Past it a bound was kept to UV_MAX, in
+# Math::BigInt: IV_MAX + 1 was 9223372036854775808..9223372036854775808. T2
+# asks only whether a value is an IV and whether it is within 2**53, so a
+# bound past IV_MAX answered nothing; it SATURATES now -- perl's UV or NV
+# there is the general path's, as before.)
+{
+    my $vars = 'my $x = 9223372036854775807; my $y = -9223372036854775807 - 1; my $z = 3037000499; my $w = 3037000500;';
+    for my $c ( [ '$x - 1', '9223372036854775806..9223372036854775806' ], [ '$y + 1', '-9223372036854775807..-9223372036854775807' ],
+        [ '$x + $y', '-1..-1' ], [ '$z * $z', '9223372030926249001..9223372030926249001' ],
+        [ '$x + 1', '-inf..+inf' ], [ '$y - 1', '-inf..+inf' ], [ '$x * 2', '-inf..+inf' ], [ '$y * -1', '-inf..+inf' ],
+        [ '$w * $w', '-inf..+inf' ], [ '-$y', '-inf..+inf' ] ) {
+        my ( $e, $want ) = @$c;
+        my ($r) = grep { $_->operation =~ /\A(?:Add|Subtract|Multiply|Negate)\z/ } nodes("$vars my \$r = $e; print \$r;");
+        is interval($r), $want, "$e: $want";
+    }
+}
+
 # T2: AN i64 OP WHERE THE INTERVAL PROVES AN IV, the general path elsewhere,
 # and no stop for overflow anywhere in what it emits.
 {

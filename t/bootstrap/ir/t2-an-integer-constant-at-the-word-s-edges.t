@@ -3,6 +3,7 @@
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
+require Chalk::IR::Analysis;
 require Chalk::Target::LLVM::Builder;
 
 # A CONSTANT IS A DECIMAL STRING from the wire ([-+]?\d+, leading zeros
@@ -11,8 +12,9 @@ my $IV_MAX = '9223372036854775807';
 my $IV_MIN = '-9223372036854775808';
 my $UV_MAX = '18446744073709551615';
 
-# i64_holds($decimal): an i64 holds it (within [IV_MIN, IV_MAX]).
-my $holds = \&Chalk::Target::LLVM::Builder::i64_holds;
+# decimal_is_iv($decimal): an i64 holds it (within [IV_MIN, IV_MAX]) -- T1's
+# fact, which T2 asks before it makes an i64 constant.
+my $holds = \&Chalk::IR::Analysis::decimal_is_iv;
 for my $c (
     [ $IV_MAX, 1 ], [ '9223372036854775808', 0 ], [ $IV_MIN, 1 ], [ '-9223372036854775809', 0 ],
     [ $UV_MAX, 0 ], [ '18446744073709551616', 0 ], [ '-18446744073709551616', 0 ],
@@ -23,7 +25,7 @@ for my $c (
     [ '9999999999999999999', 0 ], [ '-9999999999999999999', 0 ], [ '1000000000000000000000000', 0 ],
 ) {
     my ( $d, $want ) = @$c;
-    is( $holds->($d) ? 1 : 0, $want, "i64_holds($d): " . ( $want ? 'yes' : 'no' ) );
+    is( $holds->($d) ? 1 : 0, $want, "decimal_is_iv($d): " . ( $want ? 'yes' : 'no' ) );
 }
 
 # uv_bits($decimal): a constant past IV_MAX and within UV_MAX -- a UV perl

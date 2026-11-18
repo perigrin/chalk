@@ -336,12 +336,20 @@ sub narrow_return_type ($meta, $type) {
 # interval attaches to the DEFINITION and no later mutation invalidates it.
 # Loop-carried values need a widening at the Phi -- one known place.
 #
-# THE DOMAIN. lo and hi are Math::BigInt, undef for -inf / +inf; a node not
-# modelled has no interval (anything). A value past [IV_MIN, UV_MAX] is an NV
-# in perl, and an NV's arithmetic rounds: where an operation may be done in
-# NVs, a bound is kept only where it and every operand bound it may have come
-# from are within 2**53 in size (an NV holds those exactly, and rounding is
-# monotone); any other goes to infinity.
+# THE DOMAIN. lo and hi are native integers within [IV_MIN, IV_MAX], undef
+# for -inf / +inf; a node not modelled has no interval (anything). A bound
+# that would leave the IV range is undef: it SATURATES. Nothing asks of a
+# value past the IV range -- T2 asks whether one is an IV (int_is_iv) and
+# whether it is within 2**53 (int_within), each to take a faster path where
+# it may, the general one where not -- so a bound past it would answer
+# nothing. Every bound is computed exactly (_iv_add, _iv_sub, _iv_mul check
+# against the edge before they compute).
+#
+# AN NV'S ROUNDING bounds nothing kept. perl does + - * in NVs only where an
+# operand or the exact result is past [IV_MIN, UV_MAX] (an integral NV within
+# it is taken as the integer): such a value is on a side the interval leaves
+# unbounded, and at least 2**63 in size there -- past every bound kept, by
+# more than an NV of that size rounds. Each kept bound still holds of it.
 #
 # THE ALGORITHM. Round-robin to a post-fixpoint, widening a loop Phi's bound
 # to infinity the second time it moves; then a few narrowing rounds, each
@@ -352,32 +360,38 @@ sub narrow_return_type ($meta, $type) {
 # guessed, a node it cannot model is anything.
 # ============================================================================
 use Hash::Util::FieldHash qw(fieldhash);
-require Math::BigInt;
 fieldhash my %INTERVAL;    # node => [lo, hi]
 fieldhash my %ANALYSED;    # Return node => 1: its program's nodes analysed
 
-my $IV_MIN = Math::BigInt->new('-9223372036854775808');
-my $IV_MAX = Math::BigInt->new('9223372036854775807');
-my $UV_MAX = Math::BigInt->new('18446744073709551615');
-my $EXACT  = Math::BigInt->new('9007199254740992');    # 2**53
+use constant { IV_MAX => 9223372036854775807, IV_MIN => -9223372036854775807 - 1 };
 
-# int_interval($node) -> ($lo, $hi) perl's value of $node lies in (each a
-# Math::BigInt, undef for unbounded), or () where nothing is proven.
+# int_interval($node) -> ($lo, $hi) perl's value of $node lies in (each
+# within [IV_MIN, IV_MAX], undef for unbounded), or () where nothing is proven.
 sub int_interval ($node) {
     my $iv = $INTERVAL{$node} // return ();
     return ( $iv->[0], $iv->[1] );
 }
 
 # int_within($node, $lo, $hi) -> true where $node's interval is proven
-# within [$lo, $hi] (decimal strings or Math::BigInt).
+# within [$lo, $hi] (integers, or decimal strings an IV holds).
 sub int_within ($node, $lo, $hi) {
     my ( $a, $b ) = int_interval($node) or return 0;
     return 0 unless defined $a && defined $b;
-    return $a >= Math::BigInt->new($lo) && $b <= Math::BigInt->new($hi) ? 1 : 0;
+    return $a >= $lo && $b <= $hi ? 1 : 0;
+}
+
+# decimal_is_iv($decimal) -> an IV holds the integer the decimal string
+# ([-+]?\d+, leading zeros and all) spells: within [IV_MIN, IV_MAX]. Asked of
+# its digits -- by count, then as strings of one length -- never of an NV,
+# which rounds past 2**53.
+sub decimal_is_iv ($d) {
+    my ( $sign, $digits ) = $d =~ /\A([-+]?)0*(\d+)\z/ or return false;
+    my $edge = $sign eq '-' ? '9223372036854775808' : '9223372036854775807';
+    return length $digits < 19 || length $digits == 19 && $digits le $edge;
 }
 
 # int_is_iv($node) -> true where $node is proven an IV (within [IV_MIN, IV_MAX]).
-sub int_is_iv ($node) { return int_within( $node, $IV_MIN, $IV_MAX ) }
+sub int_is_iv ($node) { return int_within( $node, IV_MIN, IV_MAX ) }
 
 # not_a_value_type($type) -> why $type is no value's type, or undef for one
 # that is. These have no layout at any width on any target -- not "not yet
@@ -468,12 +482,12 @@ sub _iv_modelled ($n) {
     return 1;
 }
 
-# _iv_const($n) -> an integer Constant's value (Math::BigInt), else undef.
+# _iv_const($n) -> an integer Constant's value, where an IV holds it; else
+# undef (one past the IV range bounds nothing: see THE DOMAIN).
 sub _iv_const ($n) {
     return undef unless blessed($n) && $n->operation eq 'Constant' && ( $n->const_type // '' ) eq 'integer';
     my $v = $n->value // return undef;
-    return undef unless $v =~ /\A[-+]?\d+\z/;
-    return Math::BigInt->new($v);
+    return decimal_is_iv($v) ? 0 + $v : undef;
 }
 
 sub _iv_loop_phi ($n) {
@@ -504,52 +518,60 @@ sub _iv_within ( $x, $y ) {
     return 1;
 }
 
-sub _iv_in_exact ($iv) {
-    return defined $iv->[0] && defined $iv->[1] && $iv->[0] >= $IV_MIN && $iv->[1] <= $UV_MAX;
+# CHECKED ARITHMETIC on bounds: the exact result where an IV holds it, else
+# undef (saturated: see THE DOMAIN); undef in, undef out. Each checks against
+# the edge before it computes, so perl's own + - * never leaves the IVs.
+sub _iv_add ( $a, $b ) {
+    return undef unless defined $a && defined $b;
+    return undef if $b > 0 ? $a > IV_MAX - $b : $a < IV_MIN - $b;
+    return $a + $b;
 }
 
-# _iv_round($r, @operands) -> $r, its bounds made safe where the operation
-# may be done in NVs: an operand or the result may be past [IV_MIN, UV_MAX].
-sub _iv_round ( $r, @in ) {
-    return $r unless grep { !_iv_in_exact($_) } $r, @in;
-    my $big = grep { defined $_ && $_->copy->babs > $EXACT } map { @$_ } @in;
-    return [ map { defined $_ && !$big && $_->copy->babs <= $EXACT ? $_ : undef } @$r ];
+sub _iv_sub ( $a, $b ) {
+    return undef unless defined $a && defined $b;
+    return undef if $b > 0 ? $a < IV_MIN + $b : $a > IV_MAX + $b;
+    return $a - $b;
 }
 
-# _iv_mul($a, $b) -> a bound product, undef standing for an infinity of the
-# sign given: ($v, $sign) pairs. 0 times anything is 0.
+# (by the operands' sizes: perl's abs of IV_MIN is the UV 2**63, and a
+# product of two UVs is exact while a UV holds it, an NV past 2**64 else)
+sub _iv_mul ( $a, $b ) {
+    return undef unless defined $a && defined $b;
+    return 0 if $a == 0 || $b == 0;
+    my $size = abs($a) * abs($b);
+    return ( $a < 0 ) == ( $b < 0 ) ? ( $size <= IV_MAX ? $size : undef ) : ( $size <= -(IV_MIN) ? 0 - $size : undef );
+}
+
+# _iv_corner($x, $xs, $y, $ys) -> a bound product, undef standing for an
+# infinity of the sign given: ($v, $sign) pairs. 0 times anything is 0; a
+# product past the IV range is an infinity of its sign.
 sub _iv_corner ( $x, $xs, $y, $ys ) {
-    return [ Math::BigInt->bzero, 0 ] if ( defined $x && $x->is_zero ) || ( defined $y && $y->is_zero );
-    return [ $x * $y, 0 ] if defined $x && defined $y;
-    my $sx = defined $x ? ( $x->is_neg ? -1 : 1 ) : $xs;
-    my $sy = defined $y ? ( $y->is_neg ? -1 : 1 ) : $ys;
-    return [ undef, $sx * $sy ];
+    return [ 0, 0 ] if ( defined $x && $x == 0 ) || ( defined $y && $y == 0 );
+    my $sx = defined $x ? ( $x < 0 ? -1 : 1 ) : $xs;
+    my $sy = defined $y ? ( $y < 0 ? -1 : 1 ) : $ys;
+    return [ _iv_mul( $x, $y ), $sx * $sy ];
 }
 
 sub _iv_arith ( $op, $x, $y ) {
-    my $add = sub ( $a, $b ) { defined $a && defined $b ? $a + $b : undef };
-    return [ $add->( $x->[0], $y->[0] ), $add->( $x->[1], $y->[1] ) ] if $op eq 'Add';
-    if ( $op eq 'Subtract' ) {
-        return [ ( defined $x->[0] && defined $y->[1] ) ? $x->[0] - $y->[1] : undef,
-                 ( defined $x->[1] && defined $y->[0] ) ? $x->[1] - $y->[0] : undef ];
-    }
+    return [ _iv_add( $x->[0], $y->[0] ), _iv_add( $x->[1], $y->[1] ) ] if $op eq 'Add';
+    return [ _iv_sub( $x->[0], $y->[1] ), _iv_sub( $x->[1], $y->[0] ) ] if $op eq 'Subtract';
     # Multiply: the four corners, an infinite one by its sign.
     my @c = map { my ( $xv, $xs ) = @$_; map { _iv_corner( $xv, $xs, @$_ ) } [ $y->[0], -1 ], [ $y->[1], 1 ] } [ $x->[0], -1 ], [ $x->[1], 1 ];
-    my ( $lo, $hi ) = ( 'none', 'none' );
+    my ( $lo, $hi, $ninf, $pinf );
     for my $c (@c) {
         my ( $v, $s ) = @$c;
         if ( defined $v ) {
-            $lo = $v if !ref($lo) && $lo eq 'none' || ref($lo) && $v < $lo;
-            $hi = $v if !ref($hi) && $hi eq 'none' || ref($hi) && $v > $hi;
+            $lo = $v if !defined $lo || $v < $lo;
+            $hi = $v if !defined $hi || $v > $hi;
         }
-        else { $lo = 'ninf' if $s < 0; $hi = 'pinf' if $s > 0 }
+        else { $ninf = 1 if $s < 0; $pinf = 1 if $s > 0 }
     }
-    return [ ref($lo) ? $lo : undef, ref($hi) ? $hi : undef ];
+    return [ $ninf ? undef : $lo, $pinf ? undef : $hi ];
 }
 
 sub _iv_transfer ( $n, $st ) {
     my $op = $n->operation;
-    if ( $op eq 'Constant' ) { my $v = _iv_const($n); return [ $v, $v->copy ] }
+    if ( $op eq 'Constant' ) { my $v = _iv_const($n); return [ $v, $v ] }
     if ( $op eq 'Phi' ) {
         my @in = map { _iv_of( $_, $st ) } grep { blessed($_) } $n->inputs->@*;
         @in = grep { defined } @in;
@@ -569,13 +591,12 @@ sub _iv_transfer ( $n, $st ) {
     my @x = map { _iv_operand( $n, $_, $st ) } grep { blessed($_) } $n->inputs->@[ 0 .. ( $op =~ /\A(?:Add|Subtract|Multiply|Modulo|BitAnd)\z/ ? 1 : 0 ) ];
     if ( $op =~ /\A(?:Add|Subtract|Multiply)\z/ ) {
         return undef if grep { !defined } ( $x[0], $x[1] );
-        return _iv_round( _iv_arith( $op, $x[0], $x[1] ), $x[0], $x[1] );
+        return _iv_arith( $op, $x[0], $x[1] );
     }
     if ( $op eq 'Negate' || $op eq 'Increment' || $op eq 'Decrement' ) {
         my $x = $x[0] // return undef;
-        my $r = $op eq 'Negate' ? _iv_arith( 'Subtract', [ Math::BigInt->bzero, Math::BigInt->bzero ], $x )
-              : _iv_arith( 'Add', $x, [ ( Math::BigInt->new( $op eq 'Increment' ? 1 : -1 ) ) x 2 ] );
-        return _iv_round( $r, $x );
+        return _iv_arith( 'Subtract', [ 0, 0 ], $x ) if $op eq 'Negate';
+        return _iv_arith( 'Add', $x, [ ( $op eq 'Increment' ? 1 : -1 ) x 2 ] );
     }
     if ( $op eq 'Coerce' ) {
         my $in = $n->inputs->[0];
@@ -586,19 +607,20 @@ sub _iv_transfer ( $n, $st ) {
         # (pp_modulo: the result's size below the right side's, its sign the right side's)
         my $r = $x[1] // return undef;
         return [ undef, undef ] unless defined $r->[0] && defined $r->[1];
-        return [ Math::BigInt->bzero, $r->[1] - 1 ] if $r->[0] > 0;
-        return [ $r->[0] + 1, Math::BigInt->bzero ] if $r->[1] < 0;
-        my $m = $r->[0]->copy->babs > $r->[1]->copy->babs ? $r->[0]->copy->babs : $r->[1]->copy->babs;
-        return [ -( $m - 1 ), $m - 1 ];
+        return [ 0, $r->[1] - 1 ] if $r->[0] > 0;
+        return [ $r->[0] + 1, 0 ] if $r->[1] < 0;
+        # (lo <= 0 <= hi: the larger size less one, each side's taken without overflow)
+        my $m = -( $r->[0] + 1 ) > $r->[1] - 1 ? -( $r->[0] + 1 ) : $r->[1] - 1;
+        return [ -$m, $m ];
     }
     if ( $op eq 'BitAnd' ) {
         # (& with an integer constant not below 0 is on numbers: at most it)
         return [ undef, undef ] if ( $n->can('flavor') ? $n->flavor // '' : '' ) eq 'string';
-        my ($c) = grep { defined && !$_->is_neg && $_ <= $IV_MAX } map { _iv_const( _iv_uncoerce($_) ) } $n->inputs->@[ 0, 1 ];
-        return defined $c ? [ Math::BigInt->bzero, $c ] : [ undef, undef ];
+        my ($c) = grep { defined && $_ >= 0 } map { _iv_const( _iv_uncoerce($_) ) } $n->inputs->@[ 0, 1 ];
+        return defined $c ? [ 0, $c ] : [ undef, undef ];
     }
-    return [ Math::BigInt->bzero, $IV_MAX->copy ] if $op eq 'Length';
-    return [ Math::BigInt->new(-1), $IV_MAX->copy ] if $op eq 'Count';
+    return [ 0, IV_MAX ] if $op eq 'Length';
+    return [ -1, IV_MAX ] if $op eq 'Count';
     return [ undef, undef ];
 }
 
@@ -611,8 +633,8 @@ sub _iv_step ( $p, $st ) {
     my $op = $v->operation;
     if ( $op eq 'Increment' || $op eq 'Decrement' ) {
         return undef unless blessed( $v->inputs->[0] ) && refaddr( _iv_uncoerce( $v->inputs->[0] ) ) == refaddr($p);
-        my $one = Math::BigInt->new( $op eq 'Increment' ? 1 : -1 );
-        return [ $one, $one->copy ];
+        my $one = $op eq 'Increment' ? 1 : -1;
+        return [ $one, $one ];
     }
     return undef unless $op eq 'Add' || $op eq 'Subtract';
     my ( $a, $b ) = $v->inputs->@[ 0, 1 ];
@@ -622,7 +644,9 @@ sub _iv_step ( $p, $st ) {
     else  { return undef }
     my $iv = _iv_operand( $v, $d, $st ) // return undef;
     return undef unless defined $iv->[0] && defined $iv->[1];
-    return $op eq 'Add' ? $iv : [ -$iv->[1], -$iv->[0] ];
+    return $iv if $op eq 'Add';
+    my $s = _iv_arith( 'Subtract', [ 0, 0 ], $iv );    # (-IV_MIN is past IV_MAX)
+    return defined $s->[0] && defined $s->[1] ? $s : undef;
 }
 
 # _iv_trip_cap($phi, $st) -> bounds on a loop Phi from the loop's trips, or
@@ -631,8 +655,8 @@ sub _iv_step ( $p, $st ) {
 # i-th back edge leaves a counter of at least start + i * step that passed
 # the test, so there are at most (bound - start) / step + 1 of them. A Phi
 # each pass moves by a value of known interval then stays within its start
-# plus that many of them. Kept only within [IV_MIN, UV_MAX], where every
-# pass's value is exact.
+# plus that many of them. Kept only where both its bounds are within the IV
+# range.
 sub _iv_trip_cap ( $p, $st ) {
     my $L = $p->region;
     my $d = _iv_step( $p, $st ) // return undef;
@@ -647,13 +671,19 @@ sub _iv_trip_cap ( $p, $st ) {
         next unless $k->[0] >= 1;
         my $c0 = _iv_of( $c->inputs->[0], $st ) // next;
         next unless defined $c0->[0];
-        my $t = $g->[1] < $c0->[0] ? Math::BigInt->bzero : ( $g->[1] - $c0->[0] ) / $k->[0] + 1;
+        my $t = $g->[1] < $c0->[0] ? 0 : _iv_add( _iv_div( _iv_sub( $g->[1], $c0->[0] ) // next, $k->[0] ), 1 ) // next;
         $trips = $t if !defined $trips || $t < $trips;
     }
     return undef unless defined $trips;
-    my $z = Math::BigInt->bzero;
-    my $cap = [ $a0->[0] + $trips * ( $d->[0] < $z ? $d->[0] : $z ), $a0->[1] + $trips * ( $d->[1] > $z ? $d->[1] : $z ) ];
-    return _iv_in_exact($cap) ? $cap : undef;
+    my $cap = [ _iv_add( $a0->[0], _iv_mul( $trips, $d->[0] < 0 ? $d->[0] : 0 ) ), _iv_add( $a0->[1], _iv_mul( $trips, $d->[1] > 0 ? $d->[1] : 0 ) ) ];
+    return defined $cap->[0] && defined $cap->[1] ? $cap : undef;
+}
+
+# _iv_div($a, $k) -> $a / $k rounded down, for $a >= 0 and $k >= 1: in
+# integers, exactly (perl's / goes through an NV past 2**53).
+sub _iv_div ( $a, $k ) {
+    use integer;
+    return $a / $k;
 }
 
 sub _iv_uncoerce ($n) {
@@ -701,13 +731,13 @@ sub _iv_guard ( $L, $p, $st ) {
     my $o = _iv_uncoerce($other);
     return undef unless blessed($o);
     my $known = _iv_const($o);
-    return undef unless ( $o->stamp // '' ) eq 'Int' || ref $known;    # static type
+    return undef unless ( $o->stamp // '' ) eq 'Int' || defined $known;    # static type
     my $ov = _iv_of( $o, $st ) // return undef;
     # phi < o: phi <= hi(o) - 1; phi <= o: hi(o); phi > o: lo(o) + 1; phi >= o: lo(o)
-    return [ undef, defined $ov->[1] ? $ov->[1] - 1 : undef ] if $c eq 'lt';
-    return [ undef, defined $ov->[1] ? $ov->[1]->copy : undef ] if $c eq 'le';
-    return [ defined $ov->[0] ? $ov->[0] + 1 : undef, undef ] if $c eq 'gt';
-    return [ defined $ov->[0] ? $ov->[0]->copy : undef, undef ];
+    return [ undef, _iv_sub( $ov->[1], 1 ) ] if $c eq 'lt';
+    return [ undef, $ov->[1] ] if $c eq 'le';
+    return [ _iv_add( $ov->[0], 1 ), undef ] if $c eq 'gt';
+    return [ $ov->[0], undef ];
 }
 
 # _iv_in_body($n, $Loop, $st) -> $n is evaluated only in the loop's body: each

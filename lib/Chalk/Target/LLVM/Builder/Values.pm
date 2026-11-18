@@ -432,23 +432,14 @@ sub _uv_constant {
     return uv_bits( $v->value // return undef );
 }
 
-# AN INTEGER CONSTANT IS A DECIMAL STRING ([-+]?\d+, leading zeros and all).
-# Whether a word holds it is asked of its digits -- by count, then as
-# strings of one length -- never of an NV, which rounds past 2**53.
-#
-# i64_holds($decimal) -> an i64 holds it: within [IV_MIN, IV_MAX].
-sub i64_holds ($d) {
-    my ( $sign, $digits ) = $d =~ /\A([-+]?)0*(\d+)\z/ or return false;
-    my $edge = $sign eq '-' ? '9223372036854775808' : '9223372036854775807';
-    return length $digits < 19 || length $digits == 19 && $digits le $edge;
-}
-
-# uv_bits($decimal) -> where it is past IV_MAX and within UV_MAX (a UV), its
-# 64 bits read as an i64, in decimal; else undef. (A string of digits within
-# UV_MAX numifies to that UV exactly.)
+# uv_bits($decimal) -> where an integer constant's decimal string is past
+# IV_MAX and within UV_MAX (a UV), its 64 bits read as an i64, in decimal;
+# else undef. Asked of its digits (an i64 holds it where an IV does:
+# Chalk::IR::Analysis::decimal_is_iv), never of an NV, which rounds past
+# 2**53; a string of digits within UV_MAX numifies to that UV exactly.
 sub uv_bits ($d) {
     my ($digits) = $d =~ /\A\+?0*(\d+)\z/ or return undef;
-    return undef if i64_holds($digits) || length $digits > 20 || length $digits == 20 && $digits gt '18446744073709551615';
+    return undef if Chalk::IR::Analysis::decimal_is_iv($digits) || length $digits > 20 || length $digits == 20 && $digits gt '18446744073709551615';
     return '' . unpack 'q', pack 'Q', $digits;
 }
 
@@ -743,7 +734,7 @@ sub _value {
         }
         return $b->emit(op => 'Undef', type => '%Slot') if $ty eq '%Slot';
         # (one past what a UV holds, or below IV_MIN, typed an integer: no i64 holds it)
-        out('an integer constant past what an i64 holds') if $ty eq 'i64' && defined $c && $c =~ /\A[-+]?\d+\z/ && !i64_holds($c);
+        out('an integer constant past what an i64 holds') if $ty eq 'i64' && defined $c && $c =~ /\A[-+]?\d+\z/ && !Chalk::IR::Analysis::decimal_is_iv($c);
         return $b->emit(op => 'Const', type => $ty, attr => { value => $c }) if $ty ne '%Str';
         $b->{strs}{$c} //= scalar keys $b->{strs}->%*;
         return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => $c, id => $b->{strs}{$c} });
