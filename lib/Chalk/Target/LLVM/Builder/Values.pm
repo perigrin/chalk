@@ -429,13 +429,18 @@ sub type_of {
 sub _uv_constant {
     my ($v) = @_;
     return undef unless $v->operation eq 'Constant' && ( $v->const_type // '' ) eq 'integer';
-    my $c = $v->value // return undef;
-    return undef unless $c =~ /\A\+?0*(\d+)\z/;
-    my $d = $1;
-    return undef if length $d < 19 || length $d == 19 && $d le '9223372036854775807';
-    return undef if length $d > 20 || length $d == 20 && $d gt '18446744073709551615';
-    require Math::BigInt;
-    return '' . ( Math::BigInt->new($d) - Math::BigInt->new('18446744073709551616') );
+    return uv_bits( $v->value // return undef );
+}
+
+# uv_bits($decimal) -> where an integer constant's decimal string is past
+# IV_MAX and within UV_MAX (a UV), its 64 bits read as an i64, in decimal;
+# else undef. Asked of its digits (an i64 holds it where an IV does:
+# Chalk::IR::Analysis::decimal_is_iv), never of an NV, which rounds past
+# 2**53; a string of digits within UV_MAX numifies to that UV exactly.
+sub uv_bits ($d) {
+    my ($digits) = $d =~ /\A\+?0*(\d+)\z/ or return undef;
+    return undef if Chalk::IR::Analysis::decimal_is_iv($digits) || length $digits > 20 || length $digits == 20 && $digits gt '18446744073709551615';
+    return '' . unpack 'q', pack 'Q', $digits;
 }
 
 # arith_type($Add) -> the T2 type of a + - * (pp_add, pp_subtract,
@@ -729,11 +734,7 @@ sub _value {
         }
         return $b->emit(op => 'Undef', type => '%Slot') if $ty eq '%Slot';
         # (one past what a UV holds, or below IV_MIN, typed an integer: no i64 holds it)
-        if ($ty eq 'i64' && defined $c && $c =~ /\A[-+]?\d+\z/) {
-            require Math::BigInt;
-            my $d = Math::BigInt->new($c);
-            out('an integer constant past what an i64 holds') if $d > Math::BigInt->new('9223372036854775807') || $d < Math::BigInt->new('-9223372036854775808');
-        }
+        out('an integer constant past what an i64 holds') if $ty eq 'i64' && defined $c && $c =~ /\A[-+]?\d+\z/ && !Chalk::IR::Analysis::decimal_is_iv($c);
         return $b->emit(op => 'Const', type => $ty, attr => { value => $c }) if $ty ne '%Str';
         $b->{strs}{$c} //= scalar keys $b->{strs}->%*;
         return $b->emit(op => 'ConstStr', type => '%Str', attr => { value => $c, id => $b->{strs}{$c} });
