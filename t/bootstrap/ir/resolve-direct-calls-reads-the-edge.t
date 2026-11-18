@@ -4,7 +4,6 @@ use 5.42.0;
 use utf8;
 use Test::More;
 use File::Temp qw(tempfile);
-use Scalar::Util qw(blessed refaddr);
 use lib 'lib', 't/lib';
 
 use Chalk::IR::Serialize::JSON ();

@@ -48,7 +48,6 @@ sub _collect_loop_jump_ifs($ctx) {
     }
     return @out;
 }
-use Scalar::Util qw(refaddr);
 
 # --- Test 1: `next if $cond;` ---
 {

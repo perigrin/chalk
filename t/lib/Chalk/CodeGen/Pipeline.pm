@@ -4,7 +4,6 @@ use 5.42.0;
 use utf8;
 use experimental 'class';
 
-use Scalar::Util qw(blessed refaddr);
 use Chalk::IR::Serialize::JSON ();
 use Chalk::Target::LLVM ();
 use Chalk::Impl ();

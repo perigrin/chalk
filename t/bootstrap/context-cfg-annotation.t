@@ -9,7 +9,6 @@ use Chalk::Bootstrap::Context;
 use Chalk::Bootstrap::Semiring::SemanticAction;
 use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;
-use Scalar::Util 'refaddr';
 
 my $factory = Chalk::IR::NodeFactory->new();
 

@@ -7,7 +7,6 @@ use utf8;
 
 use Carp         qw(croak);
 use File::Temp   qw(tempfile);
-use Scalar::Util qw(blessed);
 use JSON::PP;
 use Chalk::CodeGen::Harness::Deviation ();
 

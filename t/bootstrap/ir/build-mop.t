@@ -7,7 +7,6 @@ use lib 'lib', 't/lib';
 use Test::Chalk;
 
 use Chalk::CodeGen::Harness::MdtestCorpus;
-use Scalar::Util qw(blessed);
 
 # 019eb42a MOP-direct corpus vocabulary: class structure in ir blocks is
 # declared via the real MOP declare_* API (the same accumulation the parser

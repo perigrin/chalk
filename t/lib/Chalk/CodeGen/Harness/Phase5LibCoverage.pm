@@ -5,7 +5,6 @@ use utf8;
 
 package Chalk::CodeGen::Harness::Phase5LibCoverage;
 
-use Scalar::Util qw(blessed);
 use JSON::PP ();
 use Chalk::CodeGen::Pipeline;
 

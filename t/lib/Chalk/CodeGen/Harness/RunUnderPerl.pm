@@ -122,7 +122,6 @@ use 5.42.0;
 use utf8;
 use feature 'class';
 no warnings 'experimental::class';
-use Scalar::Util qw(blessed looks_like_number weaken refaddr);
 use JSON::PP;
 
 # --- Snippet under test ---
@@ -343,7 +342,6 @@ use 5.42.0;
 use utf8;
 use feature 'class';
 no warnings 'experimental::class';
-use Scalar::Util qw(blessed looks_like_number);
 use JSON::PP;
 
 # --- Snippet under test ---

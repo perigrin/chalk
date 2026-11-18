@@ -10,7 +10,6 @@ use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::IR::Scheduler::EagerPinning;
 use Chalk::Bootstrap::Semiring::SemanticAction;
-use Scalar::Util qw(refaddr);
 
 my $ir = perl_pipeline();
 plan skip_all => 'Perl grammar failed' unless defined $ir;

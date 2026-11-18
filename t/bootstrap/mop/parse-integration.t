@@ -235,7 +235,6 @@ class Counters {
 # VarDecl. Both names must end up in class_scope_vars (presence, not order).
 {
     use TestPipeline qw(parse_perl_source);
-    use Scalar::Util qw(refaddr);
 
     my $bool_src;
     {

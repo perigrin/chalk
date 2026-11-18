@@ -5,7 +5,6 @@ use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use File::Temp qw(tempdir);
-use Scalar::Util qw(refaddr blessed);
 use JSON::PP;
 use feature 'try';
 no warnings 'experimental::try';

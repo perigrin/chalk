@@ -241,7 +241,6 @@ class Chalk::CodeGen::Harness::Comparator {
     # Called by the triangle rig before running the three-corner verdict.
     # ------------------------------------------------------------------
     sub check_f7 ($class_or_self, $graph_for_p, $graph_for_l) {
-        use Scalar::Util qw(refaddr);
 
         my $addr_p = refaddr($graph_for_p);
         my $addr_l = refaddr($graph_for_l);

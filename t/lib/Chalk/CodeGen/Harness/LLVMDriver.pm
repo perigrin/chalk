@@ -7,7 +7,6 @@ use utf8;
 
 use Carp      qw(croak);
 use File::Temp qw(tempfile);
-use Scalar::Util qw(blessed);
 
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::Rooted qw(rooted);   # a hand-written block begins at a Start, as B::SoN's graphs do

@@ -5,7 +5,6 @@ use utf8;
 
 use lib 'lib', 't/lib';
 use Test::Chalk;
-use Scalar::Util 'refaddr';
 
 use Chalk::Bootstrap::Bindings;
 use Chalk::IR::NodeFactory;

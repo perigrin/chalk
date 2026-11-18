@@ -6,7 +6,6 @@ use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use Chalk::Bootstrap::Context;
-use Scalar::Util 'refaddr';
 
 subtest 'extend with rule override' => sub {
     my $ctx = Chalk::Bootstrap::Context->new(

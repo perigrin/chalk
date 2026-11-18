@@ -6,7 +6,6 @@ use 5.42.0;
 use utf8;
 
 use Carp qw(croak);
-use Scalar::Util qw(blessed);
 
 use Chalk::CodeGen::Harness::HandGraphs;
 use Chalk::CodeGen::Harness::RunUnderPerl;

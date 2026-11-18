@@ -5,7 +5,6 @@ use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use Digest::SHA qw(sha1_hex);
-use Scalar::Util qw(refaddr blessed);
 
 use Chalk::Grammar::Rule;
 use Chalk::Grammar::Symbol;

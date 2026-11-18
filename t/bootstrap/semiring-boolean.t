@@ -6,7 +6,6 @@ use lib 'lib', 't/lib';
 use Test::Chalk;
 
 use Chalk::Bootstrap::Semiring::Boolean;
-use Scalar::Util qw(refaddr);
 
 # Create a semiring instance
 my $sr = Chalk::Bootstrap::Semiring::Boolean->new();

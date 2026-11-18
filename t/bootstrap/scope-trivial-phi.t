@@ -8,7 +8,6 @@ use Test::Chalk;
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::Bindings;
 use Chalk::IR::Node::Phi;
-use Scalar::Util 'refaddr';
 
 my $factory = Chalk::IR::NodeFactory->new();
 

@@ -146,6 +146,5 @@ sub _form_open_count($sched, $f) {
             sprintf('node in outer chain present: %s', $n->operation));
     }
 }
-use Scalar::Util qw(refaddr);
 
 done_testing();

@@ -6,7 +6,6 @@ use lib 'lib', 't/lib';
 use Test::Chalk;
 
 use File::Basename qw(basename);
-use Scalar::Util qw(blessed);
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
 use Chalk::IR::Serialize::JSON qw(to_json from_json);

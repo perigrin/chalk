@@ -10,7 +10,6 @@ use lib 't/bootstrap/lib';
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);
 use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
-use Scalar::Util qw(blessed);
 
 my $raw_ir = perl_pipeline();
 BAIL_OUT('Perl grammar failed to parse') unless defined $raw_ir;

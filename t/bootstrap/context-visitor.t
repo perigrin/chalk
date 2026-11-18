@@ -6,7 +6,6 @@ use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
 use Chalk::Bootstrap::Context;
-use Scalar::Util 'refaddr';
 
 # Build the standard test tree used by most subtests:
 #

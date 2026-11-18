@@ -114,6 +114,5 @@ sub _parse_first_method($source) {
             "item $i matches chain step (op: " . $expected[$i]->operation . ")");
     }
 }
-use Scalar::Util qw(refaddr);
 
 done_testing();

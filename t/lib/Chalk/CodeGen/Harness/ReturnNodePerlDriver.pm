@@ -7,7 +7,6 @@ use utf8;
 
 use Carp         qw(croak);
 use File::Temp   qw(tempfile);
-use Scalar::Util qw(blessed);
 
 use Chalk::CodeGen::Harness::BehaviorRecord;
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`

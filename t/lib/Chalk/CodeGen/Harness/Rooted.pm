@@ -2,7 +2,6 @@
 # ABOUTME: its control chain (and of each MOP method's) takes a Start, so T2 can walk back to it.
 package Chalk::CodeGen::Harness::Rooted;
 use v5.42.0;
-use Scalar::Util qw(blessed refaddr);
 use Exporter 'import';
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;

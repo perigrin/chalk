@@ -68,7 +68,6 @@ my sub all_nodes($root) {
     }
     return @out;
 }
-use Scalar::Util qw(refaddr);
 
 # ============================================================================
 # §1 Punctuation variables. perl -c accepts each in an expression position;

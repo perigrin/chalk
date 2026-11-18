@@ -8,7 +8,6 @@ use JSON::PP;
 use File::Temp qw(tempfile);
 use Chalk::IR::Analysis ();
 use Chalk::IR::Serialize::JSON ();
-use Scalar::Util qw(blessed);
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";

@@ -12,7 +12,6 @@ use Chalk::IR::NodeFactory;
 use Chalk::Bootstrap::BNF::Target::Perl;
 use Chalk::Bootstrap::Semiring::Precedence;
 use Chalk::Bootstrap::Context;
-use Scalar::Util qw(refaddr);
 
 # ========================================================================
 # Unit tests on _complete_prec via multiply() with complete-annotated
