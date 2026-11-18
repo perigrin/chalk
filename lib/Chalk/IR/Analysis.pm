@@ -730,8 +730,8 @@ sub _iv_guard ( $L, $p, $st ) {
     # Int, or a Coerce of one)
     my $o = _iv_uncoerce($other);
     return undef unless blessed($o);
-    my $known = _iv_const($o);
-    return undef unless ( $o->stamp // '' ) eq 'Int' || defined $known;    # static type
+    my $known = defined _iv_const($o);
+    return undef unless ( $o->stamp // '' ) eq 'Int' || $known;    # static type
     my $ov = _iv_of( $o, $st ) // return undef;
     # phi < o: phi <= hi(o) - 1; phi <= o: hi(o); phi > o: lo(o) + 1; phi >= o: lo(o)
     return [ undef, _iv_sub( $ov->[1], 1 ) ] if $c eq 'lt';
