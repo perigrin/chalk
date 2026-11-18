@@ -490,7 +490,11 @@ Both trees, with the corrected INCdump (Part A, "under_test"):
 - **after:** this commit's tree, every `.t` but mode2-extractor.t (901).
 
 Every test gave a row (899 and 901). t2-census-cases.t exited 1 under the
-4-wide runner in both; it passes in the suite (it is load-sensitive).
+runner in both, failing case jumps:2 only. The runner's fault, not chalk's:
+run.sh exported its tools directory as `T`, and jumps:2 reads `$ENV{T}` as its
+`goto` target. run.sh now hands T and OUT to each test as arguments; through
+it the file passes 426/426, as it does in the suite. Its module rows are
+unaffected (the failure was the case's output, not what it loads).
 `2026-11-17-test-imports-summary.tsv` is the after run;
 `2026-11-17-test-imports-summary-before.tsv` is the before run.
 
