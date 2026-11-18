@@ -67,18 +67,24 @@ sub is_built_in ($name) { return $BUILT_IN{ inc_key($name) } ? 1 : 0 }
 # (warn_handlers_do_nothing), whether perl calls one changes nothing: undef.
 # $root is the main program's Return.
 sub perl_may_warn ($root, @nodes) {
+    my $why = warnings_may_be_on(@nodes) // return undef;
+    return undef if $Chalk::IR::Serialize::JSON::DOWARN && warn_handlers_do_nothing($root, @nodes);
+    return $why;
+}
+
+# warnings_may_be_on(@nodes) -> why perl's own warnings may be on somewhere in
+# the program (see perl_may_warn), or undef: whether or not a handler takes them.
+sub warnings_may_be_on (@nodes) {
     my $sw = $Chalk::IR::Serialize::JSON::DOWARN
         // return "the wire does not say perl's warning switches (-w, -W, -X)";
     return undef if $sw->{all_off};
-    my $why = $sw->{all_on} ? '-W'
+    return $sw->{all_on} ? '-W'
         : $Chalk::IR::Serialize::JSON::USED_MODULES{warnings} ? 'use warnings'
         : ( grep { $_ >= 5.035 } keys %Chalk::IR::Serialize::JSON::USED_VERSIONS ) ? 'a use VERSION of 5.35 or later'
         : %Chalk::IR::Serialize::JSON::FOLLOWED ? 'a module compiled in'
         : $sw->{on} ? '-w or $^W'
         : ( grep { $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq "\cW" } @nodes ) ? '$^W'
-        : return undef;
-    return undef if warn_handlers_do_nothing($root, @nodes);
-    return $why;
+        : undef;
 }
 
 # warn_handlers_do_nothing($root, @nodes) -> true where every handler the

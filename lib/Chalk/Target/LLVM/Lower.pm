@@ -45,17 +45,36 @@ sub lower_program {
         # THE MOP IS READ SEALED: an unsealed one may still change under the reader.
         Chalk::Target::LLVM::Builder::out('an unsealed MOP') if $opt{mop} && !$opt{mop}->is_sealed;
         # A LIST ASSIGN TO AN ARRAY OR HASH (which takes the rest of the list)
-        # is not T2's, ON THE CHAIN OR NOT: one B::SoN left floating was never
-        # made, and its array read empty (`my ($f, @rest) = ...`: "1 " for "1 2 3").
-        Chalk::Target::LLVM::Builder::out('a list assignment to an array or hash') if grep {
-            my $a = $_;
-            $a->operation eq 'Assign' && $a->can('targets') && defined $a->targets
-                # (`my ($c, @x) = @_` is T2's: the arguments, taken by place)
-                && !( blessed( $a->inputs->[-1] ) && $a->inputs->[-1]->operation eq 'ArgsSource' )
-                && grep { blessed($_) && ( $_->operation eq 'PadAccess' && ( $_->sigil // '' ) =~ /\A[\@%]\z/
-                                           || $_->operation =~ /\A(?:ArrayLiteral|HashLiteral|EntryDef)\z/ && ( $_->can('sigil') ? $_->sigil // '' : '' ) ne '$' ) }
-                         $a->inputs->@[ 0 .. $a->targets - 1 ]
-        } Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
+        # THAT IS NOT PLACED (Assign::is_placed) is not T2's: one B::SoN left
+        # floating was never made, and its array read empty (`my ($f, @rest)
+        # = (1, 2, 3)`: "1 " for "1 2 3"). Nor one of a variable B::SoN also
+        # binds as a value (`my @r = (9, 9); ($x, @r) = f()`: its reads stayed
+        # the first list's -- "9 9"). A placed one is list_assign's.
+        # AND ONE INTO SCALARS FROM A `my` ARRAY OR HASH KEPT IN MEMORY (one
+        # B::SoN does not stamp Array or Hash): B::SoN bound its scalars by
+        # place, the first to the array itself, on the chain or not (`my ($f,
+        # $s) = @r`: "2 " for "2 3"; `my ($f) = @r` read after a pop: the count).
+        {
+            my @list_assigns = grep {
+                $_->operation eq 'Assign' && $_->can('targets') && defined $_->targets
+                    # (`my ($c, @x) = @_` is T2's: the arguments, taken by place)
+                    && !( blessed( $_->inputs->[-1] ) && $_->inputs->[-1]->operation eq 'ArgsSource' )
+            } Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
+            my %bound = !@list_assigns ? () : map { ( ( $_->operation eq 'HashLiteral' ? '%' : '@' ) . $_->symbol => 1 ) }
+                grep { $_->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && defined $_->symbol }
+                Chalk::Target::LLVM::Builder::_all_nodes($opt{mop}, $ret);
+            for my $a (@list_assigns) {
+                my @in = $a->inputs->@*;
+                my @t = splice @in, 0, $a->targets;
+                my @agg = grep { blessed($_) && ( $_->operation eq 'PadAccess' && ( $_->sigil // '' ) =~ /\A[\@%]\z/
+                                                  || $_->operation =~ /\A(?:ArrayLiteral|HashLiteral|EntryDef)\z/ && ( $_->can('sigil') ? $_->sigil // '' : '' ) ne '$' ) } @t;
+                Chalk::Target::LLVM::Builder::out('a list assignment to an array or hash')
+                    if @agg && ( !$a->is_placed || grep { $_->operation eq 'PadAccess' && $bound{ $_->sigil . $_->symbol } } @agg );
+                Chalk::Target::LLVM::Builder::out('a list assignment into scalars from an array or hash kept in memory')
+                    if ( grep { blessed($_) && $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' } @t )
+                    && grep { blessed($_) && ( $_->is_my_array || $_->is_my_hash ) && ( $_->stamp // '' ) !~ /\A(?:Array|Hash)\z/ } @in;
+            }
+        }
         # A SCALAR DEREF where a reference T2 does not make may reach it (to an
         # element, `\(@a)`, `\$_[0]`): refused, not stopped at run time. T2
         # makes one to a `my` scalar kept in memory, a literal (read-only), a
