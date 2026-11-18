@@ -1,9 +1,9 @@
 # ABOUTME: _resolve_direct_calls reaches its callee through the Call's target
 # ABOUTME: edge whenever that edge exists, not through the graph-name hash.
 use 5.42.0;
-use Test::More;
-use File::Temp qw(tempfile);
 use lib 'lib', 't/lib';
+use Test::Chalk;
+use File::Temp qw(tempfile);
 
 use Chalk::IR::Serialize::JSON ();
 use Chalk::IR::Analysis ();

@@ -312,7 +312,8 @@ modules and lines over the tests that have the line:
 ## Part C: the artifacts, after the migration (branch test-chalk-migrate)
 
 Every `.t` under t/, and the two t/bootstrap/lib helpers that loaded
-Test::More, now `use Test::Chalk` unless listed under "Kept" below. Test::Chalk
+Test::More, now `use Test::Chalk` (the last 28, which this section once
+kept, since branch test-chalk-rest: "Kept: nothing" below). Test::Chalk
 gained what the suite calls, each red first in
 `t/bootstrap/test-chalk-under-perl.t` (Test::More's stdout, stderr and exit
 status under perl are the oracle); the T2 probes in
@@ -338,8 +339,8 @@ status under perl are the oracle); the T2 probes in
 | `use Test::More` -> `use Test::Chalk` | 823 `.t` + 2 helper `.pm` |
 | `use Test2::V0` -> `use Test::Chalk` | 49 |
 | new (`test-chalk-under-perl.t`) | 1 |
-| kept on Test::More | 19 |
-| kept on Test2::V0 | 9 |
+| kept on Test::More | 19, then 0 (test-chalk-rest) |
+| kept on Test2::V0 | 9, then 0 (test-chalk-rest) |
 
 The edit was scripted: the framework line swapped, t/lib put in `@INC` before
 it (a `use lib` line moved up or widened). By hand:
@@ -363,56 +364,87 @@ called `Scalar::Util::refaddr`, but Node.pm never loaded Scalar::Util; it
 worked only because Test::More did. It now calls the builtin `refaddr` that
 `use 5.42.0` imports, as the rest of Node.pm does.
 
-### Kept, and what Test::Chalk lacks for them
+### Kept: nothing (branch test-chalk-rest)
 
-- **`plan skip_all` inside a subtest** skips that subtest under Test::More. In
-  Test::Chalk it ends the program. Adding it needs the subtest's code run in
-  an eval, or a `last` out of `plan`:
-  - T2 refuses a `last` that leaves its sub. That would refuse `plan` for
-    every program.
-  - Under T2, a package variable the code ref writes is read stale after
-    `eval { $code->(); 1 }`, so the subtest probe DIFFERS.
+The 28 files this section once kept (19 on Test::More, 9 on Test2::V0) now
+`use Test::Chalk`; `grep -rlE '^\s*use (Test::More|Test2::V0)' t` prints
+nothing. What Test::Chalk lacked for them, each red first in
+`t/bootstrap/test-chalk-under-perl.t`:
 
-  Repro: `our $C; sub inc { $C = $C + 1 } sub st { my ($code) = @_; $C = 0;
-  my $ran = eval { $code->(); 1 }; print $C + 0, "\n" } st(sub { inc(); inc() });`
-  perl prints 2; T2 prints 0.
+| function | the oracle | files |
+|---|---|---|
+| `plan skip_all` inside a subtest | Test::More | 19 Test::More files, 2 Test2::V0 (`skip_all "x"` -> `plan skip_all => "x"`) |
+| `ref_ok` | Test2::Tools::Ref | extract-wrap, comparator, oracle-neg, oracle |
+| `dies { ... }`, `lives { ... }` | Test2::Tools::Exception | oracle-neg, method-return-type-from-wire, typed-invariant-takes-a-graph, mop-has-default-validation |
+| `isa_ok($x, [classes], $name)` | Test2::Tools::Class | extract-wrap, oracle-neg, oracle |
+| a value of several lines in a failure's diagnostics, each line `# `-prefixed (is_deeply's four spaces in) | Test::More | son-loop-backedge.t's diagnostic showed it |
 
-  So these stay on Test::More:
-  - benchmark/parse-performance.t
-  - filter-composite-audit.t
-  - transform/entry-normalization.t
-  - mop/mop-carries-the-graph-registry.t
-  - in ir/: a-flattening-input-is-not-one-element, a-list-stamped-literal-is-an-array,
-    a-recursive-call-contributes-bottom, builtin-join-lowers-a-static-list,
-    builtin-keys-lowers-in-insertion-order, builtin-sort-orders-an-array,
-    call-at-the-abi-unbox-at-the-node, callsite-seeding-narrows-and-joins,
-    callsite-want-picks-the-reading, ctor-arg-inference-joins,
-    direct-call-args-join-all-callsites, element-repr-joins-stores,
-    resolve-direct-calls-reads-the-edge, son-loop-backedge,
-    sort-fold-signature-survives-the-loader
+- **skip_all in a subtest**, Test::More's way: the subtest's code runs in
+  `eval { $code->(); 1 }`; `plan skip_all` there prints `1..0 # SKIP why`,
+  notes the reason and dies; the subtest catches it and reports
+  `ok N # skip why` (no name). At the top level it still exits 0.
+- **A test failed before the skip_all is hidden.** Test::More prints its
+  failure and `# Looks like you failed 1 test of 1.` on stderr, indented, then
+  reports the subtest `ok N # skip why`; the program passes and exits 0.
+  Test::Chalk does the same, byte for byte. son-loop-backedge.t is that case:
+  its "the loaded loop graph lowers and runs" subtest logs
+  `not ok 1 - lower() does not die` (T2: "a loop condition that is not one
+  value"), then skip_alls, so the file passes while chalk cannot lower that
+  loop. The gap is real and hidden by the test, not by Test::Chalk.
+- **A die in a subtest** finishes it (its plan, and the test from what ran),
+  then goes on dying, as Test::More's. (shortcut: no END block, so not
+  Test::More's "Tests were run but no plan ..." on stderr.)
+- **Test2's functions** are Test2's output exactly: its `# Failed test` header
+  (not Test::More's `#   Failed test`), its diagnostics. The oracle is
+  Test::More with Test2's own tools for these four.
+  - `lives` failing leaves its exception in `$@` and shows `# Exception: ...`
+    after the next test's diagnostics, if that test fails (Test2's pending
+    diagnostic); the next test or `diag` drops it either way.
+  - `isa_ok` is Test2's only when its second argument is an array ref.
+    Test2's `isa_ok($x, 'A', 'B')` (two classes) is Test::More's
+    `isa_ok($x, $class, $name)` here: with three arguments the two cannot both
+    be meant, and the suite's other 226 isa_ok calls (79 files) are Test::More's. No file calls the Test2
+    list form without brackets.
+  - shortcuts: `dies`/`lives` do not warn in void context; `dies` does not
+    alert on a false exception; an object with overloaded `""` is shown as it
+    stringifies.
+- **Migration:** the framework line swapped (t/lib before it); Test2's `is` of
+  two references -> `is_deeply` (oracle-neg.t, two calls). Under perl each
+  migrated Test::More file gives the same stdout and exit status as before
+  (stderr too, but for the location in perl's own "Wide character" warning);
+  each Test2::V0 file runs the same number of tests, all passing.
 
-  Two Test2::V0 files are kept for the same reason:
-  - ir/loader-reproduces-the-wire.t
-  - ir/field-default-carries-the-field-type.t (which also calls `dies`)
+THE T2 PROBLEM, fixed. A subtest run in an eval was a silent wrong answer
+through T2: a package variable written through a code ref's call inside
+`eval { $code->(); 1 }` was read stale after it.
 
-  son-loop-backedge.t shows what this hides. Its "lowering failed" subtest
-  logs `not ok 1 - lower() does not die`, then skip_alls, so it reports ok:
-  T2 says "a loop condition that is not one value".
-- **Test2-only functions** Test::Chalk does not have (Test::More has none of them):
-  - codegen-harness/extract-wrap.t: `ref_ok`, `isa_ok($x, [classes])`
-  - codegen-harness/comparator.t: `ref_ok`
-  - codegen-harness/oracle-neg.t: `dies`, `ref_ok`, `isa_ok($x, [classes])`
-  - codegen-harness/oracle.t: `ref_ok`, `isa_ok($x, [classes])`
-  - ir/method-return-type-from-wire.t: `dies`, `lives`
-  - ir/typed-invariant-takes-a-graph.t: `dies`
-  - mop-has-default-validation.t: `dies`
+    our $C; sub inc { $C = $C + 1 }
+    sub st { my ($code) = @_; my $save = $C; $C = 0; my $ran = eval { $code->(); 1 };
+             my $n = $C + 0; $C = $save; print $n, "\n" }
+    st(sub { inc(); inc() });     # perl 2, T2 0
+
+The root cause was T1's: `Chalk::IR::Node::Phi::is_memory` took a Call input
+as a memory version only for a named call or a method, so the eval's join
+past `$code->()` was a value Phi even though B::SoN flagged it memory. T2
+never put it among the memory versions a store replaces, so the read of `$C`
+after the eval was made at its first use -- after `$C = $save`. A call through
+a code ref runs a sub too: `is_memory` now asks `Call::is_sub_call` (direct,
+method, indirect). Test:
+`t/bootstrap/ir/llvm-a-package-scalar-a-code-ref-call-wrote-in-an-eval.t`.
+The T2 probe file now has skip_all in a subtest SAME through T2 (DIFFERS
+with the fix reverted).
+
+Verified (test-chalk-rest): every `.t` but mode2-extractor.t, 902 files, 0
+failures (grammar-conformance.t and chalk-recognizes-its-own-source.t run
+alone); census ROUNDTRIP 426, DIFFERS 0, LLI_FAIL 0; corpus gate-green 222,
+t2-gate-green 222.
 
 ### The other artifacts
 
 | artifact | removed from | kept in | why kept |
 |---|---:|---:|---|
-| `use Test::More` (48 modules) | 823 + 2 `.pm` | 19 | skip_all in a subtest (above) |
-| `use Test2::V0` (103 modules) | 49 | 9 | Test2-only functions, or skip_all in a subtest (above) |
+| `use Test::More` (48 modules) | 823 + 2 `.pm`, then the last 19 | 0 | -- (skip_all in a subtest: Test::Chalk has it now) |
+| `use Test2::V0` (103 modules) | 49, then the last 9 | 0 | -- (ref_ok, dies, lives, isa_ok of [classes], skip_all in a subtest: Test::Chalk has them now) |
 | `use File::Temp` (3 artifact modules) | 1 (llvm-an-inlined-callee-has-its-own-variables.t) | every other file that has it | each one calls tempfile/tempdir/tmpnam: the test writes its probe program to a file |
 | `use lib 'lib', 't/lib'` (lib.pm, 213 lines) | 0 | all | a test must run as `perl -Ilib t/x.t` and under TapDiff/B::SoN with no `-I`; Test::Chalk lives in t/lib. 16 files that had no t/lib gained `use lib 't/lib'` |
 | `use Chalk::CodeGen::Harness` | 1 (corpus-single-source.t: reads Harness.pm as text) | 22 | each calls `Chalk::CodeGen::Harness->run_entry` |
@@ -490,9 +522,9 @@ over the full table). Lines in 3 or more tests after, then everything removed.
 
 | line | tests before -> after | artifact modules | decision |
 |---|---|---:|---|
-| `use Test::More;` | 840 -> 19 | 48 | removed (Part C); 19 kept: skip_all in a subtest |
-| `use Test2::V0;` | 58 -> 9 | 102 | removed (Part C); 9 kept: Test2-only functions or skip_all in a subtest |
-| `use Test::Chalk;` | 0 -> 873 | 1 | kept: the test framework, one module of 607 lines |
+| `use Test::More;` | 840 -> 19 -> 0 | 48 | removed (Part C); the last 19 since test-chalk-rest (skip_all in a subtest) |
+| `use Test2::V0;` | 58 -> 9 -> 0 | 102 | removed (Part C); the last 9 since test-chalk-rest (ref_ok, dies, lives, isa_ok of [classes], skip_all in a subtest) |
+| `use Test::Chalk;` | 0 -> 873 -> 903 | 1 | kept: the test framework, one module (607 lines; 773 since test-chalk-rest) |
 | `use lib 'lib', 't/lib';` and kin (lib.pm, Config) | all | 1-2 | kept: a test runs as `perl -Ilib t/x.t` and under TapDiff/B::SoN with no `-I`, and Test::Chalk lives in t/lib |
 | `use File::Temp qw(tempfile);` / `require File::Temp;` / `qw(tempdir)` | 464 / 15 / 8 | 8-17 | kept: each calls tempfile, tempdir or tmpnam -- the test writes its probe program and the `.ll` to files for B::SoN and lli. Its chain (IO::Handle, IO::Seekable, Symbol, SelectSaver, Errno, Carp::Heavy) goes when a test hands text to a subprocess without a file, or when chalk compiles globs (task: globs as metaclass objects) |
 | `require Chalk::CodeGen::Pipeline;` / `use` | 352 | 1 | kept: the t/lib driver each one calls (`->run_detail`) |

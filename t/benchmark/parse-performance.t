@@ -2,14 +2,14 @@
 # ABOUTME: Skipped unless CHALK_BENCHMARK=1. Measures single-file detail + multi-file throughput.
 use 5.42.0;
 use utf8;
-use Test::More;
+use lib 'lib', 't/lib';
+use Test::Chalk;
 use Time::HiRes qw(time);
 
 unless ($ENV{CHALK_BENCHMARK}) {
     plan skip_all => 'Set CHALK_BENCHMARK=1 to run benchmarks';
 }
 
-use lib 'lib';
 use lib 't/bootstrap/lib';
 
 use TestPipeline qw(perl_pipeline build_perl_ir_parser);

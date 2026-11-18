@@ -2,8 +2,8 @@
 # ABOUTME: the edge it already carries, never through a hash passed alongside.
 use 5.42.0;
 use utf8;
-use Test::More;
 use lib 'lib', 't/lib';
+use Test::Chalk;
 use File::Temp qw(tempfile);
 use Chalk::IR::Serialize::JSON ();
 
