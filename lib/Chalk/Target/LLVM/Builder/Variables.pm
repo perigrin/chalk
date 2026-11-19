@@ -493,11 +493,16 @@ sub list_assign {
     # AN ARRAY OR HASH TARGET (`my ($f, @rest) = f()`) takes the rest: a `my`
     # one, where the assign is placed (Assign::is_placed) -- its reads are
     # made after it. Another (a package's, a closure's) is not T2's.
+    # AN ELEMENT, A SLICE, A CAPTURED SCALAR (B::SoN names each by the node
+    # that is its place, the Assign on the chain): stored there, see below.
     my $placed = $s->is_placed;
+    my $pinned = $s->is_pinned;
+    my $is_cell = sub ($t) { $t->operation eq 'MakeCell' && !( blessed( $t->inputs->[0] ) && $t->inputs->[0]->operation eq 'PadAccess' && ( $t->inputs->[0]->sigil // '' ) =~ /\A[\@%]\z/ ) };
     out('a list assignment to an array or hash') if grep {
         !( blessed($_) && ( $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$'
                             || $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'undef'
-                            || $placed && ( $_->is_my_array || $_->is_my_hash ) && !( $_->can('shared') && $_->shared ) ) )
+                            || $placed && ( $_->is_my_array || $_->is_my_hash ) && !( $_->can('shared') && $_->shared )
+                            || $pinned && ( $_->operation =~ /\A(?:Subscript|Slice)\z/ || $is_cell->($_) ) ) )
     } @t;
     my $list = $b->emit(op => 'NewArray', type => '%Array*');
     for my $e (grep { blessed($_) } @in) {
@@ -505,11 +510,56 @@ sub list_assign {
         else { $b->emit(op => 'APush', type => 'void', inputs => [ $list, $b->as($b->value($e), '%Slot') ]) }
     }
     # (its value in scalar context: the count of the list assigned)
-    $b->{memo}{ refaddr($s) } = $b->emit(op => 'ALen', type => 'i64', inputs => [$list]) if grep { $_->operation eq 'PadAccess' && ( $_->sigil // '' ) ne '$' } @t;
+    $b->{memo}{ refaddr($s) } = $b->emit(op => 'ALen', type => 'i64', inputs => [$list])
+        if grep { !( $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' ) && $_->operation ne 'Constant' } @t;
+    # EVERY PLACE BEFORE ANY STORE, as perl: the list is made, then each
+    # target's place (its index or key, its container), then the stores, left
+    # to right -- `($a[0], $a[$a[0]]) = ...` reads the second index before the
+    # first store. %place: a target => the stores it takes, one per value (a
+    # slice one per index, in their order).
+    my %place;
+    for my $t (@t) {
+        if ( $t->operation eq 'Subscript' ) {
+            $place{ refaddr($t) } = [ $b->element_place( $t->inputs->@[0, 1], ( $t->can('kind') ? $t->kind // 'array' : 'array' ), $s, $t ) ];
+        }
+        elsif ( $t->operation eq 'Slice' ) {
+            # A SLICE'S INPUTS are its indices (or keys) and then what it is of.
+            my @ix = grep { blessed($_) } $t->inputs->@*;
+            my $of = pop @ix;
+            my $kind = $t->kind // '';
+            out("a list assignment to a slice of kind $kind") unless $kind =~ /\A(?:array|hash)\z/;
+            # shortcut: how many values a slice takes is how many indices it
+            # has, known here only where each is one scalar written out.
+            out('a list assignment to a slice whose indices are a list made at run time') if grep { _is_list($_) } @ix;
+            out('a list assignment to a slice of @_') if blessed($of) && $of->operation eq 'ArgsSource';
+            # B::SoN COUNTS A SLICE AS ONE PLACE: in `(@a[0, 1], $z) = (1, 2, 3)`
+            # it binds $z to the 2, and every later read of $z is that constant.
+            # Nothing here can put the 3 back: refused.
+            out('a list assignment to a slice and then another target (B::SoN binds what follows a slice one place per slice)')
+                if @ix != 1 && refaddr($t) != refaddr( $t[-1] );
+            $place{ refaddr($t) } = [ map { $b->element_place( $of, $_, $kind, $s, $t ) } @ix ];
+        }
+        elsif ( $is_cell->($t) ) {
+            # A CAPTURED SCALAR: its cell is the variable's own storage (CellWrite).
+            my $ptr = $b->value($t);
+            $place{ refaddr($t) } = [ sub ($val) {
+                $b->hash_reads_settled('a store to a captured variable');
+                $b->emit(op => 'Store', type => 'void', inputs => [ $val, $ptr ]);
+                return;
+            } ];
+        }
+    }
     my %val;
     my $at = 0;
     for my $t (@t) {
         my $i = $at++;
+        if ( my $stores = $place{ refaddr($t) } ) {
+            # (each store its value by place, undef past the list's end)
+            my $n = 0;
+            $_->( $b->emit(op => 'AGet', type => '%Slot', inputs => [ $list, $b->emit(op => 'Const', type => 'i64', attr => { value => $i + $n++ }) ]) ) for $stores->@*;
+            $at = $i + $stores->@*;
+            next;
+        }
         next unless $t->operation eq 'PadAccess';
         if (( $t->sigil // '' ) ne '$') {
             # THE REST, into the variable's own array or hash (in place: a
@@ -569,6 +619,11 @@ sub _cell_variable {
         return undef unless blessed($mem);
         my $v = $mem->inputs->[0];
         return $v if blessed($v) && $v->operation eq 'PadAccess' && $v->is_location && $v->name eq $want;
+        # (`my ($x, $y) = (1, 2)`: any of a list assign's targets)
+        if ( $mem->operation eq 'Assign' && defined $mem->targets ) {
+            my ($t) = grep { blessed($_) && $_->operation eq 'PadAccess' && $_->is_location && $_->name eq $want } $mem->inputs->@[ 0 .. $mem->targets - 1 ];
+            return $t if $t;
+        }
         # Another variable's cell, made just before, is a step too (two captures),
         # as is a location read, whose input is the memory it reads at.
         return undef unless $mem->operation =~ /\A(?:Assign|EntryWrite|Call|MakeCell|PadAccess)\z/;

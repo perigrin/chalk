@@ -174,7 +174,7 @@ class Chalk::Grammar::Perl::BuiltinTable {
         # its value's first use, and never not at all. Not every such builtin
         # is listed: the ones B::SoN's wire is checked for (WireCheck).
         acts => { map { ( $_ => 1 ) } qw(push pop shift unshift splice delete chomp chop
-            open close binmode printf say syswrite sysread read readline seek truncate opendir readdir closedir
+            open close binmode printf prtf say syswrite sysread read readline seek truncate opendir readdir closedir
             unlink mkdir rmdir rename chdir chmod chown utime link symlink
             exit die warn system exec fork wait waitpid kill sleep
             bless tie untie select srand each) },
@@ -198,6 +198,8 @@ class Chalk::Grammar::Perl::BuiltinTable {
         #              its LIST formatted, lock its operand, prototype a
         #              sub's, pack the string a template makes of its LIST,
         #              formline its LIST formatted into the accumulator
+        #   printf     (B::SoN's prtf, perl's op name) its LIST formatted
+        #              as sprintf's and printed to a handle: its value 1
         #   an array's end: shift takes its first, pop its last; push adds
         #              its LIST last, unshift first; `$#a = N` (B::SoN's
         #              set_arylen) sets its last index
@@ -214,7 +216,7 @@ class Chalk::Grammar::Perl::BuiltinTable {
             bless => 'blesses', blessed => 'class_name', reftype_of_ref => 'referent_kind',
             join => 'joined', unpack => 'unpacked', glob => 'file_names', each => 'next_pair',
             chr => 'character', ord => 'code_point', time => 'epoch_seconds', reverse => 'reversed',
-            sprintf => 'formatted', lock => 'operand', prototype => 'prototype_of', pack => 'packed',
+            sprintf => 'formatted', printf => 'prints_formatted', prtf => 'prints_formatted', lock => 'operand', prototype => 'prototype_of', pack => 'packed',
             formline => 'format_line',
             shift => 'takes_first', pop => 'takes_last', push => 'adds_last', unshift => 'adds_first',
             set_arylen => 'sets_last_index',

@@ -1483,6 +1483,31 @@ sub sprintf_value {
     return $b->as( $r, $ty );
 }
 
+# printf_stmt($Call) -> a printf where it stands: sprintf's string of its
+# format and arguments (sprintf_value: a format written out), printed to
+# STDOUT, or to STDOUT or STDERR by name. Its value is 1, as print's.
+# shortcut: the wire marks no handle on a printf (a Print has
+# has_filehandle), so a first operand that is no string written out -- a
+# handle in a variable, a format made at run time -- cannot be told apart
+# and is refused; a bareword handle is a Glob constant, which no format is.
+sub printf_stmt {
+    my ($b, $s) = @_;
+    my @a = grep { blessed($_) } $s->inputs->@*;
+    pop @a if $s->can('memory_input') && $s->memory_input;
+    my $fd = 1;
+    if ( @a && $a[0]->operation eq 'Constant' && ( $a[0]->const_type // '' ) eq 'glob' ) {
+        my $name = ( shift(@a)->value // '' ) =~ s/\A(?:main)?:://r;
+        $fd = { STDOUT => 1, STDERR => 2 }->{$name} // out('a printf to a filehandle other than STDOUT or STDERR');
+    }
+    elsif ( $b->selects ) { out('a printf to the handle a select chose') }
+    out('a printf whose first operand is no format written out (a handle in a variable, or a format made at run time)')
+        unless @a && $a[0]->operation eq 'Constant' && ( $a[0]->const_type // '' ) eq 'string' && defined $a[0]->value;
+    my $str = $b->sprintf_value($s, '%Str', @a);
+    $b->emit(op => 'Print', type => 'void', inputs => [$str], attr => { fd => $fd });
+    $b->{memo}{ refaddr($s) } = $b->emit(op => 'Const', type => 'i64', attr => { value => 1 });
+    return;
+}
+
 # truth($node) -> an i1: perl's truth of a value of any slice type.
 sub truth {
     my ($b, $n) = @_;

@@ -406,9 +406,18 @@ sub walk {
         # A FOUR-ARGUMENT substr (an lvalue substr, an s/// into one): its part
         # replaced in the `my` scalar where it stands.
         elsif ($op eq 'Call' && ( $s->builtin_kind // '' ) eq 'piece') { $b->substr_write($s); $ctl = $s }
+        # A printf WHERE IT STANDS: its format's string printed (printf_stmt).
+        elsif ($op eq 'Call' && ( $s->builtin_kind // '' ) eq 'prints_formatted') { $b->printf_stmt($s); $ctl = $s }
+        # A DIVISION OR A MODULUS PINNED WHERE IT RUNS (B::SoN pins one whose
+        # divisor may be zero): made here, so its die is where perl's is --
+        # before the print that follows it, inside the eval it stands in --
+        # and not at its value's first use. It reads no memory: nothing waits
+        # on it.
+        elsif ($op eq 'Divide' || $op eq 'Modulo') { $b->value($s); $ctl = $s }
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
-        # value is the argument. A direct call is made where it stands.
-        elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || $s->is_sub_call )) {
+        # value is the argument. A direct call is made where it stands, and so
+        # is a method named by a value (`$o->$m()`): what it does, it does here.
+        elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || $s->is_sub_call || ( $s->dispatch_kind // '' ) eq 'dynamic_method' )) {
             $b->value($s);
             push $b->{passed}->@*, $s;   # B::SoN versions memory at a call
             $ctl = $s;

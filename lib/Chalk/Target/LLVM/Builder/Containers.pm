@@ -1301,56 +1301,71 @@ sub array_stmt {
     $b->value($s);   # shift, pop: made here, its value memoized for its reader
 }
 
-# element_store($Subscript, $value): `$a[i] = v`, the array growing to i.
+# element_store($Subscript, $value, $Assign): `$a[i] = v`, `$h{k} = v` --
+# what it stores made first, then where (element_place), then the store.
 sub element_store {
     my ($b, $target, $v, $s) = @_;
+    # perl evaluates what it stores, then where, then stores.
+    my $val = $b->as($b->value($v), '%Slot');
+    $b->element_place( $target->inputs->@[0, 1], ( $target->can('kind') ? $target->kind // 'array' : 'array' ), $s, $target )->($val);
+}
+
+# element_place($container, $index, $kind, @site) -> a sub that stores the
+# %Slot it is given into that element. The index (or key) and the container
+# are made HERE, the store when the sub is called: a list assign makes every
+# target's place first and stores after (perl's order -- `($a[0], $a[$a[0]])
+# = ...` reads the second index before the first store). @site: the nodes
+# that may carry the store's file and line, the first that does.
+sub element_place {
+    my ($b, $c, $i, $kind, @site) = @_;
     # (STORED THROUGH AN ELEMENT B::SoN did not make a hash or array first -- a
     # reference from elsewhere: refused, not stopped at run time where it is undef)
     out('a store through an element not made a hash or array first')
-        if blessed( $target->inputs->[0] ) && $target->inputs->[0]->operation eq 'Subscript' && !$b->{args}{ refaddr( $target->inputs->[0] ) };
+        if blessed($c) && $c->operation eq 'Subscript' && !$b->{args}{ refaddr($c) };
     # (AN ELEMENT OF A SLICE -- grep's or map's $_ over `@a[0, 1]` -- is the
     # array's own element in perl; the slice here is a copy: refused)
     out("a store into a slice's element (perl aliases the array's element)")
-        if blessed( $target->inputs->[0] ) && $target->inputs->[0]->operation eq 'Slice';
-    if (( $target->can('kind') ? $target->kind // 'array' : 'array' ) eq 'hash') {
-        my ($h, $k) = $target->inputs->@[0, 1];
-        # perl evaluates what it stores, then where, then stores.
-        my $val = $b->as($b->value($v), '%Slot');
-        my $key = $b->as($b->value($k), '%Str');
-        my $ref = $b->hash_of($h);
-        # A HASH READ STILL TO BE MADE, of a version this store replaces, would
-        # be made after it and see the new value: refused. (reads_before leaves
-        # hash reads in place: made early, one could run above its guard.)
-        $b->hash_reads_settled('a hash store');
-        $b->reads_before($_) for $b->{passed}->@*;
-        $b->emit(op => 'HSet', type => 'void', inputs => [ $ref, $key, $val ]);
-        return;
+        if blessed($c) && $c->operation eq 'Slice';
+    if ($kind eq 'hash') {
+        my $key = $b->as($b->value($i), '%Str');
+        my $ref = $b->hash_of($c);
+        return sub ($val) {
+            # A HASH READ STILL TO BE MADE, of a version this store replaces, would
+            # be made after it and see the new value: refused. (reads_before leaves
+            # hash reads in place: made early, one could run above its guard.)
+            $b->hash_reads_settled('a hash store');
+            $b->reads_before($_) for $b->{passed}->@*;
+            $b->emit(op => 'HSet', type => 'void', inputs => [ $ref, $key, $val ]);
+            return;
+        };
     }
-    my ($arr, $idx) = $target->inputs->@[0, 1];
+    my ($arr, $idx) = ($c, $i);
     # A LIST WRITTEN OUT (`for ($x, @a[1, 2]) { $_ *= 10 }`, no array of its
     # own): perl's elements are its items' own -- stored through their
     # aliases (an array of them, as @_ is). A named array's (`my @n = sort
     # ...`) are its own.
     my $anon = blessed($arr) && $arr->operation eq 'ArrayLiteral' && !defined $arr->symbol && ( $arr->stamp // '' ) eq 'Array';   # static type
-    my $val = $b->as($b->value($v), '%Slot');
     my $ix  = $b->as($b->value($idx), 'i64');
     my $a   = $anon ? do { local $b->{alias_strict} = 1; $b->alias_list($arr) } : $b->array_of($arr);
-    $b->hash_reads_settled('an element store');   # it may be an array read through another name
-    my ($at) = grep { $_->can('line') && defined $_->line } $s, $target;
+    my ($at) = grep { blessed($_) && $_->can('line') && defined $_->line } @site;
     # A STORE INTO @_ (or a list's aliases) is the caller's: a literal there is read-only, and
     # perl dies -- its message, caught, names where (no site from B::SoN for
     # this store: refused where an eval may catch it).
     my $into_args = blessed($arr) && $arr->operation eq 'ArgsSource' || $anon;
     out('a store into @_ of no site, in a program with an eval') if $into_args && !$at && $b->{has_eval};
-    $b->emit(op => 'ASet', type => 'void',
-        inputs => [ $a, $ix, $val ],
-        attr => do {
-            # PERL DIES on a store before the start, naming the subscript and where.
-            my $msg = $at ? " at " . ( $at->file // '-' ) . " line " . $at->line . ".\n" : ".\n";   # no site from B::SoN yet
-            $b->{strs}{$msg} //= scalar keys $b->{strs}->%*;
-            +{ msg => $msg, id => $b->{strs}{$msg} };
-        });
-    $b->after_call if $into_args;
+    return sub ($val) {
+        $b->hash_reads_settled('an element store');   # it may be an array read through another name
+        $b->emit(op => 'ASet', type => 'void',
+            inputs => [ $a, $ix, $val ],
+            attr => do {
+                # PERL DIES on a store before the start, naming the subscript and where.
+                my $msg = $at ? " at " . ( $at->file // '-' ) . " line " . $at->line . ".\n" : ".\n";   # no site from B::SoN yet
+                $b->{strs}{$msg} //= scalar keys $b->{strs}->%*;
+                +{ msg => $msg, id => $b->{strs}{$msg} };
+            });
+        $b->after_call if $into_args;
+        return;
+    };
 }
 
 1;
