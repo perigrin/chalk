@@ -19,6 +19,10 @@ my @FILES = map { "$OPBASIC/$_" } qw(arith.t cmp.t concat.t magic_phase.t qq.t);
 # ---------------------------------------------------------------------------
 # Guard: the corpus files must exist. Without them there is nothing to prove.
 # ---------------------------------------------------------------------------
+# (No perl5 checkout at all is a machine without the corpus: skipped, as the
+# t/base gates beside this file are. A checkout missing one of the five is
+# a broken corpus, and stops the run.)
+plan skip_all => "perl5 t/opbasic not found at $OPBASIC" unless -d $OPBASIC;
 for my $f (@FILES) {
     BAIL_OUT("corpus file missing: $f") unless -f $f;
 }
