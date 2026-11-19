@@ -72,7 +72,7 @@ same( q{for my $i (1 .. 3) { printf "%d,", $i * 2 } printf "\n";},        'a pri
 # A METHOD NAMED BY A VALUE, called for what it does: it runs where it stands.
 SKIP: {
     my $dyn1 = qq{package C; sub new { bless {n=>0}, shift } sub inc { \$_[0]{n}++; return }\npackage main; my \$o = C->new; my \$m = "inc"; \$o->\$m(); print \$o->{n}, "\\n";};
-    skip 'this B::SoN leaves a dynamic method call off the control chain', 15 unless Chalk::CodeGen::Harness::Producer->pins_dynamic_method_calls;
+    skip 'this B::SoN leaves a dynamic method call off the control chain', 24 unless Chalk::CodeGen::Harness::Producer->pins_dynamic_method_calls;
     same( $dyn1, 'a dynamic method call as a statement (dyn1)' );
     same( qq{package C; sub new { bless {n=>0}, shift } sub inc { \$_[0]{n}++; return 5 }\npackage main; my \$o = C->new; my \$m = "inc"; my \$r = \$o->\$m(); print "\$r \$o->{n}\\n";},
         'a dynamic method call read after a field it wrote (dyn2)' );
@@ -80,6 +80,10 @@ SKIP: {
         'a dynamic method call in a loop body' );
     same( qq{package C; sub new { bless {}, shift } sub hi { print "hi \$_[1]\\n"; return }\npackage main; my \$o = C->new; my \$m = \$ARGV[0] // "hi"; print "a\\n"; \$o->\$m("there"); print "b\\n";},
         'a dynamic method call between prints' );
+    # (B::SoN gives a pinned one its context, `want`: in a list it is a list)
+    same( qq{package Foo; sub add { return \$_[1] + \$_[2] }\npackage main; my \$o = bless {}, "Foo"; my \$m = "add"; print \$o->\$m(2, 3), "\\n";}, 'a dynamic method call printed' );
+    same( qq{package Foo; sub two { return (\$_[1], \$_[1] * 2) }\npackage main; my \$o = bless {}, "Foo"; my \$m = "two"; my \@l = \$o->\$m(4); my \$n = \$o->\$m(5); print "\@l|\$n|", scalar(\@l), "\\n";}, 'a dynamic method call in list and in scalar context' );
+    same( qq{package Foo; sub two { return (\$_[1], \$_[1] * 2) }\npackage main; my \$o = bless {}, "Foo"; my \$m = "two"; print join(",", \$o->\$m(4)), "\\n"; for my \$x (\$o->\$m(1)) { print "\$x;" } print "\\n";}, 'a dynamic method call in a join and a foreach list' );
     same( qq{package C; sub new { bless {}, shift } sub hi { return "hi" }\npackage main; my \$o = C->new; my \$m = "nope"; print "a\\n"; \$o->\$m(); print "b\\n";},
         'a dynamic method call of no such method dies where it stands' );
 }

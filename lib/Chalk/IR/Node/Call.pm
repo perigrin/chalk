@@ -190,9 +190,13 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
 
     method is_builtin() { return ( $dispatch_kind // '' ) eq 'builtin' ? 1 : 0 }
 
-    # is_sub_call -> true for a call of a sub: named (direct), a method, or
-    # through a code value (indirect).
-    method is_sub_call() { return ( $dispatch_kind // '' ) =~ /\A(?:direct|method|indirect)\z/ ? 1 : 0 }
+    # is_sub_call -> true for a call of a sub: named (direct), a method -- by
+    # a name written out or one made at run time (`$o->$m()`, dynamic_method)
+    # -- or through a code value (indirect). Whatever asks "may this run a
+    # sub" or "is this a list where a list is asked" asks it of all four: a
+    # dynamic method call left out was a list in its own lowering (B::SoN's
+    # `want`) and a scalar to what read it, and printed ARRAY(0x...).
+    method is_sub_call() { return ( $dispatch_kind // '' ) =~ /\A(?:direct|method|dynamic_method|indirect)\z/ ? 1 : 0 }
 
     # result_type -> the type the builtin returns, or undef.
     method result_type() {

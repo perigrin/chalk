@@ -1,5 +1,5 @@
 # ABOUTME: `my ($x, undef, $y) = LIST` through T2: each target its element by place,
-# ABOUTME: undef past the end. A target that takes the rest (an array), left off the chain, is refused.
+# ABOUTME: undef past the end. A target that takes the rest (an array) is filled where B::SoN places it.
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
@@ -26,8 +26,9 @@ for my $src (
     is $r->{verdict}, 'SAME', 'as perl through T2: ' . ( $src =~ s/\n/ /gr ) or diag $r->{why} // explain $r;
 }
 
+# A TARGET THAT TAKES THE REST (an array): B::SoN places the assign by where
+# its targets live (its `placement`), and T2 fills the array.
 my $r = tap(qq{my (\$f, \@rest) = (\$ENV{F} // 1, 2, 3);\nprint "\$f \@rest\\n";\n});
-is $r->{verdict}, 'REFUSED', 'an array target is refused';
-like $r->{why} // '', qr/a list assignment to an array or hash/, '... by name';
+is $r->{verdict}, 'SAME', 'an array target takes the rest' or diag $r->{why} // explain $r;
 
 done_testing;

@@ -417,7 +417,7 @@ sub walk {
         # A SHIFT OF @_ BOUND TO AN ARGUMENT is on the chain for its order; its
         # value is the argument. A direct call is made where it stands, and so
         # is a method named by a value (`$o->$m()`): what it does, it does here.
-        elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || $s->is_sub_call || ( $s->dispatch_kind // '' ) eq 'dynamic_method' )) {
+        elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || $s->is_sub_call )) {
             $b->value($s);
             push $b->{passed}->@*, $s;   # B::SoN versions memory at a call
             $ctl = $s;

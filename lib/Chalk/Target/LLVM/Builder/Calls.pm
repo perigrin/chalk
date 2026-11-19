@@ -632,7 +632,7 @@ sub call_targets {
 # _hands_args_on(@nodes) -> a call among them hands its @_ on (`&g`, `g(@_)`, `g($_[0])`).
 sub _hands_args_on {
     return scalar grep {
-        $_->operation eq 'Call' && ( $_->is_sub_call || ( $_->dispatch_kind // '' ) eq 'dynamic_method' )
+        $_->operation eq 'Call' && $_->is_sub_call
             && ( $_->can('shares_args') && $_->shares_args || grep { _of_args($_) } $_->inputs->@* )
     } @_;
 }

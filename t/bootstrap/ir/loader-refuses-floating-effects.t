@@ -1,5 +1,5 @@
-# ABOUTME: the loader refuses a wire whose write, call or bless is on no control chain (B::SoN
-# ABOUTME: left it floating, so T2 never made it), and still loads the floating records it may.
+# ABOUTME: the loader refuses a wire whose write, call or bless is on no control chain (T2 would
+# ABOUTME: never make it), and still loads the floating records it may; what B::SoN places, runs.
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
@@ -18,33 +18,73 @@ sub verdict ($src) {
     return run_probe($pl);
 }
 
+require Chalk::CodeGen::Harness::Producer;
+require Chalk::IR::Serialize::JSON;
+require JSON::PP;
+my $PINS_DYN = Chalk::CodeGen::Harness::Producer->pins_dynamic_method_calls;
+
 my $STORE = qr/a write B::SoN left off the control chain/;
 my $CALL  = qr/a call B::SoN left off the control chain/;
 my $BLESS = qr/a bless B::SoN left off the control chain/;
+my $W4    = qr/ref\(\) of a reference that a bless elsewhere changes/;
+my $T2LA  = qr/a list assignment to an array or hash/;
+
+# floated($src, $is) -> why the loader refuses $src's wire once the node $is
+# accepts is taken off the control chain (what followed it now follows what
+# it followed), or '' where it loads. B::SoN places these nodes since its
+# `placement`; the check is for a wire that does not.
+sub floated ( $src, $is ) {
+    my ( $fh, $pl ) = tempfile( SUFFIX => '.pl', UNLINK => 1 );
+    print $fh $src;
+    close $fh;
+    my $wire  = JSON::PP->new->utf8->decode( scalar qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null) );
+    my $nodes = $wire->{methods}{'main::__PROGRAM__'}{nodes};
+    my ($n) = grep { defined $_->{control_in} && $is->($_) } $nodes->@* or return 'no such node on the control chain';
+    my $before = delete $n->{control_in};
+    for my $m ( $nodes->@* ) {
+        $m->{control_in} = $before if defined $m->{control_in} && $m->{control_in} == $n->{id};
+        $m->{inputs} = [ map { defined $_ && !ref $_ && $_ == $n->{id} ? $before : $_ } $m->{inputs}->@* ] if $m->{op} =~ /\A(?:Region|If|Loop)\z/;
+    }
+    eval { Chalk::IR::Serialize::JSON::from_json( JSON::PP->new->utf8->canonical->encode($wire) ) };
+    return $@ // '';
+}
+my $list_assign = sub ($n) { $n->{op} eq 'Assign' && defined $n->{fields}{targets} };
+my $bless       = sub ($n) { $n->{op} eq 'Call' && ( $n->{fields}{name} // '' ) eq 'bless' };
+
+# OFF THE CHAIN, each is refused by name: T2 would never make it.
+for my $case (
+    [ q{my @a=(0); my $c; ($a[0], $c) = (5,6); print "$a[0] $c\n";},             $list_assign, $STORE, 'an element and a scalar' ],
+    [ q{my %h; my $c; ($h{k}, $c) = (9, 10); print "$h{k} $c\n";},               $list_assign, $STORE, 'a hash element and a scalar' ],
+    [ q{my $x = 1; my $g = sub { $x }; ($x) = (7); print $g->(), "\n";},          $list_assign, $STORE, 'a captured variable' ],
+    [ q{my %h; @h{qw(a b)} = (1,2); print "$h{a} $h{b}\n";},                     $list_assign, $STORE, 'a hash slice' ],
+    [ q{my @a = (0,0,0); @a[0,1] = (5,6); print "@a\n";},                        $list_assign, $STORE, 'an array slice' ],
+    [ q{my $r = [0,0]; ($r->[0], $r->[1]) = (3,4); print "@$r\n";},              $list_assign, $STORE, 'elements through a reference' ],
+    [ q{our @g = (0,0); ($g[0], $g[1]) = (3,4); print "@g\n";},                  $list_assign, $STORE, "a package array's elements" ],
+    [ q{package K; sub hi { "hi" } package main; my $h = {}; my $o = bless $h, "K"; print $h->hi, "\n";}, $bless, $BLESS, 'a bless of a variable read beside it' ],
+) {
+    my ( $src, $is, $name, $what ) = @$case;
+    like( floated( $src, $is ), $name, "$what, off the chain: refused by name" );
+}
 
 # Each: [source, the refusal's name (undef: perl's output), what it is].
 for my $case (
-    # A list assignment to a place in memory, never made:
-    [ q{my @a=(0); my $c; ($a[0], $c) = (5,6); print "$a[0] $c\n";},             $STORE, 'an element and a scalar' ],
-    [ q{my %h; my $c; ($h{k}, $c) = (9, 10); print "$h{k} $c\n";},               $STORE, 'a hash element and a scalar' ],
-    [ q{my $x = 1; my $g = sub { $x }; ($x, my $y) = (7, 8); print $g->(), " $y\n";}, $STORE, 'a captured variable and a fresh one' ],
-    [ q{my $x = 1; my $g = sub { $x }; ($x) = (7); print $g->(), "\n";},          $STORE, 'a captured variable' ],
-    [ q{my %h; @h{qw(a b)} = (1,2); print "$h{a} $h{b}\n";},                     $STORE, 'a hash slice' ],
-    [ q{my @a = (0,0,0); @a[0,1] = (5,6); print "@a\n";},                        $STORE, 'an array slice' ],
-    [ q{my @a = (1,2); ($a[0], $a[1]) = ($a[1], $a[0]); print "@a\n";},          $STORE, 'a swap of elements' ],
-    [ q{my $r = [0,0]; ($r->[0], $r->[1]) = (3,4); print "@$r\n";},              $STORE, 'elements through a reference' ],
-    [ q{our @g = (0,0); ($g[0], $g[1]) = (3,4); print "@g\n";},                  $STORE, "a package array's elements" ],
-    [ q{sub f { @_ = (9, 9); $_[0] = 3 } my $x = 1; f($x); print "$x\n";},        $STORE, 'the arguments' ],
+    # A list assignment to a place in memory, where B::SoN places it:
+    [ q{my @a=(0); my $c; ($a[0], $c) = (5,6); print "$a[0] $c\n";},             undef, 'an element and a scalar' ],
+    [ q{my $x = 1; my $g = sub { $x }; ($x, my $y) = (7, 8); print $g->(), " $y\n";}, undef, 'a captured variable and a fresh one' ],
+    [ q{my @a = (1,2); ($a[0], $a[1]) = ($a[1], $a[0]); print "@a\n";},          undef, 'a swap of elements' ],
     [ q{my @a = (1,2,3); my $x = $a[0] + $a[1]; ($a[0], $a[1]) = (10, 20) if @ARGV; $a[2] = $x; print "@a\n";},
-        $STORE, 'elements, in an arm not taken (right only by that)' ],
-    # A call:
+        undef, 'elements, in an arm not taken' ],
+    # (placed, and not T2's yet: its own refusal)
+    [ q{sub f { @_ = (9, 9); $_[0] = 3 } my $x = 1; f($x); print "$x\n";},        $T2LA, 'the arguments' ],
+    # A call by a name made at run time: where B::SoN pins it (its
+    # `placement-pins`), perl's output; floating, refused.
     [ q{package C; sub new { bless {n=>0}, shift } sub inc { $_[0]{n}++; return } package main; my $o = C->new; my $m = "inc"; $o->$m(); print $o->{n}, "\n";},
-        $CALL, 'a dynamic method call, its value unused' ],
+        ( $PINS_DYN ? undef : $CALL ), 'a dynamic method call, its value unused' ],
     [ q{package C; sub new { bless {n=>0}, shift } sub inc { $_[0]{n}++; return 5 } package main; my $o = C->new; my $m = "inc"; my $r = $o->$m(); print "$r $o->{n}\n";},
-        $CALL, 'a dynamic method call that writes, its value used' ],
-    # A bless:
-    [ q{my $h = {}; my $o = bless $h, "K"; print ref($h), " ", ref($o), "\n";},  $BLESS, 'a bless of a variable read beside it' ],
-    [ q{package K; sub hi { "hi" } package main; my $h = {}; my $o = bless $h, "K"; print $h->hi, "\n";}, $BLESS, 'a bless nothing reads' ],
+        ( $PINS_DYN ? undef : $CALL ), 'a dynamic method call that writes, its value used' ],
+    # A bless, on the chain now: a ref() beside it still names no version.
+    [ q{my $h = {}; my $o = bless $h, "K"; print ref($h), " ", ref($o), "\n";},  $W4, 'a bless of a variable, ref() read beside it' ],
+    [ q{package K; sub hi { "hi" } package main; my $h = {}; my $o = bless $h, "K"; print $h->hi, "\n";}, undef, 'a bless of a variable a method is then called on' ],
     # What may float:
     [ q{my ($p, $q) = (1, 2); ($p, $q) = ($q, $p); print "$p $q\n";},            undef, 'a list assignment of scalars is a record' ],
     [ q{sub f { my ($p, @r) = @_; return "$p @r" } print f(1, 2, 3), "\n";},      undef, 'the arguments, bound to fresh variables' ],
