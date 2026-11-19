@@ -16,6 +16,7 @@ use Chalk::IR::Analysis;   # from_json still runs it; see the note at its call
 use Chalk::IR::Node::Coerce;   # _insert_str_coercions builds these directly
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: the join lattice
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
+use Chalk::IR::Serialize::WireCheck;   # what the wire cannot order, refused
 
 # CFG node operations — these carry control tokens and are never hash-consed.
 my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
@@ -1348,7 +1349,12 @@ sub from_json ($json_string) {
     %RUN = %run;
     %ON_WIRE = map { ( $_ => 1 ) } keys +($data->{methods} // {})->%*;
     %REFUSED = +($data->{refused} // {})->%*;
+    # WHAT THE WIRE GIVES NO ORDER OR MEMORY VERSION FOR IS REFUSED HERE, by
+    # name, before a graph is made: the loader drops what control does not
+    # reach, so nothing after this can see a store B::SoN left floating.
+    my @defined = keys %ON_WIRE;
     delete $data->{methods}->@{@gone};
+    Chalk::IR::Serialize::WireCheck->new( methods => $data->{methods}, defined => \@defined )->check;
     # ...and its class's record of it: a module's class keeps its shape, and
     # the name stays in its stash, unloaded (can() asks by name).
     my %gone = map { $_ => 1 } @gone;

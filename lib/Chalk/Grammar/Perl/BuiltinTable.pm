@@ -168,6 +168,17 @@ class Chalk::Grammar::Perl::BuiltinTable {
         # (the next -d's), require %INC and the subs it compiles in.
         changes_state => { map { ( $_ => 1 ) } qw(chdir require) },
 
+        # IT DOES SOMETHING BESIDES MAKE ITS VALUE (perlfunc): changes an
+        # array, a hash, a string, a handle, a file, a process, an object's
+        # class, a tie. It runs where it stands, once -- never later, at
+        # its value's first use, and never not at all. Not every such builtin
+        # is listed: the ones B::SoN's wire is checked for (WireCheck).
+        acts => { map { ( $_ => 1 ) } qw(push pop shift unshift splice delete chomp chop
+            open close binmode printf say syswrite sysread read readline seek truncate opendir readdir closedir
+            unlink mkdir rmdir rename chdir chmod chown utime link symlink
+            exit die warn system exec fork wait waitpid kill sleep
+            bless tie untie select srand each) },
+
         # WHAT IT DOES, among the builtins of its family (or, for one of no
         # family, of the column it shares: a handle's operation, a tie
         # function, an array's end, a list's order) -- one each, so a backend
