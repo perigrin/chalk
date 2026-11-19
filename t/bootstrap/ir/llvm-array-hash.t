@@ -12,11 +12,9 @@ use Chalk::IR::Node::PadAccess;
 use Chalk::IR::Node::Return;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # Helper: run LLVM IR text through lli and return output
 sub run_ll {

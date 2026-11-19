@@ -12,11 +12,9 @@ use Chalk::MOP;
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # process_control_node, _collect_body_recursive, and Elaborate's
 # _collect_chain_recursive each hard-coded VarDecl/Assign/CompoundAssign/

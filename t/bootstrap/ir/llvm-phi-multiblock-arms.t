@@ -10,11 +10,9 @@ use Chalk::CodeGen::Harness::Rooted qw(rooted);
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # Lowering a value can open new basic blocks (bounds-checked Subscript,
 # And/Or short-circuits, ternaries). The phi/loop wiring sites historically

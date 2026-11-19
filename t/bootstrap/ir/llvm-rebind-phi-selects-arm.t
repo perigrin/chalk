@@ -5,6 +5,8 @@
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
+use Chalk::CodeGen::Harness::LLI;
+Chalk::CodeGen::Harness::LLI->lli;
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
@@ -113,7 +115,8 @@ sub run_ll ($ret) {
     print $fh $ll;
     close $fh;
 
-    my $lli = '/usr/lib/llvm-15/bin/lli';
+    require Chalk::CodeGen::Harness::LLI;
+    my $lli = Chalk::CodeGen::Harness::LLI->path;
     my $out = `$lli $path 2>&1`;
     return ($out, undef, $ll);
 }

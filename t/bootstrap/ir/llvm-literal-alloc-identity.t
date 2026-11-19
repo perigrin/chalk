@@ -10,11 +10,9 @@ use Chalk::CodeGen::Harness::Rooted qw(rooted);
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # An aggregate literal ALLOCATES (the Call(new) precedent: construction is
 # an effect). Content hash-consing collapsed `[1,2]` and `[1,2]` to one

@@ -10,11 +10,9 @@ use Chalk::CodeGen::Harness::Rooted qw(rooted);
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # A match EXECUTES (it reads its subject and writes capture state) — two
 # textually-identical matches at different program points are distinct

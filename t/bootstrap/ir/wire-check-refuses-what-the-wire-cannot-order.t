@@ -7,9 +7,9 @@ use File::Temp qw(tempfile);
 use Chalk::CodeGen::Harness::AuditProbe qw(run_probe);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
-my $LLI = $ENV{LLI} // '/usr/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";
-plan skip_all => "lli not found at $LLI (set LLI)"                  unless -x $LLI;
 
 sub verdict ($src) {
     my ( $fh, $pl ) = tempfile( SUFFIX => '.pl', UNLINK => 1 );

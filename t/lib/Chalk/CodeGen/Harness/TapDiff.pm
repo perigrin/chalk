@@ -12,7 +12,8 @@ use Chalk::CodeGen::Pipeline;
 # a pass through Context says nothing about it.
 our $PERL = $ENV{TAPDIFF_PERL} // $^X;
 our $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
-our $LLI  = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+our $LLI  = Chalk::CodeGen::Harness::LLI->path;
 
 # compare($path, inc => [dirs]) -> {
 #   verdict  SAME | DIFFERS | REFUSED

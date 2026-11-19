@@ -9,11 +9,9 @@ use Chalk::CodeGen::Harness::Rooted qw(rooted);
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # Helper: write .ll to a temp file and run lli; return stdout (chomped).
 # Returns undef if lli exits non-zero (invalid IR).

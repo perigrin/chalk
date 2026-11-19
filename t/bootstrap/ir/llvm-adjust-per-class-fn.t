@@ -12,11 +12,9 @@ use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # Lowering ADJUST bodies inline on the MAIN context (per Call(new)) shares
 # the main value cache across constructions: the second new of the same

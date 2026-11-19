@@ -4,6 +4,8 @@ use 5.42.0;
 use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
+use Chalk::CodeGen::Harness::LLI;
+Chalk::CodeGen::Harness::LLI->lli;
 use JSON::PP;
 use File::Temp qw(tempfile);
 
@@ -95,8 +97,8 @@ subtest 'forward-referenced backedges are patched onto the Phis' => sub {
 };
 
 subtest 'the loaded loop graph lowers and runs, printing 6' => sub {
-    my $LLI = '/usr/lib/llvm-15/bin/lli';
-    plan skip_all => "lli not found at $LLI" unless -x $LLI;
+    require Chalk::CodeGen::Harness::LLI;
+    my $LLI = Chalk::CodeGen::Harness::LLI->path;
 
     require Chalk::Target::LLVM;
     require Chalk::IR::NodeFactory;

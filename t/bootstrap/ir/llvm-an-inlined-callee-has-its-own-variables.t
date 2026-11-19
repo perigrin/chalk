@@ -10,8 +10,8 @@ use Chalk::IR::Graph;
 use Chalk::Target::LLVM;
 use Chalk::MOP;
 
-my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
-plan skip_all => "lli not found at $LLI (set LLI)" unless -x $LLI;
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 sub ic ($f, $v) { my $c = $f->make('Constant', value => "$v", const_type => 'integer'); $c->set_stamp('Int'); $c }
 sub sc ($f, $v) { my $c = $f->make('Constant', value => $v, const_type => 'string'); $c->set_stamp('Str'); $c }

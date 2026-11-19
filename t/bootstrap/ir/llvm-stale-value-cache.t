@@ -11,11 +11,9 @@ use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # The lower_value cache memoizes SSA refs by node id. PadAccess was already
 # excluded (llvm-reassign-soundness.t), but a PURE node whose transitive

@@ -25,8 +25,8 @@ use Chalk::Target::LLVM;
 # the VALUE, not merely that a module lowers, because that is the only check
 # that separated a fix from a miscompile.
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
-plan skip_all => "lli not found" unless -x $LLI;
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 my $wire = do {
     open my $fh, '<', 't/bootstrap/ir/data/method-call-abi-boundary.json'

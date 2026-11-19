@@ -6,6 +6,8 @@ use 5.42.0;
 use utf8;
 use lib 'lib', 't/lib';
 use Test::Chalk;
+use Chalk::CodeGen::Harness::LLI;
+Chalk::CodeGen::Harness::LLI->lli;
 
 use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
@@ -134,7 +136,8 @@ sub run_ll ($ll) {
     require File::Temp;
     my ($fh, $path) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
     print $fh $ll; close $fh;
-    my $lli = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
+    require Chalk::CodeGen::Harness::LLI;
+    my $lli = Chalk::CodeGen::Harness::LLI->path;
     return scalar qx($lli $path 2>&1);
 }
 

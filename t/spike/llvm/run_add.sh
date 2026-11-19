@@ -11,7 +11,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LLI=/usr/lib/llvm-15/bin/lli
+LLI=${LLI:-lli}
 PERL=$HOME/.local/share/pvm/versions/5.42.0/bin/perl
 
 ORACLE=$("$PERL" -e 'my $r = 1 + 2; print $r;')

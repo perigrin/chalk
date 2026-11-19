@@ -13,12 +13,10 @@ use Chalk::IR::Node::Return;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::Rooted qw(rooted);
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 # Skip if lli is not available (CI without LLVM)
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # Observe a value the way a program does: PRINT it, then return undef. A
 # program's observable contract is stdout plus exit status; it has no side

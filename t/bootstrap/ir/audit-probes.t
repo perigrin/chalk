@@ -6,9 +6,9 @@ use Test::Chalk;
 use Chalk::CodeGen::Harness::AuditProbe qw(probes run_all read_baseline);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
-my $LLI = $ENV{LLI} // '/usr/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";
-plan skip_all => "lli not found at $LLI (set LLI)"                  unless -x $LLI;
 
 # A VERDICT THAT CHANGES FAILS THIS TEST, either way: a probe that went SAME
 # -> REFUSED is a regression to look at, one that went REFUSED -> SAME is

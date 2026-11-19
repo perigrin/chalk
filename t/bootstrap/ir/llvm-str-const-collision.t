@@ -25,10 +25,8 @@ use Chalk::Target::LLVM;
 # RED: a class with a method body containing a string literal AND a main-graph
 # string literal -> assert the .ll has NO duplicate @str_const_0 and lli accepts.
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 # Helper: build a class with TWO methods each having a Str constant.
 # Both method bodies lower in a fresh Context, so each emits @str_const_0

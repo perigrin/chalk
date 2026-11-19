@@ -37,7 +37,8 @@ class Chalk::CodeGen::Harness::Mode2Adapter {
 
     my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
     my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
-    my $LLI  = '/usr/lib/llvm-15/bin/lli';
+    require Chalk::CodeGen::Harness::LLI;
+    my $LLI  = Chalk::CodeGen::Harness::LLI->path;
 
     # run_cases(\@cases) -> {
     #   conformance => { pass, total, pct },   # SEPARATE harvested tally

@@ -9,7 +9,8 @@ our @EXPORT_OK = qw(cases case_by_id run_case);
 
 my $SON    = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 my $CORPUS = $ENV{SON_CORPUS} // "$SON/../t/corpus/mdtest/pvm";
-my $LLI    = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI    = Chalk::CodeGen::Harness::LLI->path;
 
 # cases() -> ({ id, cid, file, src, want }, ...): the census's cases, in the
 # census's order (cid c001.. is the census numbering; id is file:N, stable when

@@ -16,7 +16,8 @@ use Chalk::CodeGen::Pipeline;
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
-my $LLI  = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI  = Chalk::CodeGen::Harness::LLI->path;
 
 # This runner consumes ARBITRARY REAL FILES — that is its whole contract, and
 # the reason it must filter by EXCLUSION rather than inclusion.

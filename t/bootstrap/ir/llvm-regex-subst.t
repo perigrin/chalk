@@ -11,10 +11,8 @@ use Chalk::IR::NodeFactory;
 use Chalk::MOP;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 sub lli_run {
     my ($ret, %lower_opts) = @_;

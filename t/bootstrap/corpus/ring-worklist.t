@@ -11,11 +11,11 @@ use Chalk::CodeGen::Harness::RingWorklist;
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
-my $LLI  = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI  = Chalk::CodeGen::Harness::LLI->lli;
 my $ROOT = $ENV{PERL5_T_DIR} // "$ENV{HOME}/dev/perl5/t";
 
 plan skip_all => "perl5-son not found at $SON" unless -f "$SON/B/SoN.pm";
-plan skip_all => "lli not found at $LLI"        unless -x $LLI;
 plan skip_all => "perl 5.42 not found at $PERL" unless -x $PERL;
 plan skip_all => "perl5 t/ not found at $ROOT"  unless -d $ROOT;
 

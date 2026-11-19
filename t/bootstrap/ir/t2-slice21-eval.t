@@ -6,9 +6,9 @@ use Test::Chalk;
 use File::Temp qw(tempfile);
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
-my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";
-plan skip_all => "lli not found at $LLI (set LLI)"                  unless -x $LLI;
 require Chalk::CodeGen::Pipeline;
 
 # run($cmd) -> [stdout, stderr, exit code]

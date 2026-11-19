@@ -8,11 +8,9 @@ use Test::Chalk;
 
 use Chalk::CodeGen::Harness::MdtestCorpus;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 my $REGEX_MD = 't/corpus/mdtest/regex.md';
 

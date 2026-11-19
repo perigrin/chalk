@@ -10,10 +10,8 @@ use Chalk::IR::Graph;
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 # Print the returned value on stdout, bracketed, instead of relying on a
 # type-tag epilogue: rebuild the Return so the value flows through

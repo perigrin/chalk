@@ -7,7 +7,7 @@ set -u
 OUT=${1:?usage: run.sh OUTDIR}
 mkdir -p "$OUT/runs"
 T=$(cd "$(dirname "$0")" && pwd)
-export HOME=${SUITE_HOME:-/home/runner} PERL5_SON_LIB=${PERL5_SON_LIB:-/home/user/repo/lib} LLI=${LLI:-/usr/bin/lli}
+export HOME=${SUITE_HOME:-/home/runner} PERL5_SON_LIB=${PERL5_SON_LIB:-/home/user/repo/lib}
 # (T and OUT go to each test as arguments, not the environment: a corpus case reads $ENV{T})
 
 one() {

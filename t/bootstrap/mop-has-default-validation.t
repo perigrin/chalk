@@ -56,9 +56,10 @@ subtest 'a well-formed has_default field still lowers' => sub {
     my ($rn, $mop) = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_wellformed);
     my $ll = eval { Chalk::Target::LLVM->lower(rooted($rn, $mop), (defined $mop ? (mop => $mop) : ())) };
     ok(defined $ll && !$@, 'well-formed has_default lowers without error') or diag($@);
-    my $lli = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
+    require Chalk::CodeGen::Harness::LLI;
+    my $lli = Chalk::CodeGen::Harness::LLI->path;
     SKIP: {
-        skip "no lli at $lli", 1 unless -x $lli && defined $ll;
+        skip Chalk::CodeGen::Harness::LLI->skip_reason // "nothing lowered", 1 if defined Chalk::CodeGen::Harness::LLI->skip_reason || !defined $ll;
         require File::Temp;
         my ($fh, $path) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
         print $fh $ll; close $fh;

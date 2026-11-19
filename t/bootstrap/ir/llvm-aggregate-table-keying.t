@@ -10,11 +10,9 @@ use Chalk::CodeGen::Harness::Rooted qw(rooted);
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # _arr_table/_hash_table memoized the i8* -> %Array*/%Hash* bitcast PER NODE
 # ID, populated once and never invalidated. A container variable reassigned

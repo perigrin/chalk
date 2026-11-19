@@ -13,11 +13,9 @@ use Chalk::MOP;
 use Chalk::Target::LLVM;
 
 my $P = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # Helper: run perl and get oracle output
 sub perl_oracle {

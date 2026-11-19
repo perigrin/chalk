@@ -28,10 +28,8 @@ use Chalk::Target::LLVM;
 # Fix: add post-class re-emit guarded by _strpair_emitted (mirror of _memcmp_emitted);
 # set _strpair_emitted=1 at the existing line-376 emit site to prevent double-declare.
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 # Helper: build a class with a Str :param field but NO Str-returning methods.
 # The outer graph calls the Int-returning method -> class scan returns $need_strpair=0

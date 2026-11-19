@@ -10,10 +10,8 @@ use Chalk::IR::Graph::TypedInvariant;
 use Chalk::CodeGen::Harness::MdtestCorpus;
 use Chalk::CodeGen::Harness::LLVMDriver;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 # ---------------------------------------------------------------------------
 # Unit tests for build_graph_from_ir

@@ -12,10 +12,8 @@ use Chalk::IR::NodeFactory;
 use Chalk::IR::Graph;
 use Chalk::Target::LLVM;
 
-my $LLI = q{/usr/lib/llvm-15/bin/lli};
-unless (-x $LLI) {
-    plan skip_all => qq{lli not found at $LLI};
-}
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 # ---------------------------------------------------------------------------
 # THE BUG: _lower_call_direct never writes its result into $self->{cache}, so

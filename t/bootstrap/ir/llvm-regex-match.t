@@ -8,10 +8,8 @@ use Test::Chalk;
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 # Wrap a value node into a PROGRAM: Start -> Print(Coerce(value->Str)) -> Return(undef).
 # A compiled program has no type-tag channel; its observable contract is stdout

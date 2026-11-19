@@ -11,7 +11,9 @@ use Chalk::Target::LLVM;
 
 my $PERL    = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON     = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
-my $LLVM_AS = '/usr/lib/llvm-15/bin/llvm-as';
+use Chalk::CodeGen::Harness::LLI;
+Chalk::CodeGen::Harness::LLI->lli;
+my $LLVM_AS = Chalk::CodeGen::Harness::LLI->tool('llvm-as');
 
 plan skip_all => "perl5-son not found at $SON" unless -f "$SON/B/SoN.pm";
 plan skip_all => "llvm-as not found at $LLVM_AS" unless -x $LLVM_AS;

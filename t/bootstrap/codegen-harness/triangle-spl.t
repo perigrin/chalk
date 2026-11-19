@@ -16,11 +16,9 @@ use Chalk::CodeGen::Harness::Comparator;
 use Chalk::CodeGen::Harness::LLVMDriver;
 use Chalk::CodeGen::Harness::ReturnNodePerlDriver;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless ( -x $LLI ) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # ---------------------------------------------------------------------------
 # Helper: build the arith-add graph (L-GREEN: print 1 + 2)

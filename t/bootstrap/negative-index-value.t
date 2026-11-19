@@ -39,10 +39,10 @@ sub print_program ($ret) {
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
 my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
-my $LLI  = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI  = Chalk::CodeGen::Harness::LLI->lli;
 
 plan skip_all => "perl5-son not found at $SON" unless -f "$SON/B/SoN.pm";
-plan skip_all => "lli not found at $LLI"        unless -x $LLI;
 
 # Compile $body through B::SoN -> loader -> Target::LLVM -> lli and return
 # what the program prints for corpus_case's value (see print_program). The array read lowering must apply perl's

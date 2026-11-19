@@ -9,7 +9,8 @@ our @EXPORT_OK = qw(probes run_probe run_all read_baseline write_baseline $DIR $
 our $DIR      = 't/data/audit-probes';
 our $BASELINE = "$DIR/BASELINE.tsv";
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
-my $LLI = $ENV{LLI} // '/usr/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->path;
 
 # The verdicts:
 #   SAME     chalk's program printed what perl printed, and ended as perl did

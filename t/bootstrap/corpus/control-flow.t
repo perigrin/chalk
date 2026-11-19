@@ -9,11 +9,9 @@ use Test::Chalk;
 use Chalk::CodeGen::Harness::MdtestCorpus;
 use Chalk::CodeGen::Harness::LLVMDriver;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 my $CONTROL_FLOW_MD = 't/corpus/mdtest/control-flow.md';
 

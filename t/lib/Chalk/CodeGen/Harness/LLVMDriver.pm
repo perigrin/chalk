@@ -14,7 +14,8 @@ use Chalk::CodeGen::Harness::BehaviorRecord;
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 
 # The lli interpreter path.
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->path;
 
 # run($return_node, \%opts) -> ($L, \%emission_meta)
 #

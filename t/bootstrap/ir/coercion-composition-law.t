@@ -61,8 +61,8 @@ use Chalk::Target::LLVM;
 # from the RETURN-tag printer in the test epilogue, not from the coercion arm.
 # ---------------------------------------------------------------------------
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
-plan skip_all => "lli not found at $LLI" unless -x $LLI;
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 sub run_lli {
     my ($ll_text) = @_;

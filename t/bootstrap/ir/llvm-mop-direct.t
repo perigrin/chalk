@@ -12,11 +12,9 @@ use Chalk::MOP;
 use Chalk::IR::NodeFactory;
 use Chalk::Target::LLVM;
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
-unless (-x $LLI) {
-    plan skip_all => "lli not found at $LLI";
-}
 
 # docs/plans/2026-06-11-llvm-reads-mop-directly.md: class structure is
 # compile-time context. The backend receives the sealed MOP alongside the

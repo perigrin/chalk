@@ -69,9 +69,10 @@ subtest 'an unstamped Add of two Ints is typed from its operands' => sub {
     # make, and the module prints perl's answer.
     my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(defined $ll, 'an unstamped Add: T2 lowers it') or diag $@;
-    my $lli = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
+    require Chalk::CodeGen::Harness::LLI;
+    my $lli = Chalk::CodeGen::Harness::LLI->path;
     SKIP: {
-        skip "no lli at $lli", 1 unless -x $lli && defined $ll;
+        skip Chalk::CodeGen::Harness::LLI->skip_reason // "nothing lowered", 1 if defined Chalk::CodeGen::Harness::LLI->skip_reason || !defined $ll;
         require File::Temp;
         my ($fh, $path) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
         print $fh $ll; close $fh;
@@ -277,9 +278,10 @@ subtest 'an unstamped DefinedOr of two Ints is typed from its operands' => sub {
     # make, and the module prints perl's answer.
     my $ll = eval { Chalk::Target::LLVM->lower($ret) };
     ok(defined $ll, 'an unstamped DefinedOr: T2 lowers it') or diag $@;
-    my $lli = $ENV{LLI} // '/usr/lib/llvm-15/bin/lli';
+    require Chalk::CodeGen::Harness::LLI;
+    my $lli = Chalk::CodeGen::Harness::LLI->path;
     SKIP: {
-        skip "no lli at $lli", 1 unless -x $lli && defined $ll;
+        skip Chalk::CodeGen::Harness::LLI->skip_reason // "nothing lowered", 1 if defined Chalk::CodeGen::Harness::LLI->skip_reason || !defined $ll;
         require File::Temp;
         my ($fh, $path) = File::Temp::tempfile(SUFFIX => '.ll', UNLINK => 1);
         print $fh $ll; close $fh;

@@ -15,8 +15,8 @@ use Chalk::IR::Serialize::JSON ();
 # icmp ne i64 (the same _ensure_i1 rule Not uses). Previously the raw i64
 # reached `select i1` and lli rejected the module.
 
-my $LLI = '/usr/lib/llvm-15/bin/lli';
-plan skip_all => "lli not found at $LLI" unless -x $LLI;
+use Chalk::CodeGen::Harness::LLI;
+my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 require Chalk::Target::LLVM;
 
 # Observe the value the way a program does: PRINT it, bracketed, then return
