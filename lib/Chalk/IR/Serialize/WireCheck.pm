@@ -227,61 +227,6 @@ class Chalk::IR::Serialize::WireCheck {
     }
 
     # ------------------------------------------------------------------
-    # W1. A PACKAGE SCALAR CARRIED ROUND A LOOP AS A VALUE (a Phi) is not
-    # read from memory in the loop, so a sub the loop calls cannot change
-    # it: `$g = $g + 1; bump()` lost bump's `$g += 10`.
-    # ------------------------------------------------------------------
-    method _loop_carried_package_scalars($name) {
-        my $g = $self->_graph($name);
-        for my $phi ( grep { $_->{op} eq 'Phi' && !$self->_f( $_, 'memory' ) } $g->{nodes}->@* ) {
-            my $loop = $g->{by}{ $self->_f( $phi, 'region' ) // '' };
-            next unless defined $loop && $loop->{op} eq 'Loop';
-            # It carries $var where what comes round is what the loop stores
-            # to $var, and what comes in is $var's value before the loop.
-            my ( $in, $round ) = $self->_inputs($phi);
-            next unless defined $in && defined $round;
-            my @stores = grep { $_->{op} eq 'EntryWrite' } $g->{nodes}->@*;
-            for my $w (@stores) {
-                my ( $target, $value ) = $self->_inputs($w);
-                next unless defined $value && $value == $round;
-                my $var = $self->_written_pkg( $g, $w ) // next;
-                next unless $var =~ /\A\$/;
-                next unless ( $self->_pkg_name( $g->{by}{$in} ) // '' ) eq $var
-                    || grep { ( $self->_written_pkg( $g, $_ ) // '' ) eq $var && ( ( $self->_inputs($_) )[1] // -1 ) == $in } @stores;
-                next unless grep { $self->_is_sub_call($_) && $self->_in_loop( $g, $_, $loop ) } $g->{nodes}->@*;
-                next unless $self->_written_elsewhere( $name, $var );
-                $self->_gap("a package scalar ($var) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (in $name)");
-            }
-        }
-        return;
-    }
-
-    method _in_loop( $g, $n, $loop ) {
-        my ( %seen, @q );
-        @q = $self->_preds( $g, $n );
-        while ( defined( my $x = shift @q ) ) {
-            next if $seen{ $x->{id} }++;
-            return 1 if $x->{id} == $loop->{id};
-            if ( $x->{op} eq 'Proj' && ( ( $self->_inputs($x) )[0] // -1 ) == $loop->{id} ) {
-                return 1 if ( $self->_f( $x, 'index' ) // 0 ) == 0;
-                push @q, $self->_preds( $g, $loop );    # the way out: on to what is before the loop
-                $seen{ $loop->{id} }++;
-                next;
-            }
-            push @q, $self->_preds( $g, $x );
-        }
-        return 0;
-    }
-
-    method _written_elsewhere( $name, $var ) {
-        for my $other ( grep { $_ ne $name } sort keys $methods->%* ) {
-            my $o = $self->_graph($other);
-            return 1 if grep { ( $self->_written_pkg( $o, $_ ) // '' ) eq $var } $o->{nodes}->@*;
-        }
-        return 0;
-    }
-
-    # ------------------------------------------------------------------
     # W10. A PACKAGE ARRAY OR HASH FLATTENED INTO A LIST carries no memory
     # version, so the list is made at its first use -- after a later store
     # to the array: `my @c = (@st, 2); @st = ()` read @st empty.
@@ -514,11 +459,17 @@ class Chalk::IR::Serialize::WireCheck {
         return;
     }
 
-    # A store to a package variable in an eval block that dies: the wire is
-    # the same for `local $v = 3` there (its restore, which the die skips, is
-    # not written) and for `$v = 3`, so which it is cannot be told.
+    # A store to a package variable in an eval block that dies may be a
+    # `local`'s, whose restore the die skips and the wire does not write.
+    # B::SoN reads what a `local` is to put back at the memory version its
+    # store replaces (an EntryDef of the variable there, which nothing takes
+    # once the restore is gone), so a store with such a read beside it is
+    # refused -- `$g = $g + 2` has the same read -- and one without is a
+    # plain store. In a graph with a loop a `local` may save a value the
+    # loop carries instead, with no read: refused there as before.
     method _stores_in_a_dying_eval($name) {
         my $g = $self->_graph($name);
+        my $has_loop = grep { $_->{op} eq 'Loop' } $g->{nodes}->@*;
         for my $u ( grep { $_->{op} eq 'Unwind' && defined $self->_f( $_, 'eval_id' ) } $g->{nodes}->@* ) {
             my $id = $self->_f( $u, 'eval_id' );
             my ($join) = grep { $_->{op} eq 'Region' && ( $self->_f( $_, 'eval_id' ) // '' ) eq $id } $g->{nodes}->@*;
@@ -530,11 +481,25 @@ class Chalk::IR::Serialize::WireCheck {
                 next if $seen{ $x->{id} }++ || $x->{id} == $entry;
                 my $var = $self->_written_pkg( $g, $x );
                 $self->_gap("a store to a package variable ($var) in an eval block that dies: the wire does not say whether it is a `local`, whose restore the die would skip (in $name)")
-                    if defined $var && $var ne '$main::@';
+                    if defined $var && $var ne '$main::@' && ( $has_loop || $self->_may_be_a_local( $g, $x, $var ) );
                 push @q, $self->_preds( $g, $x );
             }
         }
         return;
+    }
+
+    # _may_be_a_local($g, $store, $var) -> true where a read of $var from
+    # memory stands at the version $store replaces, or is taken by nothing:
+    # the read a `local` saves its old value with.
+    method _may_be_a_local( $g, $store, $var ) {
+        my $replaced = ( $self->_inputs($store) )[2];
+        for my $r ( grep { $_->{op} eq 'EntryDef' && ( $self->_pkg_name($_) // '' ) eq $var } $g->{nodes}->@* ) {
+            my ($at) = $self->_inputs($r);
+            next unless defined $at;    # (the variable's name, not a read of it)
+            return 1 if defined $replaced && $at == $replaced;
+            return 1 unless ( $g->{cons}{ $r->{id} } // [] )->@*;
+        }
+        return 0;
     }
 
     # W7. A DIE OF A REFERENCE: T2's $@ is the die's message, a string.
@@ -572,7 +537,6 @@ class Chalk::IR::Serialize::WireCheck {
         }
         for my $name ( sort keys $methods->%* ) {
             $self->_floating_effects($name);
-            $self->_loop_carried_package_scalars($name);
             $self->_flattened_package_aggregates($name);
             $self->_autovivifying_reads($name);
             $self->_hashes_read_as_scalars($name);

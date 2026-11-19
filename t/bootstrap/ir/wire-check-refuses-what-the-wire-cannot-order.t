@@ -1,5 +1,5 @@
 # ABOUTME: the loader's wire check refuses, by name, the shapes B::SoN's wire gives no order or
-# ABOUTME: memory version for (the IR audit's classes W1, W4-W10, hash truth), and no neighbour of them.
+# ABOUTME: memory version for (the IR audit's classes W4-W10, hash truth), and no neighbour of them.
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
@@ -18,11 +18,10 @@ sub verdict ($src) {
     return run_probe($pl);
 }
 
-my $W1    = qr/a package scalar \(\$main::\w+\) carried round a loop as a value/;
 my $W4    = qr/ref\(\) of a reference that a bless elsewhere changes \(or blessed\(\) of one\)/;
 my $W5    = qr/a captured variable passed to a sub that writes its argument/;
 my $W6    = qr/a `local` \(\$main::g\) in a sub a die leaves, under an eval/;
-my $W6E   = qr/a store to a package variable \(\$main::v\) in an eval block that dies/;
+my $W6E   = qr/a store to a package variable \(\$main::\w+\) in an eval block that dies/;
 my $DIV   = qr/a (?:division|modulus) whose divisor may be zero, on no control chain/;
 my $DEREF = qr/a dereference nothing reads, which may still die/;
 my $DIE   = qr/a die of what may be a reference, where an eval may catch it/;
@@ -31,13 +30,26 @@ my $W9    = qr/a read through an element that is not there, which perl makes/;
 my $W10   = qr/a package array or hash \([\@%]main::\w+\) flattened into a list at no memory version/;
 my $HASH  = qr/a hash read as a scalar \(its truth or its count\) at no memory version/;
 
+# Does this B::SoN put a division that may fault on the control chain? (Its
+# `placement-pins` does; before it the division floats and is refused here.)
+my $PINS_DIV = do {
+    my ( $fh, $pl ) = tempfile( SUFFIX => '.pl', UNLINK => 1 );
+    print $fh q{my $d = @ARGV; my $q = 1 / $d; print "before\n"; print "$q\n";};
+    close $fh;
+    require JSON::PP;
+    my $wire = eval { JSON::PP::decode_json( scalar qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null) ) } // {};
+    scalar grep { $_->{op} eq 'Divide' && defined $_->{control_in} } ( $wire->{methods}{'main::__PROGRAM__'}{nodes} // [] )->@*;
+};
+
 # Each: [source, the refusal's name (undef: perl's output), what it is].
 for my $case (
-    # W1
-    [ q{our $g = 0; sub bump { $g += 10 } for my $i (1..3) { $g = $g + 1; bump(); } print "$g\n";}, $W1, 'W1: a counter a called sub also adds to' ],
-    [ q{our $g = 0; sub bump { $g += 10 } for my $i (1..3) { bump(); $g = $g + 1; } print "$g\n";}, $W1, 'W1: the call first' ],
-    [ q{our $n = 0; sub step { $n++ < 3 } my $t = 0; while (step()) { $t += $n; $n = $n + 0 } print "$t $n\n";}, $W1, "W1: the call is the loop's test" ],
-    [ q{our $s = ""; sub ap { $s .= $_[0] } for my $c ("a".."c") { $s .= "-"; ap($c) } print "$s\n";}, $W1, 'W1: a string appended to' ],
+    # W1 (a package scalar a called sub writes, carried round a loop): B::SoN
+    # reads it from memory in the loop now (its `placement`), and the rule
+    # that refused it is gone. Perl's answer.
+    [ q{our $g = 0; sub bump { $g += 10 } for my $i (1..3) { $g = $g + 1; bump(); } print "$g\n";}, undef, 'W1: a counter a called sub also adds to' ],
+    [ q{our $g = 0; sub bump { $g += 10 } for my $i (1..3) { bump(); $g = $g + 1; } print "$g\n";}, undef, 'W1: the call first' ],
+    [ q{our $n = 0; sub step { $n++ < 3 } my $t = 0; while (step()) { $t += $n; $n = $n + 0 } print "$t $n\n";}, undef, "W1: the call is the loop's test" ],
+    [ q{our $s = ""; sub ap { $s .= $_[0] } for my $c ("a", "b", "c") { $s .= "-"; ap($c) } print "$s\n";}, undef, 'W1: a string appended to' ],
     [ q{our $g = 0; sub show { return "<$_[0]>" } my $o = ""; for my $i (1..3) { $g = $g + 1; $o .= show($i); } print "$g $o\n";},
         undef, 'W1: a sub that does not write the variable' ],
     [ q{our $g = 0; for my $i (1..3) { $g = $g + $i; } print "$g\n";}, undef, 'W1: no call in the loop' ],
@@ -58,13 +70,21 @@ for my $case (
     [ q{our $v = 1; sub show { print $v } sub t { local $v = 2; show(); eval { local $v = 3; show(); die "x\n" }; show() } t(); show(); print "\n";},
         $W6E, 'W6: a local in an eval block that dies' ],
     [ q{our $g = 1; sub t { local $g = 2; return $g + 1 } my $r = eval { t() }; print "$g $r\n";}, undef, 'W6: a local in a sub that cannot die' ],
+    # (B::SoN reads what a `local` is to put back, at the version its store
+    # replaces: a store with no such read beside it is a plain one)
+    [ q{our $g = 1; eval { $g = 2; die "x\n"; $g = 3 }; print "$g\n";}, undef, 'W6: a plain store in an eval block that dies (ev12)' ],
+    [ q{our $g = 1; sub t { eval { $g = 2; die "x\n" }; return } t(); print "$g\n";}, undef, 'W6: a plain store in a dying eval, in a sub' ],
+    [ q{our $g = 1; eval { local $g = 2; die "x\n" }; print "$g\n";}, $W6E, 'W6: a local alone in an eval block that dies' ],
+    [ q{our $g = 1; eval { $g = $g + 2; die "x\n" }; print "$g\n";}, $W6E, 'W6: a store of what was read there: the wire of a local' ],
+    [ q{our $g = 1; for my $i (1, 2) { eval { $g = 5; die "x\n" }; print "$g\n" }}, $W6E, 'W6: a store in a dying eval in a loop' ],
     [ q{use v5.42; no warnings; sub g ($x) { die "bad $x\n" if $x > 1; return $x } sub h ($x) { my $r = "n"; try { g($x); } catch ($e) { chomp $e; $r = "c:$e"; } return $r } $@ = "before"; print h(1), " ", h(2), " [$@]\n";},
         undef, 'W6: a try puts $@ back itself, and its chomp of $e is of a copy' ],
     [ q{use v5.42; no warnings; my %c; $c{a} = 1; sub f { 1 } sub g ($k) { return if $k eq "z"; if (exists $c{$k}) { try { f() } catch ($x) { die "A: $x" } 1 } else { 2 } } print g("a"), g("b"), "[", scalar(g("z")) // "u", "]\n";},
         undef, 'W6: a catch that dies again, with no local' ],
     # W7
-    [ q{my $d = @ARGV; my $q = 1 / $d; print "before\n"; print "$q\n";}, $DIV, 'W7: a division by zero after a print' ],
-    [ q{my $d = @ARGV; my $q = 7 % $d; print "before\n"; print "$q\n";}, $DIV, 'W7: a modulus by zero after a print' ],
+    # (a B::SoN that pins a division that may fault gives it its place: perl's answer)
+    [ q{my $d = @ARGV; my $q = 1 / $d; print "before\n"; print "$q\n";}, ( $PINS_DIV ? undef : $DIV ), 'W7: a division by zero after a print' ],
+    [ q{my $d = @ARGV; my $q = 7 % $d; print "before\n"; print "$q\n";}, ( $PINS_DIV ? undef : $DIV ), 'W7: a modulus by zero after a print' ],
     [ q{my $d = @ARGV + 2; my $q = 7 / $d; print "$q\n";}, undef, 'W7: a division used where it stands' ],
     [ q{my $n = @ARGV + 5; my $q = -$n ** 2 / 3; my $m = $n % 2; print "x\n"; print "$q $m\n";}, undef, 'W7: a constant divisor, coerced' ],
     [ q{use strict; my $r; print "a\n"; my @l = @$r; print "b\n";}, $DEREF, 'W7: an unread deref of undef' ],
