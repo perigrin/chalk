@@ -34,8 +34,9 @@ for my $case (
     my $select = sub ($graphs, $mop) { my $g = $graphs->{'main::__PROGRAM__'} or return (); ([ 'main::__PROGRAM__', $g->returns->[0] ]) };
     my ($units, undef, undef, $err) = Chalk::CodeGen::Pipeline->new->run_detail($json, $select, program_mode => 1);
     my $ll = !$err && $units->[0]{ok} ? $units->[0]{ll} : undef;
-    # (a case with a third element: perl's answer, or refused by that name)
-    if ( !defined $ll && $or_refused && ( $err // $units->[0]{err} // '' ) =~ $or_refused ) { pass("$name: refused by name"); next }
+    # (a case with a third element is refused, by that name: B::SoN gives
+    # ref() and blessed() no memory version yet)
+    if ($or_refused) { like( $err // $units->[0]{err} // '', $or_refused, "$name: refused by name" ); next }
     ok(defined $ll && $ll =~ /^; chalk T2/m, "$name: lowered through T2") or diag $err // $units->[0]{err};
     next unless defined $ll;
     my ($lf, $llp) = tempfile(SUFFIX => '.ll', UNLINK => 1);

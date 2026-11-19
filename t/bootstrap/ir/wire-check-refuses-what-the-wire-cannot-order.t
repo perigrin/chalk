@@ -32,14 +32,8 @@ my $HASH  = qr/a hash read as a scalar \(its truth or its count\) at no memory v
 
 # Does this B::SoN put a division that may fault on the control chain? (Its
 # `placement-pins` does; before it the division floats and is refused here.)
-my $PINS_DIV = do {
-    my ( $fh, $pl ) = tempfile( SUFFIX => '.pl', UNLINK => 1 );
-    print $fh q{my $d = @ARGV; my $q = 1 / $d; print "before\n"; print "$q\n";};
-    close $fh;
-    require JSON::PP;
-    my $wire = eval { JSON::PP::decode_json( scalar qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null) ) } // {};
-    scalar grep { $_->{op} eq 'Divide' && defined $_->{control_in} } ( $wire->{methods}{'main::__PROGRAM__'}{nodes} // [] )->@*;
-};
+require Chalk::CodeGen::Harness::Producer;
+my $PINS_DIV = Chalk::CodeGen::Harness::Producer->pins_divisions;
 
 # Each: [source, the refusal's name (undef: perl's output), what it is].
 for my $case (

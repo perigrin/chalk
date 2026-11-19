@@ -149,12 +149,17 @@ PL
     }
 }
 
+require Chalk::CodeGen::Harness::Producer;
+my $PINS_DIV = Chalk::CodeGen::Harness::Producer->pins_divisions;
+
 for my $name ( sort keys %prog ) {
     my $r = tap( $prog{$name} );
-    # (p-divmod's `-7 % $v` is on no control chain, with prints before it: the
-    # loader refuses it by name, as it would the same wire dying late.)
-    if ( $r->{verdict} eq 'REFUSED' && ( $r->{why} // '' ) =~ /GAP: a (?:division|modulus) whose divisor may be zero, on no control chain/ ) {
-        pass "$name: refused by name";
+    # (p-divmod's `-7 % $v` has prints before it: where B::SoN leaves it off
+    # the control chain the loader refuses it by name, as it would the same
+    # wire dying late. Pinned, it is perl's.)
+    if ( $name eq 'p-divmod' && !$PINS_DIV ) {
+        is $r->{verdict}, 'REFUSED', "$name: refused where the wire floats the modulus";
+        like $r->{why} // '', qr/GAP: a (?:division|modulus) whose divisor may be zero, on no control chain/, "$name: by name";
         next;
     }
     is $r->{verdict}, 'SAME', "$name: as perl" or diag $r->{why} // '', "\n", explain $r;

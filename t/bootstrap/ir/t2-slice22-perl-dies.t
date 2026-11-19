@@ -10,6 +10,8 @@ use Chalk::CodeGen::Harness::LLI;
 my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";
 require Chalk::CodeGen::Pipeline;
+require Chalk::CodeGen::Harness::Producer;
+my $PINS_DIV = Chalk::CodeGen::Harness::Producer->pins_divisions;
 
 # run($cmd) -> [stdout, stderr, exit code]
 sub run ($cmd) {
@@ -25,8 +27,9 @@ for my $case (
     [ q{my $z = $ENV{NO_SUCH_VAR} // 0; my $r = eval { 7 % $z }; print defined $r ? "r=$r\n" : "caught $@";}, 'a zero modulus in an eval' ],
     [ q{sub d { return $_[0] / $_[1] } my $r = eval { d(1, 2) + d(1, 0) }; print defined $r ? "r=$r\n" : "caught $@"; print d(9, 3), "\n";}, 'a zero divisor in a called sub' ],
     [ q{my $z = $ENV{NO_SUCH_VAR} // 0; my $r = eval { 1 }; print "ok\n"; print 7 / $z, "\n"; print "never\n";}, 'a zero divisor outside an eval still exits',
-        # (its wire is also that of `my $q = 7 / $z` taken before the print of "ok")
-        qr/GAP: a division whose divisor may be zero, on no control chain/ ],
+        # (where B::SoN leaves the division off the chain its wire is also that of
+        # `my $q = 7 / $z` taken before the print of "ok": refused, by that name)
+        ( $PINS_DIV ? () : qr/GAP: a division whose divisor may be zero, on no control chain/ ) ],
     [ q{package C; sub new { bless {}, shift } package main; my $r = eval { C->new->nope; 1 }; print defined $r ? "r\n" : "caught $@";}, 'a method no class answers' ],
     [ q{package C; sub m { 1 } package main; my $r = eval { Nope->m; 1 }; print defined $r ? "r\n" : "caught $@";}, 'a method of a package not loaded' ],
     [ q{package C; sub m { 1 } package main; my $o = $ENV{NO_SUCH_VAR}; my $r = eval { $o->m; 1 }; print defined $r ? "r\n" : "caught $@";}, 'a method on undef' ],
@@ -40,8 +43,8 @@ for my $case (
     my $select = sub ($graphs, $mop) { my $g = $graphs->{'main::__PROGRAM__'} or return (); ([ 'main::__PROGRAM__', $g->returns->[0] ]) };
     my ($units, undef, undef, $err) = Chalk::CodeGen::Pipeline->new->run_detail($json, $select, program_mode => 1);
     my $ll = !$err && $units->[0]{ok} ? $units->[0]{ll} : undef;
-    # (a case with a third element: perl's answer, or refused by that name)
-    if ( !defined $ll && $or_refused && ( $err // $units->[0]{err} // '' ) =~ $or_refused ) { pass("$name: refused by name"); next }
+    # (a case with a third element is refused, by that name)
+    if ($or_refused) { like( $err // $units->[0]{err} // '', $or_refused, "$name: refused by name" ); next }
     ok(defined $ll && $ll =~ /^; chalk T2/m, "$name: lowered through T2") or diag $err // $units->[0]{err};
     next unless defined $ll;
     my ($lf, $llp) = tempfile(SUFFIX => '.ll', UNLINK => 1);

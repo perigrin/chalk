@@ -43,11 +43,9 @@ sub through_llvm ($pl) {
 {
     my $pl = write_pl(q{my @a; my %h; print "e\n" if !@a; my $r = \@a; my $q = \%h; print ref($r), ref($q), "\n";});
     my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null);
-    # The wire's own stamps, before the loader: the case this file is about.
-    require JSON::PP;
-    my $wire = JSON::PP->new->utf8->decode($json)->{methods}{'main::__PROGRAM__'}{nodes};
-    ok( ( grep { $_->{op} eq 'Ref' && ( $_->{stamp} // '' ) eq 'ScalarRef' } @$wire ),
-        'the producer stamps the array\'s Ref ScalarRef' );
+    # (B::SoN stamped the array's Ref ScalarRef on the wire until its
+    # `placement` typed a `my @a` by its sigil; the loader's stamp is the
+    # one asserted, whichever the wire says.)
     require Chalk::IR::Serialize::JSON;
     my $g = Chalk::IR::Serialize::JSON::from_json($json)->{'main::__PROGRAM__'};
     my @refs = grep { $_->operation eq 'Ref' } $g->nodes->@*;

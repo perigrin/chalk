@@ -11,22 +11,13 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";
 
 require Chalk::CodeGen::Pipeline;
-require JSON::PP;
+require Chalk::CodeGen::Harness::Producer;
 
 sub wire ($src) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src;
     close $fh;
     return ( scalar qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null), $pl );
-}
-
-# pinned($src, $is) -> true when the wire has a node $is accepts on the
-# program's control chain (B::SoN before its `placement-pins` leaves a
-# dynamic method call and a division floating: those cases wait on it).
-sub pinned ($src, $is) {
-    my ($json) = wire($src);
-    my $nodes = JSON::PP::decode_json($json)->{methods}{'main::__PROGRAM__'}{nodes};
-    return scalar grep { defined $_->{control_in} && $is->($_) } $nodes->@*;
 }
 
 # The whole program through B::SoN, chalk's pipeline and lli: [stdout and
@@ -65,9 +56,6 @@ sub same ($src, $name, %opt) {
     is( $got->[2], $want->[2], "$name: perl's STDERR" ) if $opt{stderr};
 }
 
-my $is_dyn = sub ($n) { $n->{op} eq 'Call' && ( $n->{fields}{dispatch_kind} // '' ) eq 'dynamic_method' };
-my $is_div = sub ($n) { $n->{op} =~ /\A(?:Divide|Modulo)\z/ };
-
 # A printf: its format's string to the handle, where it stands; its value 1.
 same( q{printf("%s-%d\n", "made", 3); print "x\n";},                       'a printf statement' );
 same( q{print "a\n"; printf "%05.1f|%-4s|%x\n", 3.14159, "ab", 255; print "b\n";}, 'a printf between prints' );
@@ -84,7 +72,7 @@ same( q{for my $i (1 .. 3) { printf "%d,", $i * 2 } printf "\n";},        'a pri
 # A METHOD NAMED BY A VALUE, called for what it does: it runs where it stands.
 SKIP: {
     my $dyn1 = qq{package C; sub new { bless {n=>0}, shift } sub inc { \$_[0]{n}++; return }\npackage main; my \$o = C->new; my \$m = "inc"; \$o->\$m(); print \$o->{n}, "\\n";};
-    skip 'this B::SoN leaves a dynamic method call off the control chain', 15 unless pinned( $dyn1, $is_dyn );
+    skip 'this B::SoN leaves a dynamic method call off the control chain', 15 unless Chalk::CodeGen::Harness::Producer->pins_dynamic_method_calls;
     same( $dyn1, 'a dynamic method call as a statement (dyn1)' );
     same( qq{package C; sub new { bless {n=>0}, shift } sub inc { \$_[0]{n}++; return 5 }\npackage main; my \$o = C->new; my \$m = "inc"; my \$r = \$o->\$m(); print "\$r \$o->{n}\\n";},
         'a dynamic method call read after a field it wrote (dyn2)' );
@@ -100,7 +88,7 @@ SKIP: {
 # its value's first use.
 SKIP: {
     my $fl1 = q{my $d = @ARGV; my $q = 1 / $d; print "before\n"; print "$q\n";};
-    skip 'this B::SoN leaves a division that may fault off the control chain', 26 unless pinned( $fl1, $is_div );
+    skip 'this B::SoN leaves a division that may fault off the control chain', 26 unless Chalk::CodeGen::Harness::Producer->pins_divisions;
     same( $fl1, 'a division by zero before a print (fl1)', stderr => 1 );
     same( q{my $d = @ARGV; my $q = 7 % $d; print "before\n"; print "$q\n";},                                  'a modulus by zero before a print (fl6)', stderr => 1 );
     same( q{my $d = @ARGV; print "a\n"; my $q = eval { 1 / $d } // "inf"; print "$q\n";},                      'a division by zero in an eval (fl3)' );

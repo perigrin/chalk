@@ -1,5 +1,5 @@
 # ABOUTME: Division and modulus by zero die, as perl's do, rather than give Inf or crash:
-# ABOUTME: B::SoN -> chalk -> lli exits 255 where perl does; inside an eval, refused by name.
+# ABOUTME: B::SoN -> chalk -> lli exits 255 where perl does (refused where the wire floats the division).
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
@@ -11,6 +11,8 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";
 
 require Chalk::CodeGen::Pipeline;
+require Chalk::CodeGen::Harness::Producer;
+my $PINS_DIV = Chalk::CodeGen::Harness::Producer->pins_divisions;
 
 # The whole program through B::SoN, chalk's pipeline and lli: its stdout and
 # exit status.
@@ -44,12 +46,17 @@ for my $case (
 ) {
     my ($src, $name) = @$case;
     my ($out, $rc) = eval { through_llvm($src) };
-    # (OR REFUSED: the division is on no control chain, and this wire is
+    # (WHERE B::SoN LEAVES THE DIVISION OFF THE CONTROL CHAIN this wire is
     # also the wire of `my $q = 1 / $z; print "a\n"; print $q`, which dies
-    # before the "a" -- the loader's wire check cannot tell which it is.)
-    my $refused = ( $@ // '' ) =~ /GAP: a (?:division|modulus) whose divisor may be zero, on no control chain/;
-    ok($refused || ( $out // '' ) eq "a\n", "$name by zero: stops where perl does, or refused") or diag $@;
-    ok($refused || ( $rc // -1 ) == 255, "$name by zero: perl's exit status, or refused");
+    # before the "a": refused by the loader, by name. Pinned, it is perl's.)
+    if ($PINS_DIV) {
+        is($out, "a\n", "$name by zero: stops where perl does") or diag $@;
+        is($rc, 255, "$name by zero: perl's exit status");
+    }
+    else {
+        like($@ // '', qr/GAP: a (?:division|modulus) whose divisor may be zero, on no control chain/, "$name by zero, floating on the wire: refused by name");
+        is($out, undef, "$name by zero, floating: nothing is run");
+    }
 }
 
 # A nonzero divisor still divides.
@@ -65,10 +72,12 @@ for my $case (
     ok(( $dz // '' ) eq "died\n" || $@ =~ /GAP: .*zero.*eval/, 'a division that may be by zero, in an eval: perl\'s answer, or refused') or diag $@;
     my ($out) = eval { through_llvm(q{sub h { $_[0] / 2 } my $x = $ENV{NO_SUCH_VAR} // 6; my $r = eval { h($x) }; print "$r\n";}) };
     is($out, "3\n", 'a division by a literal in an eval is lowered') or diag $@;
-    # An UNUSED division still dies in perl; B::SoN drops it from the graph,
-    # so it says so on the eval instead.
-    eval { through_llvm(q{my $z = $ENV{NO_SUCH_VAR} // 0; my $r = eval { my $q = 1 / $z; 1 }; print defined $r ? "ran\n" : "died\n";}) };
-    like($@, qr/GAP: .*eval.*may die/, 'an unused division that may be by zero, in an eval, is refused');
+    # An UNUSED division still dies in perl. Pinned where it stands (B::SoN's
+    # `placement-pins`) it is made there and the eval catches it; before
+    # that B::SoN drops it from the graph, and says so on the eval instead.
+    my ($un) = eval { through_llvm(q{my $z = $ENV{NO_SUCH_VAR} // 0; my $r = eval { my $q = 1 / $z; 1 }; print defined $r ? "ran\n" : "died\n";}) };
+    if ($PINS_DIV) { is($un, "died\n", 'an unused division by zero, in an eval: perl\'s answer') or diag $@ }
+    else           { like($@, qr/GAP: .*eval.*may die/, 'an unused division that may be by zero, in an eval, is refused') }
     # So with a reference to an element: one before the start dies. B::SoN
     # stands it where it is taken, naming its site, so the eval catches it
     # there -- perl's answer, its message in $@ -- in the eval's body or in a
