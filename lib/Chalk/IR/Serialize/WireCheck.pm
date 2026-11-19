@@ -137,15 +137,17 @@ class Chalk::IR::Serialize::WireCheck {
             my $op = $n->{op};
             my $at = "(node $n->{id} of $name)";
             if ( $EFFECT_OP{$op} ) { $self->_gap("a write B::SoN left off the control chain: a $op $at") }
-            elsif ( $IN_PLACE{$op} ) {
+            # (a floating Chomp, RegexSubst or Transliterate is B::SoN's value
+            # form, of a copy: `chomp $e` of a catch's $e)
+            elsif ( $op eq 'Assign' ) {
                 my @in = $self->_inputs($n);
-                my $nt = $op eq 'Assign' ? $self->_f( $n, 'targets' ) // 1 : 1;
+                my $nt = $self->_f( $n, 'targets' ) // 1;
                 my @targets = map { defined $_ ? $g->{by}{$_} : undef } @in[ 0 .. $nt - 1 ];
                 my @rhs     = map { defined $_ ? $g->{by}{$_} : undef } @in[ $nt .. $#in ];
                 my %places  = map { ( $_ => 1 ) } grep { defined } map { $self->_place( $g, $_ ) } @targets;
                 next unless %places;
                 $self->_gap( "a write B::SoN left off the control chain: "
-                        . ( $op eq 'Assign' ? ( defined $self->_f( $n, 'targets' ) ? 'a list assignment' : 'an assignment' ) : "a $op" )
+                        . ( defined $self->_f( $n, 'targets' ) ? 'a list assignment' : 'an assignment' )
                         . ' to ' . join( ' and ', sort keys %places ) . " $at" );
             }
             elsif ( $self->_is_sub_call($n) ) {
@@ -332,6 +334,7 @@ class Chalk::IR::Serialize::WireCheck {
         my $g = $self->_graph($name);
         for my $n ( grep { $_->{op} =~ /\A(?:Divide|Modulo)\z/ && !$self->_pinned($_) } $g->{nodes}->@* ) {
             my $d = $g->{by}{ ( $self->_inputs($n) )[1] // '' };
+            $d = $g->{by}{ ( $self->_inputs($d) )[0] // '' } while defined $d && $d->{op} eq 'Coerce';
             next if defined $d && $d->{op} eq 'Constant' && ( $self->_f( $d, 'value' ) // 0 ) =~ /\A-?(?:\d*\.)?\d+\z/ && $self->_f( $d, 'value' ) != 0;
             $self->_gap( "a " . ( $n->{op} eq 'Divide' ? 'division' : 'modulus' ) . " whose divisor may be zero, on no control chain: it would die at its value's first use, after what perl never ran (in $name)" )
                 if $self->_effect_before_first_use( $g, $n );
@@ -486,7 +489,9 @@ class Chalk::IR::Serialize::WireCheck {
                 $_->{op} eq 'ElemRestore'
                     || $_->{op} eq 'EntryWrite' && ( $self->_f( $_, 'binds' )
                         || defined $v && $v->{op} eq 'EntryDef' && $self->_inputs($v)
-                           && $self->_pkg_name($v) eq ( $self->_written_pkg( $g, $_ ) // '' ) )
+                           && $self->_pkg_name($v) eq ( $self->_written_pkg( $g, $_ ) // '' )
+                           # (a try or an eval puts $@ back itself; a die sets it anyway)
+                           && $self->_pkg_name($v) ne '$main::@' )
             } $g->{nodes}->@*;
             $self->_gap("a `local` in a sub a die may leave, under an eval: the die's way out restores nothing (in $name)")
                 if $local && $may_die->($name);

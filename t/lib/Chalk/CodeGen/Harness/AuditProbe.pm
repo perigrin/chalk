@@ -19,7 +19,7 @@ my $LLI = $ENV{LLI} // '/usr/bin/lli';
 #   TIMEOUT  chalk did not finish lowering in time
 sub probes () { return sort glob "$DIR/*.pl" }
 
-sub _one_line ($s) { $s =~ s/\s+at \S+ line \d+\.?\s*\z//; $s =~ s/\s+/ /g; $s =~ s/0x[0-9a-f]+/0x.../g; return substr( $s, 0, 160 ) }
+sub _one_line ($s) { $s =~ s/\s+at \S+ line \d+\.?\s*\z//; $s =~ s/\s+/ /g; $s =~ s/0x[0-9a-f]+/0x.../g; return substr( $s, 0, 160 ) =~ s/\s+\z//r }
 
 # run_probe($file) -> [verdict, why]. Call it in a child process: it loads chalk.
 sub run_probe ($file) {
