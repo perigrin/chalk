@@ -19,9 +19,9 @@ sub verdict ($src) {
 }
 
 my $W1    = qr/a package scalar \(\$main::\w+\) carried round a loop as a value/;
-my $W4    = qr/ref\(\) or blessed\(\) in a program that blesses a reference it may already have read/;
+my $W4    = qr/ref\(\) of a reference that a bless elsewhere changes \(or blessed\(\) of one\)/;
 my $W5    = qr/a captured variable passed to a sub that writes its argument/;
-my $W6    = qr/a `local` in a sub a die may leave, under an eval/;
+my $W6    = qr/a `local` \(\$main::g\) in a sub a die leaves, under an eval/;
 my $W6E   = qr/a store to a package variable \(\$main::v\) in an eval block that dies/;
 my $DIV   = qr/a (?:division|modulus) whose divisor may be zero, on no control chain/;
 my $DEREF = qr/a dereference nothing reads, which may still die/;
@@ -46,6 +46,9 @@ for my $case (
     [ q{use Scalar::Util qw(blessed); my $o = {}; my $a = blessed($o) // "u"; bless $o, "K"; my $b = blessed($o) // "u"; print "$a $b\n";}, $W4, 'W4: blessed either side of a bless' ],
     [ q{sub mk { return bless {}, "A" } sub re { bless $_[0], "B"; return } my $o = mk(); my $a = ref($o); re($o); print "$a ", ref($o), "\n";}, $W4, 'W4: the bless in a sub' ],
     [ q{package A; sub new { return bless {}, shift } package main; my $o = A->new; print ref($o), "\n";}, undef, 'W4: ref of an object blessed once, fresh' ],
+    [ q{use Scalar::Util qw(blessed); my $x = 1; my $r = \$x; print blessed($r) // "u", " ", ref($r), "\n"; bless $r, "S"; print blessed($r), "\n";},
+        $W4, 'W4: a read printed after the bless (the wire of one taken before it and printed after)' ],
+    [ q{package C; sub new { my $c = shift; my $s = {}; bless $s, $c; $s } package main; my $o = C->new; print ref($o), "\n";}, undef, 'W4: ref of what a constructor blessed as a statement' ],
     # W5
     [ q{my $x = 1; my $g = sub { $x }; sub setx { $_[0] = 12 } setx($x); print $g->(), "\n";}, $W5, 'W5: a named sub writes $_[0]' ],
     [ q{my $x = 1; my $g = sub { $x }; my $set = sub { $_[0] = 5 }; $set->($x); print $g->(), "\n";}, $W5, 'W5: a code reference writes $_[0]' ],
@@ -74,6 +77,7 @@ for my $case (
     # W9
     [ q{my $h = { a => 1 }; my $v = $h->{b}{c}; print exists $h->{b} ? "viv" : "none", "\n";}, $W9, 'W9: a nested read of a missing key' ],
     [ q{my $h = { a => { c => 2 } }; my $v = $h->{a}{c}; print "$v\n";}, undef, 'W9: a nested read of a key that is there' ],
+    [ q{my $r = {}; $r->{a}{b} = 3; print $r->{a}{b}, "\n";}, undef, 'W9: a nested read of what a store made' ],
     # W10
     [ q{our @st = (1); my @c = (@st, 2); @st = (); print "@c\n";}, $W10, 'W10: a package array in a list, then emptied' ],
     [ q{our %g = (a => 1); my @k = (%g); %g = (); print scalar(@k), "\n";}, $W10, 'W10: a package hash in a list, then emptied' ],

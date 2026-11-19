@@ -150,6 +150,12 @@ PL
 
 for my $name ( sort keys %prog ) {
     my $r = tap( $prog{$name} );
+    # (p-divmod's `-7 % $v` is on no control chain, with prints before it: the
+    # loader refuses it by name, as it would the same wire dying late.)
+    if ( $r->{verdict} eq 'REFUSED' && ( $r->{why} // '' ) =~ /GAP: a (?:division|modulus) whose divisor may be zero, on no control chain/ ) {
+        pass "$name: refused by name";
+        next;
+    }
     is $r->{verdict}, 'SAME', "$name: as perl" or diag $r->{why} // '', "\n", explain $r;
 }
 

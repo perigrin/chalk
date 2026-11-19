@@ -39,11 +39,19 @@ sub through_llvm ($src) {
 # 089 174).
 for my $c (
     [ q{my @a = (3, 1, 2); if (!@ARGV) { print "none\n" } if (@a) { print "some\n" }},         "none\nsome\n", 'an if' ],
-    [ q{my @e = (); my %h = (a => 1); print @e ? "e" : "-", %h ? "h" : "-", "\n";},            "-h\n",         'a ternary, a hash too' ],
+    [ q{my @e = (); my @f = (1); print @e ? "e" : "-", @f ? "f" : "-", "\n";},               "-f\n",         'a ternary' ],
 ) {
     my ($src, $want, $name) = @$c;
     my $got = eval { through_llvm($src) };
     is($got, $want, "$name: perl's answer") or diag $@;
+}
+
+# A HASH as a condition is refused by the loader: B::SoN hands the hash itself
+# to the test, at no memory version, and T2 read every hash as true (`%h ?`
+# of an emptied hash printed "h").
+{
+    eval { through_llvm(q{my @e = (); my %h = (a => 1); print @e ? "e" : "-", %h ? "h" : "-", "\n";}) };
+    like($@, qr/GAP: a hash read as a scalar \(its truth or its count\) at no memory version/, 'a hash as a condition is refused by name');
 }
 
 done_testing;

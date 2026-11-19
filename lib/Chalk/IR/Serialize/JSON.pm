@@ -1352,9 +1352,15 @@ sub from_json ($json_string) {
     # WHAT THE WIRE GIVES NO ORDER OR MEMORY VERSION FOR IS REFUSED HERE, by
     # name, before a graph is made: the loader drops what control does not
     # reach, so nothing after this can see a store B::SoN left floating.
-    my @defined = keys %ON_WIRE;
+    my %defined = map { ( $_ => $data->{methods}{$_} ) } grep { !defined $data->{methods}{$_}{module} } keys %ON_WIRE;
     delete $data->{methods}->@{@gone};
-    Chalk::IR::Serialize::WireCheck->new( methods => $data->{methods}, defined => \@defined )->check;
+    # (ONLY A WIRE THAT SAYS perl's warning switches, `dowarn`: B::SoN's since
+    # 2026-11-15. A graph chalk wrote itself, to_json's, does not: its nodes
+    # are not placed by B::SoN's rules, and a hand-built one may float what it
+    # likes. Nor does a fixture recorded from an older B::SoN, whose pinning
+    # these rules were not written against.)
+    Chalk::IR::Serialize::WireCheck->new( methods => $data->{methods}, defined => \%defined )->check
+        if exists $data->{dowarn};
     # ...and its class's record of it: a module's class keeps its shape, and
     # the name stays in its stash, unloaded (can() asks by name).
     my %gone = map { $_ => 1 } @gone;

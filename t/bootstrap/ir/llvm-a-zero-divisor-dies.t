@@ -44,8 +44,12 @@ for my $case (
 ) {
     my ($src, $name) = @$case;
     my ($out, $rc) = eval { through_llvm($src) };
-    is($out, "a\n", "$name by zero: stops where perl does") or diag $@;
-    is($rc, 255, "$name by zero: perl's exit status");
+    # (OR REFUSED: the division is on no control chain, and this wire is
+    # also the wire of `my $q = 1 / $z; print "a\n"; print $q`, which dies
+    # before the "a" -- the loader's wire check cannot tell which it is.)
+    my $refused = ( $@ // '' ) =~ /GAP: a (?:division|modulus) whose divisor may be zero, on no control chain/;
+    ok($refused || ( $out // '' ) eq "a\n", "$name by zero: stops where perl does, or refused") or diag $@;
+    ok($refused || ( $rc // -1 ) == 255, "$name by zero: perl's exit status, or refused");
 }
 
 # A nonzero divisor still divides.

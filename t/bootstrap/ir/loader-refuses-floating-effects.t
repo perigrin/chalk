@@ -53,6 +53,10 @@ for my $case (
         undef, 'a dynamic call of a method that reads and writes nothing' ],
     [ q{package Foo; sub new { return bless { n => 3 }, shift } package main; my $o = Foo->new; print ref($o), " $o->{n}\n";},
         undef, 'a bless of a fresh hash, returned' ],
+    [ q{package Foo; sub add { return $_[1] + $_[2] } package main; my $o = bless {}, "Foo"; my $m = "add"; print $o->$m(2, 3), "\n";},
+        undef, 'a dynamic call printed where it stands' ],
+    [ q{package C; sub v { ${$_[0]} } package main; my $x = 5; my $o = bless \$x, "C"; print ref($o), " ", $o->v, "\n";}, undef, 'a bless of a fresh scalar reference' ],
+    [ q{package T; sub wrap { bless $_[1], $_[0] } package main; my $o = T->wrap({ n => 4 }); print ref($o), " $o->{n}\n";}, undef, 'a bless of an argument, returned' ],
     [ q{my $slot = 0; sub slot :lvalue { $slot } slot() = 42; print slot(), "\n";}, undef, 'an lvalue call, the place of a store on the chain' ],
 ) {
     my ( $src, $name, $what ) = @$case;

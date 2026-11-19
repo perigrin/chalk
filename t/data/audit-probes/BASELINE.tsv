@@ -52,7 +52,7 @@ ar6	SAME
 ar7	SAME	
 ar8	REFUSED	GAP: T2: out of its slices (an argument perl aliases (Subscript) passed where a sub writes @_)
 ar9	SAME	
-bless1	REFUSED	load: from_json failed: GAP: ref() or blessed() in a program that blesses a reference it may already have read: the read names no memory version, so it may be made on
+bless1	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
 bless2	REFUSED	load: from_json failed: GAP: a bless B::SoN left off the control chain: it runs at its value's first use, or never, and another read of what it blesses may come first
 bt1	SAME	
 ca1	SAME	
@@ -129,20 +129,20 @@ ef19	SAME
 ef2	REFUSED	GAP: T2: out of its slices (Call builtin prtf)
 ef20	SAME	
 ef21	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
-ef22	REFUSED	load: from_json failed: GAP: a call B::SoN left off the control chain: open (node 10 of main::__PROGRAM__)
+ef22	REFUSED	GAP: T2: out of its slices (a open B::SoN does not place on the chain)
 ef23	SAME	
 ef24	SAME	
 ef25	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
 ef26	SAME	
 ef27	REFUSED	GAP: T2: out of its slices (a reference to what is not an array)
 ef28	REFUSED	GAP: T2: out of its slices (a local aggregate restored with no save made)
-ef3	REFUSED	load: from_json failed: GAP: a call B::SoN left off the control chain: open (node 21 of main::__PROGRAM__)
+ef3	REFUSED	GAP: T2: out of its slices (a statement Call builtin unlink)
 ef4	SAME	
 ef5	SAME	
 ef6	REFUSED	GAP: T2: out of its slices (an each in a program with a keys or values (which reset it, B::SoN places them nowhere))
 ef7	SAME	
 ef8	SAME	
-ef9	REFUSED	load: from_json failed: GAP: ref() or blessed() in a program that blesses a reference it may already have read: the read names no memory version, so it may be made on
+ef9	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
 ev1	SAME	
 ev10	SAME	
 ev11	SAME	
@@ -240,7 +240,7 @@ lo13	SAME
 lo14	REFUSED	load: from_json failed: GAP: a package array or hash (@main::st) flattened into a list at no memory version, where it is also written: the list would be made after th
 lo15	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
 lo16	REFUSED	load: from_json failed: GAP: a store to a package variable ($main::v) in an eval block that dies: the wire does not say whether it is a `local`, whose restore the die
-lo2	REFUSED	load: from_json failed: GAP: a `local` in a sub a die may leave, under an eval: the die's way out restores nothing (in main::t)
+lo2	REFUSED	load: from_json failed: GAP: a `local` ($main::g) in a sub a die leaves, under an eval: the die's way out restores nothing (in main::t)
 lo3	WRONG	got=[4 ] want=[1 ]
 lo4	SAME	
 lo5	REFUSED	GAP: T2: out of its slices (a local)
@@ -345,16 +345,16 @@ st10	REFUSED	load: from_json failed: GAP: a hash read as a scalar (its truth or 
 st11	SAME	
 st12	SAME	
 st13	SAME	
-st14	REFUSED	load: from_json failed: GAP: ref() or blessed() in a program that blesses a reference it may already have read: the read names no memory version, so it may be made on
-st15	REFUSED	load: from_json failed: GAP: ref() or blessed() in a program that blesses a reference it may already have read: the read names no memory version, so it may be made on
-st16	REFUSED	load: from_json failed: GAP: ref() or blessed() in a program that blesses a reference it may already have read: the read names no memory version, so it may be made on
-st17	REFUSED	load: from_json failed: GAP: ref() or blessed() in a program that blesses a reference it may already have read: the read names no memory version, so it may be made on
-st2	REFUSED	load: from_json failed: GAP: ref() or blessed() in a program that blesses a reference it may already have read: the read names no memory version, so it may be made on
+st14	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
+st15	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
+st16	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
+st17	SAME	
+st2	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
 st3	REFUSED	no program graph
 st4	SAME	
 st5	REFUSED	load: from_json failed: GAP: `defined &main::foo` may change as the program runs (main::__PROGRAM__ may run)
-st6	REFUSED	load: from_json failed: GAP: ref() or blessed() in a program that blesses a reference it may already have read: the read names no memory version, so it may be made on
-st7	REFUSED	load: from_json failed: GAP: ref() or blessed() in a program that blesses a reference it may already have read: the read names no memory version, so it may be made on
+st6	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
+st7	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
 st8	SAME	
 st9	SAME	
 swap1	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 18 of main::__PROGRAM__)

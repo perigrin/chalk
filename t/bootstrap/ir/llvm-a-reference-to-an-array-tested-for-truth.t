@@ -41,7 +41,7 @@ sub through_llvm ($pl) {
 # THE LOADED Ref IS AN ArrayRef / HashRef, by its operand's sigil (Earley.pm's
 # `\@held_rows`, read by `!@held_rows` beside it, was ScalarRef).
 {
-    my $pl = write_pl(q{my @a; my %h; print "e\n" if !@a; print "f\n" if !%h; my $r = \@a; my $q = \%h; print ref($r), ref($q), "\n";});
+    my $pl = write_pl(q{my @a; my %h; print "e\n" if !@a; my $r = \@a; my $q = \%h; print ref($r), ref($q), "\n";});
     my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null);
     # The wire's own stamps, before the loader: the case this file is about.
     require JSON::PP;
