@@ -1,0 +1,420 @@
+# The audit probes' verdicts (tools/audit-probes.pl --update writes this file).
+# name	verdict	why
+al1	REFUSED	GAP: T2: out of its slices (a loop phi with other than two ways in)
+al10	SAME	
+al11	SAME	
+al12	SAME	
+al13	SAME	
+al14	SAME	
+al15	SAME	
+al16	SAME	
+al17	SAME	
+al18	SAME	
+al19	SAME	
+al2	REFUSED	GAP: T2: out of its slices (a loop phi with other than two ways in)
+al20	SAME	
+al21	SAME	
+al22	SAME	
+al23	SAME	
+al24	SAME	
+al25	SAME	
+al26	SAME	
+al27	SAME	
+al28	SAME	
+al29	SAME	
+al3	REFUSED	GAP: T2: out of its slices (PadAccess)
+al30	REFUSED	GAP: T2: out of its slices (a list perl may alias (Phi) passed where a sub writes @_)
+al4	SAME	
+al5	SAME	
+al6	SAME	
+al7	SAME	
+al8	SAME	
+al9	SAME	
+ar1	SAME	
+ar10	SAME	
+ar11	SAME	
+ar12	WRONG	got=[3 ] want=[1 ]
+ar13	REFUSED	GAP: T2: out of its slices (sub main::f reads @_ other than by shifts, $_[N] or a signature)
+ar14	SAME	
+ar15	SAME	
+ar16	REFUSED	GAP: T2: out of its slices (the value of a list assignment to scalars)
+ar17	LOUD	chalk: refused at run time: a hash element read through no HASH reference
+ar18	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+ar19	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+ar2	SAME	
+ar20	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+ar21	WRONG	got=[1 ] want=[5 ]
+ar22	WRONG	got=[0 ] want=[3 ]
+ar3	SAME	
+ar4	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+ar5	REFUSED	GAP: T2: out of its slices (an argument perl aliases (PostfixDeref) passed where a sub writes @_)
+ar6	SAME	
+ar7	SAME	
+ar8	REFUSED	GAP: T2: out of its slices (an argument perl aliases (Subscript) passed where a sub writes @_)
+ar9	SAME	
+bless1	SAME	
+bless2	WRONG	got=[HASH K ] want=[K K ]
+bt1	SAME	
+ca1	SAME	
+ca10	SAME	
+ca11	SAME	
+ca12	REFUSED	GAP: T2: out of its slices (a method no package defines (foo))
+ca13	SAME	
+ca14	SAME	
+ca15	SAME	
+ca16	SAME	
+ca17	REFUSED	GAP: T2: out of its slices (a slice taken as a scalar (Coerce))
+ca18	SAME	
+ca19	SAME	
+ca2	REFUSED	GAP: T2: out of its slices (wantarray in a sub (T2 has no void context))
+ca20	SAME	
+ca21	SAME	
+ca22	SAME	
+ca23	SAME	
+ca24	SAME	
+ca25	SAME	
+ca26	SAME	
+ca27	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+ca28	SAME	
+ca29	WRONG	got=[ ] want=[d ]
+ca3	SAME	
+ca30	SAME	
+ca4	SAME	
+ca5	SAME	
+ca6	SAME	
+ca7	SAME	
+ca8	SAME	
+ca9	SAME	
+chop1	SAME	
+chop2	REFUSED	no program graph
+chop3	REFUSED	no program graph
+cl1	WRONG	got=[1 ] want=[7 ]
+cl10	SAME	
+cl11	REFUSED	GAP: T2: out of its slices (a captured variable that is not one kept in memory)
+cl12	SAME	
+cl13	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
+cl14	REFUSED	no program graph
+cl15	WRONG	got=[a1,b2 ] want=[a1,b2,c3 ]
+cl16	SAME	
+cl17	SAME	
+cl18	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+cl19	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
+cl2	WRONG	got=[1 ] want=[7 ]
+cl20	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
+cl21	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+cl22	SAME	
+cl23	WRONG	got=[1 ] want=[12 ]
+cl24	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
+cl25	WRONG	got=[5 ] want=[6 ]
+cl3	SAME	
+cl4	SAME	
+cl5	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
+cl6	REFUSED	GAP: T2: out of its slices (CellWrite)
+cl7	SAME	
+cl8	REFUSED	no program graph
+cl9	REFUSED	no program graph
+dyn1	WRONG	got=[0 ] want=[1 ]
+dyn2	WRONG	got=[5 0 ] want=[5 1 ]
+ef1	REFUSED	GAP: T2: out of its slices (a statement Call builtin prtf)
+ef10	WRONG	got=[A A ] want=[A B ]
+ef11	SAME	
+ef12	SAME	
+ef13	SAME	
+ef14	SAME	
+ef15	SAME	
+ef16	SAME	
+ef17	SAME	
+ef18	SAME	
+ef19	SAME	
+ef2	REFUSED	GAP: T2: out of its slices (Call builtin prtf)
+ef20	SAME	
+ef21	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+ef22	REFUSED	GAP: T2: out of its slices (a open B::SoN does not place on the chain)
+ef23	SAME	
+ef24	SAME	
+ef25	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+ef26	SAME	
+ef27	REFUSED	GAP: T2: out of its slices (a reference to what is not an array)
+ef28	REFUSED	GAP: T2: out of its slices (a local aggregate restored with no save made)
+ef3	REFUSED	GAP: T2: out of its slices (a statement Call builtin unlink)
+ef4	SAME	
+ef5	SAME	
+ef6	REFUSED	GAP: T2: out of its slices (an each in a program with a keys or values (which reset it, B::SoN places them nowhere))
+ef7	SAME	
+ef8	SAME	
+ef9	WRONG	got=[K K ] want=[HASH K ]
+ev1	SAME	
+ev10	SAME	
+ev11	SAME	
+ev12	SAME	
+ev13	SAME	
+ev14	SAME	
+ev15	SAME	
+ev16	SAME	
+ev17	REFUSED	GAP: T2: out of its slices (an eval closed at another depth)
+ev18	REFUSED	no program graph
+ev2	SAME	
+ev3	SAME	
+ev4	SAME	
+ev5	SAME	
+ev6	WRONG	got=[5 ] want=[12 ]
+ev7	SAME	
+ev8	REFUSED	no program graph
+ev9	SAME	
+ex1	WRONG	got=[ str ] want=[HASH 7 ]
+ex2	WRONG	got=[str ] want=[ref ]
+ex3	WRONG	got=[str:E=HASH(0x...) at t/data/audit-probes/ex3.pl line 1. ] want=[oops ]
+ex4	WRONG	got=[ ] want=[HASH ]
+fl1	WRONG	got=[before ] want=[]
+fl10	LOUD	substr outside of string: stopped (chalk, T2)
+fl11	WRONG	got=[none ] want=[viv ]
+fl12	SAME	
+fl13	REFUSED	GAP: T2: out of its slices (Call builtin log)
+fl14	WRONG	got=[num ] want=[died ]
+fl2	REFUSED	no program graph
+fl3	SAME	
+fl4	SAME	
+fl5	WRONG	got=[a b ] want=[a ] (exit differs)
+fl6	WRONG	got=[before ] want=[]
+fl7	SAME	
+fl8	REFUSED	no program graph
+fl9	SAME	
+go1	SAME	
+go2	SAME	
+go3	REFUSED	no program graph
+go4	REFUSED	GAP: T2: out of its slices (an if whose arms do not meet)
+ht1	WRONG	got=[ne ] want=[e ne ]
+ht2	WRONG	got=[n=HASH(0x...) ] want=[n=0 ]
+im1	REFUSED	load: from_json failed: GAP: a BEGIN block with effects of its own is not lowered (a BEGIN or END block runs outside the main program)
+im10	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+im11	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+im12	REFUSED	GAP: T2: out of its slices (a capture read where its match may have failed (perl reads the last match that succeeded))
+im13	SAME	
+im14	SAME	
+im15	SAME	
+im16	SAME	
+im17	SAME	
+im18	SAME	
+im19	SAME	
+im2	REFUSED	load: from_json failed: GAP: a BEGIN block with effects of its own is not lowered (a BEGIN or END block runs outside the main program)
+im20	SAME	
+im21	SAME	
+im22	SAME	
+im23	LOUD	chalk: refused at run time: a store through an undefined scalar reference
+im24	SAME	
+im25	SAME	
+im26	SAME	
+im27	SAME	
+im28	SAME	
+im29	SAME	
+im3	REFUSED	load: from_json failed: GAP: a BEGIN block with effects of its own is not lowered (a BEGIN or END block runs outside the main program)
+im30	SAME	
+im4	REFUSED	GAP: T2: out of its slices (a tie of a scalar)
+im5	SAME	
+im6	WRONG	got=[ ] want=[d ]
+im7	SAME	
+im8	SAME	
+im9	SAME	
+io1	REFUSED	GAP: T2: out of its slices (a variable a handle writes, read other than after a close)
+io10	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+io2	REFUSED	GAP: T2: out of its slices (a variable a handle writes, read other than after a close)
+io3	REFUSED	GAP: T2: out of its slices (a four-argument select of handles or a wait)
+io4	REFUSED	GAP: T2: out of its slices (a statement Call builtin sleep)
+io5	REFUSED	GAP: T2: out of its slices (a four-argument select of handles or a wait)
+io6	REFUSED	GAP: T2: out of its slices (an open of a file (or of what is not a reference to a constant string))
+io7	REFUSED	GAP: T2: out of its slices (a variable a handle writes, read other than after a close)
+io8	SAME	
+io9	SAME	
+la1	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+la2	WRONG	got=[0 0 ] want=[3 4 ]
+la3	WRONG	got=[0 0 ] want=[3 4 ]
+la4	REFUSED	GAP: T2: out of its slices (a value stamped List (Assign))
+la5	WRONG	got=[ ] want=[1 ]
+la6	WRONG	got=[0 0 2 ] want=[8 9 2 ]
+la7	SAME	
+lo1	SAME	
+lo10	SAME	
+lo11	SAME	
+lo12	SAME	
+lo13	SAME	
+lo14	WRONG	got=[11 ] want=[21 ]
+lo15	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+lo16	WRONG	got=[2331 ] want=[2321 ]
+lo2	WRONG	got=[2 ] want=[1 ]
+lo3	WRONG	got=[4 ] want=[1 ]
+lo4	SAME	
+lo5	REFUSED	GAP: T2: out of its slices (a local)
+lo6	SAME	
+lo7	SAME	
+lo8	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+lo9	REFUSED	no program graph
+lp1	SAME	
+lp10	SAME	
+lp11	SAME	
+lp12	SAME	
+lp13	SAME	
+lp14	SAME	
+lp15	SAME	
+lp16	SAME	
+lp17	SAME	
+lp18	SAME	
+lp19	SAME	
+lp2	SAME	
+lp20	SAME	
+lp21	SAME	
+lp22	SAME	
+lp23	SAME	
+lp24	SAME	
+lp25	SAME	
+lp26	REFUSED	no program graph
+lp27	SAME	
+lp28	REFUSED	GAP: T2: out of its slices (an array through an element read whole)
+lp3	REFUSED	no program graph
+lp4	SAME	
+lp5	SAME	
+lp6	SAME	
+lp7	SAME	
+lp8	REFUSED	no program graph
+lp9	REFUSED	no program graph
+m4	WRONG	got=[ 10 ] want=[9 10 ]
+nv1	WRONG	got=[2 ] want=[1 2 ]
+nv10	SAME	
+nv11	SAME	
+nv12	SAME	
+nv13	SAME	
+nv14	SAME	
+nv2	SAME	
+nv3	SAME	
+nv4	WRONG	got=[0 7|7 ] want=[0 1 2|7 ]
+nv5	WRONG	got=[0 ] want=[2 ]
+nv6	SAME	
+nv7	WRONG	got=[10 ] want=[30 ]
+nv8	WRONG	got=[11 ] want=[21 ]
+nv9	REFUSED	GAP: T2: out of its slices (PadAccess)
+pg1	WRONG	got=[13 ] want=[33 ]
+pg10	SAME	
+pg11	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+pg12	SAME	
+pg13	SAME	
+pg14	REFUSED	GAP: T2: out of its slices (a reference to what is not an array)
+pg15	SAME	
+pg16	SAME	
+pg1b	SAME	
+pg2	WRONG	got=[1,2,3, ] want=[11,22,33, ]
+pg3	REFUSED	GAP: T2: out of its slices (a package scalar read of no one version)
+pg4	SAME	
+pg5	SAME	
+pg6	REFUSED	no program graph
+pg7	SAME	
+pg8	SAME	
+pg9	SAME	
+pl1	SAME	
+pl10	WRONG	never ends
+pl11	WRONG	got=[13 ] want=[23 ]
+pl12	REFUSED	no program graph
+pl13	REFUSED	GAP: T2: out of its slices (the value of a list assignment to scalars)
+pl14	SAME	
+pl15	SAME	
+pl2	SAME	
+pl3	SAME	
+pl4	WRONG	got=[13 ] want=[33 ]
+pl5	WRONG	got=[13 ] want=[33 ]
+pl6	WRONG	got=[3 ] want=[33 ]
+pl7	SAME	
+pl8	WRONG	got=[13 ] want=[33 ]
+pl9	REFUSED	no program graph
+rn1	REFUSED	no program graph
+rn10	SAME	
+rn2	REFUSED	GAP: T2: out of its slices (a statement Call builtin srand)
+rn3	SAME	
+rn4	SAME	
+rn5	SAME	
+rn6	SAME	
+rn7	SAME	
+rn8	REFUSED	GAP: T2: out of its slices (an open for writing of a file (or of what is not a `my` scalar))
+rn9	REFUSED	GAP: T2: out of its slices (a require of Cwd.pm, not compiled in)
+slice1	WRONG	got=[ ] want=[1 2 ]
+slice2	WRONG	got=[0 0 0 ] want=[5 6 0 ]
+slice3	WRONG	got=[a=0 ] want=[a=7,b=8 ]
+sm1	SAME	
+sm2	SAME	
+sm3	SAME	
+sm4	SAME	
+st1	REFUSED	GAP: T2: out of its slices (a hash element of a named hash)
+st10	WRONG	got=[11 ] want=[01 ]
+st11	SAME	
+st12	SAME	
+st13	SAME	
+st14	WRONG	got=[CODE Z Z ] want=[CODE HASH Z ]
+st15	REFUSED	GAP: T2: out of its slices (a control node with 2 successors)
+st16	SAME	
+st17	SAME	
+st2	WRONG	got=[K K ] want=[u K ]
+st3	REFUSED	no program graph
+st4	SAME	
+st5	REFUSED	load: from_json failed: GAP: `defined &main::foo` may change as the program runs (main::__PROGRAM__ may run)
+st6	WRONG	got=[B B ] want=[A B ]
+st7	WRONG	got=[B B ] want=[A B ]
+st8	SAME	
+st9	SAME	
+swap1	WRONG	got=[1 2 ] want=[2 1 ]
+swap2	SAME	
+swap3	WRONG	got=[1 2 ] want=[2 1 ]
+tp1	SAME	
+tp10	SAME	
+tp11	REFUSED	GAP: T2: out of its slices (a package scalar read of no one version)
+tp12	REFUSED	GAP: T2: out of its slices (a package scalar read of no one version)
+tp2	SAME	
+tp3	SAME	
+tp4	SAME	
+tp5	WRONG	got=[3 ] want=[5 ]
+tp6	WRONG	got=[0 ] want=[10 ]
+tp7	WRONG	got=[-a ] want=[-a-b-c ]
+tp8	SAME	
+tp9	SAME	
+vp1	SAME	
+vp10	REFUSED	no program graph
+vp11	SAME	
+vp12	SAME	
+vp13	REFUSED	GAP: T2: out of its slices (a slice taken as a scalar (Coerce))
+vp14	SAME	
+vp15	SAME	
+vp16	SAME	
+vp17	SAME	
+vp18	SAME	
+vp19	WRONG	got=[HASH K HASH ] want=[HASH K K ]
+vp2	SAME	
+vp20	SAME	
+vp3	SAME	
+vp4	SAME	
+vp5	WRONG	got=[21 ] want=[30 ]
+vp6	SAME	
+vp7	SAME	
+vp8	SAME	
+vp9	SAME	
+wa1	SAME	
+wa10	SAME	
+wa11	SAME	
+wa12	SAME	
+wa13	SAME	
+wa14	SAME	
+wa15	SAME	
+wa16	SAME	
+wa17	SAME	
+wa18	WRONG	got=[1 2 3 ] want=[2 1 3 ]
+wa19	REFUSED	GAP: T2: out of its slices (Call builtin splice)
+wa2	SAME	
+wa20	SAME	
+wa21	SAME	
+wa22	SAME	
+wa23	SAME	
+wa24	SAME	
+wa25	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+wa26	SAME	
+wa3	SAME	
+wa4	SAME	
+wa5	SAME	
+wa6	SAME	
+wa7	SAME	
+wa8	SAME	
+wa9	SAME	
