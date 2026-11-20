@@ -97,6 +97,11 @@ class Chalk::IR::ReferenceFlow {
             for my $i ( 0 .. $#in ) {
                 push $uses{ refaddr( $in[$i] ) }->@*, [ $n, $i ] if blessed( $in[$i] );
             }
+            # A CELL MADE AT A VERSION holds the variable as that version left
+            # it: what a store there put into it reaches the closure through
+            # the cell (position -1: no value input).
+            push $uses{ refaddr( $n->mem_in ) }->@*, [ $n, -1 ]
+                if $n->operation eq 'MakeCell' && blessed( $n->mem_in );
             my $k = _location_key($n);
             push $at{$k}->@*, $n if defined $k;
             if ( $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '&'
