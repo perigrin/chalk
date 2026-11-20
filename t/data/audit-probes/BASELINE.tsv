@@ -114,13 +114,14 @@ cl7	SAME
 cl8	REFUSED	no program graph
 cl9	REFUSED	no program graph
 cr1	SAME	
+cr10	SAME	
 cr2	SAME	
-cr3	REFUSED	GAP: T2: out of its slices (Call builtin reftype)
+cr3	SAME	
 cr4	SAME	
 cr5	SAME	
 cr6	SAME	
 cr7	SAME	
-cr8	REFUSED	GAP: T2: out of its slices (a control node with 3 successors)
+cr8	SAME	
 cr9	SAME	
 dyn1	SAME	
 dyn2	SAME	
@@ -176,6 +177,13 @@ ex1	REFUSED	load: from_json failed: GAP: a die of what may be a reference, where
 ex2	REFUSED	load: from_json failed: GAP: a die of what may be a reference, where an eval may catch it: $@ would be its string, not the reference (in main::__PROGRAM__)
 ex3	REFUSED	load: from_json failed: GAP: a die of what may be a reference, where an eval may catch it: $@ would be its string, not the reference (in main::__PROGRAM__)
 ex4	REFUSED	load: from_json failed: GAP: a die of what may be a reference, where an eval may catch it: $@ would be its string, not the reference (in main::__PROGRAM__)
+fk1	SAME	
+fk2	SAME	
+fk3	SAME	
+fk4	SAME	
+fk5	SAME	
+fk6	SAME	
+fk7	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
 fl1	SAME	
 fl10	SAME	
 fl11	REFUSED	load: from_json failed: GAP: a read through an element that is not there, which perl makes (autovivification) (in main::__PROGRAM__)
@@ -195,6 +203,9 @@ go1	SAME
 go2	SAME	
 go3	REFUSED	no program graph
 go4	REFUSED	GAP: T2: out of its slices (an if whose arms do not meet)
+hc1	SAME	
+hc2	SAME	
+hc3	SAME	
 hs1	SAME	
 hs2	SAME	
 hs3	SAME	
@@ -384,7 +395,7 @@ st11	SAME
 st12	SAME	
 st13	SAME	
 st14	SAME	
-st15	REFUSED	GAP: T2: out of its slices (a control node with 2 successors)
+st15	SAME	
 st16	SAME	
 st17	SAME	
 st2	SAME	
