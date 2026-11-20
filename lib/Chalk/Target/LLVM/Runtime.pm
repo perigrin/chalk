@@ -2298,11 +2298,55 @@ code:
   %k = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_code, i64 0, i64 0), i64 4)
   ret %Str %k
 sc:
+  ; (a reference to a scalar that holds a reference is a REF: `ref \\$r`)
+  %ci = extractvalue %Slot %s, 1
+  %cp = inttoptr i64 %ci to %Slot*
+  %cv = load %Slot, %Slot* %cp
+  %cvt = extractvalue %Slot %cv, 0
+  %clo = icmp uge i8 %cvt, 5
+  %chi = icmp ule i8 %cvt, 9
+  %toref = and i1 %clo, %chi
+  br i1 %toref, label %rr, label %plain_sc
+rr:
+  %rq = call %Str @t2_str(i8* getelementptr ([4 x i8], [4 x i8]* @lit_kind_ref, i64 0, i64 0), i64 3)
+  ret %Str %rq
+plain_sc:
   %q = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_scalar, i64 0, i64 0), i64 6)
   ret %Str %q
 none:
   %e = call %Str @t2_str(i8* getelementptr ([5 x i8], [5 x i8]* @lit_hash, i64 0, i64 0), i64 0)
   ret %Str %e
+}
+; t2_referent_type(s) -> Scalar::Util\'s reftype: what s refers to, its class
+; aside (HASH, ARRAY, CODE, SCALAR, REF; REGEXP for a qr//), undef for what
+; is no reference.
+@lit_kind_regexp = private unnamed_addr constant [7 x i8] c"REGEXP\00"
+define internal %Slot @t2_referent_type(%Slot %s) {
+entry:
+  %b = call %Str @t2_basetype(%Slot %s)
+  %n = extractvalue %Str %b, 1
+  %none = icmp eq i64 %n, 0
+  br i1 %none, label %undef, label %ref
+undef:
+  ret %Slot zeroinitializer
+ref:
+  %c = call %Slot @t2_class_of(%Slot %s)
+  %ct = extractvalue %Slot %c, 0
+  %blessed = icmp eq i8 %ct, 3
+  br i1 %blessed, label %obj, label %plain
+obj:
+  %cn = call %Str @t2_slot_str(%Slot %c)
+  %rxn = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_regexp, i64 0, i64 0), i64 6)
+  %rxc = call i64 @t2_strcmp(%Str %cn, %Str %rxn)
+  %isrx = icmp eq i64 %rxc, 0
+  br i1 %isrx, label %rx, label %plain
+rx:
+  %rs = call %Str @t2_str(i8* getelementptr ([7 x i8], [7 x i8]* @lit_kind_regexp, i64 0, i64 0), i64 6)
+  %rb = call %Slot @t2_box_str(%Str %rs)
+  ret %Slot %rb
+plain:
+  %pb = call %Slot @t2_box_str(%Str %b)
+  ret %Slot %pb
 }
 @t2_stashes = internal global %Slot zeroinitializer
 @lit_isa = private unnamed_addr constant [5 x i8] c"@ISA\00"

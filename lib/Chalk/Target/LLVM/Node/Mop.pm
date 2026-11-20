@@ -8,6 +8,7 @@ no warnings 'experimental::class';
 class Chalk::Target::LLVM::Node::Bless :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_bless') } }
 class Chalk::Target::LLVM::Node::ClassOf :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_class_of') } }
 class Chalk::Target::LLVM::Node::RefType :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_reftype') } }
+class Chalk::Target::LLVM::Node::ReferentType :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_referent_type') } }
 class Chalk::Target::LLVM::Node::MopUniversal :isa(Chalk::Target::LLVM::Node) { method to_ll () { 'call void @t2_universal_setup()' } }
 class Chalk::Target::LLVM::Node::MopVar :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { 'call void @t2_mop_var(' . $self->_args($self->inputs->@*) . ', %Slot* ' . $self->attr->{global} . ')' }

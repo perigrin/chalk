@@ -621,6 +621,16 @@ sub _value {
         out('a blessed of other than one argument') unless @in == 1;
         return $b->emit(op => 'ClassOf', type => '%Slot', inputs => [ $b->as($b->value($in[0]), '%Slot') ]);
     }
+    # reftype($x): what a reference refers to (HASH, ARRAY, CODE, SCALAR, REF,
+    # REGEXP), its class aside; undef for what is no reference. No bless
+    # changes it, so it is no read of the class; the memory version B::SoN
+    # reads it at is not an operand.
+    if ($op eq 'Call' && ( $v->builtin_kind // '' ) eq 'referent_type') {
+        my @in = grep { blessed($_) } $v->inputs->@*;
+        pop @in if $v->can('memory_input') && $v->memory_input;
+        out('a reftype of other than one argument') unless @in == 1;
+        return $b->emit(op => 'ReferentType', type => '%Slot', inputs => [ $b->as($b->value($in[0]), '%Slot') ]);
+    }
     # $$r: what the variable r refers to holds; perl's die where r is no SCALAR
     # reference (a string under strict refs; undef too), its eval's to catch.
     # A FOREACH ALIAS READ (B::SoN's ${ \ $_[i] }, a guard of its existence

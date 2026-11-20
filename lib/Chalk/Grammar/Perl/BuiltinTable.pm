@@ -104,17 +104,19 @@ class Chalk::Grammar::Perl::BuiltinTable {
         # f's a UV. require's 1 (a file already loaded, or one B::SoN
         # followed). index's position, -1 for none. Yes or no: perl's
         # chdir, -d and -e (1 or ''). blessed's class name, the kind of thing
-        # `ref \$x` names (B::SoN's reftype_of_ref).
+        # `ref \$x` names (B::SoN's reftype_of_ref), the kind of thing a
+        # reference refers to (Scalar::Util's reftype).
         return_type => {
             ( map { ( $_ => 'Num' ) } qw(int abs rand hex oct) ),
             require => 'Int', index => 'Int',
             ( map { ( $_ => 'Boolean' ) } qw(chdir ftdir ftis) ),
-            blessed => 'Str', reftype_of_ref => 'Str',
+            blessed => 'Str', reftype_of_ref => 'Str', reftype => 'Str',
         },
 
         # ITS VALUE MAY BE UNDEF: substr outside its string, blessed of what
-        # is not an object, -d and -e of nothing there.
-        may_be_undef => { map { ( $_ => 1 ) } qw(substr blessed ftdir ftis) },
+        # is not an object, reftype of what is no reference, -d and -e of
+        # nothing there.
+        may_be_undef => { map { ( $_ => 1 ) } qw(substr blessed reftype ftdir ftis) },
 
         # THE KIND OF BUILTIN IT IS (after perlfunc's "Perl Functions by
         # Category", one each):
@@ -123,7 +125,7 @@ class Chalk::Grammar::Perl::BuiltinTable {
         #              -e), the directory chdir changes to, the file
         #              require loads
         #   substring  a piece of a string (substr), or where one is (index)
-        #   object     what a reference is: bless, blessed, `ref \$x`
+        #   object     what a reference is: bless, blessed, reftype, `ref \$x`
         #   array      an element taken off an array's end: shift, pop
         #   list       a LIST made or taken whole: join's (a string of one),
         #              unpack's and glob's (a list), each's (a key and value)
@@ -135,7 +137,7 @@ class Chalk::Grammar::Perl::BuiltinTable {
             ( map { ( $_ => 'number' ) }    qw(int abs rand hex oct) ),
             ( map { ( $_ => 'path' ) }      qw(ftdir ftis chdir require) ),
             ( map { ( $_ => 'substring' ) } qw(substr index) ),
-            ( map { ( $_ => 'object' ) }    qw(bless blessed reftype_of_ref) ),
+            ( map { ( $_ => 'object' ) }    qw(bless blessed reftype reftype_of_ref) ),
             ( map { ( $_ => 'array' ) }     qw(shift pop) ),
             ( map { ( $_ => 'list' ) }      qw(join unpack glob each) ),
             warn => 'warning',
@@ -213,7 +215,7 @@ class Chalk::Grammar::Perl::BuiltinTable {
         kind => {
             ftdir => 'is_directory', ftis => 'is_present', chdir => 'changes_directory', require => 'loads_file',
             substr => 'piece', index => 'position',
-            bless => 'blesses', blessed => 'class_name', reftype_of_ref => 'referent_kind',
+            bless => 'blesses', blessed => 'class_name', reftype => 'referent_type', reftype_of_ref => 'referent_kind',
             join => 'joined', unpack => 'unpacked', glob => 'file_names', each => 'next_pair',
             chr => 'character', ord => 'code_point', time => 'epoch_seconds', reverse => 'reversed',
             sprintf => 'formatted', printf => 'prints_formatted', prtf => 'prints_formatted', lock => 'operand', prototype => 'prototype_of', pack => 'packed',
