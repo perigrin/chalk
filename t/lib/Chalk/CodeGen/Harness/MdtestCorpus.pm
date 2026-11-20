@@ -1472,6 +1472,15 @@ sub _last_pad_store {
     return @stores == 1 ? ($stores[0]) : ();
 }
 
+# _operands($node) -> its inputs and then the memory version it names (wire
+# v2's mem_in): the order a v1 wire -- and every ir block here -- writes them,
+# the memory last. A spec node built from an ir block has no mem_in.
+sub _operands {
+    my ($n) = @_;
+    return () unless $n->can('inputs') && defined $n->inputs;
+    return ( $n->inputs->@*, ( $n->can('mem_in') && blessed( $n->mem_in ) ? $n->mem_in : () ) );
+}
+
 # _collect_bidirectional($node) -> @nodes reachable via inputs + control_in +
 # consumers (the whole connected spec graph, so branch-control stores hanging
 # off Proj/Region are visible). Deduped.
@@ -1485,7 +1494,7 @@ sub _collect_bidirectional {
         next if $seen{ $n->id }++;
         push @out, $n;
         if ($n->can('inputs') && defined $n->inputs) {
-            push @queue, grep { blessed($_) } $n->inputs->@*;
+            push @queue, grep { blessed($_) } _operands($n);
         }
         push @queue, $n->control_in
             if $n->can('control_in') && defined $n->control_in;
@@ -1659,8 +1668,8 @@ sub _node_match {
     # by-index pairing — operand ORDER is load-bearing, so an operand SWAP
     # (T2/H1) stays rejected.
     if (_pair_match($rs, $rr, $in_descent)) {
-        my @sin = $rs->can('inputs') && defined $rs->inputs ? $rs->inputs->@* : ();
-        my @rin = $rr->can('inputs') && defined $rr->inputs ? $rr->inputs->@* : ();
+        my @sin = $rs->can('inputs') && defined $rs->inputs ? _operands($rs) : ();
+        my @rin = $rr->can('inputs') && defined $rr->inputs ? _operands($rr) : ();
         # Children are NOT descent — a matched child may itself fold, so reset
         # the descent flag for the operand walk.
         return true
@@ -1715,7 +1724,7 @@ sub _operand_specificity {
 sub _rin_for_descent {
     my ($real) = @_;
     return () unless blessed($real) && $real->can('inputs') && defined $real->inputs;
-    return grep { blessed($_) } $real->inputs->@*;
+    return grep { blessed($_) } _operands($real);
 }
 
 # _match_operands(\@sin, \@rin, $ctx, $store_seen, $commutative) -> bool — pair
@@ -2008,7 +2017,7 @@ sub _fold_satisfied_ids {
     my %consumers;
     for my $node (@nodes) {
         next unless $node->can('inputs') && defined $node->inputs;
-        for my $in ($node->inputs->@*) {
+        for my $in (_operands($node)) {
             push $consumers{ $in->id }->@*, $node->id if blessed($in);
         }
     }
@@ -2105,7 +2114,7 @@ sub _mark_pad_scaffolding {
     my %consumers;
     for my $node (@nodes) {
         next unless $node->can('inputs') && defined $node->inputs;
-        $consumers{ $_->id }++ for grep { blessed($_) } $node->inputs->@*;
+        $consumers{ $_->id }++ for grep { blessed($_) } _operands($node);
     }
 
     for my $node (@nodes) {
@@ -2237,7 +2246,7 @@ sub _mark_coerce_absorption {
     my %consumers;
     for my $node (@nodes) {
         next unless $node->can('inputs') && defined $node->inputs;
-        for my $in ($node->inputs->@*) {
+        for my $in (_operands($node)) {
             push $consumers{ $in->id }->@*, $node if blessed($in);
         }
     }
@@ -2351,7 +2360,7 @@ sub _collect_nodes_recursive {
     return if $visited->{$id}++;
     push @$nodes, $node;
     if ($node->can('inputs') && defined $node->inputs) {
-        _collect_nodes_recursive($_, $visited, $nodes) for $node->inputs->@*;
+        _collect_nodes_recursive($_, $visited, $nodes) for _operands($node);
     }
     if ($node->can('control_in') && defined $node->control_in) {
         _collect_nodes_recursive($node->control_in, $visited, $nodes);
@@ -2388,7 +2397,7 @@ sub _visit_node {
     # it was already matched by the folded real Constant.
     if ($skip_ids->{$id}) {
         if ($node->can('inputs') && defined $node->inputs) {
-            _visit_node($_, $visited, $sigs, $skip_ids) for $node->inputs->@*;
+            _visit_node($_, $visited, $sigs, $skip_ids) for _operands($node);
         }
         if ($node->can('control_in') && defined $node->control_in) {
             _visit_node($node->control_in, $visited, $sigs, $skip_ids);
@@ -2417,7 +2426,7 @@ sub _visit_node {
 
     # Recurse into inputs (data flow)
     if ($node->can('inputs') && defined $node->inputs) {
-        for my $inp ($node->inputs->@*) {
+        for my $inp (_operands($node)) {
             _visit_node($inp, $visited, $sigs, $skip_ids) if defined $inp;
         }
     }
