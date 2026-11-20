@@ -1,0 +1,1 @@
+use v5.38; use feature 'class'; no warnings; class C { field $x = 1; ADJUST { $main::g += 10 } method m { 1 } } class D { field $y; ADJUST { $main::g = 0; for my $i (1..3) { $main::g = $main::g + 1; C->new; } } } D->new; print "$main::g\n";
