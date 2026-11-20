@@ -829,7 +829,9 @@ sub array_value {
     return $b->emit(op => 'Argv', type => '%Array*') if $v->is_argv;
     return $b->{argsarr} // out('@_ outside a sub taking it as a list') if $op eq 'ArgsSource';
     # A HASH COUNTED is its keys (perl 5.26+), not its pairs flattened (4 for 2).
-    if ($op eq 'Count' && blessed($in[0]) && ( $in[0]->is_named_hash || $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%' || $in[0]->operation eq 'FieldAccess' && ( $b->field_of($in[0]) )[1] eq '%' )) {
+    # (a package hash by name -- `our %g; scalar(%g)`, `%g ? :` -- as a `my %h`)
+    if ($op eq 'Count' && blessed($in[0]) && ( $in[0]->is_named_hash || $in[0]->is_package_aggregate && $in[0]->sigil eq '%'
+                                               || $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%' || $in[0]->operation eq 'FieldAccess' && ( $b->field_of($in[0]) )[1] eq '%' )) {
         my $h = $in[0]->operation eq 'PostfixDeref' ? $b->hash_of($in[0]->inputs->[0]) : $b->hash_of($in[0]);
         return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]);
     }

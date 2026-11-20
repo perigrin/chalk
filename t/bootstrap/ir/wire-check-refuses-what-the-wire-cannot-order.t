@@ -1,5 +1,5 @@
 # ABOUTME: the loader's wire check refuses, by name, the shapes B::SoN's wire gives no order or
-# ABOUTME: memory version for (the IR audit's classes W5-W10), and no neighbour of them.
+# ABOUTME: memory version for (the IR audit's classes W5-W10, a hash assignment's count), and no neighbour of them.
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
@@ -18,6 +18,7 @@ sub verdict ($src) {
     return run_probe($pl);
 }
 
+my $HASHASG = qr/a list assignment to a hash read as a scalar \(the count of its right side\)/;
 my $W5    = qr/a captured variable passed to a sub that writes its argument/;
 my $W6    = qr/a `local` \(\$main::g\) in a sub a die leaves, under an eval/;
 my $W6E   = qr/a store to a package variable \(\$main::\w+\) in an eval block that dies/;
@@ -27,7 +28,6 @@ my $DIE   = qr/a die of what may be a reference, where an eval may catch it/;
 my $W8    = qr/a DESTROY method \(\w+::DESTROY\)/;
 my $W9    = qr/a read through an element that is not there, which perl makes/;
 my $W10   = qr/a package array or hash \([\@%]main::\w+\) flattened into a list at no memory version/;
-my $HASH  = qr/a hash read as a scalar \(its truth or its count\) at no memory version/;
 
 # Does this B::SoN put a division that may fault on the control chain? (Its
 # `placement-pins` does; before it the division floats and is refused here.)
@@ -100,11 +100,18 @@ for my $case (
     [ q{our %g = (a => 1); my @k = (%g); %g = (); print scalar(@k), "\n";}, $W10, 'W10: a package hash in a list, then emptied' ],
     [ q{our @g = (1); sub t { local @g = (@g, 2); return scalar @g } print t(), scalar(@g), "\n";}, $W10, 'W10: local of itself and more' ],
     [ q{our @g = (1,2); sub f { return (@g, 9) } my @r = f(); @g = (); print "@r\n";}, undef, 'W10: flattened in a sub that writes nothing' ],
-    # hash truth
-    [ q{my %h; print "e\n" if !%h; my %g = (a => 1); print "ne\n" if %g;}, $HASH, 'hash truth: if and !' ],
-    [ q{my %h; my $n = %h; print "n=$n\n";}, $HASH, 'hash truth: my $n = %h' ],
-    [ q{my %h; my $a = %h ? 1 : 0; $h{k} = 1; my $b = scalar(%h) ? 1 : 0; print "$a$b\n";}, $HASH, 'hash truth: ?:' ],
+    # hash truth: B::SoN reads a hash as a scalar by a Count at a memory
+    # version, and the rule that refused the hash itself there is gone.
+    [ q{my %h; print "e\n" if !%h; my %g = (a => 1); print "ne\n" if %g;}, undef, 'hash truth: if and !' ],
+    [ q{my %h; my $n = %h; print "n=$n\n";}, undef, 'hash truth: my $n = %h' ],
+    [ q{my %h; my $a = %h ? 1 : 0; $h{k} = 1; my $b = scalar(%h) ? 1 : 0; print "$a$b\n";}, undef, 'hash truth: ?:' ],
     [ q{my %h = (a => 1, b => 2); my $n = keys %h; print "n=$n\n";}, undef, 'hash truth: keys counted' ],
+    [ q{our %g; sub add { $g{$_[0]} = 1 } my $a = %g; add("x"); my $b = %g ? "t" : "f"; print "$a $b ", scalar(%g), "\n";}, undef, 'hash truth: a package hash a called sub fills' ],
+    # A list assignment to a hash as a scalar is its right side's count; the
+    # wire hands the test the hash's list: still refused.
+    [ q{our %g; sub f { return () } my $n = (%g = f()) ? "t" : "f"; print "$n\n";}, $HASHASG, 'hash assign: a package hash assigned in a ?:' ],
+    [ q{sub f { return (a => 1, a => 2) } my %h; my $n = (%h = f()) ? "t" : "f"; print "$n ", scalar(%h), "\n";}, $HASHASG, 'hash assign: a `my` hash assigned in a ?:' ],
+    [ q{my $n = 0; sub f { return $n++ < 2 ? (a => 1) : () } while (my %i = f()) { print "in\n"; } print "out\n";}, $HASHASG, 'hash assign: a while over a `my %i = f()`' ],
 ) {
     my ( $src, $name, $what ) = @$case;
     my ( $v, $why ) = verdict($src)->@*;

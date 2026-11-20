@@ -46,12 +46,22 @@ for my $c (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
-# A HASH as a condition is refused by the loader: B::SoN hands the hash itself
-# to the test, at no memory version, and T2 read every hash as true (`%h ?`
-# of an emptied hash printed "h").
-{
-    eval { through_llvm(q{my @e = (); my %h = (a => 1); print @e ? "e" : "-", %h ? "h" : "-", "\n";}) };
-    like($@, qr/GAP: a hash read as a scalar \(its truth or its count\) at no memory version/, 'a hash as a condition is refused by name');
+# A HASH as a condition is its count of keys, at the memory version B::SoN
+# reads it at (Count(hash, memory)): a `my %h`, and a package hash by name
+# (its EntryDef), whose count was an array's length ("an array element read
+# through no ARRAY reference" at run time).
+for my $c (
+    [ q{my @e = (); my %h = (a => 1); print @e ? "e" : "-", %h ? "h" : "-", "\n";},        "-h\n",      'a hash in a ternary' ],
+    [ q{my %h; my $a = %h ? 1 : 0; $h{k} = 1; my $b = %h ? 1 : 0; delete $h{k}; print "$a$b", (%h ? 1 : 0), "\n";}, "010\n", 'a hash read before a store, after it, and emptied' ],
+    [ q{my %h; my $n = %h; $h{a} = 1; $h{b} = 2; my $m = %h; print "$n $m ", %h + 1, "\n"; print "e\n" if !%h;}, "0 2 3\n", 'a hash as a number' ],
+    [ q{our %g; print %g ? "y" : "n"; $g{a} = 1; print %g ? "y" : "n"; my $n = %g; %g = (); print " $n ", (!%g ? "e" : "ne"), "\n";}, "ny 1 e\n", 'a package hash, declared with no value' ],
+    [ q{our %g; sub add { $g{$_[0]} = 1 } my $a = %g; add("x"); my $b = %g; add("y"); print "$a $b ", scalar(%g), "\n";}, "0 1 2\n", 'a package hash a called sub fills' ],
+    [ q{our %g = (a => 1, b => 2); if (%g) { print scalar(%g), "\n" }},                    "2\n",       'a package hash, stored whole' ],
+    [ q{package P; our %reg; sub n { return scalar(%reg) } package main; $P::reg{a} = 1; $P::reg{b} = 2; print P::n(), " ", (%P::reg ? "t" : "f"), "\n";}, "2 t\n", 'a hash of another package' ],
+) {
+    my ($src, $want, $name) = @$c;
+    my $got = eval { through_llvm($src) };
+    is($got, $want, "$name: perl's answer") or diag $@;
 }
 
 done_testing;
