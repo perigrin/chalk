@@ -33,11 +33,11 @@ al9	SAME
 ar1	SAME	
 ar10	SAME	
 ar11	SAME	
-ar12	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to the arguments (@_) (node 8 of main::f)
+ar12	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
 ar13	REFUSED	GAP: T2: out of its slices (sub main::f reads @_ other than by shifts, $_[N] or a signature)
 ar14	SAME	
 ar15	SAME	
-ar16	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to a slice (node 6 of main::sw)
+ar16	REFUSED	GAP: T2: out of its slices (a list assignment to a slice of @_)
 ar17	LOUD	chalk: refused at run time: a hash element read through no HASH reference
 ar18	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
 ar19	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
@@ -53,7 +53,7 @@ ar7	SAME
 ar8	REFUSED	GAP: T2: out of its slices (an argument perl aliases (Subscript) passed where a sub writes @_)
 ar9	SAME	
 bless1	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
-bless2	REFUSED	load: from_json failed: GAP: a bless B::SoN left off the control chain: it runs at its value's first use, or never, and another read of what it blesses may come first
+bless2	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
 bt1	SAME	
 ca1	SAME	
 ca10	SAME	
@@ -88,24 +88,24 @@ ca9	SAME
 chop1	SAME	
 chop2	REFUSED	no program graph
 chop3	REFUSED	no program graph
-cl1	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to a captured variable (node 14 of main::__PROGRAM__)
+cl1	SAME	
 cl10	SAME	
-cl11	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to a captured variable (node 18 of main::__PROGRAM__)
+cl11	SAME	
 cl12	SAME	
 cl13	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
 cl14	REFUSED	no program graph
-cl15	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 23 of main::__PROGRAM__)
+cl15	SAME	
 cl16	SAME	
 cl17	SAME	
 cl18	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
 cl19	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
-cl2	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to a captured variable (node 15 of main::__PROGRAM__)
+cl2	SAME	
 cl20	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
-cl21	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to a captured variable (node 16 of main::__PROGRAM__)
+cl21	SAME	
 cl22	SAME	
 cl23	REFUSED	load: from_json failed: GAP: a captured variable passed to a sub that writes its argument ($_[N] is the caller's variable; the closure would not see the write) (the c
 cl24	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
-cl25	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to a captured variable (node 18 of main::__PROGRAM__)
+cl25	SAME	
 cl3	SAME	
 cl4	SAME	
 cl5	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
@@ -113,11 +113,11 @@ cl6	REFUSED	GAP: T2: out of its slices (CellWrite)
 cl7	SAME	
 cl8	REFUSED	no program graph
 cl9	REFUSED	no program graph
-dyn1	REFUSED	load: from_json failed: GAP: a call B::SoN left off the control chain: a method call by a name made at run time (node 11 of main::__PROGRAM__)
-dyn2	REFUSED	load: from_json failed: GAP: a call B::SoN left off the control chain: a method call by a name made at run time (node 5 of main::__PROGRAM__)
-ef1	REFUSED	GAP: T2: out of its slices (a statement Call builtin prtf)
-ef10	REFUSED	load: from_json failed: GAP: a bless B::SoN left off the control chain: it runs at its value's first use, or never, and another read of what it blesses may come first
-ef11	REFUSED	load: from_json failed: GAP: a bless B::SoN left off the control chain: it runs at its value's first use, or never, and another read of what it blesses may come first
+dyn1	SAME	
+dyn2	SAME	
+ef1	SAME	
+ef10	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
+ef11	SAME	
 ef12	SAME	
 ef13	SAME	
 ef14	SAME	
@@ -126,10 +126,10 @@ ef16	SAME
 ef17	SAME	
 ef18	SAME	
 ef19	SAME	
-ef2	REFUSED	GAP: T2: out of its slices (Call builtin prtf)
+ef2	SAME	
 ef20	SAME	
 ef21	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
-ef22	REFUSED	GAP: T2: out of its slices (a open B::SoN does not place on the chain)
+ef22	REFUSED	GAP: T2: out of its slices (a variable a handle writes, read other than after a close)
 ef23	SAME	
 ef24	SAME	
 ef25	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
@@ -137,6 +137,8 @@ ef26	SAME
 ef27	REFUSED	GAP: T2: out of its slices (a reference to what is not an array)
 ef28	REFUSED	GAP: T2: out of its slices (a local aggregate restored with no save made)
 ef3	REFUSED	GAP: T2: out of its slices (a statement Call builtin unlink)
+ef30	SAME	
+ef31	REFUSED	GAP: T2: out of its slices (an open of a file (or of what is not a reference to a constant string))
 ef4	SAME	
 ef5	SAME	
 ef6	REFUSED	GAP: T2: out of its slices (an each in a program with a keys or values (which reset it, B::SoN places them nowhere))
@@ -146,7 +148,7 @@ ef9	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsew
 ev1	SAME	
 ev10	SAME	
 ev11	SAME	
-ev12	REFUSED	load: from_json failed: GAP: a store to a package variable ($main::g) in an eval block that dies: the wire does not say whether it is a `local`, whose restore the die
+ev12	SAME	
 ev13	SAME	
 ev14	SAME	
 ev15	SAME	
@@ -165,17 +167,18 @@ ex1	REFUSED	load: from_json failed: GAP: a die of what may be a reference, where
 ex2	REFUSED	load: from_json failed: GAP: a die of what may be a reference, where an eval may catch it: $@ would be its string, not the reference (in main::__PROGRAM__)
 ex3	REFUSED	load: from_json failed: GAP: a die of what may be a reference, where an eval may catch it: $@ would be its string, not the reference (in main::__PROGRAM__)
 ex4	REFUSED	load: from_json failed: GAP: a die of what may be a reference, where an eval may catch it: $@ would be its string, not the reference (in main::__PROGRAM__)
-fl1	REFUSED	load: from_json failed: GAP: a division whose divisor may be zero, on no control chain: it would die at its value's first use, after what perl never ran (in main::__P
+fl1	SAME	
 fl10	LOUD	substr outside of string: stopped (chalk, T2)
 fl11	REFUSED	load: from_json failed: GAP: a read through an element that is not there, which perl makes (autovivification) (in main::__PROGRAM__)
 fl12	SAME	
 fl13	REFUSED	GAP: T2: out of its slices (Call builtin log)
-fl14	WRONG	got=[num ] want=[died ]
-fl2	REFUSED	no program graph
+fl14	REFUSED	no program graph
+fl2	SAME	
+fl20	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
 fl3	SAME	
 fl4	SAME	
 fl5	REFUSED	load: from_json failed: GAP: a dereference nothing reads, which may still die (of undef, under strict refs) (in main::__PROGRAM__)
-fl6	REFUSED	load: from_json failed: GAP: a modulus whose divisor may be zero, on no control chain: it would die at its value's first use, after what perl never ran (in main::__PR
+fl6	SAME	
 fl7	SAME	
 fl8	REFUSED	no program graph
 fl9	SAME	
@@ -225,12 +228,16 @@ io6	REFUSED	GAP: T2: out of its slices (an open of a file (or of what is not a r
 io7	REFUSED	GAP: T2: out of its slices (a variable a handle writes, read other than after a close)
 io8	SAME	
 io9	SAME	
-la1	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
-la2	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 18 of main::__PROGRAM__)
-la3	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 19 of main::__PROGRAM__)
-la4	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 13 of main::__PROGRAM__)
-la5	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 16 of main::__PROGRAM__)
-la6	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 23 of main::__PROGRAM__)
+la1	SAME	
+la2	SAME	
+la3	SAME	
+la30	SAME	
+la31	SAME	
+la32	SAME	
+la33	SAME	
+la4	SAME	
+la5	SAME	
+la6	SAME	
 la7	SAME	
 lo1	SAME	
 lo10	SAME	
@@ -241,7 +248,11 @@ lo14	REFUSED	load: from_json failed: GAP: a package array or hash (@main::st) fl
 lo15	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
 lo16	REFUSED	load: from_json failed: GAP: a store to a package variable ($main::v) in an eval block that dies: the wire does not say whether it is a `local`, whose restore the die
 lo2	REFUSED	load: from_json failed: GAP: a `local` ($main::g) in a sub a die leaves, under an eval: the die's way out restores nothing (in main::t)
-lo3	WRONG	got=[4 ] want=[1 ]
+lo20	SAME	
+lo21	SAME	
+lo22	SAME	
+lo23	SAME	
+lo3	SAME	
 lo4	SAME	
 lo5	REFUSED	GAP: T2: out of its slices (a local)
 lo6	SAME	
@@ -276,7 +287,7 @@ lp6	SAME
 lp7	SAME	
 lp8	REFUSED	no program graph
 lp9	REFUSED	no program graph
-m4	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 19 of main::__PROGRAM__)
+m4	SAME	
 nv1	REFUSED	load: from_json failed: GAP: a package array or hash (@main::st) flattened into a list at no memory version, where it is also written: the list would be made after th
 nv10	SAME	
 nv11	SAME	
@@ -290,8 +301,8 @@ nv5	REFUSED	load: from_json failed: GAP: a package array or hash (%main::g) flat
 nv6	SAME	
 nv7	REFUSED	load: from_json failed: GAP: a package array or hash (@main::g) flattened into a list at no memory version, where it is also written: the list would be made after the
 nv8	REFUSED	load: from_json failed: GAP: a package array or hash (@main::g) flattened into a list at no memory version, where it is also written: the list would be made after the
-nv9	REFUSED	GAP: T2: out of its slices (PadAccess)
-pg1	REFUSED	load: from_json failed: GAP: a package scalar ($main::g) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
+nv9	SAME	
+pg1	SAME	
 pg10	SAME	
 pg11	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
 pg12	SAME	
@@ -300,8 +311,11 @@ pg14	REFUSED	GAP: T2: out of its slices (a reference to what is not an array)
 pg15	SAME	
 pg16	SAME	
 pg1b	SAME	
-pg2	REFUSED	load: from_json failed: GAP: a package scalar ($main::g) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
-pg3	REFUSED	load: from_json failed: GAP: a package scalar ($main::g) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
+pg2	SAME	
+pg20	SAME	
+pg21	SAME	
+pg22	SAME	
+pg3	SAME	
 pg4	SAME	
 pg5	SAME	
 pg6	REFUSED	no program graph
@@ -309,19 +323,19 @@ pg7	SAME
 pg8	SAME	
 pg9	SAME	
 pl1	SAME	
-pl10	REFUSED	load: from_json failed: GAP: a package scalar ($main::n) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
-pl11	REFUSED	load: from_json failed: GAP: a package scalar ($main::g) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
+pl10	SAME	
+pl11	SAME	
 pl12	REFUSED	no program graph
-pl13	REFUSED	load: from_json failed: GAP: a package scalar ($main::a1) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (
+pl13	REFUSED	GAP: T2: out of its slices (the value of a list assignment to scalars)
 pl14	SAME	
 pl15	SAME	
 pl2	SAME	
 pl3	SAME	
-pl4	REFUSED	load: from_json failed: GAP: a package scalar ($main::g) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
-pl5	REFUSED	load: from_json failed: GAP: a package scalar ($main::g) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
-pl6	REFUSED	load: from_json failed: GAP: a package scalar ($main::g) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
+pl4	SAME	
+pl5	SAME	
+pl6	SAME	
 pl7	SAME	
-pl8	REFUSED	load: from_json failed: GAP: a package scalar ($main::g) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
+pl8	SAME	
 pl9	REFUSED	no program graph
 rn1	REFUSED	no program graph
 rn10	SAME	
@@ -333,13 +347,15 @@ rn6	SAME
 rn7	SAME	
 rn8	REFUSED	GAP: T2: out of its slices (an open for writing of a file (or of what is not a `my` scalar))
 rn9	REFUSED	GAP: T2: out of its slices (a require of Cwd.pm, not compiled in)
-slice1	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to a slice (node 20 of main::__PROGRAM__)
-slice2	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to a slice (node 16 of main::__PROGRAM__)
-slice3	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to a slice (node 37 of main::__PROGRAM__)
+sg1	SAME	
+slice1	SAME	
+slice2	SAME	
+slice3	SAME	
 sm1	SAME	
 sm2	SAME	
 sm3	SAME	
 sm4	SAME	
+sr1	REFUSED	no program graph
 st1	REFUSED	GAP: T2: out of its slices (a hash element of a named hash)
 st10	REFUSED	load: from_json failed: GAP: a hash read as a scalar (its truth or its count) at no memory version (in main::__PROGRAM__)
 st11	SAME	
@@ -357,19 +373,19 @@ st6	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsew
 st7	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
 st8	SAME	
 st9	SAME	
-swap1	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 18 of main::__PROGRAM__)
+swap1	SAME	
 swap2	SAME	
-swap3	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 21 of main::__PROGRAM__)
+swap3	SAME	
 tp1	SAME	
 tp10	SAME	
-tp11	REFUSED	load: from_json failed: GAP: a package scalar ($main::n) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
-tp12	REFUSED	load: from_json failed: GAP: a package scalar ($Ctr::c) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (in
+tp11	SAME	
+tp12	SAME	
 tp2	SAME	
 tp3	SAME	
 tp4	SAME	
-tp5	REFUSED	load: from_json failed: GAP: a package scalar ($main::depth) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the writ
-tp6	REFUSED	load: from_json failed: GAP: a package scalar ($main::total) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the writ
-tp7	REFUSED	load: from_json failed: GAP: a package scalar ($main::s) carried round a loop as a value, where a sub the loop calls may write it: the loop would not see the write (i
+tp5	SAME	
+tp6	SAME	
+tp7	REFUSED	no program graph
 tp8	SAME	
 tp9	SAME	
 vp1	SAME	
@@ -382,12 +398,14 @@ vp15	SAME
 vp16	SAME	
 vp17	SAME	
 vp18	SAME	
-vp19	REFUSED	load: from_json failed: GAP: a bless B::SoN left off the control chain: it runs at its value's first use, or never, and another read of what it blesses may come first
+vp19	REFUSED	load: from_json failed: GAP: ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wro
 vp2	SAME	
 vp20	SAME	
+vp21	REFUSED	no program graph
+vp22	SAME	
 vp3	SAME	
 vp4	SAME	
-vp5	WRONG	got=[21 ] want=[30 ]
+vp5	REFUSED	no program graph
 vp6	SAME	
 vp7	SAME	
 vp8	SAME	
@@ -401,15 +419,15 @@ wa14	SAME
 wa15	SAME	
 wa16	SAME	
 wa17	SAME	
-wa18	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to a slice (node 18 of main::__PROGRAM__)
+wa18	SAME	
 wa19	REFUSED	GAP: T2: out of its slices (Call builtin splice)
 wa2	SAME	
 wa20	SAME	
-wa21	REFUSED	load: from_json failed: GAP: a write B::SoN left off the control chain: a list assignment to an element (node 30 of main::__PROGRAM__)
+wa21	SAME	
 wa22	SAME	
 wa23	SAME	
 wa24	SAME	
-wa25	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+wa25	SAME	
 wa26	SAME	
 wa3	SAME	
 wa4	SAME	
