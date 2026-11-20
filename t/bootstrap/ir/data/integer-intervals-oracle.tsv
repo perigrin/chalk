@@ -579,14 +579,17 @@ case	chalk-found-gaps:23	0b3fb14085445584efc39b439706278e	OK
 node	chalk-found-gaps:23	main::__PROGRAM__|Constant|const_type=integer|value=1#0	iv,e53
 node	chalk-found-gaps:23	main::__PROGRAM__|Constant|const_type=integer|value=2#0	iv,e53
 node	chalk-found-gaps:23	main::__PROGRAM__|Constant|const_type=integer|value=3#0	iv,e53
+node	chalk-found-gaps:23	main::__PROGRAM__|Count|EntryDef|package=main|sigil=@|symbol=ARGV|MemStart#0	iv
 case	chalk-found-gaps:24	4548e7d06b2ccb1cb87fa762cb12bb98	OK
 node	chalk-found-gaps:24	main::__PROGRAM__|Constant|const_type=integer|value=1#0	iv,e53
 node	chalk-found-gaps:24	main::__PROGRAM__|Constant|const_type=integer|value=2#0	iv,e53
 node	chalk-found-gaps:24	main::__PROGRAM__|Constant|const_type=integer|value=3#0	iv,e53
 node	chalk-found-gaps:24	main::__PROGRAM__|Count|ArrayLiteral#5|Phi#8#0	iv
+node	chalk-found-gaps:24	main::__PROGRAM__|Count|EntryDef|package=main|sigil=@|symbol=ARGV|MemStart#0	iv
 case	chalk-found-gaps:25	ea2aba6bf5c98da71b9b1734cee7f341	OK
 node	chalk-found-gaps:25	main::__PROGRAM__|Constant|const_type=integer|value=1#0	iv,e53
 node	chalk-found-gaps:25	main::__PROGRAM__|Constant|const_type=integer|value=2#0	iv,e53
+node	chalk-found-gaps:25	main::__PROGRAM__|Count|EntryDef|package=main|sigil=@|symbol=ARGV|MemStart#0	iv
 case	chalk-found-gaps:26	b2f1d4340d0be6a37e2555a84d098b1f	OK
 node	chalk-found-gaps:26	main::__PROGRAM__|Constant|const_type=integer|value=0#0	iv,e53
 node	chalk-found-gaps:26	main::__PROGRAM__|Constant|const_type=integer|value=0#1	iv,e53
