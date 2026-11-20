@@ -8,6 +8,7 @@ use JSON::PP ();   # no import: its to_json/from_json collide with Chalk's
 use File::Temp;
 
 use Chalk::IR::Serialize::JSON qw(to_json from_json);
+use Chalk::IR::Serialize::WireUpgrade;
 
 # THE LOADER'S CONTRACT, stated as a test rather than a comment:
 #
@@ -50,7 +51,7 @@ use Chalk::IR::Serialize::JSON qw(to_json from_json);
 # it become an assertion. See docs/plans/2026-08-24-loader-analysis-pipeline.md.
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
-my $SON  = "$ENV{HOME}/dev/perl5-son/lib";
+my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 
 sub wire_for ($src) {
     my ($fh, $tmp) = File::Temp::tempfile(SUFFIX => '.pl', UNLINK => 1);
@@ -64,7 +65,10 @@ sub wire_for ($src) {
 # string-comparing the JSON: key order, whitespace and float formatting are
 # the serializer's business, not the loader's.
 sub stamp_diffs ($before_json, $after_json) {
+    # THE WIRE AS THE LOADER READS IT: a v1 wire upgraded to v2 (wire v2,
+    # stage 2) -- its one new node per graph, a MemStart, is the wire's.
     my $before = JSON::PP->new->decode($before_json);
+    Chalk::IR::Serialize::WireUpgrade::upgrade($before) if ( $before->{version} // 1 ) == 1;
     my $after  = JSON::PP->new->decode($after_json);
     my @diffs;
 
