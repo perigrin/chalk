@@ -31,7 +31,7 @@ ok(-f $script, 'script/chalk-emit-son-json exists');
         my $data = eval { JSON::PP->new->decode($output) };
         ok(defined $data, 'output is valid JSON') or diag("Parse error: $@");
 
-        is($data->{version}, 1, 'JSON version is 1');
+        is($data->{version}, 2, 'JSON version is 2 (wire v2: chalk writes memory by mem_in)');
         ok(exists $data->{methods}, 'JSON has methods key');
         is(ref $data->{methods}, 'HASH', 'methods is a hashref');
 
