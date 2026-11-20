@@ -220,6 +220,8 @@ class Chalk::IR::NodeFactory {
                 $input->add_consumer($node);
             }
         }
+        # (a memory edge is a use as an input is: the version lists its reader)
+        $args{mem_in}->add_consumer($node) if blessed( $args{mem_in} );
     }
 
     # Permissive node construction. Accepts both data ops (hash-consed by

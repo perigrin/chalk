@@ -119,7 +119,7 @@ sub args_assign {
     for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' } ( $s->consumers // [] )->@*) {
         next if $b->{args}{ refaddr($r) };
         next if $r->is_assign_target;   # the next list assign's target, versioned by this one
-        out('a read after `my (...) = @_` of no target') unless grep { blessed($_) && refaddr($_) == refaddr($s) } $r->inputs->@*;
+        out('a read after `my (...) = @_` of no target') unless blessed( $r->mem_in ) && refaddr( $r->mem_in ) == refaddr($s);
         $b->{args}{ refaddr($r) } = $arg_of{ $r->symbol } // out('a read after `my (...) = @_` of no target');
     }
 }
@@ -137,7 +137,7 @@ sub plain_anon {
     # (A FILE LEXICAL it reads -- `my @a; my sub t { scalar @a }` -- is no
     # capture: one variable for the program, reached as a named sub reaches it)
     return 0 if grep { $_->operation eq 'CellParam'
-        || $_->operation eq 'PadAccess' && !( $_->can('file') && $_->file ) && ( $_->shared || !defined $_->inputs->[0] ) } $t->graph->component;
+        || $_->operation eq 'PadAccess' && !( $_->can('file') && $_->file ) && ( $_->shared || !defined $_->inputs->[0] && !blessed( $_->mem_in ) ) } $t->graph->component;
     return 0 if grep { $_->operation eq 'AnonSub' && ( $_->name // '' ) eq $c->name } +($b->{own_nodes} // [])->@*;
     out('a closure called directly and as a code value') if ( $b->{funcs}{ refaddr($t) } // {} )->{closure};
     return 1;
@@ -158,7 +158,6 @@ sub call {
             unless @anon;
         out('a direct call of a closure made elsewhere') unless @anon == 1;
         my @args = $c->inputs->@*;
-        pop @args if $c->can('memory_input') && $c->memory_input;
         my $code = $b->value( $anon[0] );
         # A SIGNATURE'S ARITY where the call's count is known: perl dies on
         # another -- refused by name here (its entry's check is a run-time stop).
@@ -184,7 +183,6 @@ sub call {
         $b->emit(op => 'GStore', type => 'void', inputs => [ $b->as( $b->const_str($full), '%Slot' ) ], attr => { global => $b->global_named("${pkg}::AUTOLOAD") });
     }
     my @args = $c->inputs->@*;
-    pop @args if $c->can('memory_input') && $c->memory_input;
     # A CLOSURE OF A METHOD READING ITS FIELDS is handed the object, last:
     # called from that method only (its name is the closure's prefix).
     my @self;
@@ -315,7 +313,6 @@ sub glob_call {
     out('an & call of a sub a glob is given at run time') if $c->can('shares_args') && $c->shares_args;
     my ( $pkg, $name ) = ( $c->name // '' ) =~ /\A(.*)::([^:]+)\z/ or out('a call of a glob\'s sub of no package');
     my @args = $c->inputs->@*;
-    pop @args if $c->can('memory_input') && $c->memory_input;
     my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
     $b->hash_reads_settled('a call');
     $b->set_want($c);
@@ -399,7 +396,6 @@ sub _is_feature_class {
 sub construct {
     my ($b, $c, $leaf) = @_;
     my @in = $c->inputs->@*;
-    pop @in if $c->can('memory_input') && $c->memory_input;
     my @names = +($c->can('param_names') ? $c->param_names // [] : [])->@*;
     out('a new whose arguments are not name => value') if @names != @in || grep { _is_list($_) } @in;
     my %arg = map { ( $names[$_] => $in[$_] ) } 0 .. $#in;
@@ -522,7 +518,6 @@ sub method_call {
         out('a new of a class not named here') if !$cls && grep { _is_feature_class($_) } $b->{mop}->classes;
     }
     my @args = $c->inputs->@*;
-    pop @args if $c->can('memory_input') && $c->memory_input;
     # `$o->$m(...)`: the method's name is a value, the input after the invocant.
     my $dyn = ( $c->dispatch_kind // '' ) eq 'dynamic_method' ? ( splice @args, 1, 1 ) : undef;
     out('a method named at run time by a list') if $dyn && _is_list($dyn);
@@ -775,7 +770,7 @@ sub _element_ref_read {
 sub _folded {
     my ($n) = @_;
     return 0 unless blessed($n) && $n->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && defined $n->symbol;
-    return !grep { my $u = $_; blessed($u) && grep { blessed($_) && $_->is_memory_version } $u->inputs->@* } ( $n->consumers // [] )->@*;
+    return !grep { my $u = $_; blessed($u) && ( blessed( $u->mem_in ) || grep { blessed($_) && $_->is_memory_version } $u->inputs->@* ) } ( $n->consumers // [] )->@*;
 }
 
 # alias_list($n) -> an array whose elements an @_ aliases (AAppendAlias): an
@@ -1146,7 +1141,6 @@ sub func {
         # stop) is for what this cannot see.
         for my $k (grep { $_->operation eq 'Call' && ( ( $_->dispatch_kind // '' ) eq 'indirect' || ( $_->name // '' ) eq $name ) } _all_nodes( $b->{mop}, $b->{ret} ), $g->component) {
             my @a = grep { blessed($_) } $k->inputs->@*;
-            pop @a if $k->can('memory_input') && $k->memory_input;
             shift @a if ( $k->dispatch_kind // '' ) eq 'indirect';   # (the code)
             out("a call of a code value that may be closure $name, of a count perl checks against its signature")
                 if grep { _is_list($_) } @a or @a < $cmin or defined $cmax && @a > $cmax;
@@ -1495,7 +1489,6 @@ sub io_value {
     my $name = $v->name;
     my $kind = $v->builtin_kind // '';
     my @in = grep { blessed($_) } $v->inputs->@*;
-    pop @in if $v->can('memory_input') && $v->memory_input;
     # AN OP ON A HANDLE B::SoN DOES NOT PLACE (a close whose value is read, not
     # on the chain): where it runs against the others is not known.
     out("a $name B::SoN does not place on the chain") if $kind ne 'waits_for_handles' && !$v->is_pinned;
@@ -1525,7 +1518,7 @@ sub io_value {
             out('a variable a handle writes, read other than after a close')
                 if ( $var->can('shared') && $var->shared )
                 || grep { refaddr($_) != refaddr($var) && ( $_->symbol // '' ) eq $var->symbol && !_opens_it($_)
-                          && !_after_close( $_->inputs->[0], $fh, $b->{own_nodes} ) }
+                          && !_after_close( $_->mem_in, $fh, $b->{own_nodes} ) }
                    grep { $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' } +($b->{own_nodes} // [])->@*;
             $h = $b->emit(op => 'FhWOpen', type => '%Slot', inputs => [ $b->location($var) ], attr => { trunc => $m eq '>' });
         }

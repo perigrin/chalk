@@ -243,8 +243,7 @@ sub _collect_positional_arg_reads {
                      $k = $k->can('control_in') ? $k->control_in : undef) {
                     last if $before{ refaddr($k) }++;
                 }
-                my $mem = sub ($n) { $n->can('memory_input') && $n->memory_input ? $n->inputs->[-1] : undef };
-                for (my $k = $mem->($c); blessed($k); $k = $mem->($k)) {
+                for (my $k = $c->mem_in; blessed($k); $k = $k->mem_in) {
                     last if $before{ refaddr($k) }++;
                 }
                 die "GAP: direct call to '$name': callee shifts \@_ and reads it as a "

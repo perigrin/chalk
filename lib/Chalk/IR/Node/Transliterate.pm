@@ -19,9 +19,6 @@ class Chalk::IR::Node::Transliterate :isa(Chalk::IR::Value) {
         return ( $self->flags // '' ) !~ /r/ && $self->is_pinned
             && blessed($subj) && $subj->operation eq 'PadAccess';
     }
-
-    # A MEMORY VERSION where pinned: it stores its subject's new string (in place).
-    method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'opaque' }
     method is_fixed() { return true }
 }

@@ -23,9 +23,6 @@ class Chalk::IR::Node::RegexSubst :isa(Chalk::IR::Node::Regex) {
         return ( $self->flags // '' ) !~ /r/ && $self->is_pinned
             && blessed($subj) && $subj->operation eq 'PadAccess';
     }
-
-    # A MEMORY VERSION where pinned: it stores its subject's new string (in place).
-    method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'opaque' }
 
     # FIXED: s/// mutates its subject

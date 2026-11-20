@@ -90,10 +90,6 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # their cells), called inside the eval's trap as a block eval's body.
     field $string_eval :param :reader = 0;
 
-    # Whether the last input is the MEMORY version this call follows rather
-    # than an argument (B::SoN `memory_input`). Not identity: the inputs are.
-    field $memory_input :param :reader = 0;
-
     # A FOLDED sort's comparison kind and direction. perl folds the standard
     # comparators into flags on the op (OPpSORT_NUMERIC, OPpSORT_DESCEND), so
     # by the time a producer sees `sort { $a <=> $b }` the block is GONE and
@@ -122,13 +118,6 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
 
     method operation() { 'Call' }
 
-    # memory_operand -> the memory version it follows (its last input), where
-    # it has one (memory_input).
-    method memory_operand() { return $memory_input ? $self->inputs->[-1] : undef }
-
-    # A MEMORY VERSION where it runs as a statement (pinned): the callee may
-    # store anything.
-    method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'opaque' }
 
     # FIXED: may do anything, including I/O and aborting
@@ -306,9 +295,7 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     method writes_first_argument() {
         return 0 unless $self->is_builtin;
         my $n = Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'writes_first_with' ) or return 0;
-        my @ops = $self->inputs->@*;
-        pop @ops if $memory_input;
-        return @ops >= $n ? 1 : 0;
+        return $self->inputs->@* >= $n ? 1 : 0;
     }
 
     # builtin_kind -> what it does, among the builtins of its family or

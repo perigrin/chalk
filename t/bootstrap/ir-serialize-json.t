@@ -28,7 +28,7 @@ sub make_simple_graph {
     my $json  = to_json({ main => $graph });
 
     ok(defined $json, 'to_json returns a value');
-    like($json, qr/"version"\s*:\s*1/, 'JSON has version 1');
+    like($json, qr/"version"\s*:\s*2/, 'JSON has version 2 (wire v2: memory named by mem_in)');
     like($json, qr/"methods"/, 'JSON has methods key');
     like($json, qr/"main"/, 'JSON has "main" method');
     like($json, qr/"nodes"/, 'JSON has nodes array');

@@ -212,6 +212,9 @@ class Chalk::IR::Graph {
                     }
                     push @neighbors, $input if defined $input && blessed($input);
                 }
+                # (the version a node reads at is a producer of it, as an
+                # input is: wire v2's mem_in)
+                push @neighbors, $n->mem_in if $n->can('mem_in') && blessed($n->mem_in);
                 if ($n->can('consumers')) {
                     for my $c ($n->consumers()->@*) {
                         push @neighbors, $c if $in_cache->($c);
@@ -287,6 +290,7 @@ class Chalk::IR::Graph {
             if ($n->operation() eq 'Phi' && defined $n->region()) {
                 push @preds, $n->region();
             }
+            push @preds, $n->mem_in if $n->can('mem_in') && blessed($n->mem_in);
             return @preds;
         };
 
@@ -345,6 +349,7 @@ class Chalk::IR::Graph {
             my $op = $n->operation;
             push @q, grep { blessed($_) } (
                 $n->inputs->@*,
+                ($n->can('mem_in')     ? $n->mem_in     : ()),
                 ($n->can('control_in') ? $n->control_in : ()),
                 ($n->can('head')       ? $n->head       : ()),
             );
@@ -380,8 +385,8 @@ class Chalk::IR::Graph {
         while (defined(my $n = shift @q)) {
             next unless blessed($n) && !$seen{ refaddr($n) }++;
             push @all, $n;
-            push @q, grep { blessed($_) } $n->inputs->@*, ($n->can('control_in') ? $n->control_in : ()),
-                ($n->consumers // [])->@*;
+            push @q, grep { blessed($_) } $n->inputs->@*, ($n->can('mem_in') ? $n->mem_in : ()),
+                ($n->can('control_in') ? $n->control_in : ()), ($n->consumers // [])->@*;
             if ($n->operation eq 'Call' && $n->can('target') && blessed(my $t = $n->target)) {
                 push @q, $t->graph->returns->@* if $t->can('graph') && $t->graph;
             }

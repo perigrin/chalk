@@ -17,6 +17,7 @@ use Chalk::IR::Node::Coerce;   # _insert_str_coercions builds these directly
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: the join lattice
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 use Chalk::IR::Serialize::WireCheck;   # what the wire cannot order, refused
+use Chalk::IR::Serialize::WireUpgrade;   # a v1 wire, read as v2
 
 # CFG node operations — these carry control tokens and are never hash-consed.
 my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
@@ -157,7 +158,11 @@ sub _extract_fields ($node, $id_remap) {
         };
     }
     if ($op eq 'Phi') {
-        return { region => $id_remap->{ $node->region->id } };
+        # (a memory Phi is flagged: wire v2 says it, nothing infers it)
+        return { region => $id_remap->{ $node->region->id }, ( $node->memory ? ( memory => JSON::PP::true() ) : () ) };
+    }
+    if ($op eq 'Assign' && $node->record) {
+        return { record => JSON::PP::true() };
     }
     if ($op eq 'Proj') {
         return { index => $node->index };
@@ -306,13 +311,13 @@ sub _all_nodes_topo ($graph_or_nodes) {
                     push @next_frontier, $region;
                 }
             }
-            # (a) backward: this node's own control predecessor.
-            if ($node->can('control_in') && defined $node->control_in) {
-                my $ctrl = $node->control_in;
-                if (!$seen{ $ctrl->id }++) {
-                    push @extra, $ctrl;
-                    push @next_frontier, $ctrl;
-                }
+            # (a) backward: this node's own control predecessor, and the
+            # memory version it names.
+            for my $back (grep { blessed($_) } ( $node->can('control_in') ? $node->control_in : () ),
+                                               ( $node->can('mem_in') ? $node->mem_in : () )) {
+                next if $seen{ $back->id }++;
+                push @extra, $back;
+                push @next_frontier, $back;
             }
             # (b) forward: a consumer whose control_in IS this node.
             if ($node->can('consumers')) {
@@ -369,7 +374,7 @@ sub _all_nodes_topo ($graph_or_nodes) {
                 && $n->region->operation eq 'Loop') {
             @in = ($in[0]);
         }
-        my @preds = grep { defined $_ && blessed($_) } @in;
+        my @preds = grep { defined $_ && blessed($_) } @in, ( $n->can('mem_in') ? $n->mem_in : () );
         if ($n->operation eq 'Phi' && defined $n->region) {
             push @preds, $n->region;
         }
@@ -480,6 +485,11 @@ sub _serialize_graph ($graph) {
                 && exists $id_remap{ $node->control_in->id }) {
             $entry{control_in} = $id_remap{ $node->control_in->id };
         }
+        # WIRE V2's memory edges: the version a node reads or follows, and
+        # whether it is one.
+        $entry{mem_in} = $id_remap{ $node->mem_in->id }
+            if $node->can('mem_in') && blessed($node->mem_in) && exists $id_remap{ $node->mem_in->id };
+        $entry{mem_out} = JSON::PP::true() if $node->can('mem_out') && $node->mem_out;
         # Region.head -> the owning If/Loop, set at produce time (FromOptree's
         # StackSim::merge / _build_single_exit / Loop exit-Region sites; the
         # hand-written frontend's IfStatement/loop actions via set_region).
@@ -518,7 +528,8 @@ sub to_json ($named_graphs) {
     }
 
     my $data = {
-        version => 1,
+        version => 2,
+        profile => ['mem'],
         source  => undef,
         methods => \%methods,
     };
@@ -538,6 +549,7 @@ sub _deserialize_graph ($method_data) {
 
     my @nodes;  # positional array of created node objects
     my @backedge_patches;  # [phi_position, backedge_index] deferred wirings
+    my @mem_patches;       # [node, memory version index] deferred: see below
 
     for my $nd (@node_data) {
         my $op     = $nd->{op};
@@ -573,6 +585,23 @@ sub _deserialize_graph ($method_data) {
 
         # Build the argument hash, with inputs and any extra fields
         my %args = (inputs => \@inputs);
+        # THE MEMORY EDGE (wire v2): the version this node reads or follows;
+        # and whether this node is a version. A read names one made before
+        # it. A node on the control chain may name a merge's memory Phi the
+        # wire lists after it (a v1 wire's order, upgraded): it is its own
+        # node, never hash-consed, and its edge is set once every node is.
+        my $mem_later;
+        if (defined( my $m = $nd->{mem_in} )) {
+            die "IR load: node #" . scalar(@nodes) . " ($op) names memory version $m, which is no node\n"
+                unless $m =~ /\A\d+\z/ && $m < @node_data;
+            if ($m < @nodes) { $args{mem_in} = $nodes[$m] }
+            elsif (defined $nd->{control_in}) { $mem_later = $m }
+            else {
+                die "IR load: node #" . scalar(@nodes) . " ($op), on no control chain, names memory "
+                  . "version $m, which is not an already-created node (have " . scalar(@nodes) . ")\n";
+            }
+        }
+        $args{mem_out} = 1 if $nd->{mem_out};
 
         # Merge extra fields based on op type.
         # For fields Chalk nodes don't support, we silently drop them.
@@ -624,10 +653,6 @@ sub _deserialize_graph ($method_data) {
             $args{want}          = $fields->{want} if exists $fields->{want};
             $args{shares_args}   = 1 if $fields->{shares_args};
             $args{string_eval}   = 1 if $fields->{string_eval};
-            # THE LAST INPUT IS MEMORY, not an argument: a builtin that reads
-            # or writes an aggregate (push, shift, ...) follows a memory
-            # version. Dropped, push took its MemStart for a value to append.
-            $args{memory_input}  = 1 if $fields->{memory_input};
             $args{class_name}    = $fields->{class_name}
                 if exists $fields->{class_name};
             $args{paren_form}    = $fields->{paren_form}
@@ -651,9 +676,8 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];
-            # B::SoN flags a memory Phi; a stamped Phi it did not flag is a value.
-            $args{memory} = $fields->{memory} ? 1 : 0
-                if $fields->{memory} || defined $nd->{stamp};
+            # A MEMORY PHI IS FLAGGED (wire v2; WireUpgrade flags a v1 wire's).
+            $args{memory} = $fields->{memory} ? 1 : 0;
 
             # predecessors[i] is the Proj that inputs[i] arrives along, carried
             # as node indices. It makes arm identity a field read instead of a
@@ -688,6 +712,8 @@ sub _deserialize_graph ($method_data) {
         elsif ($op eq 'Assign') {
             $args{targets} = $fields->{targets} if defined $fields->{targets};
             $args{local} = 1 if $fields->{local};
+            # A BINDING, NOT A STORE (wire v2 `record`).
+            $args{record} = 1 if $fields->{record};
         }
         elsif ($op eq 'ListAppend') {
             $args{collector} = $fields->{collector} if defined $fields->{collector};
@@ -715,11 +741,10 @@ sub _deserialize_graph ($method_data) {
             # ...and what it holds is whatever was last stored, from any graph:
             # a Scalar, which the backend reads as its Slot. Unknown (nothing
             # typed it) is what a read stamped where no store is in sight says.
-            # A `my $x` KEPT IN MEMORY (its input a memory version, not a
-            # VarDecl -- handed to a call) is a location too, and likewise.
+            # A `my $x` KEPT IN MEMORY (read at a memory version -- handed to
+            # a call) is a location too, and likewise.
             my $location = $fields->{shared}
-                || ( ( $fields->{sigil} // '' ) eq '$' && blessed($inputs[0])
-                     && $inputs[0]->operation ne 'VarDecl' );
+                || ( ( $fields->{sigil} // '' ) eq '$' && blessed( $args{mem_in} ) );
             $nd->{stamp} = 'Scalar'
                 if $location && ( $nd->{stamp} // 'Unknown' ) eq 'Unknown';
             # AN @ VARIABLE IS AN ARRAY, a % one a HASH, whatever inference
@@ -852,6 +877,9 @@ sub _deserialize_graph ($method_data) {
         my $node;
         if ($is_cfg) {
             $node = $factory->make_cfg($op, %args);
+        }
+        elsif (defined $mem_later) {
+            $node = $factory->make_unique($op, %args);
         }
         else {
             $node = $factory->make($op, %args);
@@ -1014,8 +1042,10 @@ sub _deserialize_graph ($method_data) {
             $node->set_has_filehandle(1) if $fields->{has_filehandle};
         }
 
+        push @mem_patches, [ $node, $mem_later ] if defined $mem_later;
         push @nodes, $node;
     }
+    $_->[0]->set_mem_in( $nodes[ $_->[1] ] ) for @mem_patches;
 
     # A READ OF A CAPTURED VARIABLE (CellRead) is typed by its use, as
     # B::SoN types a read of an address-taken `my` (`$k * 2` reads $k as
@@ -1262,6 +1292,13 @@ sub from_json ($json_string) {
     # string constant is perl's characters -- not their UTF-8 bytes, which a
     # program printing "caf\xe9" printed as two bytes for its last.
     my $data    = JSON::PP->new->utf8->decode($json_string);
+    # ONE READER, OF WIRE V2 (docs/plans/2026-11-20-wire-v2.md): a v1 wire is
+    # upgraded first. Of v2, the `mem` part is read; a wire that obeys the
+    # eval or loop parts says what this loader does not read yet.
+    my $version = $data->{version} // 1;
+    Chalk::IR::Serialize::WireUpgrade::upgrade($data) if $version == 1;
+    die "GAP: wire version $version is not one chalk reads\n" unless $data->{version} == 2;
+    die "GAP: wire v2 profile `$_` is not read yet\n" for grep { $_ ne 'mem' } ( $data->{profile} // [] )->@*;
     # The text after __DATA__ / __END__, which DATA reads (absent: none).
     our $DATA_SECTION = $data->{data_section};
 

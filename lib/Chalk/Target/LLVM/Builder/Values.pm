@@ -546,7 +546,6 @@ sub _value {
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) =~ /\A(?:method|dynamic_method)\z/) { return $b->method_call($v) }
     if ($op eq 'Call' && ( $v->dispatch_kind // '' ) eq 'indirect') {
         my ($code, @args) = $v->inputs->@*;
-        pop @args if $v->can('memory_input') && $v->memory_input;
         return $b->code_call($v, $b->as($b->value($code), '%Slot'), @args);
     }
     if ($op eq 'MakeCell' && blessed( $v->inputs->[0] ) && $v->inputs->[0]->operation eq 'PadAccess'
@@ -608,7 +607,6 @@ sub _value {
     }
     if ($op eq 'Call' && ( $v->builtin_kind // '' ) eq 'blesses') {
         my @in = $v->inputs->@*;
-        pop @in if $v->can('memory_input') && $v->memory_input;
         # ONE ARGUMENT blesses into the package the bless is in: not known here.
         out('a bless of one argument') unless @in == 2;
         return $b->emit(op => 'Bless', type => '%Slot',
@@ -617,7 +615,6 @@ sub _value {
     # blessed($x): the class a reference was blessed into, else undef.
     if ($op eq 'Call' && ( $v->builtin_kind // '' ) eq 'class_name') {
         my @in = grep { blessed($_) } $v->inputs->@*;
-        pop @in if $v->can('memory_input') && $v->memory_input;
         out('a blessed of other than one argument') unless @in == 1;
         return $b->emit(op => 'ClassOf', type => '%Slot', inputs => [ $b->as($b->value($in[0]), '%Slot') ]);
     }
@@ -627,7 +624,6 @@ sub _value {
     # reads it at is not an operand.
     if ($op eq 'Call' && ( $v->builtin_kind // '' ) eq 'referent_type') {
         my @in = grep { blessed($_) } $v->inputs->@*;
-        pop @in if $v->can('memory_input') && $v->memory_input;
         out('a reftype of other than one argument') unless @in == 1;
         return $b->emit(op => 'ReferentType', type => '%Slot', inputs => [ $b->as($b->value($in[0]), '%Slot') ]);
     }
@@ -649,7 +645,7 @@ sub _value {
     # localtime(TIME) (now where there is none): libc's localtime_r -- its
     # nine fields in a list, ctime's text in scalar context.
     if ($op eq 'Call' && $v->gives_local_time) {
-        my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
+        my @a = grep { blessed($_) } $v->inputs->@*;
         out('a localtime of more than one argument') if @a > 1;
         $b->list_only($v, 'a localtime list') if $ty eq '%Array*';
         my $t = @a ? $b->as($b->value($a[0]), 'i64') : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
@@ -667,7 +663,7 @@ sub _value {
                 || $u->operation eq 'Assign' && $u->can('targets') && defined $u->targets
         } grep { blessed($_) } ( $v->consumers // [] )->@*;
         out('a qx where the program reads $?') if grep { $_->operation eq 'EntryDef' && ( $_->symbol // '' ) eq '?' } _all_nodes($b->{mop}, $b->{ret});
-        my ($cmd) = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
+        my ($cmd) = grep { blessed($_) } $v->inputs->@*;
         out('a qx of no command') unless $cmd;
         return $b->as($b->emit(op => 'Qx', type => '%Str', inputs => [ $b->as($b->value($cmd), '%Str') ]), $ty);
     }
@@ -701,7 +697,6 @@ sub _value {
             _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
         out('a case change where a string goes past ASCII') if $b->{past_ascii};
         my @a = grep { blessed($_) } $v->inputs->@*;
-        pop @a if $v->can('memory_input') && $v->memory_input;
         out('a case change of other than one argument') unless @a == 1;
         my $m = $b->emit(op => 'Const', type => 'i64', attr => { value => $CASE_MODE{ $v->case_change } });
         return $b->emit(op => 'StrCase', type => '%Str', inputs => [ $b->as($b->value($a[0]), '%Str'), $m ]);
@@ -984,7 +979,7 @@ sub _value {
 # compiled in (1); of any other, not T2's.
 sub path_value {
     my ($b, $v, $ty) = @_;
-    my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
+    my @a = grep { blessed($_) } $v->inputs->@*;
     out( 'a ' . $v->name . ' of no argument' ) unless @a;
     if ( $v->loads_a_file ) {
         my $f = $a[0];
@@ -1010,7 +1005,7 @@ sub path_value {
 sub number_value {
     my ($b, $v, $ty) = @_;
     my $name = $v->name;
-    my @a = grep { blessed($_) && !$_->is_memory_version } $v->inputs->@*;
+    my @a = grep { blessed($_) } $v->inputs->@*;
     out("a $name of no argument (of \$_)") if $v->defaults_to_topic && !@a;
     my $node = $NUMBER_NODE{ $v->number_kind };
     if ( $node eq 'HexOct' ) {
@@ -1029,7 +1024,6 @@ sub number_value {
 sub substr_value {
     my ($b, $v, $ty) = @_;
     my @a = grep { blessed($_) } $v->inputs->@*;
-    pop @a if $v->can('memory_input') && $v->memory_input;
     return $b->{memo}{ refaddr($v) } // out('a four-argument substr read before it is made') if $v->builtin_kind eq 'piece' && @a == 4;
     out('a ' . $v->name . ' of more than three arguments') if @a > 3;
     my $str = $b->as( $b->value( $a[0] ), '%Str' );
@@ -1119,7 +1113,6 @@ sub warn_value {
     out('a warn B::SoN gives no file and line (perl names them where its message does not end in a newline)')
         unless defined $v->line;
     my @a = grep { blessed($_) } $v->inputs->@*;
-    pop @a if $v->can('memory_input') && $v->memory_input;
     out('a warn of nothing (perl warns of $@, or that something is wrong)') unless @a;
     my $arr = $b->emit(op => 'NewArray', type => '%Array*');
     for my $e (@a) {
@@ -1141,7 +1134,6 @@ sub builtin_value {
     my $name = $v->name;
     my $kind = $v->builtin_kind // '';
     my @a = grep { blessed($_) } $v->inputs->@*;
-    pop @a if $v->can('memory_input') && $v->memory_input;
     return $b->as( $b->emit(op => 'Time', type => 'i64'), $ty ) if $kind eq 'epoch_seconds';
     if ($kind eq 'reversed') {
         # IN SCALAR CONTEXT (a list's is an array): its list joined, its bytes last first.
@@ -1280,11 +1272,7 @@ sub _value_users {
     my %seen;
     return grep {
         my $u = $_;
-        my @in = $u->inputs->@*;
-        my $m = $u->can('memory_operand') ? $u->memory_operand : undef;
-        my $uses = grep { blessed($_) && refaddr($_) == refaddr($n) } @in;
-        $uses-- if blessed($m) && refaddr($m) == refaddr($n);
-        $uses > 0
+        grep { blessed($_) && refaddr($_) == refaddr($n) } $u->inputs->@*
     } grep { blessed($_) && !$seen{ refaddr($_) }++ } ( $n->consumers // [] )->@*;
 }
 
@@ -1398,11 +1386,9 @@ sub value_readers {
     my $ix = $b->{value_readers} //= do {
         my (%ix, %seen);
         for my $u (grep { blessed($_) && !$seen{ refaddr($_) }++ } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} )) {
-            my $m = $u->can('memory_operand') ? $u->memory_operand : undef;
             my %k;
             $k{ refaddr($_) }++ for grep { blessed($_) } $u->inputs->@*;
-            $k{ refaddr($m) }-- if blessed($m);
-            push $ix{$_}->@*, $u for grep { $k{$_} > 0 } keys %k;
+            push $ix{$_}->@*, $u for keys %k;
         }
         \%ix;
     };
@@ -1507,7 +1493,6 @@ sub sprintf_value {
 sub printf_stmt {
     my ($b, $s) = @_;
     my @a = grep { blessed($_) } $s->inputs->@*;
-    pop @a if $s->can('memory_input') && $s->memory_input;
     my $fd = 1;
     if ( @a && $a[0]->operation eq 'Constant' && ( $a[0]->const_type // '' ) eq 'glob' ) {
         my $name = ( shift(@a)->value // '' ) =~ s/\A(?:main)?:://r;

@@ -290,9 +290,9 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     $cls->declare_field('p', sigil => '$', type => 'Int', attributes => []);
     $cls->declare_field('q', sigil => '$', type => 'Int', attributes => []);
 
-    # EACH READ AT ITS MEMORY, as B::SoN gives it: the first at MemStart, the
+    # EACH READ AT ITS MEMORY (its mem_in), as B::SoN gives it: the first at MemStart, the
     # one after the store at the store -- two reads, never one shared value.
-    my $fa_x_rd1 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => [$f->make('MemStart')]);
+    my $fa_x_rd1 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', mem_in => $f->make('MemStart'));
     $fa_x_rd1->set_stamp('Int');
     my $fa_p_lv = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
     $fa_p_lv->set_stamp('Int');
@@ -304,7 +304,7 @@ subtest 'FieldAccess read-store-read within one body re-reads the field (C2)' =>
     my $st_x = $f->make('Assign', inputs => [$fa_x_lv, int_const($f, 9)]);
     $st_x->set_stamp('Int');
 
-    my $fa_x_rd2 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => [$st_x]);
+    my $fa_x_rd2 = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', mem_in => $st_x);
     $fa_x_rd2->set_stamp('Int');
     isnt($fa_x_rd2->id, $fa_x_rd1->id,
         'precondition: the read after the store is a node of its own (its memory is the store)');

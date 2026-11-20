@@ -29,11 +29,9 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
         return;
     }
 
-    # memory_operand -> the memory version a reference to an element reads the
-    # array at (B::SoN: the element at its index THERE -- which scalar sits at
-    # which index is the array's layout, which a shift or push changes); undef
-    # for one that reads none.
-    method memory_operand() { return $self->inputs->@* > 1 ? $self->inputs->[1] : undef }
+    # (memory_operand -> the memory version a reference to an element reads
+    # the array at -- B::SoN: the element at its index THERE, which a shift
+    # or push changes -- is its mem_in; undef for one that reads none.)
     # taken_where_it_stands -> B::SoN takes it where its statement runs: it
     # reads memory, on the control chain, the memory version after it (taking
     # it may make the element).
@@ -143,7 +141,7 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
         my $s = $self->element_subscript;
         my $arr = $s ? $s->inputs->[0] : $self->inputs->[0];
         return undef unless blessed($arr) && $arr->operation eq 'ArrayLiteral' && defined $arr->symbol;
-        return undef if grep { my $u = $_; blessed($u) && grep { blessed($_) && $_->is_memory_version } $u->inputs->@* } ( $arr->consumers // [] )->@*;
+        return undef if grep { my $u = $_; blessed($u) && ( blessed( $u->mem_in ) || grep { blessed($_) && $_->is_memory_version } $u->inputs->@* ) } ( $arr->consumers // [] )->@*;
         # (one a reference to the whole array, or to each element, escapes:
         # B::SoN reads it at its memory versions, through either name)
         return undef if grep { blessed($_) && $_->operation eq 'Ref' && !$_->element_subscript } ( $arr->consumers // [] )->@*;

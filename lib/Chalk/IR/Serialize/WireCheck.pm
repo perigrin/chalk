@@ -46,12 +46,24 @@ class Chalk::IR::Serialize::WireCheck {
                     push $cons{$in}->@*, [ $n, $slot ] if defined $in;
                     $slot++;
                 }
+                # A READ AT A VERSION uses it (slot -1: no value slot). What
+                # only follows it on the chain -- a Return, a die, a store, a
+                # sub call -- does not.
+                push $cons{ $n->{mem_in} }->@*, [ $n, -1 ]
+                    if defined $n->{mem_in} && !$self->_follows_memory($n);
             }
             { nodes => [ sort { $a->{id} <=> $b->{id} } @nodes ], by => \%by, cons => \%cons };
         };
     }
 
     method _inputs($n) { return map { ref $_ ? $_->@* : $_ } ( $n->{inputs} // [] )->@* }
+    # What a node is made from: its values and the memory version it reads.
+    method _deps($n) { return ( $self->_inputs($n), $n->{mem_in} // () ) }
+    # A node whose mem_in is where it stands on the chain, not what it reads.
+    method _follows_memory($n) {
+        return 1 if $n->{op} =~ /\A(?:Return|Unwind|Assign)\z/;
+        return $self->_is_sub_call($n);
+    }
     method _f( $n, $key ) { return ( $n->{fields} // {} )->{$key} }
     method _pinned($n) { return defined $n->{control_in} ? 1 : 0 }
 
@@ -90,7 +102,7 @@ class Chalk::IR::Serialize::WireCheck {
     method _pkg_aggregate($n) {
         return undef unless defined $n;
         return $self->_pkg_name($n)
-            if $n->{op} eq 'EntryDef' && ( $self->_f( $n, 'sigil' ) // '' ) =~ /\A[\@%]\z/ && !$self->_inputs($n);
+            if $n->{op} eq 'EntryDef' && ( $self->_f( $n, 'sigil' ) // '' ) =~ /\A[\@%]\z/ && !defined $n->{mem_in};
         return $self->_f( $n, 'symbol' )
             if $n->{op} =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( $self->_f( $n, 'symbol' ) // '' ) =~ /\A[\@%].*::/;
         return undef;
@@ -106,7 +118,7 @@ class Chalk::IR::Serialize::WireCheck {
         my $op = $t->{op};
         if ( $op eq 'PadAccess' ) {
             return undef if ( $self->_f( $t, 'sigil' ) // '$' ) ne '$';
-            return $self->_inputs($t) || $self->_f( $t, 'shared' ) ? 'a variable kept in memory' : undef;
+            return defined $t->{mem_in} || $self->_inputs($t) || $self->_f( $t, 'shared' ) ? 'a variable kept in memory' : undef;
         }
         if ( $op eq 'EntryDef' ) {
             return undef if ( $self->_f( $t, 'sigil' ) // '$' ) ne '$';
@@ -217,7 +229,7 @@ class Chalk::IR::Serialize::WireCheck {
         my $g = $self->_graph($name);
         for my $n ( $g->{nodes}->@* ) {
             return 0 if $self->_pinned($n) && $n->{op} ne 'Return';
-            return 0 if $n->{op} eq 'MemStart' && ( $g->{cons}{ $n->{id} } // [] )->@*;
+            return 0 if $n->{op} eq 'MemStart' && grep { $_->[0]{op} ne 'Return' } ( $g->{cons}{ $n->{id} } // [] )->@*;
             return 0 if $n->{op} eq 'Call' || $EFFECT_OP{ $n->{op} } || $IN_PLACE{ $n->{op} };
         }
         return 1;
@@ -253,11 +265,11 @@ class Chalk::IR::Serialize::WireCheck {
     # ------------------------------------------------------------------
     method _autovivifying_reads($name) {
         my $g = $self->_graph($name);
-        for my $n ( grep { $_->{op} eq 'Subscript' && ( () = $self->_inputs($_) ) >= 3 } $g->{nodes}->@* ) {
+        for my $n ( grep { $_->{op} eq 'Subscript' && defined $_->{mem_in} } $g->{nodes}->@* ) {
             my $c = $g->{by}{ ( $self->_inputs($n) )[0] // '' } // next;
             next unless $c->{op} eq 'Subscript' && ( $c->{stamp} // '' ) eq 'Undef';
             # (a store through it made it: `$r->{a}{b} = 3; print $r->{a}{b}`)
-            next if grep { $_->[1] == 0 && ( $_->[0]{op} eq 'Assign' || $_->[0]{op} eq 'Subscript' && ( () = $self->_inputs( $_->[0] ) ) < 3 ) } ( $g->{cons}{ $c->{id} } // [] )->@*;
+            next if grep { $_->[1] == 0 && ( $_->[0]{op} eq 'Assign' || $_->[0]{op} eq 'Subscript' && !defined $_->[0]{mem_in} ) } ( $g->{cons}{ $c->{id} } // [] )->@*;
             $self->_gap("a read through an element that is not there, which perl makes (autovivification) (in $name)");
         }
         return;
@@ -292,12 +304,12 @@ class Chalk::IR::Serialize::WireCheck {
     method _effect_before_first_use( $g, $n, $counts ) {
         # What it is computed from, pinned.
         my ( %from, %seen, @q );
-        @q = $self->_inputs($n);
+        @q = $self->_deps($n);
         while ( defined( my $id = shift @q ) ) {
             next if $seen{$id}++;
             my $x = $g->{by}{$id} // next;
             $from{$id} = 1 if $self->_pinned($x) || $STRUCTURE{ $x->{op} };
-            push @q, $self->_inputs($x);
+            push @q, $self->_deps($x);
         }
         # In an eval (B::SoN marks it): made after the eval is entered.
         if ( defined( my $eval = $self->_f( $n, 'eval_id' ) ) ) {
@@ -398,7 +410,7 @@ class Chalk::IR::Serialize::WireCheck {
             # (a try or an eval puts $@ back itself; a die sets it anyway)
             next if $var eq '$main::@';
             $restored{$var}{ $w->{id} } = 1
-                if $self->_f( $w, 'binds' ) || defined $v && $v->{op} eq 'EntryDef' && $self->_inputs($v) && $self->_pkg_name($v) eq $var;
+                if $self->_f( $w, 'binds' ) || defined $v && $v->{op} eq 'EntryDef' && defined $v->{mem_in} && $self->_pkg_name($v) eq $var;
         }
         return unless %restored;
         for my $u ( grep { $_->{op} eq 'Unwind' && !defined $self->_f( $_, 'eval_id' ) } $g->{nodes}->@* ) {
@@ -450,9 +462,9 @@ class Chalk::IR::Serialize::WireCheck {
     # memory stands at the version $store replaces, or is taken by nothing:
     # the read a `local` saves its old value with.
     method _may_be_a_local( $g, $store, $var ) {
-        my $replaced = ( $self->_inputs($store) )[2];
+        my $replaced = $store->{mem_in};
         for my $r ( grep { $_->{op} eq 'EntryDef' && ( $self->_pkg_name($_) // '' ) eq $var } $g->{nodes}->@* ) {
-            my ($at) = $self->_inputs($r);
+            my $at = $r->{mem_in};
             next unless defined $at;    # (the variable's name, not a read of it)
             return 1 if defined $replaced && $at == $replaced;
             return 1 unless ( $g->{cons}{ $r->{id} } // [] )->@*;
@@ -487,7 +499,6 @@ class Chalk::IR::Serialize::WireCheck {
             for my $e ( grep { $self->_is_bless( $_->[1] ) } $self->_all_nodes ) {
                 my ( $name, $n ) = $e->@*;
                 my @in = $self->_inputs($n);
-                pop @in if $self->_f( $n, 'memory_input' );
                 my $class = @in > 1 ? $self->_graph($name)->{by}{ $in[1] // '' } : undef;
                 next if defined $class && $class->{op} eq 'Constant' && ( $self->_f( $class, 'value' ) // '' ) ne $pkg;
                 $self->_gap("a DESTROY method ($d): chalk never destroys an object, so it would never run");

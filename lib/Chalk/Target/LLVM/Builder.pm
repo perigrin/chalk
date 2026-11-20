@@ -99,7 +99,7 @@ sub build {
         # main line's `my`, which then leaves it (`my $x; BEGIN { $x = 5 }` is 5):
         # run first here, the `my` reset it. Refused.
         out('a BEGIN block reading or writing a lexical of the main program')
-            if $kind eq 'BEGIN' && grep { $_->operation eq 'PadAccess' && ( $_->shared || !defined $_->inputs->[0] ) }
+            if $kind eq 'BEGIN' && grep { $_->operation eq 'PadAccess' && ( $_->shared || !defined $_->inputs->[0] && !blessed( $_->mem_in ) ) }
                 Chalk::IR::Graph::program_nodes( $g->returns->[0] );
         my $sub = Chalk::MOP::Sub->new( name => "main::$kind", class => undef, graph => $g, params => ['@_'], uses_args => 1 );
         my $fn = $b->func( $sub, lc($kind) . '_' . ++$b->{nphase} );
@@ -187,10 +187,9 @@ sub _match_in_list {
     my $list = 0;
     for my $c ( grep { blessed($_) } ( $n->consumers // [] )->@* ) {
         my $op = $c->operation;
-        # (a value it takes: not its memory input -- a statement after a
-        # pinned match takes the match as its memory version)
+        # (a value it takes: a statement after a pinned match that takes the
+        # match as its memory version names it by mem_in, not an input)
         my @args = $c->inputs->@*;
-        pop @args if $c->can('memory_input') && $c->memory_input;
         next unless grep { blessed($_) && refaddr($_) == refaddr($n) } @args;
         my $is_in = sub ($x) { grep { blessed($_) && refaddr($_) == refaddr($x) } @args };
         # (returned: the sub gives its list or its truth by its caller's context -- func)
@@ -263,19 +262,13 @@ sub _use_counts {
     my %seen;
     for my $u (grep { blessed($_) && !$seen{ refaddr($_) }++ } ( $c->consumers // [] )->@*) {
         my $op = $u->operation;
+        # (the call as a memory version -- a read after it, a store's memory
+        # -- is its mem_in, no input: not a use of its value)
         my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($c) } 0 .. $u->inputs->$#*;
-        # (the call as a memory version -- a read after it, a store's memory --
-        # is not a use of its value)
-        # (only its memory position: `push @a, f()` has f() as its value AND its memory)
-        my $m = $u->memory_operand;
-        if (blessed($m) && refaddr($m) == refaddr($c)) {
-            my ($mi) = reverse grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($m) } 0 .. $u->inputs->$#*;
-            @pos = grep { $_ != $mi } @pos;
-        }
-        # (a LIST assign's last input is its list, not its memory: `my ($x, $y) = f()`)
-        @pos = grep { $_ != $u->inputs->$#* } @pos if $u->operation =~ /\A(?:Assign|EntryWrite|Delete|Exists)\z/
-            && !( $u->operation eq 'Assign' && $u->can('targets') && defined $u->targets );
-        @pos = () if $u->operation =~ /\A(?:EntryDef|PadAccess)\z/;   # its input is its memory ($" read after the call)
+        # (a scalar Assign's last input, its value, is not counted -- a LIST
+        # assign's is its list: `my ($x, $y) = f()`)
+        @pos = grep { $_ != $u->inputs->$#* } @pos if $u->operation eq 'Assign'
+            && !( $u->can('targets') && defined $u->targets );
         # (a control node's first input is its control: a call on the chain
         # before a loop is the Loop's way in, not a use of its value)
         @pos = () if $op =~ /\A(?:Loop|Region|Proj)\z/;
@@ -314,11 +307,10 @@ sub _use_counts {
 sub list_only {
     my ($b, $n, $what, %o) = @_;
     for my $u (grep { blessed($_) } ( $n->consumers // [] )->@*) {
-        my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
         # (A READ PINNED where it stands is a memory version and a control: a
-        # later read's memory, a loop's or a merge's way in, takes no value)
-        my $mem = $u->memory_operand;
-        pop @pos if @pos && blessed($mem) && refaddr($mem) == refaddr($n);
+        # later read's memory -- its mem_in --, a loop's or a merge's way in,
+        # takes no value)
+        my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
         next unless @pos;
         my $op = $u->operation;
         next if $op =~ /\A(?:Loop|Region|If|Proj)\z/;
@@ -344,15 +336,11 @@ sub list_only {
 }
 
 # _value_read($n) -> some node takes $n's value as an input -- not only as its
-# memory version (a later read of the array) or its control.
+# memory version (a later read of the array: its mem_in) or its control.
 sub _value_read {
     my ($b, $n) = @_;
     for my $c (grep { blessed($_) } ( $n->consumers // [] )->@*) {
-        my @in = $c->inputs->@*;
-        my $mem = $c->memory_operand // ( $c->operation =~ /\A(?:EntryDef|PadAccess)\z/ ? $in[0] : undef );
-        my $skip = blessed($mem) && refaddr($mem) == refaddr($n) ? 1 : 0;
-        my $uses = grep { blessed($_) && refaddr($_) == refaddr($n) } @in;
-        return 1 if $uses > $skip;
+        return 1 if grep { blessed($_) && refaddr($_) == refaddr($n) } $c->inputs->@*;
     }
     return 0;
 }

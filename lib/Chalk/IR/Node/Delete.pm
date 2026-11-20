@@ -11,8 +11,6 @@ class Chalk::IR::Node::Delete :isa(Chalk::IR::Value) {
 
     # A MEMORY VERSION: a store (a read after it reads at it).
     method is_memory_version() { return 1 }
-    # memory_operand -> the version it deletes at: after the container and the key.
-    method memory_operand() { return $self->inputs->[2] }
     method staleness_kind() { 'opaque' }
     method is_fixed() { return true }
 }

@@ -30,20 +30,17 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
 
     method operation() { 'PadAccess' }
 
-    # memory_operand -> a variable kept in memory is read at its input's version.
-    method memory_operand() { return $self->is_location ? $self->inputs->[0] : undef }
     sub identity_kind { q(hash_consed) }
 
     # A SCALAR THAT IS A LOCATION is read and stored through memory, not
     # bound as an SSA value: a shared file lexical, or a `my $x` the producer
     # keeps in memory (handed to a call, so `@_` aliases it) -- its input is
-    # then a memory version, not a VarDecl. The producer spells a second of
+    # then read at a memory version (mem_in). The producer spells a second of
     # one name in one sub apart, so (graph, symbol) names the variable.
     method is_location() {
         return 0 unless $sigil eq '$';
         return 1 if $shared;
-        my $in = $self->inputs->[0];
-        return ( defined $in && $in->can('operation') && $in->operation ne 'VarDecl' ) ? 1 : 0;
+        return blessed( $self->mem_in ) ? 1 : 0;
     }
 
     # The qualified spelling, composed in ONE place. Consumers comparing against
@@ -66,12 +63,12 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     # is_my_hash -> true for A `my %h` NAMED, NOT MADE HERE (`my %e;`): one hash
     # per variable, made at its function's entry. A shared one is read at a
     # memory version, and is still the one hash.
-    method is_my_hash() { return ( $sigil // '' ) eq '%' && ( !$self->inputs->@* || $shared ) }
+    method is_my_hash() { return ( $sigil // '' ) eq '%' && ( !$self->inputs->@* && !blessed( $self->mem_in ) || $shared ) }
 
     # is_my_array -> true for A `my @a` NAMED, NOT MADE HERE: an array declared
     # once in its sub (one declared in a loop body or an arm is an ArrayLiteral
     # pinned there, made each time).
-    method is_my_array() { return ( $sigil // '' ) eq '@' && ( !$self->inputs->@* || $shared ) }
+    method is_my_array() { return ( $sigil // '' ) eq '@' && ( !$self->inputs->@* && !blessed( $self->mem_in ) || $shared ) }
 
     # is_named_hash -> a `my %h` is a named hash.
     method is_named_hash() { return $self->is_my_hash }

@@ -169,7 +169,7 @@ subtest 'multi-statement ADJUST body in control-chain order' => sub {
     $cls->declare_field('p', sigil => '$', type => 'Int', attributes => []);
     $cls->declare_field('q', sigil => '$', type => 'Int', attributes => []);
 
-    my $fa_x = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => [$f->make('MemStart')]);
+    my $fa_x = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', mem_in => $f->make('MemStart'));
     $fa_x->set_stamp('Int');
     my $fa_p_lv = $f->make('FieldAccess', field_index => 1, field_stash => 'Pt', inputs => []);
     $fa_p_lv->set_stamp('Int');
@@ -181,9 +181,9 @@ subtest 'multi-statement ADJUST body in control-chain order' => sub {
     my $st_x = $f->make('Assign',
         inputs => [$f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => []), int_const($f, 9)]);
     $st_x->set_stamp('Int');
-    # A READ OF $x AFTER THE STORE is a read of its own, at the store's memory
+    # A READ OF $x AFTER THE STORE is a read of its own, at the store's memory (mem_in)
     # (B::SoN's: the first read is at MemStart, this one at the Assign).
-    my $fa_x_after = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', inputs => [$st_x]);
+    my $fa_x_after = $f->make('FieldAccess', field_index => 0, field_stash => 'Pt', mem_in => $st_x);
     $fa_x_after->set_stamp('Int');
     my $st_q = $f->make('Assign', inputs => [$fa_q_lv, $fa_x_after]);
     $st_q->set_stamp('Int');

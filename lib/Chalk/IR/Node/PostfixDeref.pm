@@ -104,12 +104,6 @@ class Chalk::IR::Node::PostfixDeref :isa(Chalk::IR::Value) {
         return 1 if grep { !defined _my_symbol($_) || defined $sym && _my_symbol($_) eq $sym } @hits;
         return scalar grep { $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ } @all;
     }
-
-    # memory_operand -> it reads at its second input (the first is what it reads).
-    method memory_operand() { return $self->inputs->[1] }
-    # A MEMORY VERSION where pinned: B::SoN pins a read through a reference
-    # (it may die) where it stands, and versions memory at it.
-    method is_memory_version() { return $self->is_pinned }
     method staleness_kind() { 'transparent' }
     sub identity_kind { 'hash_consed' }
 

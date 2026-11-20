@@ -88,8 +88,7 @@ sub _through_ref {
     # %{$s->{k}}`) may stop as that one may: made where it stands too.
     unless ($op =~ /\A(?:Subscript|Count|PostfixDeref)\z/) {
         return 0 if $op =~ /\A(?:Phi|Constant|PadAccess|Parameter|ArgsSource|MemStart)\z/ || ( $seen //= {} )->{ refaddr($n) }++;
-        my $m = $n->memory_operand;
-        return scalar grep { blessed($_) && !( blessed($m) && refaddr($_) == refaddr($m) ) && !$_->is_memory_version
+        return scalar grep { blessed($_) && !$_->is_memory_version
                              && $b->_through_ref($_, $seen) } $n->inputs->@*;
     }
     my $c = $n->inputs->[0];
@@ -285,8 +284,7 @@ sub _rests_on_settled {
     return 0 unless blessed($n) && $n->can('operation') && !$seen->{ refaddr($n) }++;
     return 0 if $b->{memo}{ refaddr($n) } || $n->is_memory_version;
     return 1 if $b->{arm_settled} && $b->{arm_settled}{ refaddr($n) };
-    my $m = $n->memory_operand;
-    return scalar grep { !( blessed($m) && blessed($_) && refaddr($_) == refaddr($m) ) && $b->_rests_on_settled($_, $seen) } $n->inputs->@*;
+    return scalar grep { $b->_rests_on_settled($_, $seen) } $n->inputs->@*;
 }
 
 sub _needs_unmade_phi {
@@ -310,7 +308,7 @@ sub index_readers {
         # version the cell was made at: making a cell writes nothing. Not
         # indexed, `my @k = sort @h` was made after a call of the closure
         # pushing to @h.)
-        $m = $m->inputs->[1] while $m isa Chalk::IR::Node && $m->operation eq 'MakeCell';
+        $m = $m->mem_in while $m isa Chalk::IR::Node && $m->operation eq 'MakeCell';
         push $r{ refaddr($m) }->@*, $n if $m isa Chalk::IR::Node && $m->is_memory_version;
     }
     # A PACKAGE SCALAR READ WITH NO VERSION: B::SoN reads a write's target
@@ -318,12 +316,12 @@ sub index_readers {
     # write's memory. Several (local's save, store, restore): no one version --
     # refused where it is read. None: the function's starting memory.
     my @starts = grep { $_->operation eq 'MemStart' } @nodes;
-    for my $n (grep { ( $_->is_package_scalar || $_->operation eq 'FieldAccess' ) && !$_->inputs->@* } @nodes) {
+    for my $n (grep { ( $_->is_package_scalar || $_->operation eq 'FieldAccess' ) && !blessed( $_->mem_in ) } @nodes) {
         my @w = grep { $_->operation =~ /\A(?:EntryWrite|Assign)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($n) }
             ( $n->consumers // [] )->@*;
         my %seen; @w = grep { !$seen{ refaddr($_) }++ } @w;
         if (@w > 1) { $b->{unversioned}{ refaddr($n) } = 1; next }
-        push $r{ refaddr($_) }->@*, $n for @w ? grep { $_ isa Chalk::IR::Node && $_->is_memory_version } $w[0]->inputs->[2] : @starts;
+        push $r{ refaddr($_) }->@*, $n for @w ? grep { $_ isa Chalk::IR::Node && $_->is_memory_version } $w[0]->mem_in : @starts;
     }
     $b->{readers} = \%r;
 }
@@ -381,7 +379,7 @@ sub assign {
     }
     return $b->lvalue_sub_store($target, $v) if blessed($target) && $target->operation eq 'Call' && ( $target->dispatch_kind // '' ) eq 'direct';
     my $ptr = $b->location($target);
-    $b->reads_before($target->inputs->[0]);
+    $b->reads_before($target->mem_in);
     my $val = $b->as($b->value($v), '%Slot');
     $b->emit(op => 'Store', type => 'void', inputs => [ $val, $ptr ]);
     $b->pos_reset($target);
@@ -464,7 +462,6 @@ sub list_assign {
     my ($b, $s) = @_;
     out('a local') if $s->can('local') && $s->local;
     my @in = $s->inputs->@*;
-    pop @in if $s->can('memory_input') && $s->memory_input;
     my @t = splice @in, 0, $s->targets;
     # AN ARRAY OR HASH FIELD ASSIGNED WHOLE (`@l = (9)`, `%h = $r->%*`): the
     # list made first (it may read the field), then the field's own
@@ -478,9 +475,8 @@ sub list_assign {
         # (a read after it takes it as its memory; the next statement as its control)
         my @used = grep {
             my $u = $_;
-            my $m = $u->memory_operand;
             $u->operation !~ /\A(?:Loop|If|Region|Proj)\z/
-                && ( grep { blessed($_) && refaddr($_) == refaddr($s) } $u->inputs->@* ) > ( blessed($m) && refaddr($m) == refaddr($s) ? 1 : 0 )
+                && grep { blessed($_) && refaddr($_) == refaddr($s) } $u->inputs->@*
         } grep { blessed($_) } ( $s->consumers // [] )->@*;
         out('the value of a list assignment to an array or hash') if grep {
             !( $_->operation eq 'Return' && $_->inputs->@* == 1 && blessed( $b->{ret} ) && refaddr($_) == refaddr( $b->{ret} ) && $b->{in_func} )
@@ -625,7 +621,7 @@ sub list_assign {
 sub _cell_variable {
     my ($cell) = @_;
     my $want = $cell->can('cell_name') ? ( $cell->cell_name // '' ) : '';
-    my $mem = $cell->inputs->[1];
+    my $mem = $cell->mem_in;
     for (1 .. 64) {
         return undef unless blessed($mem);
         my $v = $mem->inputs->[0];
@@ -636,9 +632,9 @@ sub _cell_variable {
             return $t if $t;
         }
         # Another variable's cell, made just before, is a step too (two captures),
-        # as is a location read, whose input is the memory it reads at.
+        # as is a location read, at the memory it reads at.
         return undef unless $mem->operation =~ /\A(?:Assign|EntryWrite|Call|MakeCell|PadAccess)\z/;
-        ($mem) = grep { blessed($_) && $_->operation ne 'Constant' } reverse $mem->inputs->@*;
+        $mem = $mem->mem_in;
     }
     return undef;
 }

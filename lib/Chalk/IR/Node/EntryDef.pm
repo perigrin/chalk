@@ -32,8 +32,6 @@ class Chalk::IR::Node::EntryDef :isa(Chalk::IR::Node::Access) {
 
     method operation() { 'EntryDef' }
 
-    # memory_operand -> a package scalar's read reads at its input's version.
-    method memory_operand() { return $self->is_package_scalar ? $self->inputs->[0] : undef }
     sub identity_kind { q(hash_consed) }
 
     # The qualified spelling, composed in ONE place -- see the note on

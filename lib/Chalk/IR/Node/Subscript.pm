@@ -9,12 +9,6 @@ use Chalk::IR::Node::Access;
 class Chalk::IR::Node::Subscript :isa(Chalk::IR::Node::Access) {
     method operation() { 'Subscript' }
 
-    # memory_operand -> it reads at its third input (after the aggregate and the key).
-    method memory_operand() { return $self->inputs->[2] }
-
-    # A MEMORY VERSION where pinned: B::SoN pins a read of a tied aggregate (a
-    # method call) and versions memory at it.
-    method is_memory_version() { return $self->is_pinned }
     sub identity_kind { q(hash_consed) }
 
     # is_arg_element -> true for $_[N]: an element of @_ by a constant index.

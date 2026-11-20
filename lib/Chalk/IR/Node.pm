@@ -74,6 +74,18 @@ class Chalk::IR::Node {
     # still hash-cons to the same node; control_in is a per-use decoration.
     field $control_in :reader = undef;
 
+    # THE MEMORY VERSION THIS NODE READS OR FOLLOWS (wire v2's `mem_in`,
+    # docs/plans/2026-11-20-wire-v2.md section 3): a read's memory, a store's
+    # or a call's version before it, a Return's memory at the end. A consumer
+    # edge like control_in -- the version lists this node among its consumers
+    # -- but, unlike control_in, part of content_hash: two reads of one place
+    # at two versions are two values. Never an input: `inputs` holds values.
+    field $mem_in :param :reader = undef;
+
+    # THIS NODE IS A MEMORY VERSION (wire v2's `mem_out`): a store, a call, a
+    # read placed as one. MemStart and a memory Phi are versions by their op.
+    field $mem_out :param :reader = 0;
+
     # Per-node scheduler interpretation, populated lazily by the scheduler
     # via set_schedule_data(). Holds a Chalk::Scheduler::ScheduleMeta
     # subclass instance whose dialect (EagerPinning, GCM, ...) matches the
@@ -242,6 +254,7 @@ class Chalk::IR::Node {
                 push @parts, $input->id();
             }
         }
+        push @parts, 'mem=' . $mem_in->id() if blessed($mem_in);
         return @parts;
     }
 
@@ -271,6 +284,22 @@ class Chalk::IR::Node {
     # registration on the old and new predecessors. Called by the
     # Block control-chain fixup pass in Perl::Actions when this node
     # appears as a statement-position side effect.
+    # Late-binding setter for the memory edge, keeping the version's consumer
+    # list as set_control_in keeps a control predecessor's. (The content hash
+    # was the node's when it was made: a hash-consed node is given its
+    # mem_in at construction, `mem_in => $version`.)
+    method set_mem_in($m) {
+        $mem_in->remove_consumer($self) if blessed($mem_in);
+        $mem_in = $m;
+        $m->add_consumer($self) if blessed($m);
+        return;
+    }
+
+    method set_mem_out($v) {
+        $mem_out = $v ? 1 : 0;
+        return;
+    }
+
     method set_control_in($ctrl) {
         if (defined $control_in) {
             $control_in->remove_consumer($self);
@@ -295,14 +324,13 @@ class Chalk::IR::Node {
 
     # is_memory_version -> true for a MEMORY VERSION: MemStart, a store, a
     # call made as a statement, a memory phi -- a node a read of memory reads
-    # at. A node is none unless its class says so.
-    method is_memory_version() { return 0 }
+    # at. The wire says so (mem_out); MemStart and a memory Phi by their op.
+    method is_memory_version() { return $mem_out ? 1 : 0 }
 
-    # memory_operand -> the memory version a read reads at: its MEMORY input,
-    # not any input (a statement call is a version and a value, and reading
-    # its value is not reading memory). Undef for a node that reads no memory;
-    # each read says where its memory input is.
-    method memory_operand() { return undef }
+    # memory_operand -> the memory version this node reads or follows: its
+    # named memory edge (mem_in), never one of its inputs. Undef for a node
+    # that touches no memory.
+    method memory_operand() { return $mem_in }
 
     # reads_class -> true for a read of what a reference is blessed into
     # (ref, blessed): the state a bless replaces.

@@ -87,19 +87,21 @@ for my $case (
         or diag "got: " . ($got // $@);
 }
 
-# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
-# them): refused by name, never a wrong answer.
-{
-    my $src = q{sub ld { "l" . $_[0] } my $s = "abc"; print ld($s); $s =~ s/b/X/; print ld($s), "\n";};
+# A CALL THAT IS AN s///'s MEMORY VERSION is no use of its value. On wire v1
+# the call was the s///'s last input, and T2 counted it a scalar use beside
+# print's list: refused, "a call used both as a list and as a scalar". With
+# the memory edge named (wire v2's mem_in) the call is one use, a list: each
+# gives perl's answer -- asked of perl, not written down.
+for my $src (
+    q{sub ld { "l" . $_[0] } my $s = "abc"; print ld($s); $s =~ s/b/X/; print ld($s), "\n";},
+    q{sub ld { "l" . $_[0] } my $s = "abc"; ld($s); my $n = 1; $n = $n + 0; if ($n) { print ld($s); $s =~ s/a/Q/ } print ld($s), "\n";},
+) {
+    my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
+    print $fh $src;
+    close $fh;
+    my $want = qx($^X $pl);
     my $got = eval { through_llvm($src) };
-    ok(!defined $got, "T2 lowers no module for it: $src");
-    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa call used both as a list and as a scalar\E\)/, "refused by T2's reason: $src");
-}
-{
-    my $src = q{sub ld { "l" . $_[0] } my $s = "abc"; ld($s); my $n = 1; $n = $n + 0; if ($n) { print ld($s); $s =~ s/a/Q/ } print ld($s), "\n";};
-    my $got = eval { through_llvm($src) };
-    ok(!defined $got, "T2 lowers no module for it: $src");
-    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa call used both as a list and as a scalar\E\)/, "refused by T2's reason: $src");
+    is($got, $want, "perl's answer: $src") or diag $@;
 }
 
 done_testing;

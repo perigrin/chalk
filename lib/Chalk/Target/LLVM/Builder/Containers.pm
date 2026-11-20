@@ -249,7 +249,7 @@ sub hash_value {
     # caller: the site of the call this sub is in, N frames up (the stack
     # each call pushes). A package in scalar context; (package, file, line).
     if ($op eq 'Call' && $v->reads_call_stack) {
-        my ($n) = grep { blessed($_) && !( $v->can('memory_input') && $v->memory_input && refaddr($_) == refaddr( $v->memory_input ) ) } @in;
+        my ($n) = grep { blessed($_) } @in;
         my $depth = $n ? $b->as( $b->value($n), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
         return $b->emit(op => 'CallerPkg', type => '%Slot', inputs => [$depth]) if ( $v->stamp // '' ) eq 'Scalar';   # static type
         # caller(N) GIVES ELEVEN; T2 has the first three. Lowered only where
@@ -317,7 +317,6 @@ sub hash_value {
             out('a sort comparator reading @_') if $cmp_fn->{list} || $cmp_fn->{nargs};
         }
         my @l = @in;
-        pop @l if $v->can('memory_input') && $v->memory_input;
         my $arr = $b->emit(op => 'NewArray', type => '%Array*');
         for my $e (grep { blessed($_) } @l) {
             if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $arr, $b->array_of($e) ]) }
@@ -502,8 +501,7 @@ sub read_as_a_truth {
     my ($b, $n) = @_;
     for my $u (grep { blessed($_) } ( $n->consumers // [] )->@*) {
         my @in = $u->inputs->@*;
-        my $m = $u->memory_operand;
-        my @pos = grep { blessed( $in[$_] ) && refaddr( $in[$_] ) == refaddr($n) && !( blessed($m) && refaddr($m) == refaddr($n) ) } 0 .. $#in;
+        my @pos = grep { blessed( $in[$_] ) && refaddr( $in[$_] ) == refaddr($n) } 0 .. $#in;
         next unless @pos;
         my $op = $u->operation;
         next if $op eq 'TernaryExpr' && !grep { $_ != 0 } @pos;
@@ -857,7 +855,6 @@ sub array_value {
             # (a tie's methods may die, and nothing after them looks: not T2's in a program with an eval)
             out("a $name in a program with an eval") if $b->{has_eval};
             my @args = @in;
-            pop @args if $v->can('memory_input') && $v->memory_input;
             my ($c, $cls, @rest) = @args;
             my $sig = blessed($c) && $c->can('sigil') && defined $c->sigil ? $c->sigil
                 : blessed($c) && $c->operation eq 'ArrayLiteral' ? '@' : blessed($c) && $c->operation eq 'HashLiteral' ? '%' : '';
@@ -894,7 +891,7 @@ sub array_value {
         # C is of characters, T2's strings are bytes).
         if ($kind eq 'unpacked') {
             $b->list_only($v, 'an unpack');
-            my @a = grep { blessed($_) && !$_->is_memory_version } @in;
+            my @a = grep { blessed($_) } @in;
             out('an unpack of other than a template and one string') unless @a == 2;
             my $t = $a[0];
             my ($n) = $t->operation eq 'Constant' && defined $t->value ? $t->value =~ /\AC(\d+|\*)?\z/ : ();
@@ -910,7 +907,7 @@ sub array_value {
         # scalar context glob is an iterator: not T2's; nor several patterns.
         if ($kind eq 'file_names') {
             $b->list_only($v, 'a glob');
-            my @a = grep { blessed($_) && !$_->is_memory_version } @in;
+            my @a = grep { blessed($_) } @in;
             out('a glob of other than one pattern') unless @a == 1;
             my $lit = $a[0];
             $lit = $lit->inputs->[0] while $lit->operation eq 'Coerce';
@@ -923,7 +920,6 @@ sub array_value {
         }
         if ($kind eq 'joined') {
             my @args = @in;
-            pop @args if $v->can('memory_input') && $v->memory_input;
             my ($sep, @list) = @args;
             # ONE ARRAY is joined as it is; scalars (an array literal folded to
             # its elements, `"@a"`) and lists (a call's) go into a fresh array
@@ -1259,7 +1255,6 @@ sub array_stmt {
     $b->value($own) if blessed($own) && $own->can('operation') && $b->_through_ref($own);
     $b->hash_reads_settled('a ' . $s->name);   # (it may store through a reference: `push @$r, 1`)
     my @in = $s->inputs->@*;
-    pop @in if $s->can('memory_input') && $s->memory_input;
     my $kind = $s->builtin_kind // '';
     if ($kind eq 'adds_last') {
         my ($arr, @vals) = @in;

@@ -172,7 +172,6 @@ sub walk {
         # The block ends there: nothing after it in its arm runs.
         elsif ($op eq 'Unwind') {
             my @m = grep { blessed($_) } $s->inputs->@*;
-            pop @m if $s->can('memory_input') && $s->memory_input;
             out('a die of a list') if grep { _is_list($_) } @m;
             my $msg = @m ? $b->as($b->value( shift @m ), '%Str') : $b->const_str('Died');
             $msg = $b->emit(op => 'Concat', type => '%Str', inputs => [ $msg, $b->as($b->value($_), '%Str') ]) for @m;
@@ -212,7 +211,7 @@ sub walk {
         # shortcut: END blocks are not run (T2 refuses a program with one).
         elsif ($op eq 'Call' && $s->ends_program) {
             my ($x) = grep { blessed($_) } $s->inputs->@*;
-            my $v = $x && !( $s->can('memory_input') && $s->memory_input && refaddr($x) == refaddr( $s->memory_input ) )
+            my $v = $x
                 ? $b->as( $b->value($x), 'i64' )
                 : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });
             $b->emit(op => 'Exit', type => 'void', inputs => [$v]);
@@ -339,7 +338,8 @@ sub walk {
         # THE RESTORE, which puts that back. A reference taken to the old one
         # keeps its contents; a sub called inside the scope sees the new one.
         elsif ($op eq 'EntryWrite' && $s->binds && ( $s->inputs->[0] isa Chalk::IR::Node && $s->inputs->[0]->is_package_aggregate )) {
-            my ($t, $v, $mem) = $s->inputs->@*;
+            my ($t, $v) = $s->inputs->@*;
+            my $mem = $s->mem_in;
             my $h = $t->sigil eq '%';
             $b->hash_reads_settled('a local');
             $b->reads_before($_) for $b->{passed}->@*;
@@ -349,7 +349,7 @@ sub walk {
                 for my $r ( grep { blessed($_) && $_->operation eq 'Ref' } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) ) {
                     my $in = $r->inputs->[0];
                     next unless ( $in isa Chalk::IR::Node && $in->is_package_aggregate ) && _pkg_agg_name($in) eq _pkg_agg_name($t)
-                        && blessed( $in->inputs->[-1] ) && refaddr( $in->inputs->[-1] ) == refaddr($mem);
+                        && blessed( $in->mem_in ) && refaddr( $in->mem_in ) == refaddr($mem);
                     my $old = $b->pkg_agg($in);
                     $b->{agg_save}{ refaddr($r) } = $h ? $old : $b->emit(op => 'ARef', type => '%Slot', inputs => [$old]);
                 }
@@ -401,7 +401,6 @@ sub walk {
         # `$#a = N` where it stands: the array resized (t2_aset_len).
         elsif ($op eq 'Call' && ( $s->builtin_kind // '' ) eq 'sets_last_index') {
             my @a = grep { blessed($_) } $s->inputs->@*;
-            pop @a if $s->can('memory_input') && $s->memory_input;
             $b->emit(op => 'ASetLen', type => 'void', inputs => [ $b->array_of( $a[0] ), $b->as( $b->value( $a[1] ), 'i64' ) ]);
             $b->{memo}{ refaddr($s) } = $b->value( $a[1] );
             $ctl = $s;
@@ -952,8 +951,6 @@ sub _only_counted {
     for my $u (grep { blessed($_) } ( $n->consumers // [] )->@*) {
         next if $u->operation =~ /\A(?:Loop|Region|If|Proj)\z/ || $u->operation eq 'Phi' && $u->is_memory;
         my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
-        my $mem = $u->memory_operand;
-        pop @pos if @pos && blessed($mem) && refaddr($mem) == refaddr($n);
         return 0 if @pos && $u->operation ne 'Count';
     }
     return 1;

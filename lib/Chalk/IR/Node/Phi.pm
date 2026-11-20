@@ -36,10 +36,10 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Value) {
     # recorded", never as "no predecessors".
     field $predecessors :param :reader = undef;
 
-    # Whether this Phi merges MEMORY versions rather than a value, when the
-    # producer said: B::SoN flags its memory Phis. Undef is "not said", and
-    # is_memory then reads it from the inputs.
-    field $memory :param :reader = undef;
+    # Whether this Phi merges MEMORY versions rather than a value: the wire
+    # flags its memory Phis (wire v2; Serialize::WireUpgrade flags a v1
+    # wire's, by what the inputs say).
+    field $memory :param :reader = 0;
 
     method operation() { 'Phi' }
 
@@ -49,56 +49,12 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Value) {
 
     # is_memory -> true for a MEMORY PHI: one merging memory versions (MemStart,
     # an element store, ...), not values. It is a scheduling token: the read
-    # that consumes it loads the merged heap. Told from a value phi by its
-    # inputs being memory nodes; the producer's flag (memory) settles the
-    # cases the inputs alone cannot.
-    method is_memory($seen = {}) {
-        return 0 if $seen->{ refaddr($self) }++;   # a loop's phis reach each other
-        my $inputs = $self->inputs // [];
-        return 0 unless $inputs->@*;
-        for my $in ($inputs->@*) {
-            next unless blessed($in);
-            return 1 if $in->operation eq 'MemStart';
-            # an element store: an Assign whose lhs is a Subscript -- or a field,
-            # or a shared file lexical, each a location stored through memory
-            if ($in->operation eq 'Assign') {
-                return 1 if grep { blessed($_) && $_->operation eq 'Subscript' }
-                                 $in->inputs->@*;
-                my $lhs = $in->inputs->[0];
-                return 1 if blessed($lhs) && ( $lhs->operation eq 'FieldAccess'
-                    || ( $lhs->operation eq 'PadAccess' && $lhs->is_location )
-                    || ( $lhs->operation eq 'PostfixDeref' && ($lhs->sigil // '') eq '$' ) );
-            }
-            # a list assignment the producer merges as memory: its value is a List
-            # no arm can flatten (`($lo, $u) = ...` in each arm, then a push)
-            return 1 if $in->operation eq 'Assign' && ( $in->stamp // '' ) eq 'List' && $memory;  # static type
-            # a package scalar's store
-            return 1 if $in->operation eq 'EntryWrite';
-            # a direct call: an inlined sub may store any of those
-            # ...or a method call, which runs one (taking the producer's flag
-            # wholesale instead let an arm walk that cycles through, pvm 124)
-            # ...or a call through a code ref, which runs one too (left out, an
-            # eval's join past `$code->()` was a value phi, and a package
-            # scalar the sub wrote was read at its first use -- after the next
-            # store to it: 0 for 2)
-            return 1 if $in->operation eq 'Call' && $in->is_sub_call
-                && !( defined $memory && !$memory );
-            # ...or a builtin that versions memory (a push, a sort that runs code),
-            # on a phi the producer says is memory (a value phi may merge a
-            # sort's result).
-            return 1 if $in->operation eq 'Call' && ( $in->dispatch_kind // '' ) eq 'builtin'
-                && $memory;
-            # ...or a read B::SoN pinned where it stands (through a reference,
-            # it may die; a tied one is a call), on a phi the producer says is
-            # memory: a value phi may merge the read's value. (So is a
-            # reference to an element taken where it stands: Ref's.)
-            return 1 if $in->operation =~ /\A(?:Subscript|Exists|PostfixDeref|Count|Ref)\z/ && $in->is_pinned
-                && $memory;
-            # a memory phi of a nested structure
-            return 1 if $in->operation eq 'Phi' && $in->is_memory($seen);
-        }
-        return 0;
-    }
+    # that consumes it loads the merged heap. The wire's flag says so.
+    #
+    # STAGE 2 OF WIRE V2: the inference that told one from its inputs is
+    # Serialize::WireUpgrade's now, run once on a v1 wire; this method goes
+    # in stage 6, its callers reading `memory`.
+    method is_memory() { return $memory ? 1 : 0 }
 
     # NOT in the content hash, for the same reason control_in is not: it is a
     # per-use decoration recording where a value came from, not part of what

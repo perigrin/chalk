@@ -23,6 +23,9 @@ class Chalk::IR::Node::Assign :isa(Chalk::IR::Node::BinOp) {
     # A `local` store: perl puts the old value back when its scope ends.
     field $local :param :reader = 0;
     field $targets :param :reader = undef;
+    # A BINDING RECORD, NOT A STORE (wire v2 `record`): off both chains, it
+    # names what a `my` list is bound to; nothing runs it.
+    field $record :param :reader = 0;
 
     # is_placed -> true where this store is on the control chain AND every
     # read of an array or hash it fills comes after it: the read (or what it

@@ -751,8 +751,6 @@ sub _iv_in_body ( $n, $L, $st ) {
     my %seen;
     for my $c ( grep { blessed($_) && !$seen{ refaddr($_) }++ } ( $n->consumers // [] )->@* ) {
         my @pos = grep { blessed( $c->inputs->[$_] ) && refaddr( $c->inputs->[$_] ) == $k } 0 .. $c->inputs->$#*;
-        my $m = $c->can('memory_operand') ? $c->memory_operand : undef;
-        pop @pos if @pos && blessed($m) && refaddr($m) == $k;
         next unless @pos;
         if ( $c->operation eq 'Phi' && blessed( $c->region ) && refaddr( $c->region ) == refaddr($L) ) {
             $ok = 0 if grep { $_ != 1 } @pos;
@@ -3263,7 +3261,7 @@ sub _propagate_computed_reprs ($graphs) {
                     # the container (push, or a sub through @_), whose values
                     # no store records. Dropped too, a hash read after a store
                     # in an arm had no type, and printed nothing for 3.
-                    my $mem = $node->inputs->[2];
+                    my $mem = $node->mem_in;
                     my $written = blessed($mem) && $mem->operation ne 'MemStart';
                     next if $written && _handed_to_a_call( $node->inputs->[0] );
                     if (!$written && _static_miss( $node->inputs->[0], $node->inputs->[1] )) {
@@ -3405,7 +3403,7 @@ sub _propagate_computed_reprs ($graphs) {
                 my $boxable = $op eq 'TernaryExpr' || grep {
                     ( $_->stamp // '' ) =~ /\A(?:ArrayRef|HashRef|CodeRef|ScalarRef)\z/
                     || ( $_->operation eq 'PadAccess' && ( $_->stamp // '' ) eq 'Scalar'
-                         && !defined $_->inputs->[0] )
+                         && !defined $_->inputs->[0] && !blessed( $_->mem_in ) )
                     || ( $_->operation eq 'Phi' && ( $_->stamp // '' ) eq 'Scalar' )
                 } @in;
                 $widest = 'Scalar'
@@ -3771,7 +3769,7 @@ sub _stamp_list_assign_targets ($graphs) {
             for my $t ($n->inputs->@[ 0 .. $n->targets - 1 ]) {
                 next unless blessed($t) && $t->operation eq 'PadAccess' && ( $t->sigil // '' ) eq '$'
                     && !_is_narrowed($t->stamp) && ( $t->stamp // 'Unknown' ) eq 'Unknown'
-                    && !defined $t->inputs->[0];
+                    && !defined $t->inputs->[0] && !blessed( $t->mem_in );
                 $t->set_stamp('Scalar');
             }
         }

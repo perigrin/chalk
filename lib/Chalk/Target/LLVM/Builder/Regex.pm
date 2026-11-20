@@ -138,7 +138,7 @@ sub regex_split {
     my ($b, $c) = @_;
     my $k = 'rxp' . refaddr($c);
     return $b->{memo}{$k} if $b->{memo}{$k};
-    my ( $pat, $subj, $limit ) = grep { blessed($_) && !$_->is_memory_version } $c->inputs->@*;
+    my ( $pat, $subj, $limit ) = grep { blessed($_) } $c->inputs->@*;
     out('a split of no subject') unless blessed($subj);
     my $fn;
     if ( blessed($pat) && $pat->operation eq 'Constant' && ( $pat->const_type // '' ) eq 'string' && ( $pat->value // '' ) eq ' ' ) {
@@ -179,11 +179,9 @@ sub regex_subst {
         $b->reads_before($_) for $b->{passed}->@*;   # (the body may read and store what reads here read)
         return $b->{memo}{$k} = $b->subst_call( $s, $flags, { percall => 1 }, $subj, $code );
     }
-    # A COMPUTED REPLACEMENT is an input between the subject (and a pattern
-    # input) and the memory version: B::SoN makes it in the arm of a match of
-    # its own -- ONCE.
-    my @in = grep { blessed($_) } $s->inputs->@[ ( $s->pattern_is_input ? 2 : 1 ) .. $s->inputs->$#* ];
-    my $repl = @in && !$in[0]->is_memory_version ? $in[0] : undef;
+    # A COMPUTED REPLACEMENT is the input after the subject (and a pattern
+    # input): B::SoN makes it in the arm of a match of its own -- ONCE.
+    my ($repl) = grep { blessed($_) } $s->inputs->@[ ( $s->pattern_is_input ? 2 : 1 ) .. $s->inputs->$#* ];
     my $flags = $s->flags // '';
     out('an s///g whose replacement is made per match (B::SoN computes it once)') if $repl && $flags =~ /g/;
     $flags =~ s/[er]//g;
@@ -270,7 +268,7 @@ sub translit {
     my $sub = $b->{rxsub}{$key} //= do {
         my $w = eval { Chalk::Regex::Graph::translit( $t->from // '', $t->to // '', ( $t->flags // '' ) =~ s/r//gr ) };
         out( 'a tr: ' . ( $@ =~ s/\A(?:GAP: )?//r =~ s/\n.*//sr ) ) unless $w;
-        Chalk::MOP::Sub->new( name => 'tr', class => undef, graph => Chalk::IR::Serialize::JSON::_deserialize_graph($w), params => ['@_'], uses_args => 1 );
+        Chalk::MOP::Sub->new( name => 'tr', class => undef, graph => Chalk::IR::Serialize::JSON::_deserialize_graph( Chalk::IR::Serialize::WireUpgrade::upgrade_graph($w) ), params => ['@_'], uses_args => 1 );
     };
     my $fn = $b->func( $sub, 'tr_' . scalar keys $b->{rxsub}->%* );
     return $b->{memo}{$k} = $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $b->as( $b->value( $t->inputs->[0] ), '%Slot' ) ], attr => { fn => $fn->{name} });
@@ -298,7 +296,6 @@ sub regex_subst_count {
 sub substr_write {
     my ($b, $s) = @_;
     my @a = grep { blessed($_) } $s->inputs->@*;
-    pop @a if $s->can('memory_input') && $s->memory_input;
     out('a substr statement of other than four arguments') unless @a == 4;
     my $pad = $a[0];
     out('a four-argument substr of what is not a `my` scalar kept here')
@@ -311,7 +308,7 @@ sub substr_write {
     my $yes = $b->emit(op => 'Const', type => 'i1', attr => { value => 1 });
     my $part = $b->emit(op => 'Substr', type => '%Slot', inputs => [ $old, $off, $len, $yes, $yes ]);
     my $new = $b->emit(op => 'SubstrRep', type => '%Slot', inputs => [ $old, $off, $len, $rep ]);
-    $b->reads_before( $pad->inputs->[0] );
+    $b->reads_before( $pad->mem_in );
     $b->emit(op => 'Store', type => 'void', inputs => [ $new, $b->location($pad) ]);
     $b->pos_reset($pad);
     $b->{memo}{ refaddr($s) } = $part;
@@ -327,7 +324,7 @@ sub regex_subst_stmt {
     out('an s/// or tr in place of what is not a `my` scalar kept here')
         unless $subj->operation eq 'PadAccess' && ( $subj->sigil // '' ) eq '$' && $subj->is_location;
     my $ptr = $b->location($subj);
-    $b->reads_before( $subj->inputs->[0] );
+    $b->reads_before( $subj->mem_in );
     $b->emit(op => 'Store', type => 'void', inputs => [ $new, $ptr ]);
     $b->pos_reset($subj);
 }
@@ -348,7 +345,9 @@ sub qr_value {
 }
 
 # regex_fn($pattern, $flags) -> the function its graph (Chalk::Regex::Graph) is,
-# one per pattern and flags.
+# one per pattern and flags. (Chalk::Regex::Graph writes its graph in v1's
+# shape: WireUpgrade makes it v2. Stage 6 of wire v2 deletes the upgrade, so
+# Chalk::Regex::Graph must write v2 itself first.)
 sub regex_fn {
     my ($b, $pat, $flags, $flavor, %o) = @_;
     $flavor //= 'scalar';
@@ -357,7 +356,7 @@ sub regex_fn {
     my $w = eval { Chalk::Regex::Graph::matcher( $pat, $flags, $flavor, %o ) };
     out( 'a regex: ' . ( $@ =~ s/\A(?:GAP: )?//r =~ s/\n.*//sr ) ) unless $w;
     my $sub = $b->{rxsub}{$key} = Chalk::MOP::Sub->new(
-        name => 'regex', class => undef, graph => Chalk::IR::Serialize::JSON::_deserialize_graph($w),
+        name => 'regex', class => undef, graph => Chalk::IR::Serialize::JSON::_deserialize_graph( Chalk::IR::Serialize::WireUpgrade::upgrade_graph($w) ),
         params => ['@_'], uses_args => 1 );
     return $b->func( $sub, 'regex_' . scalar keys $b->{rxsub}->%* );
 }

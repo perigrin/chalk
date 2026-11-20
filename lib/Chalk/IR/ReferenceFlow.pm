@@ -170,9 +170,8 @@ class Chalk::IR::ReferenceFlow {
             for my $u ( ( $uses{ refaddr($v) } // [] )->@* ) {
                 my ( $c, $pos ) = @$u;
                 my $op = $c->operation;
-                # (as the memory a node reads at: no value of it)
-                next if blessed( $c->memory_operand ) && refaddr( $c->memory_operand ) == refaddr($v)
-                    && 1 == grep { blessed($_) && refaddr($_) == refaddr($v) } $c->inputs->@*;
+                # (as the memory a node reads at -- its mem_in -- it is no
+                # use of a value: $uses holds inputs only)
                 if ( defined( my $why = $hit->( $c, $pos ) ) ) { return $why }
                 if ( $op eq 'PostfixDeref' ) {
                     next unless $pos == 0;

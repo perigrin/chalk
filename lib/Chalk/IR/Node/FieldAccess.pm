@@ -12,8 +12,6 @@ class Chalk::IR::Node::FieldAccess :isa(Chalk::IR::Node::Access) {
 
     method operation() { 'FieldAccess' }
 
-    # memory_operand -> a field read reads at its first input.
-    method memory_operand() { return $self->inputs->[0] }
     sub identity_kind { q(hash_consed) }
 
     method content_hash() {
