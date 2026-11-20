@@ -264,27 +264,6 @@ class Chalk::IR::Serialize::WireCheck {
     }
 
     # ------------------------------------------------------------------
-    # A LIST ASSIGNMENT TO A HASH, READ AS A SCALAR. `while (my %i = f())`,
-    # `if (%h = f())` and `(%g = f()) ? :` are the count of the RIGHT side
-    # (2 for `(a => 1)`, 4 for `(a => 1, a => 2)`); the wire hands the test
-    # the hash's own list. (A hash read as a scalar -- `if (%h)`, `!%h`,
-    # `my $n = %h` -- is a Count at a memory version, and is not this.)
-    # ------------------------------------------------------------------
-    method _hash_assigns_read_as_scalars($name) {
-        my $g = $self->_graph($name);
-        state %scalar_slot = ( If => 1, TernaryExpr => 0, Not => 0, And => 0, Or => 0, Xor => 0, DefinedOr => 0, Coerce => 0 );
-        for my $n ( grep { $_->{op} eq 'HashLiteral' && ( $self->_f( $_, 'sigil' ) // '' ) eq '%' } $g->{nodes}->@* ) {
-            for my $c ( ( $g->{cons}{ $n->{id} } // [] )->@* ) {
-                my ( $user, $slot ) = $c->@*;
-                my $op = $user->{op};
-                $self->_gap("a list assignment to a hash read as a scalar (the count of its right side): the wire gives the hash's list there (in $name)")
-                    if $op =~ /\A(?:Concat|Add|Subtract|Multiply)\z/ || exists $scalar_slot{$op} && ( $op =~ /\A(?:And|Or|Xor)\z/ || $scalar_slot{$op} == $slot );
-            }
-        }
-        return;
-    }
-
-    # ------------------------------------------------------------------
     # W7. A FAULT HAS NO PLACE IN THE GRAPH.
     # ------------------------------------------------------------------
 
@@ -518,7 +497,6 @@ class Chalk::IR::Serialize::WireCheck {
             $self->_floating_effects($name);
             $self->_flattened_package_aggregates($name);
             $self->_autovivifying_reads($name);
-            $self->_hash_assigns_read_as_scalars($name);
             $self->_floating_divisions($name);
             $self->_unread_derefs($name);
             $self->_stores_in_a_dying_eval($name);

@@ -1,5 +1,5 @@
 # ABOUTME: the loader's wire check refuses, by name, the shapes B::SoN's wire gives no order or
-# ABOUTME: memory version for (the IR audit's classes W5-W10, a hash assignment's count), and no neighbour of them.
+# ABOUTME: memory version for (the IR audit's classes W5-W10), and no neighbour of them.
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
@@ -18,7 +18,7 @@ sub verdict ($src) {
     return run_probe($pl);
 }
 
-my $HASHASG = qr/a list assignment to a hash read as a scalar \(the count of its right side\)/;
+my $CALL2 = qr/a call used both as a list and as a scalar/;
 my $W5    = qr/a captured variable passed to a sub that writes its argument/;
 my $W6    = qr/a `local` \(\$main::g\) in a sub a die leaves, under an eval/;
 my $W6E   = qr/a store to a package variable \(\$main::\w+\) in an eval block that dies/;
@@ -107,16 +107,34 @@ for my $case (
     [ q{my %h; my $a = %h ? 1 : 0; $h{k} = 1; my $b = scalar(%h) ? 1 : 0; print "$a$b\n";}, undef, 'hash truth: ?:' ],
     [ q{my %h = (a => 1, b => 2); my $n = keys %h; print "n=$n\n";}, undef, 'hash truth: keys counted' ],
     [ q{our %g; sub add { $g{$_[0]} = 1 } my $a = %g; add("x"); my $b = %g ? "t" : "f"; print "$a $b ", scalar(%g), "\n";}, undef, 'hash truth: a package hash a called sub fills' ],
-    # A list assignment to a hash as a scalar is its right side's count; the
-    # wire hands the test the hash's list: still refused.
-    [ q{our %g; sub f { return () } my $n = (%g = f()) ? "t" : "f"; print "$n\n";}, $HASHASG, 'hash assign: a package hash assigned in a ?:' ],
-    [ q{sub f { return (a => 1, a => 2) } my %h; my $n = (%h = f()) ? "t" : "f"; print "$n ", scalar(%h), "\n";}, $HASHASG, 'hash assign: a `my` hash assigned in a ?:' ],
-    [ q{my $n = 0; sub f { return $n++ < 2 ? (a => 1) : () } while (my %i = f()) { print "in\n"; } print "out\n";}, $HASHASG, 'hash assign: a while over a `my %i = f()`' ],
+    # A list assignment to a hash as a scalar is its right side's count, and
+    # B::SoN's wire says so now: a Count of the list assigned, taken before
+    # the store. The rule that refused the hash handed to the test is gone.
+    # Perl's answer.
+    [ q{my $n = (my %h = (a => 1, a => 2)); print "$n ", scalar(keys %h), "\n";}, undef, 'hash assign: counted into a scalar, a duplicate key' ],
+    [ q{my %g = (a => 1, b => 2, c => 3); my %h; my $n = (%h = %g); print "$n\n";}, undef, 'hash assign: a hash copied counts keys and values' ],
+    [ q{my @l = (a => 1); my %h; if (%h = @l) { print "y $h{a}\n" } else { print "n\n" }}, undef, 'hash assign: an if over a hash assigned an array' ],
+    [ q{my @l = (); our %h; print((%h = @l) ? "t" : "f", "\n"); @l = (1, 2, 1, 3); my $n = (%h = @l); print "$n ", scalar(keys %h), "\n";}, undef, 'hash assign: a package hash in a ?:, then counted' ],
+    [ q{my @l = (); my %h; print !(%h = @l) ? "empty" : "full", "\n";}, undef, 'hash assign: under a not' ],
+    # From a CALL's list it is still refused, by T2 and for its own reason: the
+    # call's list is counted and stored, and T2 lowers no hash made of a
+    # call's list yet.
+    [ q{our %g; sub f { return () } my $n = (%g = f()) ? "t" : "f"; print "$n\n";}, $CALL2, 'hash assign: a package hash assigned a call in a ?:' ],
+    [ q{sub f { return (a => 1, a => 2) } my %h; my $n = (%h = f()) ? "t" : "f"; print "$n ", scalar(%h), "\n";}, $CALL2, 'hash assign: a `my` hash assigned a call in a ?:' ],
+    [ q{my $n = 0; sub f { return $n++ < 2 ? (a => 1) : () } while (my %i = f()) { print "in\n"; } print "out\n";}, $CALL2, 'hash assign: a while over a `my %i = f()`' ],
 ) {
     my ( $src, $name, $what ) = @$case;
     my ( $v, $why ) = verdict($src)->@*;
     if ($name) { is( $v, 'REFUSED', "$what: refused" ) or diag "$v $why"; like( $why, $name, "$what: by name" ) }
     else       { is( $v, 'SAME', "$what: perl's output" ) or diag "$v $why" }
+}
+
+# THE RULE IS GONE, not kept beside a wire that no longer needs it: a rule
+# nothing can trip is a rule nobody can test.
+{
+    require Chalk::IR::Serialize::WireCheck;
+    ok( !Chalk::IR::Serialize::WireCheck->can('_hash_assigns_read_as_scalars'),
+        'hash assign: WireCheck holds no rule for a hash handed to a scalar reader' );
 }
 
 done_testing;
