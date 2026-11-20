@@ -129,6 +129,9 @@ sub walk {
             # it, whose value nothing takes -- `my %p = %$h` reads B::SoN's copy
             # beside it -- is not made: its place is passed, what reads at it
             # reads there. See _stood_already.)
+            # (A BLESS replaces what its reference is blessed into: a ref() or
+            # a blessed() of an earlier version is made before it)
+            $b->class_reads_settled if $op eq 'Call' && $s->blesses;
             if ( $op eq 'PostfixDeref' && ( $s->sigil // '' ) =~ /\A[\@%]\z/ && !$b->_value_read($s) ) { $b->{stood}{ refaddr($s) } = 1 }
             else { $b->value($s) }
             push $b->{passed}->@*, $s;

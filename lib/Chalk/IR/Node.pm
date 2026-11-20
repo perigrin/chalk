@@ -304,6 +304,10 @@ class Chalk::IR::Node {
     # each read says where its memory input is.
     method memory_operand() { return undef }
 
+    # reads_class -> true for a read of what a reference is blessed into
+    # (ref, blessed): the state a bless replaces.
+    method reads_class() { return 0 }
+
     # makes_the_same -> true where making this value again, anywhere its
     # inputs are, gives the same value: it reads no memory, writes nothing and
     # cannot die (a constant, an %ENV read, a // or a . of such). The classes

@@ -26,7 +26,6 @@ my $PINS_DYN = Chalk::CodeGen::Harness::Producer->pins_dynamic_method_calls;
 my $STORE = qr/a write B::SoN left off the control chain/;
 my $CALL  = qr/a call B::SoN left off the control chain/;
 my $BLESS = qr/a bless B::SoN left off the control chain/;
-my $W4    = qr/ref\(\) of a reference that a bless elsewhere changes/;
 my $T2LA  = qr/a list assignment to an array or hash/;
 
 # floated($src, $is) -> why the loader refuses $src's wire once the node $is
@@ -82,8 +81,8 @@ for my $case (
         ( $PINS_DYN ? undef : $CALL ), 'a dynamic method call, its value unused' ],
     [ q{package C; sub new { bless {n=>0}, shift } sub inc { $_[0]{n}++; return 5 } package main; my $o = C->new; my $m = "inc"; my $r = $o->$m(); print "$r $o->{n}\n";},
         ( $PINS_DYN ? undef : $CALL ), 'a dynamic method call that writes, its value used' ],
-    # A bless, on the chain now: a ref() beside it still names no version.
-    [ q{my $h = {}; my $o = bless $h, "K"; print ref($h), " ", ref($o), "\n";},  $W4, 'a bless of a variable, ref() read beside it' ],
+    # A bless, on the chain now: a ref() beside it reads at the bless's version.
+    [ q{my $h = {}; my $o = bless $h, "K"; print ref($h), " ", ref($o), "\n";},  undef, 'a bless of a variable, ref() read beside it' ],
     [ q{package K; sub hi { "hi" } package main; my $h = {}; my $o = bless $h, "K"; print $h->hi, "\n";}, undef, 'a bless of a variable a method is then called on' ],
     # What may float:
     [ q{my ($p, $q) = (1, 2); ($p, $q) = ($q, $p); print "$p $q\n";},            undef, 'a list assignment of scalars is a record' ],

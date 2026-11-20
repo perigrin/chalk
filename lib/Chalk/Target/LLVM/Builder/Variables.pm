@@ -20,15 +20,18 @@ sub deref_at {
     return { msg => $msg, id => $b->{strs}{$msg}, pk => $pk, pkid => $b->{strs}{$pk} };
 }
 
+# ($only: of the reads waiting, only those it says yes to -- a bless
+# replaces what a reference is blessed into and nothing else, so only the
+# class reads waiting are made before it.)
 sub hash_reads_settled {
-    my ($b, $what) = @_;
+    my ($b, $what, $only) = @_;
     # (ONCE AT A TIME: a read made here may itself settle -- a sort with a
     # comparator, made as a read at a version -- and in again it was the same
     # unmade read, without end: "Deep recursion", then out of memory)
     return if $b->{settling};
     local $b->{settling} = 1;
     for my $ver ($b->{passed}->@*) {
-        my @waiting = grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) } } +($b->{readers}{ refaddr($ver) } // [])->@*;
+        my @waiting = grep { $b->_through_ref($_) && !$b->{memo}{ refaddr($_) } && ( !$only || $only->($_) ) } +($b->{readers}{ refaddr($ver) } // [])->@*;
         # (ONE MADE ALREADY IN A SCOPE NOW CLOSED -- a loop's body, an arm, an
         # arm of @_'s aliases -- was read there, before this: settled. Read
         # again after, refused where it is: value.)
@@ -45,7 +48,15 @@ sub hash_reads_settled {
             unless $next && !grep { $_->flows_into_choice } @waiting;
         $b->value($_) for @waiting;
     }
-    $b->reads_before($_) for $b->{passed}->@*;
+    $b->reads_before($_, $only) for $b->{passed}->@*;
+}
+
+# class_reads_settled(): a bless replaces what a reference is blessed into,
+# so every ref() and blessed() of an earlier memory version still to make is
+# made now, before it -- `my $r = ref($h); bless $h, "K"; print $r` is HASH.
+sub class_reads_settled {
+    my ($b) = @_;
+    $b->hash_reads_settled('a bless', sub ($r) { $r->reads_class });
 }
 
 # _through_ref($read) -> true for a read through a reference: a hash element,
@@ -233,7 +244,7 @@ sub fresh_cell {
 # made AT that version is made now, before it -- built at its first use, a
 # read after the store saw the store (`my $x = $i; $i = 5; print $x`).
 sub reads_before {
-    my ($b, $version) = @_;
+    my ($b, $version, $only) = @_;
     return unless blessed($version);
     # EVERY READ AT IT -- a variable's, an element's, a count -- from the
     # function's own index (readers): a node's consumers need not list every
@@ -255,12 +266,12 @@ sub reads_before {
     # CLOSED -- `my @l = $c ? $r->@* : ()` in a loop's body, its count at the
     # body's memory -- was made there, of the state there: settled too, not
     # made again here; read again after, refused where it is: value.)
-    for my $r (+($b->{readers}{ refaddr($version) } // [])->@*) {
+    for my $r (grep { !$only || $only->($_) } +($b->{readers}{ refaddr($version) } // [])->@*) {
         next if $b->{memo}{ refaddr($r) } || !$b->_rests_on_settled($r, {});
         $b->{arm_settled}{ refaddr($r) } = 1;
     }
     $b->value($_) for grep { !$_->is_pinned && !$b->{past_eval}{ refaddr($_) } && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_)
-                             && !$b->{arm_settled}{ refaddr($_) }
+                             && !$b->{arm_settled}{ refaddr($_) } && ( !$only || $only->($_) )
                              # (a variable made anew each pass, read before its `my`: none -- B::SoN's store target)
                              && !( $_->operation eq 'PadAccess' && $b->fresh_var($_) ) }
         +($b->{readers}{ refaddr($version) } // [])->@*;

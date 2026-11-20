@@ -275,6 +275,13 @@ class Chalk::IR::Node::Call :isa(Chalk::IR::Value) {
     # it is read where it stands.
     method reads_state() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'reads_state' ) ? 1 : 0 }
 
+    # blesses -> true for bless: what its reference is blessed into is new.
+    method blesses() { return ( $self->builtin_kind // '' ) eq 'blesses' ? 1 : 0 }
+
+    # reads_class -> true for a builtin that reads what a reference is
+    # blessed into (blessed): the state a bless replaces.
+    method reads_class() { return ( $self->builtin_kind // '' ) eq 'class_name' ? 1 : 0 }
+
     # changes_state -> true for a builtin that changes state a later read
     # sees (chdir the working directory, require %INC).
     method changes_state() { return $self->is_builtin && Chalk::Grammar::Perl::BuiltinTable::fact( $name, 'changes_state' ) ? 1 : 0 }

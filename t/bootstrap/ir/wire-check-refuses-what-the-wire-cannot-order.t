@@ -1,5 +1,5 @@
 # ABOUTME: the loader's wire check refuses, by name, the shapes B::SoN's wire gives no order or
-# ABOUTME: memory version for (the IR audit's classes W4-W10, hash truth), and no neighbour of them.
+# ABOUTME: memory version for (the IR audit's classes W5-W10), and no neighbour of them.
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
@@ -18,7 +18,6 @@ sub verdict ($src) {
     return run_probe($pl);
 }
 
-my $W4    = qr/ref\(\) of a reference that a bless elsewhere changes \(or blessed\(\) of one\)/;
 my $W5    = qr/a captured variable passed to a sub that writes its argument/;
 my $W6    = qr/a `local` \(\$main::g\) in a sub a die leaves, under an eval/;
 my $W6E   = qr/a store to a package variable \(\$main::\w+\) in an eval block that dies/;
@@ -47,13 +46,17 @@ for my $case (
     [ q{our $g = 0; sub show { return "<$_[0]>" } my $o = ""; for my $i (1..3) { $g = $g + 1; $o .= show($i); } print "$g $o\n";},
         undef, 'W1: a sub that does not write the variable' ],
     [ q{our $g = 0; for my $i (1..3) { $g = $g + $i; } print "$g\n";}, undef, 'W1: no call in the loop' ],
-    # W4
-    [ q{my $o = {}; my $c = ref($o); bless $o, "K"; my $d = ref($o); print "$c $d\n";}, $W4, 'W4: ref either side of a bless' ],
-    [ q{use Scalar::Util qw(blessed); my $o = {}; my $a = blessed($o) // "u"; bless $o, "K"; my $b = blessed($o) // "u"; print "$a $b\n";}, $W4, 'W4: blessed either side of a bless' ],
-    [ q{sub mk { return bless {}, "A" } sub re { bless $_[0], "B"; return } my $o = mk(); my $a = ref($o); re($o); print "$a ", ref($o), "\n";}, $W4, 'W4: the bless in a sub' ],
+    # W4 (ref() and blessed() across a bless): B::SoN gives the read the
+    # memory version it reads at and makes the bless the next one, and the
+    # rule that refused it is gone. Perl's answer.
+    [ q{my $o = {}; my $c = ref($o); bless $o, "K"; my $d = ref($o); print "$c $d\n";}, undef, 'W4: ref either side of a bless' ],
+    [ q{use Scalar::Util qw(blessed); my $o = {}; my $a = blessed($o) // "u"; bless $o, "K"; my $b = blessed($o) // "u"; print "$a $b\n";}, undef, 'W4: blessed either side of a bless' ],
+    [ q{sub mk { return bless {}, "A" } sub re { bless $_[0], "B"; return } my $o = mk(); my $a = ref($o); re($o); print "$a ", ref($o), "\n";}, undef, 'W4: the bless in a sub' ],
     [ q{package A; sub new { return bless {}, shift } package main; my $o = A->new; print ref($o), "\n";}, undef, 'W4: ref of an object blessed once, fresh' ],
     [ q{use Scalar::Util qw(blessed); my $x = 1; my $r = \$x; print blessed($r) // "u", " ", ref($r), "\n"; bless $r, "S"; print blessed($r), "\n";},
-        $W4, 'W4: a read printed after the bless (the wire of one taken before it and printed after)' ],
+        undef, 'W4: a read printed after the bless' ],
+    [ q{use Scalar::Util qw(blessed); my $x = 1; my $r = \$x; my $b = blessed($r) // "u"; my $k = ref($r); bless $r, "S"; print "$b $k ", blessed($r), "\n";},
+        undef, 'W4: a read taken before the bless and printed after it' ],
     [ q{package C; sub new { my $c = shift; my $s = {}; bless $s, $c; $s } package main; my $o = C->new; print ref($o), "\n";}, undef, 'W4: ref of what a constructor blessed as a statement' ],
     # W5
     [ q{my $x = 1; my $g = sub { $x }; sub setx { $_[0] = 12 } setx($x); print $g->(), "\n";}, $W5, 'W5: a named sub writes $_[0]' ],

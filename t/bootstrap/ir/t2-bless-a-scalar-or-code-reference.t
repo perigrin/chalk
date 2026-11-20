@@ -23,20 +23,15 @@ sub run ($cmd) {
 for my $case (
     [ q{package C; sub v { ${$_[0]} } package main; my $x = 5; my $o = bless \$x, "C"; print ref($o), " ", $o->v, "\n";}, 'a blessed scalar reference: its class, a method reading through it' ],
     [ q{package K; sub run { $_[0]->() } package main; my $o = bless sub { 42 }, "K"; print ref($o), " ", $o->run, "\n";}, 'a blessed code reference' ],
-    [ q{use Scalar::Util qw(blessed); my $x = 1; my $r = \$x; print blessed($r) // "u", " ", ref($r), "\n"; bless $r, "S"; print blessed($r), "\n";}, 'blessed before and after a bless of a scalar reference',
-        # (its wire is also that of `my $b = blessed($r)` taken before the bless and printed after)
-        qr/GAP: ref\(\) of a reference that a bless elsewhere changes/ ],
+    [ q{use Scalar::Util qw(blessed); my $x = 1; my $r = \$x; print blessed($r) // "u", " ", ref($r), "\n"; bless $r, "S"; print blessed($r), "\n";}, 'blessed before and after a bless of a scalar reference' ],
 ) {
-    my ($src, $name, $or_refused) = @$case;
+    my ($src, $name) = @$case;
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src; close $fh;
     my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null);
     my $select = sub ($graphs, $mop) { my $g = $graphs->{'main::__PROGRAM__'} or return (); ([ 'main::__PROGRAM__', $g->returns->[0] ]) };
     my ($units, undef, undef, $err) = Chalk::CodeGen::Pipeline->new->run_detail($json, $select, program_mode => 1);
     my $ll = !$err && $units->[0]{ok} ? $units->[0]{ll} : undef;
-    # (a case with a third element is refused, by that name: B::SoN gives
-    # ref() and blessed() no memory version yet)
-    if ($or_refused) { like( $err // $units->[0]{err} // '', $or_refused, "$name: refused by name" ); next }
     ok(defined $ll && $ll =~ /^; chalk T2/m, "$name: lowered through T2") or diag $err // $units->[0]{err};
     next unless defined $ll;
     my ($lf, $llp) = tempfile(SUFFIX => '.ll', UNLINK => 1);

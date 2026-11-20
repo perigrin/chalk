@@ -62,9 +62,6 @@ class Chalk::IR::Serialize::WireCheck {
         return Chalk::Grammar::Perl::BuiltinTable::fact( $self->_f( $n, 'name' ), $column );
     }
     method _is_bless($n)   { return ( $self->_builtin_fact( $n, 'kind' ) // '' ) eq 'blesses' ? 1 : 0 }
-    method _is_class_read($n) {
-        return $n->{op} eq 'RefType' || ( $self->_builtin_fact( $n, 'kind' ) // '' ) eq 'class_name' ? 1 : 0;
-    }
 
     # What control reaches a node from: its control_in, a Region's every way
     # in, an If's, Proj's or Loop's first input.
@@ -381,23 +378,6 @@ class Chalk::IR::Serialize::WireCheck {
     # ------------------------------------------------------------------
     method _all_nodes() { return map { my $name = $_; map { [ $name, $_ ] } $self->_graph($name)->{nodes}->@* } sort keys $methods->%* }
 
-    # W4. `ref` and `blessed` name no memory version, so a read before a
-    # bless and one after it may be one node, made once, at its first use.
-    # Refused where the program blesses a reference it did not just make and
-    # a bless -- or a call, which may bless -- is on the chain between what
-    # the read is computed from and that first use.
-    method _class_reads_across_a_bless() {
-        my @all = $self->_all_nodes;
-        return unless grep { $self->_is_bless( $_->[1] ) && !$self->_blesses_a_fresh_reference( $self->_graph( $_->[0] ), $_->[1] ) } @all;
-        for my $e ( grep { $self->_is_class_read( $_->[1] ) } @all ) {
-            my ( $name, $n ) = $e->@*;
-            my $g = $self->_graph($name);
-            $self->_gap("ref() of a reference that a bless elsewhere changes (or blessed() of one): the read names no memory version, so it may be made on the wrong side of the bless (in $name)")
-                if $self->_effect_before_first_use( $g, $n, sub ($x) { $self->_is_bless($x) || $self->_is_sub_call($x) } );
-        }
-        return;
-    }
-
     # W5. `$_[N]` IS THE CALLER'S VARIABLE. T2 hands a captured variable to
     # a call by value, so a sub that writes its argument wrote a copy.
     method _captured_arguments_written() {
@@ -544,7 +524,6 @@ class Chalk::IR::Serialize::WireCheck {
             $self->_unread_derefs($name);
             $self->_stores_in_a_dying_eval($name);
         }
-        $self->_class_reads_across_a_bless;
         $self->_captured_arguments_written;
         if ( $self->_has_eval ) { $self->_locals_a_die_skips($_) for sort keys $methods->%* }
         $self->_dies_of_references;
