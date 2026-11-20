@@ -1015,7 +1015,7 @@ sub number_value {
 
 # substr($s, $off, $len) READ (not an lvalue: B::SoN pins a store): from
 # either end, the rest or a length (negative leaves that many off the end);
-# undef outside the string, as perl's. index($s, $t, $pos): -1 for none.
+# undef outside the string, as perl's (see below). index($s, $t, $pos): -1 for none.
 sub substr_value {
     my ($b, $v, $ty) = @_;
     my @a = grep { blessed($_) } $v->inputs->@*;
@@ -1029,7 +1029,11 @@ sub substr_value {
         my ( $len, $has ) = @a > 2
             ? ( $b->as( $b->value( $a[2] ), 'i64' ), $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }) )
             : ( $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }), $b->emit(op => 'Const', type => 'i1', attr => { value => 0 }) );
-        return $b->emit(op => 'Substr', type => '%Slot', inputs => [ $str, $off, $len, $has ]);
+        # OUTSIDE THE STRING it is undef -- and perl warns of it where its
+        # warnings may be on, which chalk raises none of: stopped there.
+        my $stop = $b->emit(op => 'Const', type => 'i1',
+            attr => { value => Chalk::Impl::warnings_may_be_on( _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) ) ? 1 : 0 });
+        return $b->emit(op => 'Substr', type => '%Slot', inputs => [ $str, $off, $len, $has, $stop ]);
     }
     out('an index of fewer than two arguments') if @a < 2;
     my $pos = @a > 2 ? $b->as( $b->value( $a[2] ), 'i64' ) : $b->emit(op => 'Const', type => 'i64', attr => { value => 0 });

@@ -28,11 +28,15 @@ for my $body (
     is $r->{verdict}, 'SAME', "as perl through T2: $body" or diag $r->{why} // explain $r;
 }
 
-# OUTSIDE THE STRING perl answers undef, and warns under `use warnings`, which
-# T2 does not know: stopped at run time (exit 255), never half right.
-for my $e ( 'substr($s, 7)', 'substr($s, -9, 2)', 'substr($s, -9, -8)', 'substr($s, -7, 0)' ) {
+# OUTSIDE THE STRING perl answers undef (only a substr that is written dies of
+# it) -- and warns of it where its warnings are on, which chalk raises none
+# of: there it is stopped at run time (exit 255), never half right.
+for my $e ( 'substr($s, 7)', 'substr($s, -9, 2)', 'substr($s, -9, -8)', 'substr($s, -7, 0)', 'substr($s, 10) // "d"' ) {
     my $r = tap("$pre show($e); print qq{\\n};\n");
-    is $r->{llvm}{exit}, 255, "$e outside the string: stopped" or diag explain $r;
+    is $r->{verdict}, 'SAME', "$e outside the string: undef, as perl" or diag $r->{why} // explain $r;
+    $r = tap("use warnings;\n$pre show($e); print qq{\\n};\n");
+    is $r->{llvm}{exit}, 255, "$e outside the string under `use warnings`: stopped" or diag explain $r;
+    like $r->{llvm}{err}, qr/substr outside of string \(perl warns\): stopped/, "$e: by name";
 }
 
 done_testing;

@@ -119,10 +119,11 @@ none:
 ; substr(s, off[, len]): perl\'s translate_substr_offsets (pp.c), in signed ints --
 ; a negative offset counts from the end (still before it: clamped, unless the
 ; end is too). The bytes copied, NUL-ended. OUTSIDE THE STRING perl answers
-; undef with a warning under `use warnings`, which T2 does not know: stopped
-; at run time (exit 255), as the fallback does, not answered half right.
-@lit_substr_out = private unnamed_addr constant [47 x i8] c"substr outside of string: stopped (chalk, T2)\0A\00"
-define internal %Slot @t2_substr(%Str %s, i64 %off, i64 %len, i1 %has) {
+; undef, with a warning where its warnings are on, which chalk raises none of:
+; undef, or (stop: where they may be on, and for a substr that is written,
+; which dies of it) stopped at run time (exit 255), not answered half right.
+@lit_substr_out = private unnamed_addr constant [60 x i8] c"substr outside of string (perl warns): stopped (chalk, T2)\0A\00"
+define internal %Slot @t2_substr(%Str %s, i64 %off, i64 %len, i1 %has, i1 %stop) {
 entry:
   %p = extractvalue %Str %s, 0
   %n = extractvalue %Str %s, 1
@@ -165,7 +166,11 @@ clamp:
   %rs = call %Slot @t2_box_str(%Str %r)
   ret %Slot %rs
 undef:
-  call i64 @write(i32 2, i8* getelementptr ([47 x i8], [47 x i8]* @lit_substr_out, i64 0, i64 0), i64 46)
+  br i1 %stop, label %stopped, label %none
+none:
+  ret %Slot zeroinitializer
+stopped:
+  call i64 @write(i32 2, i8* getelementptr ([60 x i8], [60 x i8]* @lit_substr_out, i64 0, i64 0), i64 59)
   call void @t2_run_ends()
   call void @exit(i32 255)
   unreachable

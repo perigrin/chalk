@@ -307,7 +307,9 @@ sub substr_write {
     my $off = $b->as( $b->value( $a[1] ), 'i64' );
     my $len = $b->as( $b->value( $a[2] ), 'i64' );
     my $rep = $b->as( $b->value( $a[3] ), '%Str' );
-    my $part = $b->emit(op => 'Substr', type => '%Slot', inputs => [ $old, $off, $len, $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }) ]);
+    # (OUTSIDE THE STRING a substr that is written dies: stopped)
+    my $yes = $b->emit(op => 'Const', type => 'i1', attr => { value => 1 });
+    my $part = $b->emit(op => 'Substr', type => '%Slot', inputs => [ $old, $off, $len, $yes, $yes ]);
     my $new = $b->emit(op => 'SubstrRep', type => '%Slot', inputs => [ $old, $off, $len, $rep ]);
     $b->reads_before( $pad->inputs->[0] );
     $b->emit(op => 'Store', type => 'void', inputs => [ $new, $b->location($pad) ]);
@@ -393,7 +395,8 @@ sub regex_capture {
     my ( $s, $e ) = map { $b->as( $b->emit(op => 'AGet', type => '%Slot', inputs => [ $arr, $b->emit(op => 'Const', type => 'i64', attr => { value => 2 * $n + $_ }) ]), 'i64' ) } 0, 1;
     my $str = $b->as( $b->value( $m->inputs->[0] ), '%Str' );
     my $len = $b->emit(op => 'Arith', type => 'i64', inputs => [ $e, $s ], attr => { op => 'sub' });
-    my $sub = $b->emit(op => 'Substr', type => '%Slot', inputs => [ $str, $s, $len, $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }) ]);
+    my $yes = $b->emit(op => 'Const', type => 'i1', attr => { value => 1 });
+    my $sub = $b->emit(op => 'Substr', type => '%Slot', inputs => [ $str, $s, $len, $yes, $yes ]);
     my $none = $b->emit(op => 'Cmp', type => 'i1', inputs => [ $s, $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }) ], attr => { op => 'lt' });
     return $b->as( $b->emit(op => 'Select', type => '%Slot', inputs => [ $none, $b->emit(op => 'Undef', type => '%Slot'), $sub ]), $b->type_of($c) );
 }

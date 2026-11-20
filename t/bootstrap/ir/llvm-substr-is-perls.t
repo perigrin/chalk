@@ -1,5 +1,5 @@
 # ABOUTME: substr as a value: offset from either end, length to the end, past it, or
-# ABOUTME: short of it -- B::SoN -> chalk -> lli == perl; outside the string, refused at run time.
+# ABOUTME: short of it -- B::SoN -> chalk -> lli == perl; outside the string, undef (stopped where perl would warn).
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
@@ -37,7 +37,7 @@ sub through_llvm ($src) {
 
 # SUBSTR AS A VALUE (pvm string-ops cases refused "builtin substr"). A copy
 # of the bytes, with perl's offset and length rules. Outside the string perl
-# answers undef with a warning; that is refused at run time (exit 255).
+# answers undef (below).
 for my $case (
     [ q{my $s = $ENV{S} // "Hello world"; print join("|", substr($s, 6), substr($s, 3, 2), substr($s, -5, 3), substr($s, 2, -3), substr($s, 0, 100), substr($s, 11), substr($s, 3, -20), substr($s, -3)), "\n";}, "world|lo|wor|llo wo|Hello world||" . "|rld\n", 'the rules' ],
     [ q{my $s = $ENV{S} // "12345"; my $n = substr($s, 1, 2) + 1; print "$n\n";}, "24\n", 'a number read from a substring stops at its end' ],
@@ -47,7 +47,10 @@ for my $case (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
-my $err = do { local $@; eval { through_llvm(q{my $s = $ENV{S} // "abc"; print substr($s, 5), "\n";}) }; $@ };
-like($err, qr/lli exited 255/, 'outside the string is refused at run time');
+# Outside the string: undef, as perl's -- stopped at run time (exit 255)
+# where perl's warnings may be on, for perl warns of it there and chalk raises none.
+is(eval { through_llvm(q{my $s = $ENV{S} // "abc"; my $c = substr($s, 10) // "u"; print "$c\n";}) }, "u\n", 'outside the string is undef') or diag $@;
+my $err = do { local $@; eval { through_llvm(q{use warnings; my $s = $ENV{S} // "abc"; print substr($s, 5), "\n";}) }; $@ };
+like($err, qr/lli exited 255/, 'outside the string under `use warnings` is refused at run time');
 
 done_testing;
