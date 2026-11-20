@@ -93,6 +93,10 @@ sub answers ($src) {
         for my $n ( map { Chalk::IR::Graph::program_nodes($_) } $graphs->{$name}->returns->@* ) {
             next if $seen{ refaddr($n) }++;
             ( my $id = $n->id ) =~ s/\Q$DIR\E//g;
+            # (a read's memory version, its last input when the oracle was
+            # recorded, is its mem_in since wire v2: `...|mem=Call#5` in the
+            # id where it was `...|Call#5`. The same node, named as recorded.)
+            $id =~ s/\|mem=/|/g;
             my $k = "$name|$id#" . $nth{$name}{$id}++;
             my @a = ( Chalk::IR::Analysis::int_is_iv($n) ? 'iv' : (), Chalk::IR::Analysis::int_within( $n, "-$EXACT", $EXACT ) ? 'e53' : () );
             $out{$k} = join ',', @a if @a;

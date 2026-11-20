@@ -878,7 +878,7 @@ sub _deserialize_graph ($method_data) {
         if ($is_cfg) {
             $node = $factory->make_cfg($op, %args);
         }
-        elsif (defined $mem_later) {
+        elsif (defined $mem_later && $factory->identity_of($op) ne 'per_call') {
             $node = $factory->make_unique($op, %args);
         }
         else {

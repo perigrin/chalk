@@ -343,6 +343,14 @@ class Chalk::IR::NodeFactory {
         return $node;
     }
 
+    # identity_of($op) -> its class's identity_kind: 'per_call' (each make()
+    # a node of its own) or 'hash_consed'.
+    method identity_of($op_name) {
+        my $class = $DATA_CLASSES{$op_name} // $CFG_CLASSES{$op_name}
+            or die "Unknown data node operation: $op_name";
+        return $class->identity_kind;
+    }
+
     # Construct a data node WITHOUT hash-consing, even when its op would
     # normally dedupe by content_hash. B::SoN's FromOptree scout walk (a
     # throwaway pre-pass detecting loop-carried slot mutation) builds
