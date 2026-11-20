@@ -319,19 +319,19 @@ sub _collect_positional_arg_reads {
     }
 
     # SHIFTS ARE ORDERED BY THEIR MEMORY. Each `shift @_` takes the shift
-    # before it as its memory input -- that chain IS their order, so several
+    # before it as its memory version (mem_in) -- that chain IS their order, so several
     # bind as surely as one. (They were said to hash-cons and lose it; they do
     # not.) A chain that does not cover every shift -- one under a branch --
     # has no single order and is refused.
     return @shifts if @shifts <= 1;
     my %is_shift = map { refaddr($_) => $_ } @shifts;
     my ($first) = grep {
-        my $m = $_->inputs->[1];
+        my $m = $_->mem_in;
         !( blessed($m) && $is_shift{ refaddr($m) } )
     } @shifts;
     my @ordered;
     my %next = map {
-        my $m = $_->inputs->[1];
+        my $m = $_->mem_in;
         ( blessed($m) && $is_shift{ refaddr($m) } ) ? ( refaddr($m) => $_ ) : ()
     } @shifts;
     for (my $c = $first; defined $c; $c = $next{ refaddr($c) }) {
@@ -342,7 +342,7 @@ sub _collect_positional_arg_reads {
       . " `shift \@_` reads do not form one memory chain -- their order is not "
       . "in the graph (a shift under a branch?)."
         unless @ordered == @shifts
-            && scalar(grep { !blessed($_->inputs->[1]) || !$is_shift{ refaddr($_->inputs->[1]) } } @shifts) == 1;
+            && scalar(grep { !blessed($_->mem_in) || !$is_shift{ refaddr($_->mem_in) } } @shifts) == 1;
     return @ordered;
 }
 
