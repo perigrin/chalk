@@ -32,10 +32,11 @@ class Chalk::IR::Node::Ref :isa(Chalk::IR::Node::UnaryOp) {
     # (memory_operand -> the memory version a reference to an element reads
     # the array at -- B::SoN: the element at its index THERE, which a shift
     # or push changes -- is its mem_in; undef for one that reads none.)
-    # taken_where_it_stands -> B::SoN takes it where its statement runs: it
-    # reads memory, on the control chain, the memory version after it (taking
-    # it may make the element).
-    method taken_where_it_stands() { return $self->is_pinned && defined $self->memory_operand ? 1 : 0 }
+    # taken_where_it_stands -> B::SoN takes it where its statement runs: on
+    # the control chain, the memory version after it (taking it may make the
+    # element) -- mem_out. Not a mem_in alone: on wire v2 every pinned read
+    # names the memory it follows, a foreach alias's reference too.
+    method taken_where_it_stands() { return $self->is_pinned && $self->mem_out ? 1 : 0 }
     method is_memory_version() { return $self->taken_where_it_stands }
 
     method content_hash() {
