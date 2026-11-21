@@ -1301,8 +1301,10 @@ sub from_json ($json_string) {
     die "GAP: wire version $version is not one chalk reads\n" unless $data->{version} == 2;
     die "GAP: wire v2 profile `$_` is not read yet\n" for grep { $_ ne 'mem' } ( $data->{profile} // [] )->@*;
     # A WIRE THAT CAME AS V2 is held to the memory invariant (L1-L6), each of
-    # its graphs, before any is made; an upgraded v1 wire is not.
-    if ( $version == 2 ) {
+    # its graphs, before any is made; an upgraded v1 wire is not. (B::SoN's
+    # wire, which says perl's warning switches, `dowarn`, as WireCheck asks
+    # below: a graph chalk wrote itself, to_json's, threads no memory.)
+    if ( $version == 2 && exists $data->{dowarn} ) {
         my $inv = Chalk::IR::Serialize::WireInvariant->new( profile => $data->{profile} // [] );
         $inv->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;
         $inv->check( 'a ' . ( $_->{phase} // 'phase' ) . ' block', $_ ) for ( $data->{phase_blocks} // [] )->@*;

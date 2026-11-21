@@ -16,7 +16,7 @@ use Chalk::IR::Serialize::JSON;
 #   my @a = (1,2); if (@ARGV) { $a[0] = 10 } shift @a; print $a[0];
 # written out by hand: each bad one breaks one rule of it.
 my $GOOD = <<'JSON';
-{ "version": 2, "profile": ["mem"], "methods": { "main::__PROGRAM__": { "start": 0, "returns": [21], "nodes": [
+{ "version": 2, "profile": ["mem"], "dowarn": { "on": false, "all_on": false, "all_off": false }, "methods": { "main::__PROGRAM__": { "start": 0, "returns": [21], "nodes": [
    { "id": 0, "inputs": [], "op": "Start" },
    { "fields": { "const_type": "undef", "value": null }, "id": 1, "inputs": [], "op": "Constant", "stamp": "Undef" },
    { "fields": { "const_type": "integer", "value": "1" }, "id": 2, "inputs": [], "op": "Constant", "stamp": "Int" },
@@ -102,6 +102,14 @@ SKIP: {
         close $fh;
         is( refused( scalar qx($^X -I$SON -MO=-q,SoN,json,wire=2 $pl 2>/dev/null) ), '', "$name: its v2 wire loads" );
     }
+}
+
+# A GRAPH CHALK WROTE ITSELF (to_json's: no `dowarn`) is not B::SoN's wire
+# and threads no memory: not held to it.
+{
+    my $own = decode_json(bad( sub ($n, $all) { delete $n->{21}{mem_in} } ));
+    delete $own->{dowarn};
+    is( refused( encode_json($own) ), '', 'a wire chalk wrote (no dowarn) is not held to the invariant' );
 }
 
 # A V1 WIRE IS UPGRADED, NOT HELD TO THE INVARIANT (what v1 left to
