@@ -53,6 +53,18 @@ my @cases = (
       'a read of the main stash: its class linked in' ],
     [ q{sub f { my ($v) = @_; return ref $v ? "r" : "s" } for my $x (undef, [1]) { print f($x), " " } print "\n";},
       'a foreach alias handed to a sub, at an index not a constant' ],
+    # (B::SoN's: an append's result read with its store as a value input on v2 -- probe ev10)
+    [ q{use feature "try"; no warnings; my $x = 1; try { $x = 2; die "t\n"; $x = 3 } catch ($e) { $x .= "c" } print "$x\n";},
+      'an append to a `my` in a catch block' ],
+    # THE MEMORY PHI AT A SUB'S EXITS (fields.exits): named only by the Return's mem_in.
+    [ q{our $g = 0; sub f { my ($x) = @_; if ($x) { $g = $x; return 1 } $g = -1; return 2 } my $a = f(1); my $b = $g; my $c = f(0); print "$a $b $c $g\n";},
+      'a sub whose exits merge their memory' ],
+    [ q{my @s; sub r { my ($n) = @_; if ($n <= 0) { push @s, "z"; return 0 } push @s, $n; return $n + r($n - 1) } print r(3), " @s\n";},
+      'a recursive sub whose exits merge their memory' ],
+    # REVIEW FOCUS 3 (the plan): a call that is a value and a memory version,
+    # merged by a value Phi and a memory Phi at one Region.
+    [ q{our $n = 0; sub f { $n++; return $n } sub g { $n += 10; return $n } my $x = @ARGV ? f() : g(); my $y = @ARGV ? g() : f(); print "$x $y $n\n";},
+      'two calls, each a value and a version, merged at one Region' ],
 );
 for my $case (@cases) {
     my ($src, $name) = @$case;
