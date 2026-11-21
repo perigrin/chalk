@@ -18,6 +18,10 @@ class Chalk::CodeGen::Harness::Producer {
     my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
     my %answer;
 
+    # wire_option() -> the B::SoN option for the wire version SON_WIRE names
+    # (`,wire=2`), or nothing: B::SoN's default. How the gates run on wire 2.
+    sub wire_option ($class) { return length( $ENV{SON_WIRE} // '' ) ? ",wire=$ENV{SON_WIRE}" : '' }
+
     # nodes($src) -> the wire's nodes of the program's own graph.
     sub nodes ($class, $src) {
         my ( $fh, $pl ) = File::Temp::tempfile( SUFFIX => '.pl', UNLINK => 1 );

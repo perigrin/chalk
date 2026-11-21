@@ -27,7 +27,9 @@ sub run_probe ($file) {
     my $dir  = tempdir( CLEANUP => 1 );
     my $want = qx($^X $file 2>/dev/null </dev/null);
     my $want_ok = $? == 0;
-    my $json = qx($^X -I$SON -MO=-q,SoN,json,not_package=SoN $file 2>$dir/son.err);
+    require Chalk::CodeGen::Harness::Producer;
+    my $wire = Chalk::CodeGen::Harness::Producer->wire_option;
+    my $json = qx($^X -I$SON -MO=-q,SoN,json,not_package=SoN$wire $file 2>$dir/son.err);
     unless ( $json =~ /\S/ ) {
         my $why = do { local ( @ARGV, $/ ) = "$dir/son.err"; <> } // '';
         return [ 'REFUSED', 'B::SoN: ' . _one_line($why) ];

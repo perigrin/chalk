@@ -11,6 +11,7 @@ use Chalk::IR::Serialize::JSON ();
 use Chalk::IR::Graph::TypedInvariant;
 use Chalk::Target::LLVM;
 use Chalk::CodeGen::Harness::MdtestCorpus;
+use Chalk::CodeGen::Harness::Producer;
 use Chalk::CodeGen::Pipeline;
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
@@ -66,7 +67,8 @@ sub run_through_bson ($source) {
     (my $clean = $source) =~ s/^\s*#[^\n]*\n//gm;
     $clean =~ s/\s+$//;
     my ($prog, $class_names) = split_class_source($clean);
-    my $pkg_opts = join(',', 'package=main', map { "package=$_" } @$class_names);
+    my $pkg_opts = join(',', 'package=main', map { "package=$_" } @$class_names)
+        . Chalk::CodeGen::Harness::Producer->wire_option;
 
     my ($fh, $tmp) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $prog;
