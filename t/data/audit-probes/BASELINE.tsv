@@ -23,10 +23,21 @@ ag27	SAME
 ag28	REFUSED	no program graph
 ag29	REFUSED	no program graph
 ag3	SAME	
+ag30	SAME	
 ag31	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a call)
 ag32	REFUSED	no program graph
 ag33	SAME	
+ag34	SAME	
+ag35	SAME	
+ag36	SAME	
+ag37	SAME	
+ag38	SAME	
+ag39	SAME	
 ag4	REFUSED	GAP: T2: out of its slices (a sprintf of a list)
+ag40	SAME	
+ag41	SAME	
+ag42	REFUSED	no program graph
+ag43	SAME	
 ag5	SAME	
 ag6	SAME	
 ag7	SAME	
