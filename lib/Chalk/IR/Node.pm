@@ -395,7 +395,7 @@ class Chalk::IR::Node {
     method memory_phis() {
         my %seen;
         return grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($self)
-                      && $_->is_memory && !$seen{ refaddr($_) }++ }
+                      && $_->memory && !$seen{ refaddr($_) }++ }
                grep { blessed($_) } $consumers->@*;
     }
 

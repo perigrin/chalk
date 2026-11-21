@@ -1,5 +1,5 @@
-# ABOUTME: Checks a B::SoN wire before it is loaded: an effect on no control chain, or a read at
-# ABOUTME: no memory version beside a write, would be lowered wrong -- refused here, by name.
+# ABOUTME: Checks a B::SoN wire before it is loaded for what chalk would lower wrong -- a read at no
+# ABOUTME: memory version beside a write, a DESTROY, a die skipping a local -- refused here, by name.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -12,6 +12,11 @@ use Chalk::Grammar::Perl::BuiltinTable;
 # program whose store was never made. Every rule here is a STOPGAP for a gap
 # in the producer or the wire format: it refuses, it never repairs.
 #
+# AN EFFECT ON NO CONTROL CHAIN, and a division that may die floating, were
+# refused here until wire v2 stage 6: on v2 the loader's invariant
+# (WireInvariant) refuses a memory version off the chain, and B::SoN pins a
+# division that may fault; with both rules off no audit probe changed.
+#
 #   Chalk::IR::Serialize::WireCheck->new( methods => \%wire_graphs, defined => \%every_graph )->check;
 #
 # `methods` is the wire's graphs the program may run (name => { nodes => [...] });
@@ -23,14 +28,11 @@ class Chalk::IR::Serialize::WireCheck {
     field $defined :param = {};    # every sub the program's own file defines (run or not): name => wire graph
     field %index;    # graph name => { by => { id => node }, cons => { id => [[consumer, slot], ...] } }
 
-    my %STRUCTURE = map { $_ => 1 } qw(Start Region Proj If Loop Return);
     # A store that is a node of its own (each takes memory as an input), a
     # print and a die: never off the chain.
     my %EFFECT_OP = map { $_ => 1 } qw(EntryWrite CellWrite Delete ElemRestore LocalAlias Print Unwind);
     # A change in place of its first operand.
     my %IN_PLACE = map { $_ => 1 } qw(Assign CompoundAssign RegexSubst Transliterate Chomp);
-    # A read B::SoN pins to order it: it changes nothing.
-    my %PINNED_READ = map { $_ => 1 } qw(Subscript Slice PostfixDeref Exists Ref PadAccess EntryDef Count CellRead FieldAccess RefType);
 
     method _gap($why) { die "GAP: $why\n" }
 
@@ -108,122 +110,10 @@ class Chalk::IR::Serialize::WireCheck {
         return undef;
     }
 
-    # _place($g, $t) -> what kind of place in memory an assignment's target
-    # is, in words; undef for one that is no store of this node's: an SSA
-    # `my` scalar (the Assign is a record of its new value), a package scalar
-    # an EntryWrite stores beside it, a `my` or package array or hash (T2
-    # asks Assign::is_placed of those, and refuses by its own name).
-    method _place( $g, $t ) {
-        return undef unless defined $t;
-        my $op = $t->{op};
-        if ( $op eq 'PadAccess' ) {
-            return undef if ( $self->_f( $t, 'sigil' ) // '$' ) ne '$';
-            return defined $t->{mem_in} || $self->_inputs($t) || $self->_f( $t, 'shared' ) ? 'a variable kept in memory' : undef;
-        }
-        if ( $op eq 'EntryDef' ) {
-            return undef if ( $self->_f( $t, 'sigil' ) // '$' ) ne '$';
-            return ( grep { $_->[0]{op} eq 'EntryWrite' && $_->[1] == 0 } ( $g->{cons}{ $t->{id} } // [] )->@* )
-                ? undef : 'a package variable';
-        }
-        return undef if $op eq 'Constant' || $op =~ /\A(?:ArrayLiteral|HashLiteral)\z/;
-        return 'an element'                if $op eq 'Subscript';
-        return 'a slice'                   if $op eq 'Slice';
-        return 'a dereference'             if $op eq 'PostfixDeref';
-        return 'a field'                   if $op eq 'FieldAccess';
-        return 'a captured variable'       if $op =~ /\A(?:MakeCell|CellRead|CellParam)\z/;
-        return 'the arguments (@_)'        if $op eq 'ArgsSource';
-        return "a call's value"            if $op eq 'Call';
-        return "a $op";
-    }
 
-    # ------------------------------------------------------------------
-    # (a) AN EFFECT ON NO CONTROL CHAIN. T2 makes a floating node at its
-    # value's first use, and one nothing uses never: a store there is lost,
-    # a call runs late or not at all.
-    # ------------------------------------------------------------------
-    method _floating_effects($name) {
-        my $g = $self->_graph($name);
-        for my $n ( grep { !$self->_pinned($_) } $g->{nodes}->@* ) {
-            my $op = $n->{op};
-            my $at = "(node $n->{id} of $name)";
-            if ( $EFFECT_OP{$op} ) { $self->_gap("a write B::SoN left off the control chain: a $op $at") }
-            # (a floating Chomp, RegexSubst or Transliterate is B::SoN's value
-            # form, of a copy: `chomp $e` of a catch's $e)
-            elsif ( $op eq 'Assign' ) {
-                my @in = $self->_inputs($n);
-                my $nt = $self->_f( $n, 'targets' ) // 1;
-                my @targets = map { defined $_ ? $g->{by}{$_} : undef } @in[ 0 .. $nt - 1 ];
-                my @rhs     = map { defined $_ ? $g->{by}{$_} : undef } @in[ $nt .. $#in ];
-                my %places  = map { ( $_ => 1 ) } grep { defined } map { $self->_place( $g, $_ ) } @targets;
-                next unless %places;
-                $self->_gap( "a write B::SoN left off the control chain: "
-                        . ( defined $self->_f( $n, 'targets' ) ? 'a list assignment' : 'an assignment' )
-                        . ' to ' . join( ' and ', sort keys %places ) . " $at" );
-            }
-            elsif ( $self->_is_sub_call($n) ) {
-                next if $self->_is_a_stores_place( $g, $n ) || $self->_calls_only_inert( $g, $n );
-                # Its value taken with nothing on the chain between what it
-                # is given and that first use (`print $o->$m`): it runs
-                # where it stands.
-                next if ( $g->{cons}{ $n->{id} } // [] )->@*
-                    && !$self->_effect_before_first_use( $g, $n, sub ($x) { !$STRUCTURE{ $x->{op} } } );
-                my $kind = $self->_f( $n, 'dispatch_kind' ) // '';
-                $self->_gap( "a call B::SoN left off the control chain: "
-                        . ( $kind eq 'dynamic_method' ? 'a method call by a name made at run time' : 'a call of ' . ( $self->_f( $n, 'name' ) // 'a sub' ) )
-                        . " $at" );
-            }
-            elsif ( $self->_is_bless($n) ) {
-                # A bless of a fresh hash or array only the bless holds, its
-                # value taken (`return bless {}, $class`): nothing sees the
-                # unblessed one, so when it runs cannot show.
-                next if $self->_blesses_a_fresh_reference( $g, $n ) && ( $g->{cons}{ $n->{id} } // [] )->@*;
-                # Or of what only the bless takes, its value taken with nothing
-                # on the chain before that (`sub TIEHASH { bless $_[1], $_[0] }`).
-                my $x = $g->{by}{ ( $self->_inputs($n) )[0] // '' };
-                next if defined $x && !( grep { $_->[0]{id} != $n->{id} } ( $g->{cons}{ $x->{id} } // [] )->@* ) && ( $g->{cons}{ $n->{id} } // [] )->@*
-                    && !$self->_effect_before_first_use( $g, $n, sub ($y) { !$STRUCTURE{ $y->{op} } } );
-                $self->_gap("a bless B::SoN left off the control chain: it runs at its value's first use, or never, and another read of what it blesses may come first $at");
-            }
-            # (one whose value is taken runs at that first use: `my $ok =
-            # close($fh)`. Where that is late is not on the wire.)
-            elsif ( $self->_builtin_fact( $n, 'acts' ) && !( $g->{cons}{ $n->{id} } // [] )->@* ) {
-                $self->_gap( "a call B::SoN left off the control chain: " . $self->_f( $n, 'name' ) . " $at" );
-            }
-        }
-        return;
-    }
 
-    # A bless of a reference made for it, which nothing else holds: `bless {},
-    # $class`, `bless [], ...`, `bless \$x, ...`, `bless sub {...}, ...`.
-    method _blesses_a_fresh_reference( $g, $n ) {
-        my $x = $g->{by}{ ( $self->_inputs($n) )[0] // '' } // return 0;
-        return 0 unless $x->{op} =~ /\A(?:HashLiteral|ArrayLiteral|Ref|AnonSub)\z/ && ( $g->{cons}{ $x->{id} } // [] )->@* == 1;
-        return $x->{op} =~ /Literal/ && defined $self->_f( $x, 'symbol' ) ? 0 : 1;
-    }
 
-    # An lvalue call (`slot() = 42`): the place of stores that are on the chain.
-    method _is_a_stores_place( $g, $n ) {
-        my @c = ( $g->{cons}{ $n->{id} } // [] )->@*;
-        return @c && !grep { !( $_->[0]{op} eq 'Assign' && $_->[1] == 0 && !defined $self->_f( $_->[0], 'targets' ) && $self->_pinned( $_->[0] ) ) } @c;
-    }
 
-    # A call whose every possible callee reads no memory and has no effect:
-    # where it runs cannot show.
-    method _calls_only_inert( $g, $n ) {
-        my $kind = $self->_f( $n, 'dispatch_kind' ) // '';
-        my @names;
-        if ( $kind eq 'direct' ) { @names = grep { exists $methods->{$_} } ( $self->_f( $n, 'name' ) // '' ) }
-        else {
-            my $m = $kind eq 'method' ? $self->_f( $n, 'name' ) : do {
-                my $c = $g->{by}{ ( $self->_inputs($n) )[1] // '' };
-                defined $c && $c->{op} eq 'Constant' && ( $self->_f( $c, 'const_type' ) // '' ) eq 'string' ? $self->_f( $c, 'value' ) : undef;
-            };
-            return 0 unless defined $m && $m =~ /\A\w+\z/;
-            @names = grep { /::\Q$m\E\z/ } keys $methods->%*;
-        }
-        return 0 unless @names;
-        return !grep { !$self->_inert($_) } @names;
-    }
 
     method _inert($name) {
         my $g = $self->_graph($name);
@@ -275,77 +165,7 @@ class Chalk::IR::Serialize::WireCheck {
         return;
     }
 
-    # ------------------------------------------------------------------
-    # W7. A FAULT HAS NO PLACE IN THE GRAPH.
-    # ------------------------------------------------------------------
 
-    # A division floats, so it dies where its value is first used: refused
-    # where its divisor may be zero and something happens between the last
-    # of what it is computed from and that first use (`my $q = 1 / $d;
-    # print "before\n"; print $q` printed "before" and then died).
-    method _floating_divisions($name) {
-        my $g = $self->_graph($name);
-        for my $n ( grep { $_->{op} =~ /\A(?:Divide|Modulo)\z/ && !$self->_pinned($_) } $g->{nodes}->@* ) {
-            my $d = $g->{by}{ ( $self->_inputs($n) )[1] // '' };
-            $d = $g->{by}{ ( $self->_inputs($d) )[0] // '' } while defined $d && $d->{op} eq 'Coerce';
-            next if defined $d && $d->{op} eq 'Constant' && ( $self->_f( $d, 'value' ) // 0 ) =~ /\A-?(?:\d*\.)?\d+\z/ && $self->_f( $d, 'value' ) != 0;
-            $self->_gap( "a " . ( $n->{op} eq 'Divide' ? 'division' : 'modulus' ) . " whose divisor may be zero, on no control chain: it would die at its value's first use, after what perl never ran (in $name)" )
-                if $self->_effect_before_first_use( $g, $n, sub ($x) {
-                    # (an eval's entry clears $@: a die there sets it anyway)
-                    !( $STRUCTURE{ $x->{op} } || $PINNED_READ{ $x->{op} } || ( $self->_written_pkg( $g, $x ) // '' ) eq '$main::@' )
-                } );
-        }
-        return;
-    }
-
-    # _effect_before_first_use($g, $n, $counts) -> true where control passes
-    # an effect ($counts->($node) says which nodes are one) between the pinned nodes $n is computed from and where its value is
-    # first taken: a pinned node, or the end of an arm a merge takes it from.
-    method _effect_before_first_use( $g, $n, $counts ) {
-        # What it is computed from, pinned.
-        my ( %from, %seen, @q );
-        @q = $self->_deps($n);
-        while ( defined( my $id = shift @q ) ) {
-            next if $seen{$id}++;
-            my $x = $g->{by}{$id} // next;
-            $from{$id} = 1 if $self->_pinned($x) || $STRUCTURE{ $x->{op} };
-            push @q, $self->_deps($x);
-        }
-        # In an eval (B::SoN marks it): made after the eval is entered.
-        if ( defined( my $eval = $self->_f( $n, 'eval_id' ) ) ) {
-            $from{ $self->_f( $_, 'eval_entry' ) // '' } = 1
-                for grep { $_->{op} eq 'Region' && ( $self->_f( $_, 'eval_id' ) // '' ) eq $eval } $g->{nodes}->@*;
-        }
-        # Where its value is taken: %users the pinned nodes, @ends the arms' ends.
-        my ( %users, %seen_c, @ends );
-        @q = ( [ $n->{id}, -1 ] );
-        while ( defined( my $at = shift @q ) ) {
-            my ( $id, $via ) = $at->@*;
-            next if $seen_c{$id}++;
-            for my $use ( ( $g->{cons}{$id} // [] )->@* ) {
-                my ( $c, $slot ) = $use->@*;
-                if ( $c->{op} eq 'Phi' ) {
-                    my $r = $g->{by}{ $self->_f( $c, 'region' ) // '' } // return 1;
-                    # (round a loop: the body's end is not on the wire)
-                    return 1 if $r->{op} eq 'Loop' && $slot != 0;
-                    my @ways = ( $self->_f( $c, 'predecessors' ) // [ $self->_inputs($r) ] )->@*;
-                    # (an eval's merge has one way in on the wire: its block's end)
-                    my $end = $g->{by}{ $ways[ defined $self->_f( $r, 'eval_id' ) ? 0 : $slot ] // '' } // return 1;
-                    push @ends, $end;
-                }
-                elsif ( $self->_pinned($c) || $STRUCTURE{ $c->{op} } ) { $users{ $c->{id} } = $c }
-                else                                                   { push @q, [ $c->{id}, $slot ] }
-            }
-        }
-        my ( %walked, @w );
-        @w = ( @ends, map { $self->_preds( $g, $_ ) } values %users );
-        while ( defined( my $x = shift @w ) ) {
-            next if $walked{ $x->{id} }++ || $from{ $x->{id} } || $users{ $x->{id} };
-            return 1 if $counts->($x);
-            push @w, $self->_preds( $g, $x );
-        }
-        return 0;
-    }
 
     # A dereference pinned where it may die (of undef, under strict refs)
     # that nothing reads is not made by T2, and neither is its copy:
@@ -505,10 +325,8 @@ class Chalk::IR::Serialize::WireCheck {
             }
         }
         for my $name ( sort keys $methods->%* ) {
-            $self->_floating_effects($name);
             $self->_flattened_package_aggregates($name);
             $self->_autovivifying_reads($name);
-            $self->_floating_divisions($name);
             $self->_unread_derefs($name);
             $self->_stores_in_a_dying_eval($name);
         }

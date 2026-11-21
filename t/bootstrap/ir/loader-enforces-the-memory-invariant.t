@@ -66,6 +66,14 @@ for my $case (
       sub ($n, $all) { $n->{21}{mem_in} = 16 } ],
     [ L5 => qr/Assign#22/, 'an Assign that is no record and on neither chain',
       sub ($n, $all) { push @$all, { id => 22, op => 'Assign', inputs => [ 11, 12 ], stamp => 'Int' } } ],
+    # (L5 IS HARD since stage 6: a non-record Assign has all three edges)
+    [ L5 => qr/Assign#14 is no record and no memory version/, 'a store on the chains that is no version (no mem_out)',
+      sub ($n, $all) { delete $n->{14}{mem_out} } ],
+    [ L5 => qr/Assign#14 is no record and on no control chain/, 'a store that follows memory and no control',
+      sub ($n, $all) { $_->{control_in} = 13 for grep { ($_->{control_in} // -1) == 14 } values %$n; delete $n->{14}{control_in}; delete $n->{14}{mem_out};
+                       $n->{15}{inputs} = [10, 13] } ],
+    [ L5 => qr/Call#22 is a sub call/, 'a sub call off the control chain',
+      sub ($n, $all) { push @$all, { id => 22, op => 'Call', inputs => [], mem_in => 17, fields => { dispatch_kind => 'direct', name => 'main::f' } } } ],
     [ L6 => qr/Phi#16/, 'a memory Phi with one input for two ways into its Region',
       sub ($n, $all) { $n->{16}{inputs} = [7] } ],
 ) {
@@ -76,14 +84,15 @@ for my $case (
 }
 
 # WHAT THE INVARIANT LETS THROUGH, B::SoN's wires of programs it lowers:
-#  - an Assign on the control chain that follows memory and stores none (a
-#    list assignment from a call into `my` scalars): L5 asks a non-record
-#    Assign for mem_in, as SoN::Verify's V2 does (mem_out too from stage 6);
+#  - a list assignment from a call into `my` scalars declared before it: a
+#    store of their slots, on both chains (B::SoN placed it as one in stage
+#    6; it had been on the control chain only);
 #  - a string eval's trap: its value Phi has one input more than its Region
 #    has ways in, as a block eval's join does, until the exceptional edge
 #    (stage 8);
-#  - an :lvalue call as the location an Assign stores through: no version,
-#    off the chain, the Assign calling it (a sub call names memory, L5).
+#  - an :lvalue call as the location an Assign stores through: a place (the
+#    Assign's target, its one use), reading memory, off the chains -- the
+#    Assign that calls it is the version (L5).
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 SKIP: {
     skip "perl5-son not found at $SON (set PERL5_SON_LIB)", 3 unless -f "$SON/B/SoN.pm";
@@ -100,7 +109,7 @@ SKIP: {
         my ( $fh, $pl ) = File::Temp::tempfile( SUFFIX => '.pl', UNLINK => 1 );
         print $fh $src;
         close $fh;
-        is( refused( scalar qx($^X -I$SON -MO=-q,SoN,json,wire=2 $pl 2>/dev/null) ), '', "$name: its v2 wire loads" );
+        is( refused( scalar qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null) ), '', "$name: its v2 wire loads" );
     }
 }
 
@@ -112,11 +121,15 @@ SKIP: {
     is( refused( encode_json($own) ), '', 'a wire chalk wrote (no dowarn) is not held to the invariant' );
 }
 
-# A V1 WIRE IS UPGRADED, NOT HELD TO THE INVARIANT (what v1 left to
-# inference is decided by WireUpgrade; stage 6 deletes v1).
+# A V1 WIRE IS REFUSED (stage 6 deleted v1; t/bootstrap/ir/loader-refuses-wire-v1.t).
 my $v1 = decode_json($GOOD);
 $v1->{version} = 1;
-delete $v1->{profile};
-delete $_->{mem_in} for $v1->{methods}{'main::__PROGRAM__'}{nodes}->@*;
-is( refused( encode_json($v1) ), '', 'a v1 wire with no memory edges loads (upgraded)' );
+like( refused( encode_json($v1) ), qr/\AGAP: wire version 1\b/, 'a v1 wire is refused, not upgraded' );
+
+# A MEMORY EDGE NAMES A VERSION THE WIRE LISTED BEFORE IT. An upgraded v1
+# wire could name a merge's memory Phi listed after a node on the control
+# chain; B::SoN's v2 never does (it writes a node's memory first), so since
+# stage 6 a forward one is refused.
+like( refused( bad( sub ($n, $all) { $n->{8}{mem_in} = 17 } ) ), qr/names memory version 17, which is not an already-created node/,
+    'a mem_in naming a version listed after it is refused' );
 done_testing;

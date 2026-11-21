@@ -21,11 +21,7 @@ sub verdict ($src) {
 require Chalk::CodeGen::Harness::Producer;
 require Chalk::IR::Serialize::JSON;
 require JSON::PP;
-my $PINS_DYN = Chalk::CodeGen::Harness::Producer->pins_dynamic_method_calls;
 
-my $STORE = qr/a write B::SoN left off the control chain/;
-my $CALL  = qr/a call B::SoN left off the control chain/;
-my $BLESS = qr/a bless B::SoN left off the control chain/;
 my $T2LA  = qr/a list assignment to an array or hash/;
 
 # floated($src, $is) -> why the loader refuses $src's wire once the node $is
@@ -50,16 +46,19 @@ sub floated ( $src, $is ) {
 my $list_assign = sub ($n) { $n->{op} eq 'Assign' && defined $n->{fields}{targets} };
 my $bless       = sub ($n) { $n->{op} eq 'Call' && ( $n->{fields}{name} // '' ) eq 'bless' };
 
-# OFF THE CHAIN, each is refused by name: T2 would never make it.
+# OFF THE CHAIN, each is refused by name: T2 would never make it. Each is a
+# memory version (mem_out) with no control_in: the loader's invariant (L2)
+# refuses it before any check of what chalk can lower (wire v2 stage 6).
+my $OFF = qr/\AGAP: wire invariant L2: main::__PROGRAM__: \w+#\d+ is a memory version with no control_in/;
 for my $case (
-    [ q{my @a=(0); my $c; ($a[0], $c) = (5,6); print "$a[0] $c\n";},             $list_assign, $STORE, 'an element and a scalar' ],
-    [ q{my %h; my $c; ($h{k}, $c) = (9, 10); print "$h{k} $c\n";},               $list_assign, $STORE, 'a hash element and a scalar' ],
-    [ q{my $x = 1; my $g = sub { $x }; ($x) = (7); print $g->(), "\n";},          $list_assign, $STORE, 'a captured variable' ],
-    [ q{my %h; @h{qw(a b)} = (1,2); print "$h{a} $h{b}\n";},                     $list_assign, $STORE, 'a hash slice' ],
-    [ q{my @a = (0,0,0); @a[0,1] = (5,6); print "@a\n";},                        $list_assign, $STORE, 'an array slice' ],
-    [ q{my $r = [0,0]; ($r->[0], $r->[1]) = (3,4); print "@$r\n";},              $list_assign, $STORE, 'elements through a reference' ],
-    [ q{our @g = (0,0); ($g[0], $g[1]) = (3,4); print "@g\n";},                  $list_assign, $STORE, "a package array's elements" ],
-    [ q{package K; sub hi { "hi" } package main; my $h = {}; my $o = bless $h, "K"; print $h->hi, "\n";}, $bless, $BLESS, 'a bless of a variable read beside it' ],
+    [ q{my @a=(0); my $c; ($a[0], $c) = (5,6); print "$a[0] $c\n";},             $list_assign, $OFF, 'an element and a scalar' ],
+    [ q{my %h; my $c; ($h{k}, $c) = (9, 10); print "$h{k} $c\n";},               $list_assign, $OFF, 'a hash element and a scalar' ],
+    [ q{my $x = 1; my $g = sub { $x }; ($x) = (7); print $g->(), "\n";},          $list_assign, $OFF, 'a captured variable' ],
+    [ q{my %h; @h{qw(a b)} = (1,2); print "$h{a} $h{b}\n";},                     $list_assign, $OFF, 'a hash slice' ],
+    [ q{my @a = (0,0,0); @a[0,1] = (5,6); print "@a\n";},                        $list_assign, $OFF, 'an array slice' ],
+    [ q{my $r = [0,0]; ($r->[0], $r->[1]) = (3,4); print "@$r\n";},              $list_assign, $OFF, 'elements through a reference' ],
+    [ q{our @g = (0,0); ($g[0], $g[1]) = (3,4); print "@g\n";},                  $list_assign, $OFF, "a package array's elements" ],
+    [ q{package K; sub hi { "hi" } package main; my $h = {}; my $o = bless $h, "K"; print $h->hi, "\n";}, $bless, $OFF, 'a bless of a variable read beside it' ],
 ) {
     my ( $src, $is, $name, $what ) = @$case;
     like( floated( $src, $is ), $name, "$what, off the chain: refused by name" );
@@ -78,9 +77,9 @@ for my $case (
     # A call by a name made at run time: where B::SoN pins it (its
     # `placement-pins`), perl's output; floating, refused.
     [ q{package C; sub new { bless {n=>0}, shift } sub inc { $_[0]{n}++; return } package main; my $o = C->new; my $m = "inc"; $o->$m(); print $o->{n}, "\n";},
-        ( $PINS_DYN ? undef : $CALL ), 'a dynamic method call, its value unused' ],
+        undef, 'a dynamic method call, its value unused' ],
     [ q{package C; sub new { bless {n=>0}, shift } sub inc { $_[0]{n}++; return 5 } package main; my $o = C->new; my $m = "inc"; my $r = $o->$m(); print "$r $o->{n}\n";},
-        ( $PINS_DYN ? undef : $CALL ), 'a dynamic method call that writes, its value used' ],
+        undef, 'a dynamic method call that writes, its value used' ],
     # A bless, on the chain now: a ref() beside it reads at the bless's version.
     [ q{my $h = {}; my $o = bless $h, "K"; print ref($h), " ", ref($o), "\n";},  undef, 'a bless of a variable, ref() read beside it' ],
     [ q{package K; sub hi { "hi" } package main; my $h = {}; my $o = bless $h, "K"; print $h->hi, "\n";}, undef, 'a bless of a variable a method is then called on' ],

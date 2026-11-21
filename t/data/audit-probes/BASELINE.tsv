@@ -32,7 +32,7 @@ ag6	SAME
 ag7	SAME	
 ag8	SAME	
 ag9	SAME	
-al1	REFUSED	GAP: T2: out of its slices (a loop phi with other than two ways in)
+al1	REFUSED	load: from_json failed: GAP: wire invariant L6: main::__PROGRAM__: Phi#10 has 1 inputs for 2 ways into Loop#6
 al10	SAME	
 al11	SAME	
 al12	SAME	
@@ -43,7 +43,7 @@ al16	SAME
 al17	SAME	
 al18	SAME	
 al19	SAME	
-al2	REFUSED	GAP: T2: out of its slices (a loop phi with other than two ways in)
+al2	REFUSED	load: from_json failed: GAP: wire invariant L6: main::__PROGRAM__: Phi#6 has 1 inputs for 2 ways into Loop#5
 al20	SAME	
 al21	SAME	
 al22	SAME	
@@ -124,15 +124,15 @@ cl1	SAME
 cl10	SAME	
 cl11	SAME	
 cl12	SAME	
-cl13	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
+cl13	SAME	
 cl14	REFUSED	no program graph
 cl15	SAME	
 cl16	SAME	
 cl17	SAME	
 cl18	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
-cl19	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
+cl19	SAME	
 cl2	SAME	
-cl20	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
+cl20	SAME	
 cl21	SAME	
 cl22	SAME	
 cl23	REFUSED	load: from_json failed: GAP: a captured variable passed to a sub that writes its argument ($_[N] is the caller's variable; the closure would not see the write) (the c
@@ -140,8 +140,8 @@ cl24	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
 cl25	SAME	
 cl3	SAME	
 cl4	SAME	
-cl5	REFUSED	GAP: T2: out of its slices (a conversion %Slot* -> %Slot)
-cl6	REFUSED	GAP: T2: out of its slices (CellWrite)
+cl5	SAME	
+cl6	SAME	
 cl7	SAME	
 cl8	REFUSED	no program graph
 cl9	REFUSED	no program graph
@@ -180,7 +180,7 @@ ef27	REFUSED	GAP: T2: out of its slices (a reference to what is not an array)
 ef28	REFUSED	GAP: T2: out of its slices (a local aggregate restored with no save made)
 ef3	REFUSED	GAP: T2: out of its slices (a statement Call builtin unlink)
 ef30	SAME	
-ef31	REFUSED	GAP: T2: out of its slices (an open of a file (or of what is not a reference to a constant string))
+ef31	REFUSED	GAP: T2: out of its slices (the match variable $0 (B::SoN ties it to no match))
 ef4	SAME	
 ef5	SAME	
 ef6	REFUSED	GAP: T2: out of its slices (an each in a program with a keys or values (which reset it, B::SoN places them nowhere))
@@ -215,7 +215,7 @@ fk3	SAME
 fk4	SAME	
 fk5	SAME	
 fk6	SAME	
-fk7	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+fk7	SAME	
 fl1	SAME	
 fl10	SAME	
 fl11	REFUSED	load: from_json failed: GAP: a read through an element that is not there, which perl makes (autovivification) (in main::__PROGRAM__)

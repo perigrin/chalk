@@ -1310,7 +1310,7 @@ sub func {
     # context a list.)
     my $rphi = ( !$listret || $ctxlist && refaddr($ctxlist) == refaddr( $ret->inputs->[0] ) ) && !$tail && $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && $ret->inputs->[0]->operation eq 'Phi'
         && ( $ret->inputs->[0]->stamp // '' ) =~ /\A(?:List|Array)\z/   # static type
-        && !$ret->inputs->[0]->is_memory && blessed( $ret->inputs->[0]->region ) && $ret->inputs->[0]->region->operation eq 'Region'
+        && !$ret->inputs->[0]->memory && blessed( $ret->inputs->[0]->region ) && $ret->inputs->[0]->region->operation eq 'Region'
         && ( grep { blessed($_) && $_->operation eq 'Call' && ( $_->dispatch_kind // '' ) eq 'direct' } $ret->inputs->[0]->inputs->@* )
         ? $ret->inputs->[0] : undef;
     if ($rphi) {

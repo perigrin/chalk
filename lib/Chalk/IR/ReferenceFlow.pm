@@ -240,7 +240,7 @@ class Chalk::IR::ReferenceFlow {
                 }
                 # CONTROL: a branch on it, a join -- no value.
                 next if $op =~ /\A(?:If|Region|Loop|Start)\z/;
-                next if $op eq 'Phi' && $c->is_memory;
+                next if $op eq 'Phi' && $c->memory;
                 if ( $op =~ /\A(?:Unwind|CellWrite|MakeCell|LocalAlias|ElemRestore|ListAssign|VarDecl)\z/ ) {
                     return 'a ' . $op . _site($c);
                 }

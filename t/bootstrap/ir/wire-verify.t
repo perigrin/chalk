@@ -101,7 +101,7 @@ sub cached ($file) {
 sub compile ($file) {
     my $base = "$CACHE/" . sha_of($file);
     my $rc = system( "ulimit -v 4000000; PERL_HASH_SEED=0 /usr/bin/timeout $limit $^X -I$SON -Ilib "
-            . "-MO=-q,SoN,json,wire=2,not_package=SoN '$file' > '$base.tmp$$' 2>/dev/null" );
+            . "-MO=-q,SoN,json,not_package=SoN '$file' > '$base.tmp$$' 2>/dev/null" );
     my $exit = $rc >> 8;
     my $w = !( $exit == 124 || ( $exit > 128 && $exit < 160 ) || ( $rc & 127 ) ) && -s "$base.tmp$$"
         ? eval { $json->decode( slurp("$base.tmp$$") ) } : undef;

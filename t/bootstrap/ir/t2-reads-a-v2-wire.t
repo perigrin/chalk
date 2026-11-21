@@ -20,9 +20,10 @@ sub run ($cmd) {
     return [ $out, $err, $code ];
 }
 
-# lower($pl, $wire) -> (ll or undef, why): through T2 alone, from wire $wire
-sub lower ($pl, $wire) {
-    my $json = qx($^X -I$SON -MO=-q,SoN,json,wire=$wire $pl 2>/dev/null);
+# lower($pl) -> (ll or undef, why): through T2 alone, from B::SoN's wire (v2,
+# the one wire since stage 6; until then this ran each case at wire 1 and 2)
+sub lower ($pl) {
+    my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null);
     my $select = sub ($graphs, $mop) { my $g = $graphs->{'main::__PROGRAM__'} or return (); ([ 'main::__PROGRAM__', $g->returns->[0] ]) };
     my ($units, undef, undef, $err) = Chalk::CodeGen::Pipeline->new->run_detail($json, $select, program_mode => 1);
     my $u = $units->[0] // {};
@@ -71,8 +72,8 @@ for my $case (@cases) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src; close $fh;
     my $want = run("$^X $pl");
-    for my $wire (1, 2) {
-        my ($ll, $why) = lower($pl, $wire);
+    for my $wire (2) {
+        my ($ll, $why) = lower($pl);
         ok(defined $ll, "$name: wire $wire: lowered through T2") or diag $why;
         next unless defined $ll;
         my ($lf, $llp) = tempfile(SUFFIX => '.ll', UNLINK => 1);

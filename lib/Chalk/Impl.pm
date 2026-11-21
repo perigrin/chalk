@@ -29,7 +29,7 @@ my $LIB = File::Spec->catdir( dirname(__FILE__), File::Spec->updir );   # chalk'
 # these and what they reach -- never the rest of a class's code.
 my @PROTOCOL = qw(new FETCH STORE EXISTS DELETE CLEAR FIRSTKEY NEXTKEY);
 my %ROOTS = ( 'Chalk::Impl::INC' => ['enter'], 'Chalk::MOP::Class' => ['declare_symbols'] );
-my %WIRE;   # "class version" -> its decoded wire, this process
+my %WIRE;   # class -> its decoded wire, this process
 
 # THE MODULES BUILT INTO CHALK (perigrin: strict and warnings are built into
 # the system): a use or a require of one always succeeds, loads no file, and
@@ -135,12 +135,12 @@ sub file_of ($class) {
     return File::Spec->catfile( $LIB, split( /::/, $class ) ) . '.pm';
 }
 
-# wire($class, $version) -> the class's wire (decoded), B::SoN's translation of
-# its file at wire $version -- the program's: a v1 graph linked into a v2 wire
-# is read with its memory as an input (a bless of "one argument" was bless,
-# class and memory). Made once per content of the file, kept in a cache directory.
-sub wire ( $class, $version = 1 ) {
-    return $WIRE{"$class $version"} if $WIRE{"$class $version"};
+# wire($class) -> the class's wire (decoded), B::SoN's translation of its
+# file: wire v2, as the program's (a v1 graph linked into a v2 wire was read
+# with its memory as an input; B::SoN writes v2 only since stage 6). Made once
+# per content of the file, kept in a cache directory.
+sub wire ($class) {
+    return $WIRE{$class} if $WIRE{$class};
     my $file = file_of($class);
     open my $fh, '<:raw', $file or die "GAP: $class, the metaobject of a container the program uses, has no file ($file)\n";
     my $src = do { local $/; readline($fh) };
@@ -151,19 +151,19 @@ sub wire ( $class, $version = 1 ) {
     # which depend on nothing above them -- t/bootstrap/mop-depends-on-nothing.t)
     my @deps = sort( glob( File::Spec->catfile( $LIB, 'Chalk', 'MOP', '*.pm' ) ), glob( File::Spec->catfile( $LIB, 'Chalk', 'MOP', '*', '*.pm' ) ),
         glob( File::Spec->catfile( $LIB, 'Chalk', 'MOP.pm' ) ), glob( File::Spec->catfile( $DIR, '*.pm' ) ) );
-    my $key = sha256_hex( "wire=$version", $src, ( stat $son )[9] // 0, map { ( $_, ( stat $_ )[9] // 0, -s $_ ) } @deps );
+    my $key = sha256_hex( "wire v2", $src, ( stat $son )[9] // 0, map { ( $_, ( stat $_ )[9] // 0, -s $_ ) } @deps );
     my $cache = File::Spec->catdir( File::Spec->tmpdir, "chalk-impl-$<" );
     my $path  = File::Spec->catfile( $cache, "$class-$key.json" =~ s/::/-/gr );
     my $json;
     if ( open my $in, '<:raw', $path ) { local $/; $json = readline($in); close $in }
     unless ( defined $json && length $json ) {
-        $json = qx($^X -I$SON -I$LIB -MO=-q,SoN,json,wire=$version,package=$class $file 2>/dev/null);
+        $json = qx($^X -I$SON -I$LIB -MO=-q,SoN,json,package=$class $file 2>/dev/null);
         die "GAP: $class cannot be compiled in: B::SoN gave no wire for $file\n" unless $? == 0 && $json =~ /\S/;
         make_path($cache);
         my $tmp = "$path.$$";
         if ( open my $out, '>:raw', $tmp ) { print $out $json; close $out; rename $tmp, $path }
     }
-    return $WIRE{"$class $version"} = JSON::PP->new->utf8->decode($json);   # (the wire is UTF-8)
+    return $WIRE{$class} = JSON::PP->new->utf8->decode($json);   # (the wire is UTF-8)
 }
 
 # needed($data) -> the Impl classes a program's wire needs: those whose
@@ -196,7 +196,7 @@ sub link_json ($json) {
     my $data = JSON::PP->new->utf8->decode($json);   # (the wire is UTF-8: kept so)
     my @need = needed($data) or return $json;
     for my $class (@need) {
-        my $w = wire( $class, $data->{version} // 1 );
+        my $w = wire($class);
         # ITS OWN BEGIN BLOCKS may only be `use`s (a pragma, a version): an
         # Impl class runs nothing at compile time.
         for my $p ( ( $w->{phase_blocks} // [] )->@* ) {

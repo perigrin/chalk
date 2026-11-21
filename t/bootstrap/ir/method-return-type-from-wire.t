@@ -39,7 +39,7 @@ sub wire_with_method_return_type ($claimed) {
         ],
     );
     my $data = {
-        version => 1,
+        version => 2,
         methods => { 'P::m' => \%method_graph },
         classes => {
             P => {

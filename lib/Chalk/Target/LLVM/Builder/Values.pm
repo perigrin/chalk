@@ -133,8 +133,8 @@ sub _way_into_returned_list {
     return 0 if $seen->{ refaddr($phi) }++;
     my @uses = grep { blessed($_) } ( $phi->consumers // [] )->@*;
     return 1 if grep { $_->operation eq 'Return' && $_->inputs->@* == 2 && refaddr( $_->inputs->[0] ) == refaddr($phi) } @uses;
-    return 0 unless ( $phi->stamp // '' ) =~ /\A(?:List|Array)\z/ && !$phi->is_memory && @uses;   # static type
-    return !grep { !( $_->operation eq 'Phi' && !$_->is_memory && _way_into_returned_list($_, $seen) ) } @uses;
+    return 0 unless ( $phi->stamp // '' ) =~ /\A(?:List|Array)\z/ && !$phi->memory && @uses;   # static type
+    return !grep { !( $_->operation eq 'Phi' && !$_->memory && _way_into_returned_list($_, $seen) ) } @uses;
 }
 
 # number_phi_type($Phi, $stamp) -> a merge of numbers' T2 type. Of Ints: an
@@ -166,7 +166,7 @@ sub number_phi_type {
 sub _eval_want_of {
     my ($phi) = @_;
     my $r = $phi->region;
-    return undef unless blessed($r) && $r->operation eq 'Region' && defined $r->eval_entry && !$phi->is_memory;
+    return undef unless blessed($r) && $r->operation eq 'Region' && defined $r->eval_entry && !$phi->memory;
     return $r->eval_want;
 }
 
@@ -193,7 +193,7 @@ sub agg_versions {
         next if $seen{ refaddr($n) }++;
         my $op = $n->operation;
         my $st = $n->stamp // '';   # static type
-        if ( $op eq 'Phi' ) { return undef if $n->is_memory; push @phis, $n; push @q, $n->inputs->@*; next }
+        if ( $op eq 'Phi' ) { return undef if $n->memory; push @phis, $n; push @q, $n->inputs->@*; next }
         if ( $op eq 'TernaryExpr' && $st =~ /\A(?:Array|List)\z/ ) { push @q, $n->inputs->@[1, 2]; next }
         if ( $op eq 'PadAccess' && !$n->shared && !( $n->can('file') && $n->file ) && ( $n->is_my_array || $n->is_my_hash ) ) {
             $var{ $n->name . '#' . ( $n->can('targ') ? $n->targ // '' : '' ) } = 1;

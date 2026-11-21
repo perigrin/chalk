@@ -91,9 +91,9 @@
                "id" : 9,
                "inputs" : [
                   6,
-                  7,
-                  8
+                  7
                ],
+               "mem_in" : 8,
                "op" : "Subscript",
                "stamp" : "Scalar"
             },
@@ -134,6 +134,7 @@
                "inputs" : [
                   1
                ],
+               "mem_in" : 8,
                "op" : "Return"
             }
          ],
@@ -143,6 +144,9 @@
          "start" : 0
       }
    },
+   "profile" : [
+      "mem"
+   ],
    "source" : null,
-   "version" : 1
+   "version" : 2
 }

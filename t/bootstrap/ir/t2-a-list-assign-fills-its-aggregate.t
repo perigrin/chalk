@@ -49,7 +49,6 @@ my %placed_or_refused = (
     'from an array'          => 'my @s = ($ENV{F} // 7, 8, 9); my ($x, @r) = @s; print "$x|@r\n";',
     'more values, literal'   => 'my ($a, $b, @r) = ($ENV{F} // 1, 2, 3, 4, 5); print "$a $b|@r\n";',
     'in a branch'            => 'if (!@ARGV) { my ($x, @r) = ($ENV{F} // 1, 2, 3); print "$x|@r\n" } else { print "no\n" }',
-    'declared earlier'       => 'sub g { return (1, 2, 3) } my ($x, @r); ($x, @r) = g(); print "$x|@r\n"; ($x, @r) = (4, 5); print "$x|@r\n";',
     # (its reads stayed the first list's: "9 9")
     'a variable bound as a value' => 'sub g { return (1, 2, 3) } my @r = (9, 9); my $x; ($x, @r) = g(); print "@r\n";',
     # (B::SoN binds the first scalar to the array itself: "2 " for "2 3", and
@@ -59,6 +58,22 @@ my %placed_or_refused = (
     'scalars from a filled one' => 'sub g { return (1, 2, 3) } my ($x, @r) = g(); my ($f, $s) = @r; print "$f $s\n";',
     'scalar context, literal' => 'my $n = (my ($x, @r) = ($ENV{F} // 1, 2, 3)); print "$n $x @r\n";',
 );
+
+# A `my` SCALAR A LIST ASSIGNMENT REBINDS AFTER IT WAS READ. Its reads are one
+# node (the slot by name, at no memory version), so the second assignment
+# cannot reach a value made from the first: "1 2 1 2" for "1 2 3 4", and
+# "1|5" for "4|5" once Assign::is_placed no longer refused the aggregate
+# beside it (wire v2 stage 6). Refused by name until the reads name a version.
+my %rebound = (
+    'two list assigns of scalars, read between' => 'sub g { (1, 2) } sub h { (3, 4) } my ($a, $b); ($a, $b) = g(); print "$a $b\n"; ($a, $b) = h(); print "$a $b\n";',
+    'a scalar beside an array, read between'   => 'sub g { return (1, 2, 3) } my ($x, @r); ($x, @r) = g(); print "$x|@r\n"; ($x, @r) = (4, 5); print "$x|@r\n";',
+);
+for my $name (sort keys %rebound) {
+    my $r = tap("$rebound{$name}\n");
+    ok $r->{verdict} eq 'SAME'
+        || $r->{verdict} eq 'REFUSED' && ( $r->{why} // '' ) =~ /a `my` scalar a list assignment rebinds after it was read/,
+        "as perl, or refused by name: $name" or diag explain $r;
+}
 
 for my $name (sort keys %same) {
     my $r = tap("$same{$name}\n");

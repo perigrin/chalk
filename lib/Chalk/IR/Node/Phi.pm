@@ -36,25 +36,17 @@ class Chalk::IR::Node::Phi :isa(Chalk::IR::Value) {
     # recorded", never as "no predecessors".
     field $predecessors :param :reader = undef;
 
-    # Whether this Phi merges MEMORY versions rather than a value: the wire
-    # flags its memory Phis (wire v2; Serialize::WireUpgrade flags a v1
-    # wire's, by what the inputs say).
+    # Whether this Phi merges MEMORY versions rather than a value (a memory
+    # Phi): the wire flags its memory Phis (wire v2). It is a scheduling
+    # token: the read that consumes it loads the merged heap. Nothing infers
+    # it from the inputs any more (Phi::is_memory did, until wire v2 stage 6).
     field $memory :param :reader = 0;
 
     method operation() { 'Phi' }
 
-    # A MEMORY VERSION where it merges memory (is_memory).
-    method is_memory_version() { return $self->is_memory ? 1 : 0 }
+    # A MEMORY VERSION where it merges memory.
+    method is_memory_version() { return $memory ? 1 : 0 }
     method staleness_kind() { 'opaque' }
-
-    # is_memory -> true for a MEMORY PHI: one merging memory versions (MemStart,
-    # an element store, ...), not values. It is a scheduling token: the read
-    # that consumes it loads the merged heap. The wire's flag says so.
-    #
-    # STAGE 2 OF WIRE V2: the inference that told one from its inputs is
-    # Serialize::WireUpgrade's now, run once on a v1 wire; this method goes
-    # in stage 6, its callers reading `memory`.
-    method is_memory() { return $memory ? 1 : 0 }
 
     # NOT in the content hash, for the same reason control_in is not: it is a
     # per-use decoration recording where a value came from, not part of what

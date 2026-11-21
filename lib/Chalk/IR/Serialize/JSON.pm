@@ -17,7 +17,6 @@ use Chalk::IR::Node::Coerce;   # _insert_str_coercions builds these directly
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: the join lattice
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 use Chalk::IR::Serialize::WireCheck;   # what the wire cannot order, refused
-use Chalk::IR::Serialize::WireUpgrade;   # a v1 wire, read as v2
 use Chalk::IR::Serialize::WireInvariant; # a v2 wire's memory edges, checked
 
 # CFG node operations — these carry control tokens and are never hash-consed.
@@ -550,7 +549,6 @@ sub _deserialize_graph ($method_data) {
 
     my @nodes;  # positional array of created node objects
     my @backedge_patches;  # [phi_position, backedge_index] deferred wirings
-    my @mem_patches;       # [node, memory version index] deferred: see below
 
     for my $nd (@node_data) {
         my $op     = $nd->{op};
@@ -587,20 +585,15 @@ sub _deserialize_graph ($method_data) {
         # Build the argument hash, with inputs and any extra fields
         my %args = (inputs => \@inputs);
         # THE MEMORY EDGE (wire v2): the version this node reads or follows;
-        # and whether this node is a version. A read names one made before
-        # it. A node on the control chain may name a merge's memory Phi the
-        # wire lists after it (a v1 wire's order, upgraded): it is its own
-        # node, never hash-consed, and its edge is set once every node is.
-        my $mem_later;
+        # and whether this node is a version. It names one the wire lists
+        # before it (B::SoN writes a node's memory before the node; a v1
+        # wire, upgraded, could name a merge's memory Phi listed after it --
+        # gone with v1, stage 6): a forward one is a producer ordering bug.
         if (defined( my $m = $nd->{mem_in} )) {
-            die "IR load: node #" . scalar(@nodes) . " ($op) names memory version $m, which is no node\n"
-                unless $m =~ /\A\d+\z/ && $m < @node_data;
-            if ($m < @nodes) { $args{mem_in} = $nodes[$m] }
-            elsif (defined $nd->{control_in}) { $mem_later = $m }
-            else {
-                die "IR load: node #" . scalar(@nodes) . " ($op), on no control chain, names memory "
-                  . "version $m, which is not an already-created node (have " . scalar(@nodes) . ")\n";
-            }
+            die "IR load: node #" . scalar(@nodes) . " ($op) names memory version $m, which is not an "
+              . "already-created node (have " . scalar(@nodes) . ")\n"
+                unless $m =~ /\A\d+\z/ && $m < @nodes;
+            $args{mem_in} = $nodes[$m];
         }
         $args{mem_out} = 1 if $nd->{mem_out};
 
@@ -677,7 +670,7 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'Phi') {
             $args{region} = $nodes[ $fields->{region} ];
-            # A MEMORY PHI IS FLAGGED (wire v2; WireUpgrade flags a v1 wire's).
+            # A MEMORY PHI IS FLAGGED (wire v2).
             $args{memory} = $fields->{memory} ? 1 : 0;
 
             # predecessors[i] is the Proj that inputs[i] arrives along, carried
@@ -879,9 +872,6 @@ sub _deserialize_graph ($method_data) {
         if ($is_cfg) {
             $node = $factory->make_cfg($op, %args);
         }
-        elsif (defined $mem_later && $factory->identity_of($op) ne 'per_call') {
-            $node = $factory->make_unique($op, %args);
-        }
         else {
             $node = $factory->make($op, %args);
             # TWO PINNED NODES OF ONE CONTENT are two nodes: `exists $_[$i] ?
@@ -1043,10 +1033,8 @@ sub _deserialize_graph ($method_data) {
             $node->set_has_filehandle(1) if $fields->{has_filehandle};
         }
 
-        push @mem_patches, [ $node, $mem_later ] if defined $mem_later;
         push @nodes, $node;
     }
-    $_->[0]->set_mem_in( $nodes[ $_->[1] ] ) for @mem_patches;
 
     # A READ OF A CAPTURED VARIABLE (CellRead) is typed by its use, as
     # B::SoN types a read of an address-taken `my` (`$k * 2` reads $k as
@@ -1293,18 +1281,19 @@ sub from_json ($json_string) {
     # string constant is perl's characters -- not their UTF-8 bytes, which a
     # program printing "caf\xe9" printed as two bytes for its last.
     my $data    = JSON::PP->new->utf8->decode($json_string);
-    # ONE READER, OF WIRE V2 (docs/plans/2026-11-20-wire-v2.md): a v1 wire is
-    # upgraded first. Of v2, the `mem` part is read; a wire that obeys the
-    # eval or loop parts says what this loader does not read yet.
-    my $version = $data->{version} // 1;
-    Chalk::IR::Serialize::WireUpgrade::upgrade($data) if $version == 1;
-    die "GAP: wire version $version is not one chalk reads\n" unless $data->{version} == 2;
+    # ONE READER, OF WIRE V2 (docs/plans/2026-11-20-wire-v2.md). Wire v1 is
+    # gone (stage 6): B::SoN writes v2 only, and a v1 wire, or one that does
+    # not say, is refused by name -- its memory was a positional input no
+    # reader here takes for one. Of v2, the `mem` part is read; a wire that
+    # obeys the eval or loop parts says what this loader does not read yet.
+    my $version = $data->{version} // 'none';
+    die "GAP: wire version $version is not one chalk reads (wire v2 only)\n" unless $version eq '2';
     die "GAP: wire v2 profile `$_` is not read yet\n" for grep { $_ ne 'mem' } ( $data->{profile} // [] )->@*;
-    # A WIRE THAT CAME AS V2 is held to the memory invariant (L1-L6), each of
-    # its graphs, before any is made; an upgraded v1 wire is not. (B::SoN's
-    # wire, which says perl's warning switches, `dowarn`, as WireCheck asks
-    # below: a graph chalk wrote itself, to_json's, threads no memory.)
-    if ( $version == 2 && exists $data->{dowarn} ) {
+    # B::SoN'S WIRE is held to the memory invariant (L1-L6), each of its
+    # graphs, before any is made. (B::SoN's says perl's warning switches,
+    # `dowarn`, as WireCheck asks below: a graph chalk wrote itself,
+    # to_json's, threads no memory.)
+    if ( exists $data->{dowarn} ) {
         my $inv = Chalk::IR::Serialize::WireInvariant->new( profile => $data->{profile} // [] );
         $inv->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;
         $inv->check( 'a ' . ( $_->{phase} // 'phase' ) . ' block', $_ ) for ( $data->{phase_blocks} // [] )->@*;

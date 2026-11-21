@@ -152,7 +152,7 @@ sub _is_list {
     # (a merge of an array's or a hash's versions, B::SoN's stamp Unknown or
     # Hash: `@p` after a loop that whole-assigns it -- one it refuses is
     # refused where it is typed)
-    return 1 if $n->operation eq 'Phi' && !$n->is_memory && eval { Chalk::Target::LLVM::Builder::agg_versions(undef, $n) };
+    return 1 if $n->operation eq 'Phi' && !$n->memory && eval { Chalk::Target::LLVM::Builder::agg_versions(undef, $n) };
     return 1 if $Chalk::Target::LLVM::Builder::LIST_FIELD{ refaddr($n) };
     return 1 if _refs_each_item($n);
     return 0;
@@ -284,8 +284,8 @@ sub _use_counts {
             || $op eq 'Return' && $u->inputs->@* == 2 && $at0
             || $op eq 'Assign' && $u->can('targets') && defined $u->targets) { $list++ }   # `my ($x, $y) = f()`
         elsif ($op eq 'Coerce' && $PRINTED{ refaddr($c) }) { }   # print's (counted above)
-        elsif ($op eq 'Phi' && $u->is_memory) { }   # (the call as a memory version: no value)
-        elsif ($op eq 'Phi' && !$u->is_memory && blessed( $u->region ) && $u->region->operation eq 'Region'
+        elsif ($op eq 'Phi' && $u->memory) { }   # (the call as a memory version: no value)
+        elsif ($op eq 'Phi' && !$u->memory && blessed( $u->region ) && $u->region->operation eq 'Region'
                && ( $u->stamp // '' ) =~ /\A(?:List|Array)\z/) {   # static type
             # a merge of lists: its own use decides (`my @c = $p ? two() : ()`)
             # (a merge of scalars is one value: T2 takes the call's scalar)
@@ -294,7 +294,6 @@ sub _use_counts {
             $list += $l; $scalar += $s;
         }
         elsif ($op =~ /\A(?:Phi|Return)\z/) { }   # a loop's merge or a tail call: its own use decides
-        elsif ($op =~ /\A(?:Region|Loop)\z/) { }   # (the call as a way into a merge, a loop's entry: control, no value)
         else { $scalar++ }
     }
     return ($list, $scalar);
@@ -314,7 +313,7 @@ sub list_only {
         next unless @pos;
         my $op = $u->operation;
         next if $op =~ /\A(?:Loop|Region|If|Proj)\z/;
-        next if $op eq 'Phi' && $u->is_memory;   # (a merge of memory versions)
+        next if $op eq 'Phi' && $u->memory;   # (a merge of memory versions)
         my $at0 = grep { $_ == 0 } @pos;
         next if $op eq 'Coerce' && !grep { blessed($_) && $_->operation ne 'Print' } ( $u->consumers // [] )->@*;
         next if $op =~ /\A(?:ArrayLiteral|HashLiteral|Print)\z/;

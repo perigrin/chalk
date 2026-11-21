@@ -18,7 +18,7 @@ use Chalk::IR::Serialize::JSON ();
 #     backend's control-chain walk needs to emit the enclosing structure.
 
 my $json = JSON::PP->new->encode({
-    version => 1,
+    version => 2,
     source  => 'region-head',
     methods => {
         'main::f' => {

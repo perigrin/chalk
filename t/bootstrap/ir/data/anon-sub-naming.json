@@ -63,11 +63,16 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "undef",
                   "value" : null
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Undef"
@@ -80,8 +85,10 @@
                   "param_names" : [],
                   "want" : "list"
                },
-               "id" : 2,
+               "id" : 3,
                "inputs" : [],
+               "mem_in" : 1,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Unknown"
             },
@@ -90,32 +97,33 @@
                   "from_repr" : "Unknown",
                   "to_repr" : "Str"
                },
-               "id" : 3,
+               "id" : 4,
                "inputs" : [
-                  2
+                  3
                ],
                "op" : "Coerce",
                "stamp" : "Str"
             },
             {
-               "control_in" : 2,
-               "id" : 4,
+               "control_in" : 3,
+               "id" : 5,
                "inputs" : [
-                  3
+                  4
                ],
                "op" : "Print"
             },
             {
-               "control_in" : 4,
-               "id" : 5,
+               "control_in" : 5,
+               "id" : 6,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 3,
                "op" : "Return"
             }
          ],
          "returns" : [
-            5
+            6
          ],
          "start" : 0
       },
@@ -127,26 +135,32 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "integer",
                   "value" : "42"
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Int"
             },
             {
                "control_in" : 0,
-               "id" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 1,
                "op" : "Return"
             }
          ],
          "returns" : [
-            2
+            3
          ],
          "start" : 0
       },
@@ -158,28 +172,36 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "control_in" : 0,
                "fields" : {
                   "dispatch_kind" : "direct",
                   "name" : "main::f::__ANON__:1:2",
                   "param_names" : []
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
+               "mem_in" : 1,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Unknown"
             },
             {
-               "control_in" : 1,
-               "id" : 2,
+               "control_in" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 2,
                "op" : "Return"
             }
          ],
          "returns" : [
-            2
+            3
          ],
          "start" : 0
       },
@@ -191,26 +213,32 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "integer",
                   "value" : "1"
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Int"
             },
             {
                "control_in" : 0,
-               "id" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 1,
                "op" : "Return"
             }
          ],
          "returns" : [
-            2
+            3
          ],
          "start" : 0
       },
@@ -222,28 +250,36 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "control_in" : 0,
                "fields" : {
                   "dispatch_kind" : "direct",
                   "name" : "main::g::__ANON__:2:2",
                   "param_names" : []
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
+               "mem_in" : 1,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Unknown"
             },
             {
-               "control_in" : 1,
-               "id" : 2,
+               "control_in" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 2,
                "op" : "Return"
             }
          ],
          "returns" : [
-            2
+            3
          ],
          "start" : 0
       },
@@ -255,30 +291,39 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "integer",
                   "value" : "2"
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Int"
             },
             {
                "control_in" : 0,
-               "id" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 1,
                "op" : "Return"
             }
          ],
          "returns" : [
-            2
+            3
          ],
          "start" : 0
       }
    },
+   "profile" : [
+      "mem"
+   ],
    "source" : null,
-   "version" : 1
+   "version" : 2
 }

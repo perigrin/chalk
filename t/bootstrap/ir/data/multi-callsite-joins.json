@@ -41,11 +41,16 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "undef",
                   "value" : null
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Undef"
@@ -55,7 +60,7 @@
                   "const_type" : "string",
                   "value" : "hello"
                },
-               "id" : 2,
+               "id" : 3,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Str"
@@ -65,7 +70,7 @@
                   "const_type" : "integer",
                   "value" : "1"
                },
-               "id" : 3,
+               "id" : 4,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Int"
@@ -77,10 +82,12 @@
                   "name" : "main::g",
                   "param_names" : []
                },
-               "id" : 4,
+               "id" : 5,
                "inputs" : [
-                  3
+                  4
                ],
+               "mem_in" : 1,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Scalar"
             },
@@ -89,9 +96,9 @@
                   "from_repr" : "Unknown",
                   "to_repr" : "Str"
                },
-               "id" : 5,
+               "id" : 6,
                "inputs" : [
-                  4
+                  5
                ],
                "op" : "Coerce",
                "stamp" : "Str"
@@ -101,31 +108,33 @@
                   "const_type" : "string",
                   "value" : "\n"
                },
-               "id" : 6,
+               "id" : 7,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Str"
             },
             {
-               "control_in" : 4,
-               "id" : 7,
+               "control_in" : 5,
+               "id" : 8,
                "inputs" : [
-                  5,
-                  6
+                  6,
+                  7
                ],
                "op" : "Print"
             },
             {
-               "control_in" : 7,
+               "control_in" : 8,
                "fields" : {
                   "dispatch_kind" : "direct",
                   "name" : "main::g",
                   "param_names" : []
                },
-               "id" : 8,
+               "id" : 9,
                "inputs" : [
-                  2
+                  3
                ],
+               "mem_in" : 5,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Scalar"
             },
@@ -134,33 +143,34 @@
                   "from_repr" : "Unknown",
                   "to_repr" : "Str"
                },
-               "id" : 9,
+               "id" : 10,
                "inputs" : [
-                  8
+                  9
                ],
                "op" : "Coerce",
                "stamp" : "Str"
             },
             {
-               "control_in" : 8,
-               "id" : 10,
+               "control_in" : 9,
+               "id" : 11,
                "inputs" : [
-                  9,
-                  6
+                  10,
+                  7
                ],
                "op" : "Print"
             },
             {
-               "control_in" : 10,
-               "id" : 11,
+               "control_in" : 11,
+               "id" : 12,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 9,
                "op" : "Return"
             }
          ],
          "returns" : [
-            11
+            12
          ],
          "start" : 0
       },
@@ -194,6 +204,8 @@
                   1,
                   2
                ],
+               "mem_in" : 2,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Scalar"
             },
@@ -203,6 +215,7 @@
                "inputs" : [
                   3
                ],
+               "mem_in" : 3,
                "op" : "Return"
             }
          ],
@@ -212,6 +225,9 @@
          "start" : 0
       }
    },
+   "profile" : [
+      "mem"
+   ],
    "source" : null,
-   "version" : 1
+   "version" : 2
 }

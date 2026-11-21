@@ -64,26 +64,32 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "integer",
                   "value" : "0"
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Int"
             },
             {
                "control_in" : 0,
-               "id" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 1,
                "op" : "Return"
             }
          ],
          "returns" : [
-            2
+            3
          ],
          "start" : 0
       },
@@ -95,11 +101,16 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "field_index" : 0,
                   "field_stash" : "Counter"
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "FieldAccess",
                "stamp" : "Scalar"
@@ -109,9 +120,9 @@
                   "from_repr" : "Scalar",
                   "to_repr" : "Num"
                },
-               "id" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
                "op" : "Coerce",
                "stamp" : "Num"
@@ -121,41 +132,44 @@
                   "const_type" : "integer",
                   "value" : "1"
                },
-               "id" : 3,
+               "id" : 4,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Int"
             },
             {
-               "id" : 4,
+               "id" : 5,
                "inputs" : [
-                  2,
-                  3
+                  3,
+                  4
                ],
                "op" : "Add",
                "stamp" : "Num"
             },
             {
                "control_in" : 0,
-               "id" : 5,
+               "id" : 6,
                "inputs" : [
-                  1,
-                  4
+                  2,
+                  5
                ],
+               "mem_in" : 1,
+               "mem_out" : 1,
                "op" : "Assign",
                "stamp" : "Num"
             },
             {
-               "control_in" : 5,
-               "id" : 6,
+               "control_in" : 6,
+               "id" : 7,
                "inputs" : [
-                  4
+                  5
                ],
+               "mem_in" : 6,
                "op" : "Return"
             }
          ],
          "returns" : [
-            6
+            7
          ],
          "start" : 0
       },
@@ -167,26 +181,32 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "field_index" : 0,
                   "field_stash" : "Counter"
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "FieldAccess",
                "stamp" : "Scalar"
             },
             {
                "control_in" : 0,
-               "id" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 1,
                "op" : "Return"
             }
          ],
          "returns" : [
-            2
+            3
          ],
          "start" : 0
       },
@@ -198,11 +218,16 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "undef",
                   "value" : null
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Undef"
@@ -212,7 +237,7 @@
                   "const_type" : "integer",
                   "value" : "10"
                },
-               "id" : 2,
+               "id" : 3,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Int"
@@ -227,40 +252,46 @@
                      "n"
                   ]
                },
-               "id" : 3,
-               "inputs" : [
-                  2
-               ],
-               "op" : "Call",
-               "stamp" : "Object"
-            },
-            {
-               "control_in" : 3,
-               "fields" : {
-                  "class_name" : "Counter",
-                  "dispatch_kind" : "method",
-                  "name" : "inc",
-                  "param_names" : []
-               },
                "id" : 4,
                "inputs" : [
                   3
                ],
+               "mem_in" : 1,
+               "mem_out" : 1,
                "op" : "Call",
-               "stamp" : "Num"
+               "stamp" : "Object"
             },
             {
                "control_in" : 4,
                "fields" : {
                   "class_name" : "Counter",
                   "dispatch_kind" : "method",
-                  "name" : "val",
+                  "name" : "inc",
                   "param_names" : []
                },
                "id" : 5,
                "inputs" : [
-                  3
+                  4
                ],
+               "mem_in" : 4,
+               "mem_out" : 1,
+               "op" : "Call",
+               "stamp" : "Num"
+            },
+            {
+               "control_in" : 5,
+               "fields" : {
+                  "class_name" : "Counter",
+                  "dispatch_kind" : "method",
+                  "name" : "val",
+                  "param_names" : []
+               },
+               "id" : 6,
+               "inputs" : [
+                  4
+               ],
+               "mem_in" : 5,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Scalar"
             },
@@ -269,9 +300,9 @@
                   "from_repr" : "Unknown",
                   "to_repr" : "Str"
                },
-               "id" : 6,
+               "id" : 7,
                "inputs" : [
-                  5
+                  6
                ],
                "op" : "Coerce",
                "stamp" : "Str"
@@ -281,35 +312,39 @@
                   "const_type" : "string",
                   "value" : "\n"
                },
-               "id" : 7,
+               "id" : 8,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Str"
             },
             {
-               "control_in" : 5,
-               "id" : 8,
+               "control_in" : 6,
+               "id" : 9,
                "inputs" : [
-                  6,
-                  7
+                  7,
+                  8
                ],
                "op" : "Print"
             },
             {
-               "control_in" : 8,
-               "id" : 9,
+               "control_in" : 9,
+               "id" : 10,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 6,
                "op" : "Return"
             }
          ],
          "returns" : [
-            9
+            10
          ],
          "start" : 0
       }
    },
+   "profile" : [
+      "mem"
+   ],
    "source" : null,
-   "version" : 1
+   "version" : 2
 }

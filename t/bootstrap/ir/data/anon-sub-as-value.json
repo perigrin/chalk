@@ -41,11 +41,16 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "undef",
                   "value" : null
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Undef"
@@ -54,7 +59,7 @@
                "fields" : {
                   "name" : "main::__PROGRAM__::__ANON__:3:6"
                },
-               "id" : 2,
+               "id" : 3,
                "inputs" : [],
                "op" : "AnonSub",
                "stamp" : "Code"
@@ -65,7 +70,7 @@
                   "sigil" : "%",
                   "symbol" : "SIG"
                },
-               "id" : 3,
+               "id" : 4,
                "inputs" : [],
                "op" : "EntryDef",
                "stamp" : "Hash"
@@ -75,16 +80,16 @@
                   "const_type" : "string",
                   "value" : "__WARN__"
                },
-               "id" : 4,
+               "id" : 5,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Str"
             },
             {
-               "id" : 5,
+               "id" : 6,
                "inputs" : [
-                  3,
-                  4
+                  4,
+                  5
                ],
                "op" : "Subscript",
                "stamp" : "Scalar"
@@ -93,33 +98,37 @@
                "fields" : {
                   "name" : "main::__PROGRAM__::__ANON__:2:2"
                },
-               "id" : 6,
+               "id" : 7,
                "inputs" : [],
                "op" : "AnonSub",
                "stamp" : "Code"
             },
             {
                "control_in" : 0,
-               "id" : 7,
+               "id" : 8,
                "inputs" : [
-                  5,
-                  6
+                  6,
+                  7
                ],
+               "mem_in" : 1,
+               "mem_out" : 1,
                "op" : "Assign",
                "stamp" : "Code"
             },
             {
-               "control_in" : 7,
+               "control_in" : 8,
                "fields" : {
                   "dispatch_kind" : "direct",
                   "name" : "main::apply",
                   "param_names" : [],
                   "want" : "scalar"
                },
-               "id" : 8,
+               "id" : 9,
                "inputs" : [
-                  2
+                  3
                ],
+               "mem_in" : 8,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Int"
             },
@@ -128,32 +137,33 @@
                   "from_repr" : "Unknown",
                   "to_repr" : "Str"
                },
-               "id" : 9,
+               "id" : 10,
                "inputs" : [
-                  8
+                  9
                ],
                "op" : "Coerce",
                "stamp" : "Str"
             },
             {
-               "control_in" : 8,
-               "id" : 10,
+               "control_in" : 9,
+               "id" : 11,
                "inputs" : [
-                  9
+                  10
                ],
                "op" : "Print"
             },
             {
-               "control_in" : 10,
-               "id" : 11,
+               "control_in" : 11,
+               "id" : 12,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 9,
                "op" : "Return"
             }
          ],
          "returns" : [
-            11
+            12
          ],
          "start" : 0
       },
@@ -165,26 +175,32 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "integer",
                   "value" : "1"
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Int"
             },
             {
                "control_in" : 0,
-               "id" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 1,
                "op" : "Return"
             }
          ],
          "returns" : [
-            2
+            3
          ],
          "start" : 0
       },
@@ -196,26 +212,32 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "integer",
                   "value" : "7"
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Int"
             },
             {
                "control_in" : 0,
-               "id" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 1,
                "op" : "Return"
             }
          ],
          "returns" : [
-            2
+            3
          ],
          "start" : 0
       },
@@ -259,6 +281,8 @@
                   2,
                   3
                ],
+               "mem_in" : 3,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Scalar"
             },
@@ -268,6 +292,7 @@
                "inputs" : [
                   1
                ],
+               "mem_in" : 4,
                "op" : "Return"
             }
          ],
@@ -277,6 +302,9 @@
          "start" : 0
       }
    },
+   "profile" : [
+      "mem"
+   ],
    "source" : null,
-   "version" : 1
+   "version" : 2
 }

@@ -29,6 +29,7 @@ use Chalk::IR::Serialize::JSON;
 # rather than the shape of a hash.
 sub loads_as ($stamp) {
     my $wire = {
+        version => 2,
         methods => {
             'main::probe' => {
                 name  => 'main::probe',

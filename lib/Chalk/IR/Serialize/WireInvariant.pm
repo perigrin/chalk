@@ -6,8 +6,8 @@ use experimental 'class';
 
 # WIRE V2, STAGE 5 (docs/plans/2026-11-20-wire-v2.md, section 8.3). Wire v2
 # names its memory edges; chalk reads them as they come. Structural only: no
-# kind table beyond the ops it names. A v1 wire is upgraded (WireUpgrade) and
-# not held to it: what v1 left to inference is decided there.
+# kind table beyond the ops it names. (Wire v1, which named no memory edge,
+# is gone: stage 6.)
 #
 #   L1  every mem_in names MemStart, a memory Phi, or a node with mem_out
 #   L2  a node with mem_out has mem_in and control_in
@@ -15,12 +15,12 @@ use experimental 'class';
 #   L4  every node with mem_out is reached backwards (over mem_in and memory
 #       Phi inputs) from the roots: each Return's and Unwind's mem_in, and the
 #       memory Phi of a Loop no exit Region names (SoN::Verify's V3, V4)
-#   L5  an Assign is a record, or names the memory it follows (mem_in); a
-#       sub Call names it -- SoN::Verify's V2. (The plan's L5 asks a non-record
-#       Assign and a sub Call for all three of control_in, mem_in, mem_out:
-#       stage 6 makes it hard. A pinned Assign that binds `my` scalars from a
-#       call stores nothing; an :lvalue call is the location an Assign stores
-#       through, called by it, off both chains.)
+#   L5  an Assign is a record, or is on both chains: control_in, mem_in,
+#       mem_out (hard since stage 6). A sub Call has all three too -- or is
+#       a place: an :lvalue call whose one use is the target of the Assign
+#       that stores through it (and calls it), reading memory (mem_in), off
+#       the chains; that Assign is the version (the plan's section 3.3: a
+#       node an Assign stores through is a place).
 #   L6  a Phi has as many inputs as its Region has ways in (a Loop: two); a
 #       memory Phi's inputs are versions. (A trap's value Phi -- a block
 #       eval's join, a string eval's -- has one more until the exceptional
@@ -59,12 +59,23 @@ class Chalk::IR::Serialize::WireInvariant {
         for my $n ( grep { $_->{op} eq 'Return' || $_->{op} eq 'Unwind' } @nodes ) {
             $gap->( 'L3', $n, 'names no memory (mem_in)' ) unless defined $n->{mem_in};
         }
+        my %uses;    # id -> [ [user, input index] ... ]
+        for my $u (@nodes) {
+            my $in = $u->{inputs} // [];
+            push $uses{ $in->[$_] }->@*, [ $u, $_ ] for grep { defined $in->[$_] && !ref $in->[$_] } 0 .. $#$in;
+        }
         for my $n (@nodes) {
             my $f = $n->{fields} // {};
             my $sub_call = $n->{op} eq 'Call' && $SUB_CALL{ $f->{dispatch_kind} // '' };
             next unless $n->{op} eq 'Assign' && !$f->{record} || $sub_call;
-            $gap->( 'L5', $n, ( $sub_call ? 'is a sub call' : 'is no record' ) . ' that names no memory (mem_in)' )
-                unless defined $n->{mem_in};
+            my $what = $sub_call ? 'is a sub call' : 'is no record';
+            $gap->( 'L5', $n, "$what that names no memory (mem_in)" ) unless defined $n->{mem_in};
+            # (a place: the target of the Assign that stores through it, its one use)
+            my @u = ( $uses{ $n->{id} } // [] )->@*;
+            next if $sub_call && !defined $n->{control_in} && !$n->{mem_out}
+                && @u == 1 && $u[0][0]{op} eq 'Assign' && $u[0][1] == 0 && !( $u[0][0]{fields} // {} )->{record};
+            $gap->( 'L5', $n, "$what and on no control chain (control_in)" ) unless defined $n->{control_in};
+            $gap->( 'L5', $n, "$what and no memory version (mem_out)" ) unless $n->{mem_out};
         }
         # A TRAP'S JOIN: a block eval's (eval_id), or a string eval's (its one
         # way in the pinned compile of the code, a Coerce to Code).

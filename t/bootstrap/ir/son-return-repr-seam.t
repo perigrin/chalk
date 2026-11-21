@@ -19,7 +19,7 @@ use Chalk::IR::Serialize::JSON ();
 # Constant(3)): Start, Constant(3) stamped Int, Return(Start, Constant).
 
 my $bson_json = JSON::PP->new->encode({
-    version => 1,
+    version => 2,
     source  => 'seam-test',
     methods => {
         'main::f' => {

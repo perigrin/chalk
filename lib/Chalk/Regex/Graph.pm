@@ -103,9 +103,9 @@ sub translit ( $from, $to, $flags ) {
     my %seen;
     my @map = grep { !$seen{ $_->[0] }++ } map { [ $f[$_], $t[$_] ] } 0 .. $#f;
     my $g = bless { n => [], const => {}, var => {}, stamp => {} }, __PACKAGE__;
-    $g->{ctl} = $g->node('Start');
+    $g->start;
     $g->{s}   = $g->node( 'PadAccess', f => { sigil => '$', symbol => 's' }, stamp => 'Str' );
-    $g->node( 'Assign', in => [ $g->{s}, $g->node( 'ArgsSource', stamp => 'Array' ) ], f => { targets => 1 }, stamp => 'List' );
+    $g->node( 'Assign', in => [ $g->{s}, $g->node( 'ArgsSource', stamp => 'Array' ) ], f => { targets => 1, record => 1 }, stamp => 'List' );
     $g->{len} = $g->node( 'Length', in => [ $g->{s} ], stamp => 'Int' );
     $g->set( acc => $g->str_(''), 'Str' );
     $g->set( count => $g->int_(0) );
@@ -126,7 +126,7 @@ sub translit ( $from, $to, $flags ) {
         delete $g->{var}{out};
     } );
     my $a = $g->stmt( 'ArrayLiteral', in => [ $g->get('acc'), $g->get('count') ], stamp => 'ArrayRef' );
-    $g->{ret} = $g->node( 'Return', in => [$a], ctl => $g->{ctl} );
+    $g->ret( $a );
     $g->prune;
     return { nodes => $g->{n}, start => 0, returns => [ $g->{ret} ] };
 }
@@ -277,13 +277,29 @@ sub node ( $g, $op, %a ) {
     my $n = { id => scalar $g->{n}->@*, op => $op, inputs => $a{in} // [] };
     $n->{fields}     = $a{f}     if $a{f};
     $n->{control_in} = $a{ctl}   if defined $a{ctl};
+    $n->{mem_in}     = $a{mem}   if defined $a{mem};
+    $n->{mem_out}    = 1          if $a{mem_out};
     $n->{head}       = $a{head}  if defined $a{head};
     $n->{stamp}      = $a{stamp} if $a{stamp};
     push $g->{n}->@*, $n;
     return $n->{id};
 }
-# stmt(...): a node on the control chain, which goes on from it.
-sub stmt ( $g, $op, %a ) { return $g->{ctl} = $g->node( $op, %a, ctl => $g->{ctl} ) }
+# stmt(...): a node on the control chain, which goes on from it. A call there
+# (push, pop, exit, a replacement's code) is a memory version (wire v2): it
+# follows the memory before it, and is the memory after it.
+sub stmt ( $g, $op, %a ) {
+    my $call = $op eq 'Call';
+    $g->{ctl} = $g->node( $op, %a, ctl => $g->{ctl}, ( $call ? ( mem => $g->{mem}, mem_out => 1 ) : () ) );
+    $g->{mem} = $g->{ctl} if $call;
+    return $g->{ctl};
+}
+# start(): the graph's Start, and its memory's, MemStart.
+sub start ($g) {
+    $g->{ctl} = $g->node('Start');
+    $g->{mem} = $g->node('MemStart');
+}
+# ret($value): the Return, at the memory where it stands.
+sub ret ( $g, $v ) { return $g->{ret} = $g->node( 'Return', in => [$v], ctl => $g->{ctl}, mem => $g->{mem} ) }
 
 sub int_ ( $g, $v ) {
     return $g->{const}{"i$v"} //= $g->node( 'Constant', f => { const_type => 'integer', value => "$v" }, stamp => 'Int' );
@@ -322,14 +338,20 @@ sub while_ ( $g, $cond_cb, $body_cb ) {
         $phi{$v} = $g->node( 'Phi', in => [ $entry{$v}, undef ], f => { region => $L }, stamp => $g->{stamp}{$v} );
         $g->{var}{$v} = $phi{$v};
     }
+    # MEMORY is one more variable: the header's memory Phi (a pass's pushes
+    # and pops come round to it); pruned with the others where none moved it.
+    my $mphi = $g->{mem} = $g->node( 'Phi', in => [ $g->{mem}, undef ], f => { region => $L, memory => 1 } );
     my $c = $cond_cb->();
     die "Chalk::Regex::Graph: a loop condition already placed" if defined $g->{n}[$c]{control_in};
+    die "Chalk::Regex::Graph: a loop condition that is a call" if $g->{n}[$c]{op} eq 'Call';
     $g->{n}[$c]{control_in} = $L;
     $g->{ctl} = $g->node( 'Proj', in => [$L], f => { index => 0 } );
     $body_cb->();
     $g->{n}[ $phi{$_} ]{inputs}[1] = $g->{var}{$_} // $phi{$_} for keys %phi;
+    $g->{n}[$mphi]{inputs}[1] = $g->{mem};
     my $exit = $g->node( 'Proj', in => [$L], f => { index => 1 } );
     $g->{ctl} = $g->node( 'Region', in => [$exit], head => $L );
+    $g->{mem} = $mphi;
     $g->{var} = { map { ( $_ => $phi{$_} ) } keys %entry };   # (after it: the header's)
 }
 
@@ -339,11 +361,15 @@ sub if_ ( $g, $cond, $then_cb, $else_cb = undef ) {
     my $I = $g->node( 'If', in => [ $g->{ctl}, $cond ], ctl => $g->{ctl} );
     my %before = $g->{var}->%*;
     my @end;
+    my $mem = $g->{mem};
+    my @mem_end;
     for my $arm ( [ 0, $then_cb ], [ 1, $else_cb ] ) {
         $g->{var} = {%before};
+        $g->{mem} = $mem;
         my $pj = $g->{ctl} = $g->node( 'Proj', in => [$I], f => { index => $arm->[0] } );
         $arm->[1]->() if $arm->[1];
         push @end, [ $pj, $g->{ctl}, { $g->{var}->%* } ];
+        push @mem_end, $g->{mem};
     }
     my $R = $g->{ctl} = $g->node( 'Region', in => [ map { $_->[1] } @end ], head => $I );
     $g->{var} = {};
@@ -352,6 +378,9 @@ sub if_ ( $g, $cond, $then_cb, $else_cb = undef ) {
         $g->{var}{$v} = $t == $e ? $t
           : $g->node( 'Phi', in => [ $t, $e ], f => { region => $R, predecessors => [ map { $_->[0] } @end ] }, stamp => $g->{stamp}{$v} );
     }
+    # MEMORY: where the arms leave it differently, a memory Phi merges it.
+    $g->{mem} = $mem_end[0] == $mem_end[1] ? $mem_end[0]
+      : $g->node( 'Phi', in => [@mem_end], f => { region => $R, predecessors => [ map { $_->[0] } @end ], memory => 1 } );
 }
 
 # switch_(var, lo, hi, cb): cb->(k) for the value k (lo..hi) var holds, by a
@@ -375,7 +404,7 @@ sub depth ($g) { return $g->node( 'Count', in => [ $g->{stack} ], stamp => 'Int'
 # --- the matcher ---------------------------------------------------------------
 
 sub build ( $g, $p ) {
-    $g->{ctl} = $g->node('Start');
+    $g->start;
     $g->{s}   = $g->node( 'PadAccess', f => { sigil => '$', symbol => 's' }, stamp => 'Str' );
     my @params = ( $g->{s} );
     push @params, $g->{limit} = $g->node( 'PadAccess', f => { sigil => '$', symbol => 'limit' }, stamp => 'Int' ) if $g->{flavor} eq 'split';
@@ -387,7 +416,7 @@ sub build ( $g, $p ) {
         if $g->{segs} && grep { $_->{kind} =~ /\A(?:val|call)\z/ } $g->{segs}->@*;
     push @params, map { $g->{rlit}[$_] = $g->node( 'PadAccess', f => { sigil => '$', symbol => "lit$_" }, stamp => 'Str' ) } 0 .. $g->{nrlit} - 1;
     push @params, map { $g->{code}[$_] = $g->node( 'PadAccess', f => { sigil => '$', symbol => "code$_" }, stamp => 'Scalar' ) } 0 .. $g->{ncode} - 1;
-    $g->node( 'Assign', in => [ @params, $g->node( 'ArgsSource', stamp => 'Array' ) ], f => { targets => scalar @params }, stamp => 'List' );
+    $g->node( 'Assign', in => [ @params, $g->node( 'ArgsSource', stamp => 'Array' ) ], f => { targets => scalar @params, record => 1 }, stamp => 'List' );
     $g->{len}   = $g->node( 'Length', in => [ $g->{s} ], stamp => 'Int' );
     $g->{stack} = $g->node( 'ArrayLiteral', stamp => 'Array' );
     $g->ascii_only if $g->{ascii};
@@ -412,7 +441,7 @@ sub build ( $g, $p ) {
         $g->if_( $g->op2( 'NumGe', $g->get('found'), $g->int_(0) ), sub {
             $g->set( res => $g->stmt( 'ArrayLiteral', in => [ map { $g->get("r$_") } 0 .. 1 + 2 * $g->{ng} ], stamp => 'ArrayRef' ) );
         } );
-        $g->{ret} = $g->node( 'Return', in => [ $g->get('res') ], ctl => $g->{ctl} );
+        $g->ret( $g->get('res') );
         return;
     }
     if ( $f eq 'subst' ) { return $g->build_subst }
@@ -435,7 +464,7 @@ sub build ( $g, $p ) {
             } );
         } );
     }
-    $g->{ret} = $g->node( 'Return', in => [ $g->node( 'Ref', in => [ $g->{out} ], stamp => 'ArrayRef' ) ], ctl => $g->{ctl} );
+    $g->ret( $g->node( 'Ref', in => [ $g->{out} ], stamp => 'ArrayRef' ) );
 }
 
 # build_subst(): s/// -- the subject copied around each match (each, with
@@ -489,7 +518,7 @@ sub build_subst ($g) {
     } );
     $g->set( acc => $g->cat( $g->get('acc'), $g->text( $g->get('last'), $g->{len} ) ) );
     my $a = $g->stmt( 'ArrayLiteral', in => [ $g->get('acc'), $g->get('count') ], stamp => 'ArrayRef' );
-    $g->{ret} = $g->node( 'Return', in => [$a], ctl => $g->{ctl} );
+    $g->ret( $a );
 }
 sub cat ( $g, $a, $b ) { return $g->op2( 'Concat', $a, $b, 'Str' ) }
 
@@ -539,7 +568,7 @@ sub build_split ($g) {
         } );
         delete $g->{var}{$_} for qw(last fields done);
     } );
-    $g->{ret} = $g->node( 'Return', in => [ $g->node( 'Ref', in => [ $g->{out} ], stamp => 'ArrayRef' ) ], ctl => $g->{ctl} );
+    $g->ret( $g->node( 'Ref', in => [ $g->{out} ], stamp => 'ArrayRef' ) );
 }
 
 # replacement($text, $ngroups) -> [segments]: an s/// replacement's literal
@@ -834,6 +863,7 @@ sub prune ($g) {
     for my $n (@keep) {
         $n->{inputs} = [ map { $map->($_) } $n->{inputs}->@* ];
         $n->{control_in} = $map->( $n->{control_in} ) if defined $n->{control_in};
+        $n->{mem_in} = $map->( $n->{mem_in} ) if defined $n->{mem_in};
         $n->{head} = $map->( $n->{head} ) if defined $n->{head};
         if ( my $f = $n->{fields} ) {
             $f->{region} = $map->( $f->{region} ) if defined $f->{region};

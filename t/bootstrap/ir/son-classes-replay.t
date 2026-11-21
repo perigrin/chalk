@@ -13,7 +13,7 @@ use Chalk::IR::Serialize::JSON ();
 # the existing callers).
 
 my $json = JSON::PP->new->encode({
-    version => 1,
+    version => 2,
     source  => 'classes-test',
     methods => {
         'Counter::val' => {

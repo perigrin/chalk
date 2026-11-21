@@ -268,7 +268,7 @@ sub translit {
     my $sub = $b->{rxsub}{$key} //= do {
         my $w = eval { Chalk::Regex::Graph::translit( $t->from // '', $t->to // '', ( $t->flags // '' ) =~ s/r//gr ) };
         out( 'a tr: ' . ( $@ =~ s/\A(?:GAP: )?//r =~ s/\n.*//sr ) ) unless $w;
-        Chalk::MOP::Sub->new( name => 'tr', class => undef, graph => Chalk::IR::Serialize::JSON::_deserialize_graph( Chalk::IR::Serialize::WireUpgrade::upgrade_graph($w) ), params => ['@_'], uses_args => 1 );
+        Chalk::MOP::Sub->new( name => 'tr', class => undef, graph => Chalk::IR::Serialize::JSON::_deserialize_graph($w), params => ['@_'], uses_args => 1 );
     };
     my $fn = $b->func( $sub, 'tr_' . scalar keys $b->{rxsub}->%* );
     return $b->{memo}{$k} = $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $b->as( $b->value( $t->inputs->[0] ), '%Slot' ) ], attr => { fn => $fn->{name} });
@@ -345,9 +345,7 @@ sub qr_value {
 }
 
 # regex_fn($pattern, $flags) -> the function its graph (Chalk::Regex::Graph) is,
-# one per pattern and flags. (Chalk::Regex::Graph writes its graph in v1's
-# shape: WireUpgrade makes it v2. Stage 6 of wire v2 deletes the upgrade, so
-# Chalk::Regex::Graph must write v2 itself first.)
+# one per pattern and flags (its graph is wire v2, as B::SoN's are).
 sub regex_fn {
     my ($b, $pat, $flags, $flavor, %o) = @_;
     $flavor //= 'scalar';
@@ -356,7 +354,7 @@ sub regex_fn {
     my $w = eval { Chalk::Regex::Graph::matcher( $pat, $flags, $flavor, %o ) };
     out( 'a regex: ' . ( $@ =~ s/\A(?:GAP: )?//r =~ s/\n.*//sr ) ) unless $w;
     my $sub = $b->{rxsub}{$key} = Chalk::MOP::Sub->new(
-        name => 'regex', class => undef, graph => Chalk::IR::Serialize::JSON::_deserialize_graph( Chalk::IR::Serialize::WireUpgrade::upgrade_graph($w) ),
+        name => 'regex', class => undef, graph => Chalk::IR::Serialize::JSON::_deserialize_graph($w),
         params => ['@_'], uses_args => 1 );
     return $b->func( $sub, 'regex_' . scalar keys $b->{rxsub}->%* );
 }

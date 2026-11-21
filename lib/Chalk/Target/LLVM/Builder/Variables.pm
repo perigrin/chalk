@@ -463,6 +463,8 @@ sub list_assign {
     out('a local') if $s->can('local') && $s->local;
     my @in = $s->inputs->@*;
     my @t = splice @in, 0, $s->targets;
+    # (a target read before this statement: see "A `my` SCALAR READ BEFORE" below)
+    my %read_before = map { ( refaddr($_) => 1 ) } grep { blessed($_) && exists $b->{memo}{ refaddr($_) } && $b->{made}{ refaddr($_) } } @t;
     # AN ARRAY OR HASH FIELD ASSIGNED WHOLE (`@l = (9)`, `%h = $r->%*`): the
     # list made first (it may read the field), then the field's own
     # aggregate cleared and refilled -- a reference to it sees the new
@@ -498,17 +500,16 @@ sub list_assign {
         return;
     }
     # AN ARRAY OR HASH TARGET (`my ($f, @rest) = f()`) takes the rest: a `my`
-    # one, where the assign is placed (Assign::is_placed) -- its reads are
-    # made after it. Another (a package's, a closure's) is not T2's.
+    # one (the assign is on both chains here, wire v2's L5: its reads are at
+    # its version or after). Another (a package's, a closure's) is not T2's.
     # AN ELEMENT, A SLICE, A CAPTURED SCALAR (B::SoN names each by the node
     # that is its place, the Assign on the chain): stored there, see below.
-    my $placed = $s->is_placed;
     my $pinned = $s->is_pinned;
     my $is_cell = sub ($t) { $t->operation eq 'MakeCell' && !( blessed( $t->inputs->[0] ) && $t->inputs->[0]->operation eq 'PadAccess' && ( $t->inputs->[0]->sigil // '' ) =~ /\A[\@%]\z/ ) };
     out('a list assignment to an array or hash') if grep {
         !( blessed($_) && ( $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$'
                             || $_->operation eq 'Constant' && ( $_->const_type // '' ) eq 'undef'
-                            || $placed && ( $_->is_my_array || $_->is_my_hash ) && !( $_->can('shared') && $_->shared )
+                            || ( $_->is_my_array || $_->is_my_hash ) && !( $_->can('shared') && $_->shared )
                             || $pinned && ( $_->operation =~ /\A(?:Subscript|Slice)\z/ || $is_cell->($_) ) ) )
     } @t;
     my $list = $b->emit(op => 'NewArray', type => '%Array*');
@@ -595,6 +596,13 @@ sub list_assign {
             ( $list, $at ) = ( $b->emit(op => 'NewArray', type => '%Array*'), 0 );
             next;
         }
+        # A `my` SCALAR READ BEFORE THIS ASSIGNMENT REBINDS IT: its reads are
+        # one node (the slot by name, at no memory version), and a value made
+        # from the read before is made once -- `($a, $b) = g(); print "$a";
+        # ($a, $b) = h(); print "$a"` printed g's twice. (Read in this statement, as
+        # a swap's right side, it is read before the store, as perl does.)
+        out('a `my` scalar a list assignment rebinds after it was read (its reads are one node, at no memory version)')
+            if $read_before{ refaddr($t) };
         my $v = $b->emit(op => 'AGet', type => '%Slot', inputs => [ $list, $b->emit(op => 'Const', type => 'i64', attr => { value => $i }) ]);
         $val{ $t->symbol } = $v;
         $b->{lvals}{ $t->symbol } = $v;

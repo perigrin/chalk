@@ -98,7 +98,7 @@ sub agg_home {
     my $k = refaddr($L);
     return $b->{agg_home}{$k} if exists $b->{agg_home}{$k};
     my %at;
-    for my $p (grep { blessed($_) && $_->operation eq 'Phi' && !$_->is_memory } ( $L->consumers // [] )->@*) {
+    for my $p (grep { blessed($_) && $_->operation eq 'Phi' && !$_->memory } ( $L->consumers // [] )->@*) {
         my $r = $p->region;
         for my $i (grep { blessed( $p->inputs->[$_] ) && refaddr( $p->inputs->[$_] ) == refaddr($L) } 0 .. $p->inputs->$#*) {
             my $e;
@@ -535,7 +535,7 @@ sub _read_as_a_number {
     for my $u ( $b->value_readers($n) ) {
         my $op = $u->operation;
         next if $op =~ /\A(?:Num(?:Eq|Ne|Lt|Le|Gt|Ge)|Add|Subtract|Multiply|If|Not)\z/;
-        next if ( $op =~ /\A(?:And|Or)\z/ || $op eq 'Phi' && !$u->is_memory ) && $b->_read_as_a_number($u, $seen);
+        next if ( $op =~ /\A(?:And|Or)\z/ || $op eq 'Phi' && !$u->memory ) && $b->_read_as_a_number($u, $seen);
         next if $op eq 'TernaryExpr' && refaddr( $u->inputs->[0] ) == refaddr($n)
             && !grep { blessed($_) && refaddr($_) == refaddr($n) } $u->inputs->@[1, 2];
         return 0;
@@ -1127,7 +1127,7 @@ sub array_of {
     # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`, a
     # merge of a hash's versions).
     return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if ( $n isa Chalk::IR::Node && $n->is_named_hash )
-        || blessed($n) && $n->operation eq 'Phi' && !$n->is_memory && ( $b->agg_versions($n) // '' ) eq '%'
+        || blessed($n) && $n->operation eq 'Phi' && !$n->memory && ( $b->agg_versions($n) // '' ) eq '%'
         || blessed($n) && $n->operation eq 'FieldAccess' && ( $b->field_of($n) )[1] eq '%';
     if (blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%') {
         return $b->value($n) unless $n->copy;   # (its pairs, read once)

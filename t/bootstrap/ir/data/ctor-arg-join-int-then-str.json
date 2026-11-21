@@ -46,26 +46,32 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "field_index" : 0,
                   "field_stash" : "Holder"
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "FieldAccess",
                "stamp" : "Unknown"
             },
             {
                "control_in" : 0,
-               "id" : 2,
+               "id" : 3,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 1,
                "op" : "Return"
             }
          ],
          "returns" : [
-            2
+            3
          ],
          "start" : 0
       },
@@ -77,11 +83,16 @@
                "op" : "Start"
             },
             {
+               "id" : 1,
+               "inputs" : [],
+               "op" : "MemStart"
+            },
+            {
                "fields" : {
                   "const_type" : "undef",
                   "value" : null
                },
-               "id" : 1,
+               "id" : 2,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Undef"
@@ -91,7 +102,7 @@
                   "const_type" : "string",
                   "value" : "hello"
                },
-               "id" : 2,
+               "id" : 3,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Str"
@@ -101,7 +112,7 @@
                   "const_type" : "integer",
                   "value" : "42"
                },
-               "id" : 3,
+               "id" : 4,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Int"
@@ -116,27 +127,12 @@
                      "v"
                   ]
                },
-               "id" : 4,
-               "inputs" : [
-                  3
-               ],
-               "op" : "Call",
-               "stamp" : "Object"
-            },
-            {
-               "control_in" : 4,
-               "fields" : {
-                  "class_name" : "Holder",
-                  "dispatch_kind" : "method",
-                  "name" : "new",
-                  "param_names" : [
-                     "v"
-                  ]
-               },
                "id" : 5,
                "inputs" : [
-                  2
+                  4
                ],
+               "mem_in" : 1,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Object"
             },
@@ -145,13 +141,34 @@
                "fields" : {
                   "class_name" : "Holder",
                   "dispatch_kind" : "method",
-                  "name" : "get",
-                  "param_names" : []
+                  "name" : "new",
+                  "param_names" : [
+                     "v"
+                  ]
                },
                "id" : 6,
                "inputs" : [
-                  4
+                  3
                ],
+               "mem_in" : 5,
+               "mem_out" : 1,
+               "op" : "Call",
+               "stamp" : "Object"
+            },
+            {
+               "control_in" : 6,
+               "fields" : {
+                  "class_name" : "Holder",
+                  "dispatch_kind" : "method",
+                  "name" : "get",
+                  "param_names" : []
+               },
+               "id" : 7,
+               "inputs" : [
+                  5
+               ],
+               "mem_in" : 6,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Unknown"
             },
@@ -160,9 +177,9 @@
                   "from_repr" : "Unknown",
                   "to_repr" : "Str"
                },
-               "id" : 7,
+               "id" : 8,
                "inputs" : [
-                  6
+                  7
                ],
                "op" : "Coerce",
                "stamp" : "Str"
@@ -172,32 +189,34 @@
                   "const_type" : "string",
                   "value" : "\n"
                },
-               "id" : 8,
+               "id" : 9,
                "inputs" : [],
                "op" : "Constant",
                "stamp" : "Str"
             },
             {
-               "control_in" : 6,
-               "id" : 9,
+               "control_in" : 7,
+               "id" : 10,
                "inputs" : [
-                  7,
-                  8
+                  8,
+                  9
                ],
                "op" : "Print"
             },
             {
-               "control_in" : 9,
+               "control_in" : 10,
                "fields" : {
                   "class_name" : "Holder",
                   "dispatch_kind" : "method",
                   "name" : "get",
                   "param_names" : []
                },
-               "id" : 10,
+               "id" : 11,
                "inputs" : [
-                  5
+                  6
                ],
+               "mem_in" : 7,
+               "mem_out" : 1,
                "op" : "Call",
                "stamp" : "Unknown"
             },
@@ -206,37 +225,41 @@
                   "from_repr" : "Unknown",
                   "to_repr" : "Str"
                },
-               "id" : 11,
+               "id" : 12,
                "inputs" : [
-                  10
+                  11
                ],
                "op" : "Coerce",
                "stamp" : "Str"
             },
             {
-               "control_in" : 10,
-               "id" : 12,
+               "control_in" : 11,
+               "id" : 13,
                "inputs" : [
-                  11,
-                  8
+                  12,
+                  9
                ],
                "op" : "Print"
             },
             {
-               "control_in" : 12,
-               "id" : 13,
+               "control_in" : 13,
+               "id" : 14,
                "inputs" : [
-                  1
+                  2
                ],
+               "mem_in" : 11,
                "op" : "Return"
             }
          ],
          "returns" : [
-            13
+            14
          ],
          "start" : 0
       }
    },
+   "profile" : [
+      "mem"
+   ],
    "source" : null,
-   "version" : 1
+   "version" : 2
 }

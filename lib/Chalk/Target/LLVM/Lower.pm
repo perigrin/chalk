@@ -46,11 +46,13 @@ sub lower_program {
         # THE MOP IS READ SEALED: an unsealed one may still change under the reader.
         Chalk::Target::LLVM::Builder::out('an unsealed MOP') if $opt{mop} && !$opt{mop}->is_sealed;
         # A LIST ASSIGN TO AN ARRAY OR HASH (which takes the rest of the list)
-        # THAT IS NOT PLACED (Assign::is_placed) is not T2's: one B::SoN left
-        # floating was never made, and its array read empty (`my ($f, @rest)
-        # = (1, 2, 3)`: "1 " for "1 2 3"). Nor one of a variable B::SoN also
-        # binds as a value (`my @r = (9, 9); ($x, @r) = f()`: its reads stayed
-        # the first list's -- "9 9"). A placed one is list_assign's.
+        # is list_assign's: on wire v2 an Assign is a record or on both chains
+        # (the loader's L5), and one on both is placed, its reads at its
+        # version or after. A RECORD of one (off both chains: nothing runs it)
+        # is not T2's: one B::SoN left floating was never made, and its array
+        # read empty (`my ($f, @rest) = (1, 2, 3)`: "1 " for "1 2 3"). Nor one
+        # of a variable B::SoN also binds as a value (`my @r = (9, 9); ($x, @r)
+        # = f()`: its reads stayed the first list's -- "9 9").
         # AND ONE INTO SCALARS FROM A `my` ARRAY OR HASH KEPT IN MEMORY (one
         # B::SoN does not stamp Array or Hash): B::SoN bound its scalars by
         # place, the first to the array itself, on the chain or not (`my ($f,
@@ -70,7 +72,7 @@ sub lower_program {
                 my @agg = grep { blessed($_) && ( $_->operation eq 'PadAccess' && ( $_->sigil // '' ) =~ /\A[\@%]\z/
                                                   || $_->operation =~ /\A(?:ArrayLiteral|HashLiteral|EntryDef)\z/ && ( $_->can('sigil') ? $_->sigil // '' : '' ) ne '$' ) } @t;
                 Chalk::Target::LLVM::Builder::out('a list assignment to an array or hash')
-                    if @agg && ( !$a->is_placed || grep { $_->operation eq 'PadAccess' && $bound{ $_->sigil . $_->symbol } } @agg );
+                    if @agg && ( $a->record || grep { $_->operation eq 'PadAccess' && $bound{ $_->sigil . $_->symbol } } @agg );
                 Chalk::Target::LLVM::Builder::out('a list assignment into scalars from an array or hash kept in memory')
                     if ( grep { blessed($_) && $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' } @t )
                     && grep { blessed($_) && ( $_->is_my_array || $_->is_my_hash ) && ( $_->stamp // '' ) !~ /\A(?:Array|Hash)\z/ } @in;

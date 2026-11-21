@@ -24,7 +24,7 @@ use Chalk::IR::Serialize::JSON ();
 # and the distinction matters: this file's subject is ELEMENT-TYPE INFERENCE on
 # a Subscript, not rescuing a container the producer would have stamped.
 my $json = JSON::PP->new->encode({
-    version => 1,
+    version => 2,
     source  => 'agg-test',
     methods => {
         'main::f' => {
@@ -87,7 +87,7 @@ subtest 'Subscript element read gets the element type' => sub {
 # element reprs (Int/Num/Str) and returned undef for a homogeneous aggregate.
 subtest 'a Subscript over an ArrayRef of ArrayRefs reads an ArrayRef element' => sub {
     my $nested = JSON::PP->new->encode({
-        version => 1, source => 'nested-agg', methods => {
+        version => 2, source => 'nested-agg', methods => {
             'main::f' => {
                 start => 0, returns => [9],
                 nodes => [
@@ -125,7 +125,7 @@ subtest 'a Subscript over an ArrayRef of ArrayRefs reads an ArrayRef element' =>
 # ([3,4]) at index 5 (OOB) -> Slot, not Int.
 subtest 'an OOB inner index in a nested deref reads a Slot (not the element type)' => sub {
     my $oob = JSON::PP->new->encode({
-        version => 1, source => 'nested-oob', methods => {
+        version => 2, source => 'nested-oob', methods => {
             'main::f' => {
                 start => 0, returns => [11],
                 nodes => [

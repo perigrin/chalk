@@ -477,7 +477,7 @@ sub _iv_modelled ($n) {
     my $op = $n->operation;
     return defined _iv_const($n) ? 1 : 0 if $op eq 'Constant';
     return 0 unless $IV_OPS{$op} && ( $n->stamp // '' ) eq 'Int';    # static type
-    return 0 if $op eq 'Phi' && ( $n->is_memory || $n->inputs->@* < 1 );
+    return 0 if $op eq 'Phi' && ( $n->memory || $n->inputs->@* < 1 );
     return 1;
 }
 
@@ -662,7 +662,7 @@ sub _iv_trip_cap ( $p, $st ) {
     my $a0 = _iv_of( $p->inputs->[0], $st ) // return undef;
     return undef unless defined $a0->[0] && defined $a0->[1];
     my $trips;
-    for my $c ( grep { $_->operation eq 'Phi' && blessed( $_->region ) && refaddr( $_->region ) == refaddr($L) && !$_->is_memory } ( $L->consumers // [] )->@* ) {
+    for my $c ( grep { $_->operation eq 'Phi' && blessed( $_->region ) && refaddr( $_->region ) == refaddr($L) && !$_->memory } ( $L->consumers // [] )->@* ) {
         next unless $st->{modelled}{ refaddr($c) };
         my $g = _iv_guard( $L, $c, $st ) // next;
         next unless defined $g->[1];

@@ -479,7 +479,7 @@ sub close_eval {
     out('an eval closed at another depth') if ( $b->{depth} // 0 ) != $f->{depth};
     out('an eval Region of more than one way in') if $r->inputs->@* != 1;
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
-                      && !$_->is_memory } ( $r->consumers // [] )->@*;
+                      && !$_->memory } ( $r->consumers // [] )->@*;
     my %seen; @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     my $dead = $b->{cur}{dead};
     my @in;
@@ -628,7 +628,7 @@ sub if_stmt {
         return $end{$go};
     }
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($region)
-                      && !$_->is_memory } ( $region->consumers // [] )->@*;
+                      && !$_->memory } ( $region->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     # Each Region input is an arm's end; the phi's input of the same place is
@@ -745,7 +745,7 @@ sub join_jumps {
     my @pred_of = map { my $in = $_; ( grep { blessed($in) && refaddr($preds[$_]{end}) == refaddr($in) } 0 .. $#preds )[0] } @ways;
     out('a merge with a way in no arm reached') if grep { !defined } @pred_of;
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
-                      && !$_->is_memory } ( $r->consumers // [] )->@*;
+                      && !$_->memory } ( $r->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     my @made;
@@ -850,7 +850,7 @@ sub loop {
     return $b->loop_breaks($L) if !$bodyp && !$exitp;
     out('a loop without a body and an exit') unless $bodyp && $exitp;
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($L)
-                      && !$_->is_memory } ( $L->consumers // [] )->@*;
+                      && !$_->memory } ( $L->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     # AN EFFECT AND A TEST (`while (my $n = shift @w)`): B::SoN pins both on
@@ -953,7 +953,7 @@ sub loop {
 sub _only_counted {
     my ($n) = @_;
     for my $u (grep { blessed($_) } ( $n->consumers // [] )->@*) {
-        next if $u->operation =~ /\A(?:Loop|Region|If|Proj)\z/ || $u->operation eq 'Phi' && $u->is_memory;
+        next if $u->operation =~ /\A(?:Loop|Region|If|Proj)\z/ || $u->operation eq 'Phi' && $u->memory;
         my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
         return 0 if @pos && $u->operation ne 'Count';
     }
@@ -1033,7 +1033,7 @@ sub loop_breaks {
     my ($b, $L) = @_;
     my $R = $b->loop_exit($L);
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($L)
-                      && !$_->is_memory } ( $L->consumers // [] )->@*;
+                      && !$_->memory } ( $L->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     out('a loop phi with other than two ways in') if grep { scalar( $_->inputs->@* ) != 2 } @phis;
@@ -1205,7 +1205,7 @@ sub merge_at {
     my @pred_of = map { my $in = $_; ( grep { refaddr( $preds[$_]{end} ) == refaddr($in) } 0 .. $#preds )[0] } @ways;
     my @live = grep { defined $pred_of[$_] } 0 .. $#ways;   # (a way from an arm that died is no way in)
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
-                      && !$_->is_memory } ( $r->consumers // [] )->@*;
+                      && !$_->memory } ( $r->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
     my @made;
