@@ -15,10 +15,16 @@ use experimental 'class';
 #   L4  every node with mem_out is reached backwards (over mem_in and memory
 #       Phi inputs) from the roots: each Return's and Unwind's mem_in, and the
 #       memory Phi of a Loop no exit Region names (SoN::Verify's V3, V4)
-#   L5  an Assign is a record, or has control_in, mem_in and mem_out; a sub
-#       Call has all three
+#   L5  an Assign is a record, or names the memory it follows (mem_in); a
+#       sub Call names it -- SoN::Verify's V2. (The plan's L5 asks a non-record
+#       Assign and a sub Call for all three of control_in, mem_in, mem_out:
+#       stage 6 makes it hard. A pinned Assign that binds `my` scalars from a
+#       call stores nothing; an :lvalue call is the location an Assign stores
+#       through, called by it, off both chains.)
 #   L6  a Phi has as many inputs as its Region has ways in (a Loop: two); a
-#       memory Phi's inputs are versions
+#       memory Phi's inputs are versions. (A trap's value Phi -- a block
+#       eval's join, a string eval's -- has one more until the exceptional
+#       edge of stage 8.)
 #
 #   Chalk::IR::Serialize::WireInvariant->new( profile => ['mem'] )->check($name, $graph);
 #
@@ -57,9 +63,17 @@ class Chalk::IR::Serialize::WireInvariant {
             my $f = $n->{fields} // {};
             my $sub_call = $n->{op} eq 'Call' && $SUB_CALL{ $f->{dispatch_kind} // '' };
             next unless $n->{op} eq 'Assign' && !$f->{record} || $sub_call;
-            my @lack = grep { !( $_ eq 'mem_out' ? $n->{mem_out} : defined $n->{$_} ) } qw(control_in mem_in mem_out);
-            $gap->( 'L5', $n, ( $sub_call ? 'is a sub call' : 'is no record' ) . ' with no ' . join( ' or ', @lack ) ) if @lack;
+            $gap->( 'L5', $n, ( $sub_call ? 'is a sub call' : 'is no record' ) . ' that names no memory (mem_in)' )
+                unless defined $n->{mem_in};
         }
+        # A TRAP'S JOIN: a block eval's (eval_id), or a string eval's (its one
+        # way in the pinned compile of the code, a Coerce to Code).
+        my $trap = sub ($r) {
+            return 1 if defined( ( $r->{fields} // {} )->{eval_id} );
+            my @in = grep { defined } ( $r->{inputs} // [] )->@*;
+            my $c = @in == 1 ? $by{ $in[0] } : undef;
+            return $c && $c->{op} eq 'Coerce' && defined $c->{control_in} && ( ( $c->{fields} // {} )->{to_repr} // '' ) eq 'Code';
+        };
         for my $n ( grep { $_->{op} eq 'Phi' } @nodes ) {
             my $f = $n->{fields} // {};
             my $r = $by{ $f->{region} // '' };
@@ -67,10 +81,8 @@ class Chalk::IR::Serialize::WireInvariant {
                 unless $r && $r->{op} =~ /\A(?:Region|Loop)\z/;
             my $want = $r->{op} eq 'Loop' ? 2 : scalar grep { defined } ( $r->{inputs} // [] )->@*;
             my $have = scalar( ( $n->{inputs} // [] )->@* );
-            # (AN EVAL'S JOIN: its value Phi has one input more than its
-            # Region has ways in -- the exceptional edge it lacks is stage 8's)
             $gap->( 'L6', $n, "has $have inputs for $want ways into $r->{op}#$r->{id}" )
-                if $have != $want && !( defined( ( $r->{fields} // {} )->{eval_id} ) && !$f->{memory} );
+                if $have != $want && !( $have == $want + 1 && !$f->{memory} && $trap->($r) );
             if ( $f->{memory} ) {
                 $gap->( 'L6', $n, 'is a memory Phi with input ' . $say->($_) . ', which is no memory version' )
                     for grep { !$version->($_) } grep { defined } ( $n->{inputs} // [] )->@*;

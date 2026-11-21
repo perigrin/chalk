@@ -75,6 +75,35 @@ for my $case (
     like( $why, $where, "$rule: ...naming the node" );
 }
 
+# WHAT THE INVARIANT LETS THROUGH, B::SoN's wires of programs it lowers:
+#  - an Assign on the control chain that follows memory and stores none (a
+#    list assignment from a call into `my` scalars): L5 asks a non-record
+#    Assign for mem_in, as SoN::Verify's V2 does (mem_out too from stage 6);
+#  - a string eval's trap: its value Phi has one input more than its Region
+#    has ways in, as a block eval's join does, until the exceptional edge
+#    (stage 8);
+#  - an :lvalue call as the location an Assign stores through: no version,
+#    off the chain, the Assign calling it (a sub call names memory, L5).
+my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
+SKIP: {
+    skip "perl5-son not found at $SON (set PERL5_SON_LIB)", 3 unless -f "$SON/B/SoN.pm";
+    require File::Temp;
+    for my $case (
+        [ q{sub g { (5, 2) } sub f { my ($lo, $used); ($lo, $used) = g(); $used += 1; "$lo $used" } print f(), "\n";},
+          'a list assignment from a call into `my` scalars' ],
+        [ q{eval 'package Other; sub g { "g$_[0]" } 1' or die; sub f { return Other::g($_[0]) } print f(2), "\n";},
+          'a string eval' ],
+        [ q{my $slot = 0; sub slot :lvalue { $slot } slot() = 42; print slot(), "\n";},
+          'a store through an :lvalue call' ],
+    ) {
+        my ( $src, $name ) = @$case;
+        my ( $fh, $pl ) = File::Temp::tempfile( SUFFIX => '.pl', UNLINK => 1 );
+        print $fh $src;
+        close $fh;
+        is( refused( scalar qx($^X -I$SON -MO=-q,SoN,json,wire=2 $pl 2>/dev/null) ), '', "$name: its v2 wire loads" );
+    }
+}
+
 # A V1 WIRE IS UPGRADED, NOT HELD TO THE INVARIANT (what v1 left to
 # inference is decided by WireUpgrade; stage 6 deletes v1).
 my $v1 = decode_json($GOOD);
