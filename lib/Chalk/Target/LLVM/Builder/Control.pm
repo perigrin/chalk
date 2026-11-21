@@ -222,6 +222,10 @@ sub walk {
             $dead->{dead} = 1;
             $ctl = $s;
         }
+        # A CELL MADE WHERE IT STANDS (B::SoN places a MakeCell on the chain, a
+        # memory version): made where its value is first asked for (Values.pm),
+        # by the version it was made at -- making a cell writes nothing.
+        elsif ($op eq 'MakeCell') { $ctl = $s }
         # A STORE THROUGH A CELL (a captured variable written): what it is
         # given, then the store into the variable's storage.
         elsif ($op eq 'CellWrite') {
