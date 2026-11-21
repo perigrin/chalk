@@ -18,6 +18,7 @@ use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: the join lattice
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 use Chalk::IR::Serialize::WireCheck;   # what the wire cannot order, refused
 use Chalk::IR::Serialize::WireUpgrade;   # a v1 wire, read as v2
+use Chalk::IR::Serialize::WireInvariant; # a v2 wire's memory edges, checked
 
 # CFG node operations — these carry control tokens and are never hash-consed.
 my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
@@ -1299,6 +1300,13 @@ sub from_json ($json_string) {
     Chalk::IR::Serialize::WireUpgrade::upgrade($data) if $version == 1;
     die "GAP: wire version $version is not one chalk reads\n" unless $data->{version} == 2;
     die "GAP: wire v2 profile `$_` is not read yet\n" for grep { $_ ne 'mem' } ( $data->{profile} // [] )->@*;
+    # A WIRE THAT CAME AS V2 is held to the memory invariant (L1-L6), each of
+    # its graphs, before any is made; an upgraded v1 wire is not.
+    if ( $version == 2 ) {
+        my $inv = Chalk::IR::Serialize::WireInvariant->new( profile => $data->{profile} // [] );
+        $inv->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;
+        $inv->check( 'a ' . ( $_->{phase} // 'phase' ) . ' block', $_ ) for ( $data->{phase_blocks} // [] )->@*;
+    }
     # The text after __DATA__ / __END__, which DATA reads (absent: none).
     our $DATA_SECTION = $data->{data_section};
 
