@@ -26,7 +26,7 @@ use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 # before either graph is walked. Nothing had to be inferred here, only carried.
 
 my $PERL = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
-my $SON  = "$ENV{HOME}/dev/perl5-son/lib";
+my $SON  = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";   # (the producer under test, as the other tests find it)
 
 # Same exclusion list the corpus gate uses (ProgramRunner). Without it the wire
 # carries the producer's own internals and the counts describe perl, not Chalk.
