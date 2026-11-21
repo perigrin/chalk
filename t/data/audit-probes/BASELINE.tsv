@@ -1,5 +1,37 @@
 # The audit probes' verdicts (tools/audit-probes.pl --update writes this file).
 # name	verdict	why
+ag1	SAME	
+ag10	SAME	
+ag11	SAME	
+ag12	SAME	
+ag13	SAME	
+ag14	SAME	
+ag15	SAME	
+ag16	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+ag17	SAME	
+ag18	SAME	
+ag19	SAME	
+ag2	SAME	
+ag20	SAME	
+ag21	SAME	
+ag22	REFUSED	no program graph
+ag23	REFUSED	no program graph
+ag24	SAME	
+ag25	SAME	
+ag26	SAME	
+ag27	SAME	
+ag28	REFUSED	no program graph
+ag29	REFUSED	no program graph
+ag3	SAME	
+ag31	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a call)
+ag32	REFUSED	no program graph
+ag33	SAME	
+ag4	REFUSED	GAP: T2: out of its slices (a sprintf of a list)
+ag5	SAME	
+ag6	SAME	
+ag7	SAME	
+ag8	SAME	
+ag9	SAME	
 al1	REFUSED	GAP: T2: out of its slices (a loop phi with other than two ways in)
 al10	SAME	
 al11	SAME	
