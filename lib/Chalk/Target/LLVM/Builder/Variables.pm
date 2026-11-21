@@ -463,8 +463,6 @@ sub list_assign {
     out('a local') if $s->can('local') && $s->local;
     my @in = $s->inputs->@*;
     my @t = splice @in, 0, $s->targets;
-    # (a target read before this statement: see "A `my` SCALAR READ BEFORE" below)
-    my %read_before = map { ( refaddr($_) => 1 ) } grep { blessed($_) && exists $b->{memo}{ refaddr($_) } && $b->{made}{ refaddr($_) } } @t;
     # AN ARRAY OR HASH FIELD ASSIGNED WHOLE (`@l = (9)`, `%h = $r->%*`): the
     # list made first (it may read the field), then the field's own
     # aggregate cleared and refilled -- a reference to it sees the new
@@ -596,13 +594,6 @@ sub list_assign {
             ( $list, $at ) = ( $b->emit(op => 'NewArray', type => '%Array*'), 0 );
             next;
         }
-        # A `my` SCALAR READ BEFORE THIS ASSIGNMENT REBINDS IT: its reads are
-        # one node (the slot by name, at no memory version), and a value made
-        # from the read before is made once -- `($a, $b) = g(); print "$a";
-        # ($a, $b) = h(); print "$a"` printed g's twice. (Read in this statement, as
-        # a swap's right side, it is read before the store, as perl does.)
-        out('a `my` scalar a list assignment rebinds after it was read (its reads are one node, at no memory version)')
-            if $read_before{ refaddr($t) };
         my $v = $b->emit(op => 'AGet', type => '%Slot', inputs => [ $list, $b->emit(op => 'Const', type => 'i64', attr => { value => $i }) ]);
         $val{ $t->symbol } = $v;
         $b->{lvals}{ $t->symbol } = $v;

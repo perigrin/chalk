@@ -71,7 +71,7 @@ my %rebound = (
 for my $name (sort keys %rebound) {
     my $r = tap("$rebound{$name}\n");
     ok $r->{verdict} eq 'SAME'
-        || $r->{verdict} eq 'REFUSED' && ( $r->{why} // '' ) =~ /a `my` scalar a list assignment rebinds after it was read/,
+        || $r->{verdict} eq 'REFUSED' && ( $r->{why} // '' ) =~ /a `my` scalar two list assignments bind one after the other/,
         "as perl, or refused by name: $name" or diag explain $r;
 }
 

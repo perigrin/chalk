@@ -77,6 +77,34 @@ sub lower_program {
                     if ( grep { blessed($_) && $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' } @t )
                     && grep { blessed($_) && ( $_->is_my_array || $_->is_my_hash ) && ( $_->stamp // '' ) !~ /\A(?:Array|Hash)\z/ } @in;
             }
+            # A `my` SCALAR TWO LIST ASSIGNMENTS BIND, ONE AFTER THE OTHER:
+            # B::SoN reads it by name -- one node, at no memory version --
+            # so a value made from it after the first is made once, and read
+            # again after the second (`($a, $b) = g(); print "$a"; ($a, $b) =
+            # h(); print "$a"` printed g's twice). Arms that each bind it (one
+            # taken) are not one after the other.
+            my %binds;    # a scalar target => the list assigns that bind it
+            for my $a (@list_assigns) {
+                push $binds{ refaddr($_) }->@*, $a for grep {
+                    blessed($_) && $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' && !blessed( $_->mem_in )
+                } $a->inputs->@[ 0 .. $a->targets - 1 ];
+            }
+            for my $as ( grep { $_->@* > 1 } values %binds ) {
+                for my $a (@$as) {
+                    # (what control reaches from $a, as Region::reached_by walks it)
+                    my ( %after, @q );
+                    @q = ($a);
+                    while ( defined( my $n = shift @q ) ) {
+                        next if $after{ refaddr($n) }++;
+                        push @q, grep { blessed($_) && ( $_->operation eq 'Region'
+                                        || ( $_->can('control_in') && blessed( $_->control_in ) && refaddr( $_->control_in ) == refaddr($n) )
+                                        || $_->operation eq 'Proj' && $n->operation =~ /\A(?:If|Loop)\z/ && blessed( $_->inputs->[0] ) && refaddr( $_->inputs->[0] ) == refaddr($n) ) }
+                            ( $n->consumers // [] )->@*;
+                    }
+                    Chalk::Target::LLVM::Builder::out('a `my` scalar two list assignments bind one after the other (its reads are one node, at no memory version)')
+                        if grep { refaddr($_) != refaddr($a) && $after{ refaddr($_) } } @$as;
+                }
+            }
         }
         # A SCALAR DEREF A REFERENCE T2 DOES NOT MAKE MAY REACH (a glob's, a
         # field's): refused, not read wrong at run time. T2 makes one to a `my`
