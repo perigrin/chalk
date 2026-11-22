@@ -2732,6 +2732,49 @@ define internal void @t2_eval_leave() {
   store i64 %d1, i64* @t2_eval_depth
   ret void
 }
+; A DIE OF A VALUE that may be a reference (wire v2\'s `eval` profile): what
+; it leaves in $@ -- a reference as itself, anything else as its message, with
+; " at FILE line N.\n" where it ends in no newline (t2_die_value) -- stored
+; there in an eval here (t2_set_err_slot), or as t2_die_unwind does up the
+; calls; uncaught, its string to STDERR.
+define internal %Slot @t2_die_value(%Slot %v, %Str %at) {
+entry:
+  %t = extractvalue %Slot %v, 0
+  switch i8 %t, label %str [ i8 5, label %ref
+                             i8 6, label %ref
+                             i8 8, label %ref
+                             i8 9, label %ref ]
+ref:
+  ret %Slot %v
+str:
+  %s = call %Str @t2_slot_str(%Slot %v)
+  %m = call %Str @t2_die_msg(%Str %s, %Str %at)
+  %b = call %Slot @t2_box_str(%Str %m)
+  ret %Slot %b
+}
+define internal void @t2_set_err_slot(%Slot %v) {
+  store %Slot %v, %Slot* @t2_err
+  ret void
+}
+define internal void @t2_die_unwind_slot(%Slot %v) {
+entry:
+  %d = load i64, i64* @t2_eval_depth
+  %open = icmp sgt i64 %d, 0
+  br i1 %open, label %catch, label %exit
+catch:
+  store %Slot %v, %Slot* @t2_err
+  store i1 1, i1* @t2_dying
+  ret void
+exit:
+  %m = call %Str @t2_slot_str(%Slot %v)
+  call void @t2_die_raw(%Str %m)
+  unreachable
+}
+define internal void @t2_die_slot(%Slot %v) {
+  %m = call %Str @t2_slot_str(%Slot %v)
+  call void @t2_die_raw(%Str %m)
+  unreachable
+}
 define internal void @t2_die_unwind(%Str %m0) {
 entry:
   %m = call %Str @t2_die_hook(%Str %m0)

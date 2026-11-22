@@ -16,6 +16,11 @@ class Chalk::Target::LLVM::Node::Warn :isa(Chalk::Target::LLVM::Node) { method t
 class Chalk::Target::LLVM::Node::DieHook :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Str @t2_die_hook') } }
 class Chalk::Target::LLVM::Node::DieUnwind :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_die_unwind') } }
 class Chalk::Target::LLVM::Node::SetErr :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_set_err') } }
+# a die of what may be a reference: $@'s value, stored; up the calls; uncaught
+class Chalk::Target::LLVM::Node::DieValue :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_die_value') } }
+class Chalk::Target::LLVM::Node::SetErrSlot :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_set_err_slot') } }
+class Chalk::Target::LLVM::Node::DieUnwindSlot :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_die_unwind_slot') } }
+class Chalk::Target::LLVM::Node::DieSlot :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_die_slot') } }
 class Chalk::Target::LLVM::Node::EvalEnter :isa(Chalk::Target::LLVM::Node) { method to_ll () { 'call void @t2_eval_enter()' } }
 class Chalk::Target::LLVM::Node::EvalLeave :isa(Chalk::Target::LLVM::Node) { method to_ll () { 'call void @t2_eval_leave()' } }
 class Chalk::Target::LLVM::Node::ClearDying :isa(Chalk::Target::LLVM::Node) { method to_ll () { 'store i1 0, i1* @t2_dying' } }

@@ -176,6 +176,7 @@ sub walk {
         # AN UNCAUGHT DIE: its message (a list joined) to STDERR, " at FILE
         # line N.\n" added where it does not end in a newline, and exit 255.
         # The block ends there: nothing after it in its arm runs.
+        elsif ($op eq 'Unwind' && $b->dies_of_a_value($s)) { $ctl = $s }
         elsif ($op eq 'Unwind') {
             my @m = grep { blessed($_) } $s->inputs->@*;
             out('a die of a list') if grep { _is_list($_) } @m;
@@ -437,6 +438,41 @@ sub walk {
         else { out("a statement $op" . ( $op eq 'Call' ? ' ' . ( $s->dispatch_kind // '' ) . ' ' . ( $s->name // '' ) : '' )) }
     }
     return $ctl;
+}
+
+# dies_of_a_value($Unwind) -> true when made here: a die of one value that
+# may be a reference, on wire v2's `eval` profile (its Exc's value is the
+# exception in flight, a Slot). What it leaves in $@ is the reference itself,
+# or the value's message with its site (t2_die_value); stored there in an
+# eval open here, else up the calls or perl's exit, as a die of a message is.
+# Its __DIE__ handler would be handed a string: refused where %SIG is used.
+sub dies_of_a_value {
+    my ($b, $s) = @_;
+    return 0 unless $Chalk::IR::Serialize::JSON::EVAL_EDGES;
+    my @m = grep { blessed($_) } $s->inputs->@*;
+    return 0 unless @m == 1 && !_is_list( $m[0] ) && $m[0]->operation ne 'Constant'
+        && ( $m[0]->stamp // '' ) !~ /\A(?:Str|Int|Num|Boolean)\z/;   # static type
+    out('a die of what may be a reference, where %SIG is in use') if $b->special_containers->{'%SIG'};
+    my $at = ' at ' . ( $s->can('file') ? $s->file // '-' : '-' ) . ' line ' . ( $s->can('line') ? $s->line // 0 : 0 ) . ".\n";
+    my $v = $b->emit(op => 'DieValue', type => '%Slot', inputs => [ $b->as( $b->value( $m[0] ), '%Slot' ), $b->const_str($at) ]);
+    if ( my $f = ( $b->{evals} // [] )->[-1] ) {
+        out('a die of another eval than the one open here') if defined $s->eval_id && $s->eval_id ne ( $f->{region}->eval_id // '' );
+        $b->emit(op => 'SetErrSlot', type => 'void', inputs => [$v]);
+        $b->{cur}{term} = [ 'br', $b->eval_catch($f) ];
+    }
+    elsif ( $b->{has_eval} && $b->{in_func} ) {
+        $b->emit(op => 'DieUnwindSlot', type => 'void', inputs => [$v]);
+        $b->{cur}{term} = [ 'retval', $b->emit(op => 'Undef', type => '%Slot') ];
+    }
+    else {
+        $b->emit(op => 'DieSlot', type => 'void', inputs => [$v]);
+        $b->{cur}{term} = ['unreachable'];
+    }
+    $b->{cur}{dead} = 1;
+    my $dead = $b->new_block('dead');
+    $dead->{term} = ['unreachable'];
+    $dead->{dead} = 1;
+    return 1;
 }
 
 # EVAL FRAMES. B::SoN's block eval (and try): `$@ = ""` stored before it, its
