@@ -217,7 +217,8 @@ sub hash_value {
     # it as it is there, made where the read is (reads_before).
     if ( $v->is_my_hash && $op eq 'PadAccess' && $v->is_versioned_read ) {
         my $h = $b->emit(op => 'HNew', type => '%Slot');
-        $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_var($v) ]) ]);
+        my $place = $b->_place_of($v);
+        $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $place ? $b->hash_of($place) : $b->hash_var($v) ]) ]);
         return $h;
     }
     return $b->hash_var($v) if $v->is_my_hash;
@@ -369,6 +370,16 @@ sub _hash_name {
 
 # pkg_agg($n): THE ONE AGGREGATE a global holds, made at its first use from
 # any function. A whole store refills it in place, so its pointer stands.
+# _place_of($read) -> the variable's own node (no mem_in) a versioned read of a
+# `my` aggregate is of: what it lowers to is the variable -- its storage, or
+# the arguments `my ($c, @x) = @_` bound it to (args_rest) -- undef if none.
+sub _place_of {
+    my ($b, $v) = @_;
+    my ($p) = grep { $_->operation eq 'PadAccess' && !blessed( $_->mem_in ) && !$_->inputs->@*
+                     && $_->name eq $v->name && ( $_->targ // '' ) eq ( $v->targ // '' ) } ( $b->{own_nodes} // [] )->@*;
+    return $p;
+}
+
 sub pkg_agg {
     my ($b, $n) = @_;
     my $h = $n->sigil eq '%';
@@ -833,7 +844,8 @@ sub array_value {
     # A `my` ARRAY READ WHOLE AT A MEMORY VERSION: a copy, as for a hash.
     if ( $v->is_my_array && $op eq 'PadAccess' && $v->is_versioned_read ) {
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
-        $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->array_var($v) ]);
+        my $place = $b->_place_of($v);
+        $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $place ? $b->array_of($place) : $b->array_var($v) ]);
         return $a;
     }
     return $b->array_var($v) if $v->is_my_array;
