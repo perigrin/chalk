@@ -43,7 +43,7 @@ ag6	SAME
 ag7	SAME	
 ag8	SAME	
 ag9	SAME	
-al1	REFUSED	load: from_json failed: GAP: wire invariant L6: main::__PROGRAM__: Phi#10 has 1 inputs for 2 ways into Loop#6
+al1	REFUSED	GAP: T2: out of its slices (PadAccess)
 al10	SAME	
 al11	SAME	
 al12	SAME	
@@ -54,7 +54,7 @@ al16	SAME
 al17	SAME	
 al18	SAME	
 al19	SAME	
-al2	REFUSED	load: from_json failed: GAP: wire invariant L6: main::__PROGRAM__: Phi#6 has 1 inputs for 2 ways into Loop#5
+al2	REFUSED	GAP: T2: out of its slices (PadAccess)
 al20	SAME	
 al21	SAME	
 al22	SAME	
@@ -214,7 +214,7 @@ ev4	SAME
 ev5	SAME	
 ev6	SAME	
 ev7	SAME	
-ev8	REFUSED	no program graph
+ev8	SAME	
 ev9	SAME	
 ex1	SAME	
 ex2	SAME	
