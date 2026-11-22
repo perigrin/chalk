@@ -59,20 +59,20 @@ my %placed_or_refused = (
     'scalar context, literal' => 'my $n = (my ($x, @r) = ($ENV{F} // 1, 2, 3)); print "$n $x @r\n";',
 );
 
-# A `my` SCALAR A LIST ASSIGNMENT REBINDS AFTER IT WAS READ. Its reads are one
-# node (the slot by name, at no memory version), so the second assignment
-# cannot reach a value made from the first: "1 2 1 2" for "1 2 3 4", and
+# A `my` SCALAR A LIST ASSIGNMENT REBINDS AFTER IT WAS READ. Its reads were
+# one node (the slot by name, at no memory version), so the second assignment
+# could not reach a value made from the first: "1 2 1 2" for "1 2 3 4", and
 # "1|5" for "4|5" once Assign::is_placed no longer refused the aggregate
-# beside it (wire v2 stage 6). Refused by name until the reads name a version.
+# beside it (wire v2 stage 6), refused by name since. B::SoN reads it at the
+# assign's version now (stage 7): perl's answer.
 my %rebound = (
     'two list assigns of scalars, read between' => 'sub g { (1, 2) } sub h { (3, 4) } my ($a, $b); ($a, $b) = g(); print "$a $b\n"; ($a, $b) = h(); print "$a $b\n";',
     'a scalar beside an array, read between'   => 'sub g { return (1, 2, 3) } my ($x, @r); ($x, @r) = g(); print "$x|@r\n"; ($x, @r) = (4, 5); print "$x|@r\n";',
+    'declared by the first, rebound by the second' => 'sub f { return (1, 2) } my ($x, @r) = f(); print "$x|"; ($x, @r) = (5, 6); my $s = "$x"; ($x, @r) = f(); print "$s $x\n";',
 );
 for my $name (sort keys %rebound) {
     my $r = tap("$rebound{$name}\n");
-    ok $r->{verdict} eq 'SAME'
-        || $r->{verdict} eq 'REFUSED' && ( $r->{why} // '' ) =~ /a `my` scalar two list assignments bind one after the other/,
-        "as perl, or refused by name: $name" or diag explain $r;
+    is $r->{verdict}, 'SAME', "as perl through T2: $name" or diag $r->{why} // explain $r;
 }
 
 for my $name (sort keys %same) {
