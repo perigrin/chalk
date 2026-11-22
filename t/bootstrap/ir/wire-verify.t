@@ -1,5 +1,5 @@
 # ABOUTME: B::SoN's verifier (SoN::Verify, found through PERL5_SON_LIB) over the wire v2 of chalk's
-# ABOUTME: lib/**/*.pm and of the audit probes: no V1-V5 or V7 violation; the rest held to a baseline.
+# ABOUTME: lib/**/*.pm and of the audit probes: no V1-V7 violation (V6: every read names a version); V8, V9 held to a baseline.
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
@@ -13,13 +13,14 @@ use File::Spec;
 # chalk's suite too -- by the producer's one implementation of them, not a
 # second copy here ("two lists drift").
 #
-#   V1-V5, V7  mem-in-not-version, version-off-chain, write-unreachable,
-#              control-sink, memory-order-disagrees, record: none.
-#   the rest   (V6 read-unversioned:*, V8 phi-*, V9 control-fork): held to
+#   V1-V7      mem-in-not-version, version-off-chain, write-unreachable,
+#              control-sink, memory-order-disagrees, read-unversioned:* (V6,
+#              hard since stage 7: every read names a version), record: none.
+#   the rest   (V8 phi-*, V9 control-fork): held to
 #              t/data/wire-verify-v2-baseline.tsv -- the probes by their totals,
 #              chalk's lib per graph (a recorded graph may not rise; one not
-#              recorded is printed: lib changes with every chalk stage). Stage 7
-#              takes V6 to zero, stage 8 the eval joins' phi-arity.
+#              recorded is printed: lib changes with every chalk stage). Stage 8
+#              takes the eval joins' phi-arity to zero.
 #
 # A WIRE IS CACHED (it takes B::SoN about an hour over chalk's lib) under
 # CHALK_WIRE_CACHE (default: a directory in the temp dir), keyed by the
@@ -139,7 +140,7 @@ for my $set ( [ lib => \@lib ], [ probes => \@probes ] ) {
         die "$f: B::SoN wrote wire version " . ( $w->{version} // 1 ) . ", not 2\n" unless ( $w->{version} // 1 ) == 2;
         my %here;
         for my $v ( SoN::Verify::verify($w)->{violations}->@* ) {
-            if ( $HARD{ $v->{rule} } ) {
+            if ( $HARD{ $v->{rule} } || $v->{rule} =~ /\Aread-unversioned:/ ) {
                 my $k = "$f:$v->{graph} $v->{rule}";
                 if ( $HELD{$k} ) { $held{$k} = 1; next }
                 push @hard, "$f: $v->{graph}#$v->{node} $v->{op} $v->{rule}: $v->{detail}";
@@ -158,7 +159,7 @@ for my $set ( [ lib => \@lib ], [ probes => \@probes ] ) {
 }
 
 is_deeply( \@dropped, [], 'every file has a wire (none timed out or wrote no JSON)' );
-is_deeply( \@hard, [], 'no V1-V5 or V7 violation (but those %HELD names)' ) or diag join "\n", @hard[ 0 .. ( $#hard < 30 ? $#hard : 30 ) ];
+is_deeply( \@hard, [], 'no V1-V7 violation (but those %HELD names)' ) or diag join "\n", @hard[ 0 .. ( $#hard < 30 ? $#hard : 30 ) ];
 diag "held, and no longer seen (take it out of %HELD): $_" for grep { !$held{$_} } sort keys %HELD;
 
 # THE BASELINE: `probes<TAB>RULE<TAB>N` and `lib<TAB>@GRAPH<TAB>rule=n,...`
@@ -191,7 +192,7 @@ for my $g ( sort keys %graph ) {
     push @rose, map { "lib: $g $_ " . ( $want_graph{$g}{$_} // 0 ) . " -> $graph{$g}{$_}" }
         grep { $graph{$g}{$_} > ( $want_graph{$g}{$_} // 0 ) } sort keys $graph{$g}->%*;
 }
-is_deeply( \@rose, [], 'no rule above its baseline (V6, V8, V9)' );
+is_deeply( \@rose, [], 'no rule above its baseline (V8, V9)' );
 my @fell = grep { ( $total{probes}{$_} // 0 ) < $want_total{$_} } sort keys %want_total;
 diag "probes: below the baseline (lower it): @fell" if @fell;
 done_testing;
