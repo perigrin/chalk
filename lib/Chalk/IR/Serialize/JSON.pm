@@ -1295,10 +1295,15 @@ sub from_json ($json_string) {
     # THE `eval` PART (stage 8): a die's way out is an edge (Exc) to the eval's
     # catch Region. A wire without it joined a caught die by no edge at all
     # (no restore, no $@ store): one that holds an eval is refused.
-    die "GAP: an eval on a wire without the `eval` profile (its die has no way out)\n"
-        if !grep( { $_ eq 'eval' } ( $data->{profile} // [] )->@* )
-        && grep { my $f = $_->{fields} // {}; defined $f->{eval_id} || defined $f->{eval_entry} }
-           map { _wire_nodes($_) } values( ( $data->{methods} // {} )->%* );
+    unless ( grep { $_ eq 'eval' } ( $data->{profile} // [] )->@* ) {
+        for my $m ( values( ( $data->{methods} // {} )->%* ) ) {
+            for my $n ( _wire_nodes($m) ) {
+                my $f = $n->{fields} // {};
+                die "GAP: an eval on a wire without the `eval` profile (its die has no way out)\n"
+                    if defined $f->{eval_id} || defined $f->{eval_entry};
+            }
+        }
+    }
     # B::SoN'S WIRE is held to the memory invariant (L1-L6), each of its
     # graphs, before any is made. (B::SoN's says perl's warning switches,
     # `dowarn`, as WireCheck asks below: a graph chalk wrote itself,
