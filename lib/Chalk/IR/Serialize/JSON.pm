@@ -1304,7 +1304,7 @@ sub from_json ($json_string) {
     # a part it leaves out.
     my $version = $data->{version} // 'none';
     die "GAP: wire version $version is not one chalk reads (wire v2 only)\n" unless $version eq '2';
-    die 'GAP: wire v2 `profile` ' . ( ref $data->{profile} eq 'ARRAY' ? "[$data->{profile}->@*]" : $data->{profile} // 'null' )
+    die 'GAP: wire v2 `profile` ' . ( ref $data->{profile} eq 'ARRAY' ? '[' . join( ' ', $data->{profile}->@* ) . ']' : $data->{profile} // 'null' )
         . ": a wire from before wire v2 closed (stage 10); every part is v2 now\n" if exists $data->{profile};
     # B::SoN'S WIRE is held to the memory invariant (L1-L8), each of its
     # graphs, before any is made. HELD BY NAME: a wire with no `dowarn`, which
