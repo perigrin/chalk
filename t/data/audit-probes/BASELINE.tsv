@@ -226,7 +226,7 @@ fk3	SAME
 fk4	SAME	
 fk5	SAME	
 fk6	SAME	
-fk7	REFUSED	GAP: T2: out of its slices (a `my` scalar two list assignments bind one after the other (its reads are one node, at no memory version))
+fk7	SAME	
 fl1	SAME	
 fl10	SAME	
 fl11	REFUSED	load: from_json failed: GAP: a read through an element that is not there, which perl makes (autovivification) (in main::__PROGRAM__)
@@ -316,7 +316,7 @@ lo10	SAME
 lo11	SAME	
 lo12	SAME	
 lo13	SAME	
-lo14	REFUSED	load: from_json failed: GAP: a package array or hash (@main::st) flattened into a list at no memory version, where it is also written: the list would be made after th
+lo14	SAME	
 lo15	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
 lo16	REFUSED	load: from_json failed: GAP: a store to a package variable ($main::v) in an eval block that dies: the wire does not say whether it is a `local`, whose restore the die
 lo2	REFUSED	load: from_json failed: GAP: a `local` ($main::g) in a sub a die leaves, under an eval: the die's way out restores nothing (in main::t)
@@ -360,7 +360,7 @@ lp7	SAME
 lp8	REFUSED	no program graph
 lp9	REFUSED	no program graph
 m4	SAME	
-nv1	REFUSED	load: from_json failed: GAP: a package array or hash (@main::st) flattened into a list at no memory version, where it is also written: the list would be made after th
+nv1	SAME	
 nv10	SAME	
 nv11	SAME	
 nv12	SAME	
@@ -368,11 +368,11 @@ nv13	SAME
 nv14	SAME	
 nv2	SAME	
 nv3	SAME	
-nv4	REFUSED	load: from_json failed: GAP: a package array or hash (@main::g) flattened into a list at no memory version, where it is also written: the list would be made after the
-nv5	REFUSED	load: from_json failed: GAP: a package array or hash (%main::g) flattened into a list at no memory version, where it is also written: the list would be made after the
+nv4	SAME	
+nv5	SAME	
 nv6	SAME	
-nv7	REFUSED	load: from_json failed: GAP: a package array or hash (@main::g) flattened into a list at no memory version, where it is also written: the list would be made after the
-nv8	REFUSED	load: from_json failed: GAP: a package array or hash (@main::g) flattened into a list at no memory version, where it is also written: the list would be made after the
+nv7	SAME	
+nv8	SAME	
 nv9	SAME	
 pa1	SAME	
 pa2	SAME	
@@ -423,6 +423,19 @@ rn6	SAME
 rn7	SAME	
 rn8	REFUSED	GAP: T2: out of its slices (an open for writing of a file (or of what is not a `my` scalar))
 rn9	REFUSED	GAP: T2: out of its slices (a require of Cwd.pm, not compiled in)
+rv1	SAME	
+rv10	SAME	
+rv11	SAME	
+rv12	SAME	
+rv13	SAME	
+rv2	SAME	
+rv3	SAME	
+rv4	REFUSED	GAP: T2: out of its slices (a value stamped List (Assign))
+rv5	SAME	
+rv6	SAME	
+rv7	SAME	
+rv8	SAME	
+rv9	SAME	
 sg1	SAME	
 slice1	SAME	
 slice2	SAME	
