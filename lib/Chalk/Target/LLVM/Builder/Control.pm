@@ -1248,7 +1248,9 @@ sub go_round {
     # made for a back edge is refused there as in the body)
     local $b->{depth} = ( $b->{depth} // 0 ) + 1;
     my @lat = grep { !$_->{block}{dead} } $lx->{latches}->@*;
-    out('a loop that never goes round') unless @lat;
+    # A LOOP NO WAY GOES ROUND (every pass dies: `for (1) { die }`) has no
+    # latch: its head phis keep their one way in.
+    return unless @lat;
     # A WAY ROUND THROUGH A REGION THAT FEEDS THE LATCH (a `redo` in a nested
     # arm): that Region merged first, its merge one way into the next.
     while (1) {
