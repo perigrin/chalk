@@ -329,9 +329,11 @@ sub set ( $g, $name, $v, $stamp = 'Int' ) { $g->{var}{$name} = $v; $g->{stamp}{$
 sub get ( $g, $name ) { return $g->{var}{$name} // die "Chalk::Regex::Graph: no variable $name" }
 
 # while_(cond_cb, body_cb): a loop; its condition is the node cond_cb makes
-# (fresh: the Loop is its control). A variable live at entry has a phi.
+# (fresh, a value), its test an If on the Loop (wire v2's `loop` profile: the
+# Loop is [entry, back], back the control the body ends at). A variable live
+# at entry has a phi.
 sub while_ ( $g, $cond_cb, $body_cb ) {
-    my $L = $g->node( 'Loop', in => [ $g->{ctl} ], ctl => $g->{ctl}, f => { bound => 'each' } );
+    my $L = $g->node( 'Loop', in => [ $g->{ctl} ], f => { bound => 'each' } );
     my %entry = $g->{var}->%*;
     my %phi;
     for my $v ( sort keys %entry ) {
@@ -344,12 +346,13 @@ sub while_ ( $g, $cond_cb, $body_cb ) {
     my $c = $cond_cb->();
     die "Chalk::Regex::Graph: a loop condition already placed" if defined $g->{n}[$c]{control_in};
     die "Chalk::Regex::Graph: a loop condition that is a call" if $g->{n}[$c]{op} eq 'Call';
-    $g->{n}[$c]{control_in} = $L;
-    $g->{ctl} = $g->node( 'Proj', in => [$L], f => { index => 0 } );
+    my $I = $g->node( 'If', in => [ $L, $c ], ctl => $L );
+    $g->{ctl} = $g->node( 'Proj', in => [$I], f => { index => 0 } );
     $body_cb->();
+    $g->{n}[$L]{inputs}[1] = $g->{ctl};
     $g->{n}[ $phi{$_} ]{inputs}[1] = $g->{var}{$_} // $phi{$_} for keys %phi;
     $g->{n}[$mphi]{inputs}[1] = $g->{mem};
-    my $exit = $g->node( 'Proj', in => [$L], f => { index => 1 } );
+    my $exit = $g->node( 'Proj', in => [$I], f => { index => 1 } );
     $g->{ctl} = $g->node( 'Region', in => [$exit], head => $L );
     $g->{mem} = $mphi;
     $g->{var} = { map { ( $_ => $phi{$_} ) } keys %entry };   # (after it: the header's)

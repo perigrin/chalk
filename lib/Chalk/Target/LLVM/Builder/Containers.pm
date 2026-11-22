@@ -76,9 +76,7 @@ sub _loop_scope {
         if ($op eq 'Proj') {
             my $p = $ctl->inputs->[0];
             return undef unless blessed($p) && $p->operation =~ /\A(?:If|Loop)\z/;
-            return $ctl if $p->operation eq 'Loop' && $ctl->index == 0;
-            # (a loop's test, on the `loop` profile: Proj 0 its body, Proj 1
-            # its exit -- after the loop)
+            # (a loop's test: Proj 0 its body, Proj 1 its exit -- after the loop)
             if ( $p->operation eq 'If' && ( my $L = _tested_loop($p) ) ) {
                 return $ctl if $ctl->index == 0;
                 ( $from, $ctl ) = ( $L, $L->control_in );

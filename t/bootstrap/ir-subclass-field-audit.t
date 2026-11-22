@@ -455,17 +455,16 @@ subtest 'round-trip: If' => sub {
 };
 
 subtest 'round-trip: Loop' => sub {
-    # Real Loop construction (FromOptree.pm) passes a SINGLE-element
-    # inputs => [entry_control] -- never a 2-element inputs array with a
-    # backedge at inputs[1]. Loop::set_backedge_ctrl exists but is not
-    # called anywhere in production (grep confirms zero call sites in
-    # either repo's lib/); mirroring that shape here rather than inventing
-    # a 2-input backedge shape the loader's forward-reference guard would
-    # (correctly) reject as an unresolvable forward index.
+    # Wire v2's `loop` profile (stage 9a): a Loop is [entry, back], the back
+    # input the control its pass ends at -- a forward reference the writer
+    # orders after the Loop and the loader sets with set_backedge_ctrl.
     my $f    = Chalk::IR::NodeFactory->new();
     my $start = $f->make_cfg('Start');
     my $loop  = $f->make_cfg('Loop', inputs => [$start]);
-    my $exit_proj = $f->make_cfg('Proj', inputs => [$loop], index => 0);
+    my $if    = $f->make_cfg('If', inputs => [$loop, _const($f, '1')]);
+    my $body  = $f->make_cfg('Proj', inputs => [$if], index => 0);
+    my $exit_proj = $f->make_cfg('Proj', inputs => [$if], index => 1);
+    $loop->set_backedge_ctrl($body);
     my $region    = $f->make_cfg('Region', inputs => [$exit_proj]);
     $loop->set_region($region);
     my $val = _const($f, '3');
@@ -475,6 +474,9 @@ subtest 'round-trip: Loop' => sub {
     my $loaded = from_json(to_json({ Loop => $graph }));
     my ($found) = grep { blessed($_) && $_->operation eq 'Loop' } $loaded->{Loop}->nodes->@*;
     ok(defined $found, 'Loop node found after round-trip');
+    my $back = $found ? $found->inputs->[1] : undef;
+    ok(blessed($back) && $back->operation eq 'Proj' && $back->index == 0,
+        'its back input is set again: the body Proj, made after it');
 };
 
 subtest 'round-trip: Region' => sub {

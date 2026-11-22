@@ -929,22 +929,6 @@ sub _head_aggregates {
     return @out;
 }
 
-# _loop_test(@pinned) -> the nodes pinned on a Loop that nothing else pinned
-# there reads, through values that are not themselves pinned or phis: the test
-# (`while (my $n = shift @w)` pins the shift and the test over it).
-sub _loop_test {
-    my (@pinned) = @_;
-    return @pinned if @pinned < 2;
-    my %read;
-    my @todo = map { $_->inputs->@* } @pinned;
-    while (defined( my $v = shift @todo )) {
-        next unless blessed($v) && $v->can('operation') && !$read{ refaddr($v) }++;
-        next if $v->operation eq 'Phi' || $v->can('control_in') && blessed( $v->control_in );
-        push @todo, $v->inputs->@*;
-    }
-    return grep { !$read{ refaddr($_) } } @pinned;
-}
-
 # _loop_if($Loop) -> (If, its condition's effects): THE TEST of a loop (wire
 # v2's `loop` profile) -- the If the Loop's chain comes to through pinned
 # statements alone (the condition's effects, run each pass before it, as in
@@ -960,10 +944,17 @@ sub _loop_if {
         my $s = $s[0];
         if ( $s->operation eq 'If' ) {
             my ($out) = grep { $_->operation eq 'Proj' && $_->index == 1 } $s->successors_by_input;
-            return () unless $out && grep {
+            return ( $s, @effect ) if $out && grep {
                 $_->operation eq 'Region' && blessed( $_->head ) && refaddr( $_->head ) == refaddr($L)
             } ( $out->consumers // [] )->@*;
-            return ( $s, @effect );
+            # (A BRANCH IN THE TEST -- `while ($n && $n->op eq "C")`, a call
+            # on the right of && -- is an If of its own, and the chain goes
+            # on from where its arms meet: a part of the condition's effects)
+            my $r = $s->region;
+            return () unless blessed($r) && $r->operation eq 'Region';
+            push @effect, $s;
+            $c = $r;
+            next;
         }
         return () if $s->operation =~ /\A(?:Region|Loop|Proj|Return|Unwind|Exc)\z/;
         push @effect, $s;
@@ -981,19 +972,23 @@ sub _tested_loop {
     return $t && refaddr($t) == refaddr($if) ? $c : undef;
 }
 
-# loop_body_proj($Loop) -> its body's Proj 0 (of its test, or of the Loop on
-# a wire without the `loop` profile), or undef: a loop with no test.
+# loop_body_proj($Loop) -> its body's Proj 0 (of its test), or undef: a
+# loop with no test.
 sub loop_body_proj {
     my ($L) = @_;
-    my ($if) = _loop_if($L);
-    my ($p) = grep { $_->operation eq 'Proj' && $_->index == 0 } ( $if // $L )->successors_by_input;
+    my ($if) = _loop_if($L) or return undef;
+    my ($p) = grep { $_->operation eq 'Proj' && $_->index == 0 } $if->successors_by_input;
     return $p;
 }
 
 sub loop {
     my ($b, $L) = @_;
     my ( $if, @effect ) = _loop_if($L);
-    my %proj = map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } ( $if // $L )->successors_by_input;
+    # (A TEST PINNED ON THE LOOP, its Projs the Loop's: a wire without the
+    # `loop` profile, which T2 no longer reads)
+    out('a loop whose test is pinned on it (a wire without the `loop` profile)')
+        if grep { $_->operation eq 'Proj' } $L->successors_by_input;
+    my %proj = $if ? map { ( $_->index => $_ ) } grep { $_->operation eq 'Proj' } $if->successors_by_input : ();
     my ($bodyp, $exitp) = ( $proj{0}, $proj{1} );
     # (NO WAY OUT BUT THE RETURN: a label a `goto` goes back to -- B::SoN's
     # Loop at it, the goto's arm its way round -- in a body that runs on to
@@ -1004,25 +999,11 @@ sub loop {
                       && !$_->memory } ( $L->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
-    my @cond;
-    if ($if) {
-        # THE TEST IS AN If (the `loop` profile): its condition an ordinary
-        # value; the effects before it a chain walked each pass, which stops
-        # at the If.
-        @cond = ( $if->inputs->[1] );
-        $b->{loop_test}{ refaddr($if) } = 1 if @effect;
-    }
-    else {
-        # AN EFFECT AND A TEST (`while (my $n = shift @w)`): B::SoN pins both on
-        # the Loop. The test is the one nothing else pinned there reads (through
-        # values); the other is a statement chain run each pass before it.
-        my @pinned = grep { $_->operation !~ /\A(?:Phi|Proj)\z/ } $L->successors;
-        @cond = _loop_test(@pinned);
-        out('a loop condition that is not one value') unless @cond == 1;
-        @effect = grep { refaddr($_) != refaddr( $cond[0] ) } @pinned;
-        out('a loop condition of more than one effect') if @effect > 1;
-        $b->{loop_test}{ refaddr( $cond[0] ) } = 1 if @effect;
-    }
+    # THE TEST IS AN If: its condition an ordinary value; the effects before
+    # it (`while (my $n = shift @w)`: the shift) a chain walked each pass,
+    # which stops at the If.
+    my @cond = ( $if->inputs->[1] );
+    $b->{loop_test}{ refaddr($if) } = 1 if @effect;
     out('a loop phi with other than two ways in') if grep { scalar( $_->inputs->@* ) != 2 } @phis;
 
     $b->reads_before($_) for $b->{passed}->@*;   # see if_stmt
@@ -1071,7 +1052,7 @@ sub loop {
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
         my $e = $b->walk($L);
         out('a loop condition whose effect does not end in the header') if $b->{cur}{dead} || !defined $e
-            || ( $if ? refaddr($e) != refaddr( $if->inputs->[0] ) : $e->successors );
+            || refaddr($e) != refaddr( $if->inputs->[0] );
     }
     my $cond = $b->truth($b->value($cond[0]));
     my $head_end = $b->{cur};

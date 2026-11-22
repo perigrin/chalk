@@ -374,6 +374,9 @@ sub _all_nodes_topo ($graph_or_nodes) {
                 && $n->region->operation eq 'Loop') {
             @in = ($in[0]);
         }
+        # (and a Loop's back input, the control its pass ends at: the
+        # `loop` profile's other forward reference)
+        @in = ($in[0]) if $n->operation eq 'Loop';
         my @preds = grep { defined $_ && blessed($_) } @in, ( $n->can('mem_in') ? $n->mem_in : () );
         if ($n->operation eq 'Phi' && defined $n->region) {
             push @preds, $n->region;
