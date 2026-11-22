@@ -78,7 +78,7 @@ same	use v5.42; use experimental 'class'; class K { field $r = {a => 1}; method 
 same	use v5.42; use experimental 'class'; class K { field @l = (1, 2); method s { "@l" } } for (1, 2) { print K->new->s, ";" } print "\n";
 same	use v5.42; use experimental 'class'; class K { field @l = (1, 2); method r { @l = (@l, 3); return scalar @l } method s { "@l" } } my $k = K->new; print $k->r, $k->s, "\n";
 same	use v5.42; use experimental 'class'; class K { field %h; method set ($r) { %h = %$r; return } method g { join ",", map { "$_$h{$_}" } sort keys %h } } my $k = K->new; $k->set({a => 1, b => 2}); print $k->g, "\n";
-refused	use v5.42; use experimental 'class'; class K { field @l = (1); method r { my $n = (@l = (4, 5)); "$n @l" } } print K->new->r, "\n";
+same	use v5.42; use experimental 'class'; class K { field @l = (1); method r { my $n = (@l = (4, 5)); "$n @l" } } print K->new->r, "\n";
 same	use v5.42; use experimental 'class'; class K { field %h; method r { %h = (a => 1, b => 2, a => 3); join ",", map { "$_$h{$_}" } sort keys %h } } print K->new->r, "\n";
 same	my $r = {a => 1, b => 2}; my $n = %$r; print $n ? "t" : "f", "\n";
 same	my $r = {a => 1}; if (%$r) { print "y\n" }

@@ -58,11 +58,16 @@ for my $case (
     is($got->[2], $want->[2], "$name: perl's exit code");
 }
 
-# ITS VALUE TAKEN OTHER THAN AS THE METHOD'S: refused by name.
+# ITS VALUE TAKEN IN THE METHOD, AS A SCALAR: B::SoN gives the count of a
+# right side it knows the length of (wire v2 stage 7), and T2 prints it.
 {
-    my ($ll, undef, $why) = lower(qq{$K class K { field \@l; method r { my \$n = (\@l = (1, 2)); \$n + 1 } } print K->new->r, "\\n";});
-    ok(!defined $ll, 'its value taken in the method: refused');
-    like($why // '', qr/T2: out of its slices \(/, 'refused by T2') or diag $why;
+    my ($ll, $pl, $why) = lower(qq{$K class K { field \@l; method r { my \$n = (\@l = (1, 2)); \$n + 1 } } print K->new->r, "\\n";});
+    ok(defined $ll, 'its value taken in the method, a scalar: lowered') or diag $why;
+    if (defined $ll) {
+        my ($lf, $llp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
+        print $lf $ll; close $lf;
+        is(run("timeout 20 $LLI $llp")->[0], run("$^X $pl")->[0], "its value taken in the method: perl's output");
+    }
 }
 
 done_testing;

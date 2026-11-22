@@ -174,7 +174,7 @@ node	adjacency-06_control:1	main::__PROGRAM__|Constant|const_type=integer|value=
 node	adjacency-06_control:1	main::__PROGRAM__|Constant|const_type=integer|value=1000000000#0	iv,e53
 node	adjacency-06_control:1	main::__PROGRAM__|Constant|const_type=integer|value=2#0	iv,e53
 node	adjacency-06_control:1	main::__PROGRAM__|Constant|const_type=integer|value=3#0	iv,e53
-node	adjacency-06_control:1	main::__PROGRAM__|Count|ArrayLiteral#60|Phi#38#0	iv
+node	adjacency-06_control:1	main::__PROGRAM__|Count|ArrayLiteral#60|Phi#37#0	iv
 node	adjacency-06_control:1	main::__PROGRAM__|Phi#61#0	iv
 node	adjacency-06_control:1	main::__PROGRAM__|Phi#63#0	iv,e53
 case	adjacency-06_control:2	d3da31bc2723b4e59b44d265e4a9fe26	OK
@@ -492,7 +492,7 @@ node	chalk-found-gaps:10	main::__PROGRAM__|Constant|const_type=integer|value=3#0
 node	chalk-found-gaps:10	main::__PROGRAM__|Count|ArrayLiteral#3|Call#6#0	iv
 node	chalk-found-gaps:10	main::__PROGRAM__|Count|ArrayLiteral#7|Call#6#0	iv
 node	chalk-found-gaps:10	main::__PROGRAM__|Count|ArrayLiteral#8|Call#6#0	iv
-node	chalk-found-gaps:10	main::__PROGRAM__|Count|Phi#7#0	iv
+node	chalk-found-gaps:10	main::__PROGRAM__|Count|Phi#7|MemStart#0	iv
 node	chalk-found-gaps:10	main::__PROGRAM__|Count|Range|Constant|const_type=integer|value=1|PadAccess|name=$n|MemStart#0	iv
 node	chalk-found-gaps:10	main::__PROGRAM__|Phi#16#0	iv
 case	chalk-found-gaps:11	31d264b71895eda932136eb7a1fe16d8	OK
@@ -857,7 +857,7 @@ node	chalk-found-gaps:60	main::__PROGRAM__|Phi#17#0	iv
 node	chalk-found-gaps:60	main::__PROGRAM__|Phi#28#0	iv
 case	chalk-found-gaps:61	fe2e80ad18e352b856e6e7b01508c3e2	OK
 node	chalk-found-gaps:61	C::leaves|Constant|const_type=integer|value=0#0	iv,e53
-node	chalk-found-gaps:61	C::leaves|Count|ArrayLiteral#8|Phi#5#0	iv
+node	chalk-found-gaps:61	C::leaves|Count|ArrayLiteral#8|Phi#3#0	iv
 node	chalk-found-gaps:61	main::__PROGRAM__|Count|ArrayLiteral#9|Call#10#0	iv
 case	chalk-found-gaps:62	55f28fba4bcc11f4e2e8687d718ee65e	OK
 node	chalk-found-gaps:62	main::__PROGRAM__|Constant|const_type=integer|value=1#0	iv,e53
@@ -1302,9 +1302,9 @@ node	chalk-found-gaps:116	main::__PROGRAM__|Constant|const_type=integer|value=0#
 node	chalk-found-gaps:116	main::__PROGRAM__|Constant|const_type=integer|value=1#0	iv,e53
 node	chalk-found-gaps:116	main::__PROGRAM__|Constant|const_type=integer|value=1#1	iv,e53
 node	chalk-found-gaps:116	main::__PROGRAM__|Count|PadAccess|name=@lines|Call#2#0	iv
-node	chalk-found-gaps:116	main::__PROGRAM__|Count|PadAccess|name=@lines|Phi#11#0	iv
+node	chalk-found-gaps:116	main::__PROGRAM__|Count|PadAccess|name=@lines|Phi#7#0	iv
 node	chalk-found-gaps:116	main::__PROGRAM__|Count|Phi#30|Phi#13#0	iv
-node	chalk-found-gaps:116	main::__PROGRAM__|Count|Phi#30|Phi#26#0	iv
+node	chalk-found-gaps:116	main::__PROGRAM__|Count|Phi#30|Phi#18#0	iv
 node	chalk-found-gaps:116	main::__PROGRAM__|Count|Phi#31|Phi#28#0	iv
 node	chalk-found-gaps:116	main::__PROGRAM__|Phi#32#0	iv
 node	chalk-found-gaps:116	main::__PROGRAM__|Phi#33#0	iv
@@ -1702,9 +1702,9 @@ node	chalk-found-gaps:153	main::__PROGRAM__|Constant|const_type=integer|value=0#
 node	chalk-found-gaps:153	main::__PROGRAM__|Constant|const_type=integer|value=1#0	iv,e53
 node	chalk-found-gaps:153	main::__PROGRAM__|Constant|const_type=integer|value=1#1	iv,e53
 node	chalk-found-gaps:153	main::__PROGRAM__|Count|PadAccess|name=@lines|Call#2#0	iv
-node	chalk-found-gaps:153	main::__PROGRAM__|Count|PadAccess|name=@lines|Phi#11#0	iv
+node	chalk-found-gaps:153	main::__PROGRAM__|Count|PadAccess|name=@lines|Phi#7#0	iv
 node	chalk-found-gaps:153	main::__PROGRAM__|Count|Phi#30|Phi#13#0	iv
-node	chalk-found-gaps:153	main::__PROGRAM__|Count|Phi#30|Phi#26#0	iv
+node	chalk-found-gaps:153	main::__PROGRAM__|Count|Phi#30|Phi#18#0	iv
 node	chalk-found-gaps:153	main::__PROGRAM__|Count|Phi#31|Phi#28#0	iv
 node	chalk-found-gaps:153	main::__PROGRAM__|Phi#32#0	iv
 node	chalk-found-gaps:153	main::__PROGRAM__|Phi#33#0	iv
@@ -2003,7 +2003,7 @@ node	dereferencing:8	main::__PROGRAM__|Constant|const_type=integer|value=3#0	iv,
 node	dereferencing:8	main::__PROGRAM__|Constant|const_type=integer|value=4#0	iv,e53
 node	dereferencing:8	main::__PROGRAM__|Constant|const_type=integer|value=5#0	iv,e53
 node	dereferencing:8	main::__PROGRAM__|Count|ArrayLiteral#4|Call#6#0	iv
-node	dereferencing:8	main::__PROGRAM__|Count|PostfixDeref|sigil=@|site||/p.pl|1||Call#2|Call#2#0	iv
+node	dereferencing:8	main::__PROGRAM__|Count|PostfixDeref|sigil=@|site||/p.pl|1||Call#2|Call#2|PostfixDeref|sigil=@|site||/p.pl|1||Call#2|Call#2#0	iv
 case	dynamic-scope:1	a6e53b02f72b8c9a14604e592ad6cdb8	OK
 node	dynamic-scope:1	main::__PROGRAM__|Constant|const_type=integer|value=1#0	iv,e53
 node	dynamic-scope:1	main::__PROGRAM__|Constant|const_type=integer|value=2#0	iv,e53
