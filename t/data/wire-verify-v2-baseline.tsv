@@ -1,22 +1,2 @@
 # SoN::Verify on wire v2 (t/bootstrap/ir/wire-verify.t): the probes' totals per rule, chalk's lib
 # per graph (the most one wire counts). Rewritten by CHALK_WIRE_VERIFY_UPDATE=1; a row only falls.
-probes	phi-arity	4
-probes	phi-arity:eval-join	25
-lib	@Chalk::Bootstrap::Earley::_advance_from_completed	phi-arity:eval-join=1
-lib	@Chalk::Bootstrap::Earley::_complete	phi-arity:eval-join=2
-lib	@Chalk::Bootstrap::Earley::_queue_late	phi-arity:eval-join=1
-lib	@Chalk::Bootstrap::Earley::_run_parse	phi-arity:eval-join=3
-lib	@Chalk::Bootstrap::Earley::_scan	phi-arity:eval-join=1
-lib	@Chalk::Bootstrap::Perl::Actions::Atom::__ANON__:1498:13	phi-arity:eval-join=1
-lib	@Chalk::Bootstrap::Perl::Target::C::_emit_anon_sub_expr	phi-arity:eval-join=1
-lib	@Chalk::Bootstrap::Perl::Target::C::_emit_sub	phi-arity:eval-join=1
-lib	@Chalk::Bootstrap::Perl::Target::C::_generate_c_files	phi-arity:eval-join=2
-lib	@Chalk::Bootstrap::Semiring::FilterComposite::_filter_compare	phi-arity:eval-join=2
-lib	@Chalk::Bootstrap::Semiring::SemanticAction::preserving_action_state	phi-arity:eval-join=1
-lib	@Chalk::Target::LLVM::Builder::_is_list	phi-arity:eval-join=1
-lib	@Chalk::Target::LLVM::Builder::list_only	phi-arity:eval-join=1
-lib	@Chalk::Target::LLVM::Builder::regex_fn	phi-arity:eval-join=1
-lib	@Chalk::Target::LLVM::Builder::translit	phi-arity:eval-join=1
-lib	@Chalk::Target::LLVM::Lower::lower_program	phi-arity:eval-join=3
-lib	@DynaLoader::bootstrap	phi-arity:eval-join=1
-lib	@JSON::PP::tag	phi-arity:eval-join=1
