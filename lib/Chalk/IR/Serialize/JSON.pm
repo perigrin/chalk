@@ -934,6 +934,8 @@ sub _deserialize_graph ($method_data) {
         # Map a B::SoN stamp to a Chalk representation so the backend can lower
         # the node runtime-free. Chalk's own serializer emits no stamp, so this
         # only fires for B::SoN-produced JSON.
+        # AN Exc's VALUE is the exception in flight: a scalar (what a die threw).
+        $nd->{stamp} //= 'Scalar' if $op eq 'Exc';
         if (is_lowerable_stamp($nd->{stamp})) {
             $node->set_stamp($nd->{stamp});
         }
