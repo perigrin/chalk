@@ -263,7 +263,7 @@ sub walk {
         # nothing writes $_ (perl's alias would write the element) -- and what
         # it held before put back when the loop ends (alias_saves).
         elsif ($op eq 'LocalAlias' && ( $s->can('name') ? $s->name // '' : '' ) eq '_') {
-            if ($b->reads_topic) {
+            if ($b->reads_topic || $b->topic_alias) {
                 out('a $_ aliased where the program reads $_, outside a loop T2 restores it after') unless $b->{alias_restore};
                 my $src = $s->inputs->[0];
                 # (B::SoN's guarded reference to the element: the element)
@@ -1136,7 +1136,10 @@ sub topic_alias {
         my $aliased = grep { $_->operation eq 'LocalAlias' && ( $_->name // '' ) eq '_' } @all;
         my $writes = grep { $_->operation eq 'EntryWrite' && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->symbol // '' ) eq '_' && $_->inputs->[0]->is_package_scalar } @all
                      or grep { $_->operation =~ /\A(?:RegexSubst|Transliterate|Chomp)\z/ && blessed( $_->inputs->[0] ) && ( $_->inputs->[0]->can('symbol') ? $_->inputs->[0]->symbol // '' : '' ) eq '_' } @all;
-        $aliased && $writes && $b->reads_topic ? 1 : 0;
+        # (WHETHER OR NOT THIS GRAPH READS IT: a callee's store to $_ is to the
+        # element -- `for (@l) { f() } sub f { $_ = 9 }` left @l as it was,
+        # audit 2026-11-22)
+        $aliased && $writes ? 1 : 0;
     };
 }
 
@@ -1166,7 +1169,7 @@ sub alias_saves {
         return 0;
     };
     return undef unless grep { $_->operation eq 'LocalAlias' && ( $_->name // '' ) eq '_' && $mine->($_) } +($b->{own_nodes} // [])->@*;
-    return undef unless $b->reads_topic;
+    return undef unless $b->reads_topic || $b->topic_alias;
     return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_named( $b->topic_alias ? 'my::0topic' : 'main::_' ) });
 }
 
