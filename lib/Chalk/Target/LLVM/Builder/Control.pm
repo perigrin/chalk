@@ -332,7 +332,10 @@ sub walk {
         elsif ($op eq 'EntryWrite' && ( $s->inputs->[0] isa Chalk::IR::Node && $s->inputs->[0]->is_package_scalar )) {
             out('a local') if $s->can('local') && $s->local;
             my $val = $b->as($b->value($s->inputs->[1]), '%Slot');
-            $b->hash_reads_settled('a package store');
+            # (a store to $@ -- an eval clears it where its body ends -- changes
+            # no read but of $@: the others wait, made where they are used)
+            my $err = $s->inputs->[0]->symbol eq '@' && ( $s->inputs->[0]->package // 'main' ) eq 'main';
+            $b->hash_reads_settled('a package store', $err ? sub ($r) { $r->operation eq 'EntryDef' && ( $r->symbol // '' ) eq '@' } : undef);
             if ( $b->is_topic( $s->inputs->[0] ) && $b->topic_alias ) {
                 # (through $_'s alias: the element it is, perl's die on a literal)
                 my $at = $b->deref_at( $s->inputs->[0] );
@@ -1304,8 +1307,10 @@ sub leaves_restore {
 sub merge_at {
     my ($b, $r, $name, $base, @preds) = @_;   # $base: the memo where every arm began
     my @ways = grep { blessed($_) } $r->inputs->@*;
-    my @pred_of = map { my $in = $_; ( grep { refaddr( $preds[$_]{end} ) == refaddr($in) } 0 .. $#preds )[0] } @ways;
-    my @live = grep { defined $pred_of[$_] } 0 .. $#ways;   # (a way from an arm that died is no way in)
+    # (one entry per way: a list slice of no match would be no entry, and the
+    # ways after it shifted onto the wrong arms)
+    my @pred_of = map { my $in = $_; my ($i) = grep { refaddr( $preds[$_]{end} ) == refaddr($in) } 0 .. $#preds; $i } @ways;
+    my @live = grep { defined $pred_of[$_] } 0 .. $#ways;   # (a way from an arm that died, or an edge never taken, is no way in)
     my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
                       && !$_->memory } ( $r->consumers // [] )->@*;
     my %seen;

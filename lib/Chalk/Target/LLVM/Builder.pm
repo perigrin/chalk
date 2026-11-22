@@ -271,7 +271,8 @@ sub _use_counts {
             && !( $u->can('targets') && defined $u->targets );
         # (a control node's first input is its control: a call on the chain
         # before a loop is the Loop's way in, not a use of its value)
-        @pos = () if $op =~ /\A(?:Loop|Region|Proj)\z/;
+        # (nor is an Exc's: its way out if it dies)
+        @pos = () if $op =~ /\A(?:Loop|Region|Proj|Exc)\z/;
         @pos = grep { $_ != 0 } @pos if $op eq 'If';
         next unless @pos;
         my $at0 = grep { $_ == 0 } @pos;   # (a bare grep in an || chain takes the rest as its list)
@@ -338,7 +339,8 @@ sub list_only {
 # memory version (a later read of the array: its mem_in) or its control.
 sub _value_read {
     my ($b, $n) = @_;
-    for my $c (grep { blessed($_) } ( $n->consumers // [] )->@*) {
+    # (an Exc is its way out if it dies, not a read of its value)
+    for my $c (grep { blessed($_) && $_->operation ne 'Exc' } ( $n->consumers // [] )->@*) {
         return 1 if grep { blessed($_) && refaddr($_) == refaddr($n) } $c->inputs->@*;
     }
     return 0;
