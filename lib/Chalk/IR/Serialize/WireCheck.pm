@@ -105,6 +105,34 @@ class Chalk::IR::Serialize::WireCheck {
     }
 
     # ------------------------------------------------------------------
+    # W10. A `my` ARRAY OR HASH A SUB ALSO REACHES (B::SoN's `shared`), read
+    # whole at a version a sub call then follows: the call may change it, and
+    # T2 reads such an aggregate where it is used, not as it was there --
+    # `(@a, f())` with f pushing onto @a gave `1 2 0` for `1 0`.
+    # ------------------------------------------------------------------
+    method _shared_aggregate_read_before_a_call($name) {
+        my $g = $self->_graph($name);
+        my %killed = map { ( $_->{mem_in} => 1 ) }
+            grep { $_->{op} eq 'Call' && ( $self->_f( $_, 'dispatch_kind' ) // '' ) ne 'builtin' && defined $_->{mem_in} } $g->{nodes}->@*;
+        for my $n ( grep { $_->{op} eq 'PadAccess' && $self->_f( $_, 'shared' ) && defined $_->{mem_in} && $killed{ $_->{mem_in} } } $g->{nodes}->@* ) {
+            next unless ( $self->_f( $n, 'sigil' ) // '' ) =~ /\A[\@%]\z/;
+            # (as a store's target it is a place, not a read)
+            next unless grep { !( $_->[0]{op} =~ /\A(?:Assign|EntryWrite)\z/ && $_->[1] == 0 ) } ( $g->{cons}{ $n->{id} } // [] )->@*;
+            $self->_gap("a `my` aggregate a sub also reaches, read whole before a call that may change it (in $name)");
+        }
+        # (AN ARGUMENT TOO: `g(@a, $f->())` -- perl's @_ holds @a's elements
+        # as they were before $f ran; the wire passes @a's place)
+        for my $c ( grep { $_->{op} eq 'Call' && ( $self->_f( $_, 'dispatch_kind' ) // '' ) ne 'builtin' } $g->{nodes}->@* ) {
+            my @in = map { $g->{by}{$_} } grep { defined } $self->_inputs($c);
+            my ($agg) = grep { $in[$_] && $in[$_]{op} eq 'PadAccess' && ( $self->_f( $in[$_], 'sigil' ) // '' ) =~ /\A[\@%]\z/ } 0 .. $#in;
+            next unless defined $agg;
+            $self->_gap("a `my` aggregate passed to a call beside a call that may change it (in $name)")
+                if grep { $in[$_] && $in[$_]{op} eq 'Call' && ( $self->_f( $in[$_], 'dispatch_kind' ) // '' ) ne 'builtin' } $agg + 1 .. $#in;
+        }
+        return;
+    }
+
+    # ------------------------------------------------------------------
     # W9. A READ THROUGH AN ELEMENT THAT IS NOT THERE makes it in perl
     # (`$h->{b}{c}` leaves $h->{b} a hash); T2's read makes nothing.
     # Refused where B::SoN knows the element is missing (its stamp, Undef).
@@ -237,19 +265,17 @@ class Chalk::IR::Serialize::WireCheck {
         # W8. chalk frees nothing, so a DESTROY is never called: refused
         # where the program may bless into the DESTROY's package (a class
         # it names there, or one made at run time).
-        for my $d ( grep { /::DESTROY\z/ } sort keys $defined->%* ) {
+        # ANY CLASS MAY REACH IT: by @ISA, or through an AUTOLOAD perl calls
+        # for DESTROY -- the match on the bless's own class name missed both
+        # (audit 2026-11-22, W8). So any bless, in a program with either.
+        for my $d ( grep { /::(?:DESTROY|AUTOLOAD)\z/ } sort keys $defined->%* ) {
             # (one that does nothing -- Config's `sub DESTROY { }` -- is not missed)
             next if $self->_inert($d);
-            my $pkg = $d =~ s/::DESTROY\z//r;
-            for my $e ( grep { $self->_is_bless( $_->[1] ) } $self->_all_nodes ) {
-                my ( $name, $n ) = $e->@*;
-                my @in = $self->_inputs($n);
-                my $class = @in > 1 ? $self->_graph($name)->{by}{ $in[1] // '' } : undef;
-                next if defined $class && $class->{op} eq 'Constant' && ( $self->_f( $class, 'value' ) // '' ) ne $pkg;
-                $self->_gap("a DESTROY method ($d): chalk never destroys an object, so it would never run");
-            }
+            next unless grep { $self->_is_bless( $_->[1] ) } $self->_all_nodes;
+            $self->_gap("a DESTROY method ($d), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run");
         }
         for my $name ( sort keys $methods->%* ) {
+            $self->_shared_aggregate_read_before_a_call($name);
             $self->_autovivifying_reads($name);
             $self->_unread_derefs($name);
         }
