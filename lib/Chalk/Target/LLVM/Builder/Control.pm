@@ -45,6 +45,11 @@ sub walk {
         # it be made after the next store (three wrong answers, slices 14-15).
         out("a statement $op that versions memory T2 does not order reads by")
             if !$s->is_memory_version && grep { my $m = blessed($_) ? $_->memory_operand : undef; blessed($m) && refaddr($m) == refaddr($s) } ( $s->consumers // [] )->@*;
+        # A READ NAMES THE VERSION IT IS OF, and a statement that makes the next
+        # version kills it: every read at this one is made first, whatever the
+        # statement (Click's anti-dependence; audit 2026-11-22, risk 4 -- a
+        # list assign made a read of its own target after its store).
+        $b->reads_before( $s->mem_in ) if $s->can('mem_out') && $s->mem_out && blessed( $s->mem_in );
         return $ctl if $op eq 'Return';
         if ($op eq 'Print') {
             # TO STDOUT OR STDERR BY NAME (B::SoN: has_filehandle, the glob

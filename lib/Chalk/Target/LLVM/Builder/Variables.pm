@@ -597,7 +597,11 @@ sub list_assign {
         my $v = $b->emit(op => 'AGet', type => '%Slot', inputs => [ $list, $b->emit(op => 'Const', type => 'i64', attr => { value => $i }) ]);
         $val{ $t->symbol } = $v;
         $b->{lvals}{ $t->symbol } = $v;
-        $b->{memo}{ refaddr($t) } = $v;
+        # (A TARGET KEPT IN MEMORY is a read at the version before too, made
+        # before this store (Control's walk): it keeps that value -- `($x,$y)
+        # = ($y,$x)` with \$x taken gave `2 2` for `2 1` (audit 2026-11-22,
+        # risk 4). A read after names this Assign.)
+        $b->{memo}{ refaddr($t) } = $v unless blessed( $t->mem_in ) && $b->{memo}{ refaddr($t) };
         $b->emit(op => 'Store', type => 'void', inputs => [ $v, $b->location($t) ]) if $t->is_location;
     }
     # A READ MADE AFTER IT (its input this Assign): the target's element; a
