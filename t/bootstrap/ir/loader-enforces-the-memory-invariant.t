@@ -1,4 +1,4 @@
-# ABOUTME: The loader refuses a wire v2 that breaks the memory invariant (L1-L6 of the wire v2
+# ABOUTME: The loader refuses a wire v2 that breaks the memory invariant (L1-L9 of the wire v2
 # ABOUTME: plan, section 8.3), by the rule's name, before any graph is made; a good wire loads.
 use 5.42.0;
 use lib 'lib', 't/lib';
@@ -16,7 +16,7 @@ use Chalk::IR::Serialize::JSON;
 #   my @a = (1,2); if (@ARGV) { $a[0] = 10 } shift @a; print $a[0];
 # written out by hand: each bad one breaks one rule of it.
 my $GOOD = <<'JSON';
-{ "version": 2, "profile": ["mem"], "dowarn": { "on": false, "all_on": false, "all_off": false }, "methods": { "main::__PROGRAM__": { "start": 0, "returns": [21], "nodes": [
+{ "version": 2, "dowarn": { "on": false, "all_on": false, "all_off": false }, "methods": { "main::__PROGRAM__": { "start": 0, "returns": [21], "nodes": [
    { "id": 0, "inputs": [], "op": "Start" },
    { "fields": { "const_type": "undef", "value": null }, "id": 1, "inputs": [], "op": "Constant", "stamp": "Undef" },
    { "fields": { "const_type": "integer", "value": "1" }, "id": 2, "inputs": [], "op": "Constant", "stamp": "Int" },
@@ -76,6 +76,14 @@ for my $case (
       sub ($n, $all) { push @$all, { id => 22, op => 'Call', inputs => [], mem_in => 17, fields => { dispatch_kind => 'direct', name => 'main::f' } } } ],
     [ L6 => qr/Phi#16/, 'a memory Phi with one input for two ways into its Region',
       sub ($n, $all) { $n->{16}{inputs} = [7] } ],
+    # (stage 10: every kind that stores whenever it runs is a version)
+    [ L5 => qr/EntryWrite#22 is a store and no memory version/, 'an EntryWrite off both chains',
+      sub ($n, $all) { push @$all, { id => 22, op => 'EntryWrite', inputs => [ 6, 12 ] } } ],
+    # (stage 10: inputs hold values only -- MemStart and a memory Phi are none)
+    [ L9 => qr/Print#20 names MemStart#7 as a value/, 'MemStart as a value input',
+      sub ($n, $all) { $n->{20}{inputs} = [7] } ],
+    [ L9 => qr/Coerce#19 names Phi#16 as a value/, 'a memory Phi as a value input',
+      sub ($n, $all) { $n->{19}{inputs} = [16] } ],
 ) {
     my ( $rule, $where, $name, $change ) = @$case;
     my $why = refused( bad($change) );
@@ -126,7 +134,7 @@ my $v1 = decode_json($GOOD);
 $v1->{version} = 1;
 like( refused( encode_json($v1) ), qr/\AGAP: wire version 1\b/, 'a v1 wire is refused, not upgraded' );
 
-# THE `eval` PROFILE (stage 8): a die's way out is an Exc, and a block eval's
+# THE EVAL'S EXCEPTIONAL EDGE (stage 8): a die's way out is an Exc, and a block eval's
 # catch Region merges those edges (t/data/wire-v2-eval-catch-edge.json, the
 # plan's section 3.5). L7: every way into a catch Region leads back, by
 # control_in, to an Exc. And a trap's join is a merge like any other there:
@@ -140,20 +148,17 @@ like( refused( encode_json($v1) ), qr/\AGAP: wire version 1\b/, 'a v1 wire is re
         return encode_json($w);
     };
     is( refused($EVAL), '', 'an eval wire with its catch edge loads' );
-    # (stage 8's end: the old join, a die with no way out, is not read)
-    like( refused( $bad_eval->( sub ($n, $all) { } ) =~ s/"profile":\["mem","eval"\]/"profile":["mem"]/r ),
-        qr/\AGAP: an eval on a wire without the `eval` profile/, 'an eval on a wire without the eval profile is refused by name' );
     like( refused( $bad_eval->( sub ($n, $all) { $n->{16}{inputs} = [11] } ) ), qr/\AGAP: wire invariant L7: main::__PROGRAM__: Region#16 /,
         'L7: a way into a catch Region that no Exc leads to is refused by its name' );
     like( refused( $bad_eval->( sub ($n, $all) { push @$all, { id => 29, op => 'Phi', inputs => [ 4, 1 ], fields => { region => 19 }, stamp => 'Maybe[Int]' } } ) ),
         qr/\AGAP: wire invariant L6: main::__PROGRAM__: Phi#29 has 2 inputs for 1 ways into Region#19/,
-        'L6: an eval join\'s value Phi with one input more than its ways in is refused on the eval profile' );
+        'L6: an eval join\'s value Phi with one input more than its ways in is refused' );
 }
 
 # A MEMORY EDGE NAMES A VERSION THE WIRE LISTED BEFORE IT. An upgraded v1
 # wire could name a merge's memory Phi listed after a node on the control
 # chain; B::SoN's v2 never does (it writes a node's memory first), so since
-# stage 6 a forward one is refused.
-like( refused( bad( sub ($n, $all) { $n->{8}{mem_in} = 17 } ) ), qr/names memory version 17, which is not an already-created node/,
+# stage 6 a forward one is refused -- by L8 since every wire keeps it (stage 10).
+like( refused( bad( sub ($n, $all) { $n->{8}{mem_in} = 17 } ) ), qr/\AGAP: wire invariant L8: main::__PROGRAM__: Count#8 follows 17 \(mem_in or control_in\), made after it/,
     'a mem_in naming a version listed after it is refused' );
 done_testing;

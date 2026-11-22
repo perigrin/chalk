@@ -1,4 +1,4 @@
-{ "version": 2, "profile": ["mem", "eval", "loop"], "source": null, "classes": {},
+{ "version": 2, "source": null, "classes": {},
   "dowarn": { "on": false, "all_on": false, "all_off": false },
   "methods": { "main::__PROGRAM__": { "start": 0, "returns": [25], "nodes": [
    {"id":0,"inputs":[],"op":"Start"},

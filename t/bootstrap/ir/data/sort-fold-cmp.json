@@ -144,9 +144,6 @@
          "start" : 0
       }
    },
-   "profile" : [
-      "mem"
-   ],
    "source" : null,
    "version" : 2
 }

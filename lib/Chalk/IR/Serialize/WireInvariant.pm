@@ -1,4 +1,4 @@
-# ABOUTME: The memory invariant of a wire v2 (the plan's L1-L7), checked on the raw wire before
+# ABOUTME: The memory invariant of a wire v2 (the plan's L1-L8), checked on the raw wire before
 # ABOUTME: any graph is made: every edge names a version, every version is reached from the end.
 use 5.42.0;
 use utf8;
@@ -20,30 +20,39 @@ use experimental 'class';
 #       a place: an :lvalue call whose one use is the target of the Assign
 #       that stores through it (and calls it), reading memory (mem_in), off
 #       the chains; that Assign is the version (the plan's section 3.3: a
-#       node an Assign stores through is a place).
-#   L6  a Phi has as many inputs as its Region has ways in (a Loop: two; on
-#       the `loop` profile, its own inputs); a
-#       memory Phi's inputs are versions. (An eval's join too, since stage 8:
-#       its catch is a way in like the body's end.)
-#   L8  (`loop` profile) a Loop has one or two inputs (the way in, and the
-#       way round where a path goes round); the only forward references in
-#       a graph are a loop Phi's back input and a Loop's inputs[1]. A Loop's
-#       Phis have as many inputs as it (L6).
-#   L7  (`eval` profile) every way into a catch Region leads back, by
-#       control_in, to an Exc: the exceptional edges of what died, and only
-#       they, merge there.
+#       node an Assign stores through is a place). And every kind that
+#       stores whenever it runs -- EntryWrite, CellWrite, Delete,
+#       ElemRestore, MakeCell -- is a version on both chains (stage 10).
+#   L6  a Phi has as many inputs as its Region has ways in (a Loop: its
+#       own inputs); a memory Phi's inputs are versions. (An eval's join
+#       too, since stage 8: its catch is a way in like the body's end.)
+#   L7  every way into a catch Region leads back, by control_in, to an
+#       Exc: the exceptional edges of what died, and only they, merge there.
+#   L8  a Loop has one or two inputs (the way in, and the way round where a
+#       path goes round); the only forward references in a graph are a loop
+#       Phi's back input and a Loop's inputs[1]. A Loop's Phis have as many
+#       inputs as it (L6).
+#   L9  inputs hold values only: MemStart and a memory Phi, which are
+#       versions and no value, are named by mem_in and memory Phis alone
+#       (stage 10).
 #
-#   Chalk::IR::Serialize::WireInvariant->new( profile => ['mem'] )->check($name, $graph);
+# WHAT IT DOES NOT CHECK: that every read names a version. Telling a read
+# from a place takes its uses and the effect table; that is SoN::Verify's V6,
+# the one implementation (the plan's 8.2), run over chalk's lib and the
+# probes by t/bootstrap/ir/wire-verify.t.
+#
+# Every rule holds on every wire: the parts of v2 a wire once listed in its
+# `profile` (mem; eval: L7; loop: L8) are all of v2 since stage 10.
+#
+#   Chalk::IR::Serialize::WireInvariant->new->check($name, $graph);
 #
 # check() returns nothing, or dies "GAP: wire invariant Ln: GRAPH: ...\n".
 class Chalk::IR::Serialize::WireInvariant {
-    field $profile :param = ['mem'];
-
     my %SUB_CALL = map { $_ => 1 } qw(direct method dynamic_method indirect);
+    my %STORE    = map { $_ => 1 } qw(EntryWrite CellWrite Delete ElemRestore MakeCell);
 
     # check($name, $graph): the graph $name of a v2 wire ({ nodes => [...] }).
     method check( $name, $g ) {
-        return unless grep { $_ eq 'mem' } $profile->@*;
         my $ns    = $g->{nodes} // [];
         my @nodes = sort { $a->{id} <=> $b->{id} } ref $ns eq 'HASH' ? values $ns->%* : $ns->@*;
         my %by    = map { ( $_->{id} => $_ ) } @nodes;
@@ -66,35 +75,39 @@ class Chalk::IR::Serialize::WireInvariant {
         for my $n ( grep { $_->{op} eq 'Return' || $_->{op} eq 'Unwind' } @nodes ) {
             $gap->( 'L3', $n, 'names no memory (mem_in)' ) unless defined $n->{mem_in};
         }
-        my $edges = grep { $_ eq 'eval' } $profile->@*;
-        if ($edges) {
-            for my $c ( grep { $_->{op} eq 'Region' && ( $_->{fields} // {} )->{catch} } @nodes ) {
-                for my $in ( grep { defined } ( $c->{inputs} // [] )->@* ) {
-                    my ( $x, %seen ) = ( $by{$in} );
-                    $x = $by{ $x->{control_in} // '' } while $x && $x->{op} ne 'Exc' && defined $x->{control_in} && !$seen{ $x->{id} }++;
-                    $gap->( 'L7', $c, 'has a way in (' . $say->($in) . ') no Exc leads to' ) unless $x && $x->{op} eq 'Exc';
-                }
+        for my $c ( grep { $_->{op} eq 'Region' && ( $_->{fields} // {} )->{catch} } @nodes ) {
+            for my $in ( grep { defined } ( $c->{inputs} // [] )->@* ) {
+                my ( $x, %seen ) = ( $by{$in} );
+                $x = $by{ $x->{control_in} // '' } while $x && $x->{op} ne 'Exc' && defined $x->{control_in} && !$seen{ $x->{id} }++;
+                $gap->( 'L7', $c, 'has a way in (' . $say->($in) . ') no Exc leads to' ) unless $x && $x->{op} eq 'Exc';
             }
         }
-        my $loops = grep { $_ eq 'loop' } $profile->@*;
-        if ($loops) {
-            for my $n (@nodes) {
-                my $in = $n->{inputs} // [];
-                $gap->( 'L8', $n, 'has ' . scalar(@$in) . ' inputs (a Loop has one or two)' )
-                    if $n->{op} eq 'Loop' && ( @$in < 1 || @$in > 2 );
-                my $back = $n->{op} eq 'Loop' || $n->{op} eq 'Phi' && ( ( $by{ ( $n->{fields} // {} )->{region} // '' } // {} )->{op} // '' ) eq 'Loop';
-                for my $i ( 0 .. $#$in ) {
-                    next if $back && $i == 1;
-                    $gap->( 'L8', $n, "names $_, made after it" ) for grep { $_ >= $n->{id} } grep { defined && !ref } $in->[$i];
-                }
-                $gap->( 'L8', $n, "follows $_ (mem_in or control_in), made after it" )
-                    for grep { defined && $_ >= $n->{id} } $n->{mem_in}, $n->{control_in};
+        for my $n (@nodes) {
+            my $in = $n->{inputs} // [];
+            $gap->( 'L8', $n, 'has ' . scalar(@$in) . ' inputs (a Loop has one or two)' )
+                if $n->{op} eq 'Loop' && ( @$in < 1 || @$in > 2 );
+            my $back = $n->{op} eq 'Loop' || $n->{op} eq 'Phi' && ( ( $by{ ( $n->{fields} // {} )->{region} // '' } // {} )->{op} // '' ) eq 'Loop';
+            for my $i ( 0 .. $#$in ) {
+                next if $back && $i == 1;
+                $gap->( 'L8', $n, "names $_, made after it" ) for grep { $_ >= $n->{id} } grep { defined && !ref } $in->[$i];
             }
+            $gap->( 'L8', $n, "follows $_ (mem_in or control_in), made after it" )
+                for grep { defined && $_ >= $n->{id} } $n->{mem_in}, $n->{control_in};
         }
         my %uses;    # id -> [ [user, input index] ... ]
         for my $u (@nodes) {
             my $in = $u->{inputs} // [];
             push $uses{ $in->[$_] }->@*, [ $u, $_ ] for grep { defined $in->[$_] && !ref $in->[$_] } 0 .. $#$in;
+        }
+        for my $n ( grep { $STORE{ $_->{op} } } @nodes ) {
+            $gap->( 'L5', $n, 'is a store and no memory version (mem_out)' ) unless $n->{mem_out};
+        }
+        for my $n ( grep { !$memphi->($_) } @nodes ) {
+            for my $in ( grep { defined && !ref } ( $n->{inputs} // [] )->@* ) {
+                my $x = $by{$in} or next;
+                $gap->( 'L9', $n, "names $x->{op}#$in as a value (an input): it is a memory version, no value" )
+                    if $x->{op} eq 'MemStart' || $memphi->($x);
+            }
         }
         for my $n (@nodes) {
             my $f = $n->{fields} // {};
@@ -114,7 +127,7 @@ class Chalk::IR::Serialize::WireInvariant {
             my $r = $by{ $f->{region} // '' };
             $gap->( 'L6', $n, 'has no Region or Loop (region ' . $say->( $f->{region} ) . ')' )
                 unless $r && $r->{op} =~ /\A(?:Region|Loop)\z/;
-            my $want = $r->{op} eq 'Loop' ? ( $loops ? scalar( ( $r->{inputs} // [] )->@* ) : 2 ) : scalar grep { defined } ( $r->{inputs} // [] )->@*;
+            my $want = $r->{op} eq 'Loop' ? scalar( ( $r->{inputs} // [] )->@* ) : scalar grep { defined } ( $r->{inputs} // [] )->@*;
             my $have = scalar( ( $n->{inputs} // [] )->@* );
             $gap->( 'L6', $n, "has $have inputs for $want ways into $r->{op}#$r->{id}" )
                 if $have != $want;

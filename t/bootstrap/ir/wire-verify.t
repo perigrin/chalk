@@ -1,5 +1,5 @@
 # ABOUTME: B::SoN's verifier (SoN::Verify, found through PERL5_SON_LIB) over the wire v2 of chalk's
-# ABOUTME: lib/**/*.pm and of the audit probes: no V1-V7, V8 arity or V11 violation (V6: every read names a version); V8, V9 held to a baseline.
+# ABOUTME: lib/**/*.pm and of the audit probes: no violation of any rule, but those held by name.
 use 5.42.0;
 use lib 'lib', 't/lib';
 use Test::Chalk;
@@ -13,18 +13,10 @@ use File::Spec;
 # chalk's suite too -- by the producer's one implementation of them, not a
 # second copy here ("two lists drift").
 #
-#   V1-V7      mem-in-not-version, version-off-chain, write-unreachable,
-#              control-sink, memory-order-disagrees, read-unversioned:* (V6,
-#              hard since stage 7: every read names a version), record: none.
-#   V8 arity   phi-arity: none (stage 8: an eval's catch is a way into its
-#              join; stage 9: a loop's Phis have one input per input of it).
-#   V8 trivial phi-trivial: none (stage 9b: a loop's Phi the pass never wrote
-#              is forwarded to its init, Braun's construction).
-#   V11 loop   loop: none (stage 9: a Loop is [entry, back], its test an If).
-#   the rest   (V8 phi-*, V9 control-fork): held to
-#              t/data/wire-verify-v2-baseline.tsv -- the probes by their totals,
-#              chalk's lib per graph (a recorded graph may not rise; one not
-#              recorded is printed: lib changes with every chalk stage).
+#   EVERY RULE IS HARD (stage 10): a violation of any rule SoN::Verify
+#   names -- V1-V11, memory-as-value -- fails, but those %HELD names, each
+#   with why. (Until stage 10 V8's other rules and V9 were held to a
+#   baseline file, empty since stage 8: deleted.)
 #
 # A WIRE IS CACHED (it takes B::SoN about an hour over chalk's lib) under
 # CHALK_WIRE_CACHE (default: a directory in the temp dir), keyed by the
@@ -32,7 +24,6 @@ use File::Spec;
 # module's wire also by the content of each chalk module it follows. A wire
 # that timed out or wrote no JSON is a failure, never a missing row.
 #
-#   CHALK_WIRE_VERIFY_UPDATE=1   rewrite the baseline from this run
 #   SON_WIRE_JOBS=N              compiles at a time (default 2)
 #   SON_WIRE_TIMEOUT=S           per compile (default 900)
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
@@ -40,9 +31,7 @@ plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$S
 unshift @INC, $SON;
 require SoN::Verify;
 
-my %HARD = map { ( $_ => 1 ) } qw(mem-in-not-version version-off-chain write-unreachable control-sink memory-order-disagrees record phi-arity phi-trivial loop);
-my $BASELINE = 't/data/wire-verify-v2-baseline.tsv';
-# A V1-V5 OR V7 VIOLATION HELD, by file, graph and rule, each with why it is
+# A VIOLATION HELD, by file, graph and rule, each with why it is
 # not fixed yet. One that no longer occurs is printed: take it out.
 my %HELD = (
     't/data/audit-probes/pl13.pl:main::sw record' =>
@@ -134,71 +123,21 @@ ok( scalar(@lib) > 100 && scalar(@probes) > 100, sprintf( 'the sets: %d lib modu
     waitpid $_, 0 for keys %kids;
 }
 
-# verify each set: { hard => [violation lines], probes => {rule => n}, lib => {graph => {rule => n}} }
-my ( @hard, @dropped, %total, %graph, %held );
-for my $set ( [ lib => \@lib ], [ probes => \@probes ] ) {
-    my ( $name, $files ) = @$set;
-    for my $f (@$files) {
-        my $w = cached($f);
-        unless ($w) { push @dropped, $f; next }
-        die "$f: B::SoN wrote wire version " . ( $w->{version} // 1 ) . ", not 2\n" unless ( $w->{version} // 1 ) == 2;
-        my %here;
-        for my $v ( SoN::Verify::verify($w)->{violations}->@* ) {
-            if ( $HARD{ $v->{rule} } || $v->{rule} =~ /\Aread-unversioned:/ ) {
-                my $k = "$f:$v->{graph} $v->{rule}";
-                if ( $HELD{$k} ) { $held{$k} = 1; next }
-                push @hard, "$f: $v->{graph}#$v->{node} $v->{op} $v->{rule}: $v->{detail}";
-                next;
-            }
-            $total{$name}{ $v->{rule} }++;
-            my $g = $v->{graph} eq 'main::__PROGRAM__' ? "$f:$v->{graph}" : $v->{graph};
-            $here{$g}{ $v->{rule} }++;
-        }
-        next unless $name eq 'lib';
-        # (a graph is in every wire that loads its module: the most one wire counts)
-        for my $g ( keys %here ) {
-            $graph{$g}{$_} = $here{$g}{$_} for grep { $here{$g}{$_} > ( $graph{$g}{$_} // 0 ) } keys $here{$g}->%*;
-        }
+# verify each set: every violation is hard, but those %HELD names
+my ( @hard, @dropped, %held );
+for my $f ( @lib, @probes ) {
+    my $w = cached($f);
+    unless ($w) { push @dropped, $f; next }
+    die "$f: B::SoN wrote wire version " . ( $w->{version} // 1 ) . ", not 2\n" unless ( $w->{version} // 1 ) == 2;
+    for my $v ( SoN::Verify::verify($w)->{violations}->@* ) {
+        my $k = "$f:$v->{graph} $v->{rule}";
+        if ( $HELD{$k} ) { $held{$k} = 1; next }
+        push @hard, "$f: $v->{graph}#$v->{node} $v->{op} $v->{rule}: $v->{detail}";
     }
 }
 
 is_deeply( \@dropped, [], 'every file has a wire (none timed out or wrote no JSON)' );
-is_deeply( \@hard, [], 'no V1-V7 or phi-arity violation (but those %HELD names)' ) or diag join "\n", @hard[ 0 .. ( $#hard < 30 ? $#hard : 30 ) ];
+is_deeply( \@hard, [], 'no violation of any rule (but those %HELD names)' ) or diag join "\n", @hard[ 0 .. ( $#hard < 30 ? $#hard : 30 ) ];
 diag "held, and no longer seen (take it out of %HELD): $_" for grep { !$held{$_} } sort keys %HELD;
 
-# THE BASELINE: `probes<TAB>RULE<TAB>N` and `lib<TAB>@GRAPH<TAB>rule=n,...`
-my @now = (
-    ( map { my $r = $_; "probes\t$r\t$total{probes}{$r}" } sort keys +( $total{probes} // {} )->%* ),
-    ( map { my $g = $_; "lib\t\@$g\t" . join ',', map { "$_=$graph{$g}{$_}" } sort keys $graph{$g}->%* } sort keys %graph ),
-);
-if ( $ENV{CHALK_WIRE_VERIFY_UPDATE} ) {
-    open my $o, '>', $BASELINE or die "$BASELINE: $!";
-    print $o "# SoN::Verify on wire v2 (t/bootstrap/ir/wire-verify.t): the probes' totals per rule, chalk's lib\n",
-             "# per graph (the most one wire counts). Rewritten by CHALK_WIRE_VERIFY_UPDATE=1; a row only falls.\n";
-    print $o "$_\n" for @now;
-    close $o;
-    pass("$BASELINE rewritten");
-    done_testing;
-    exit;
-}
-my ( %want_total, %want_graph );
-for ( split /\n/, slurp($BASELINE) ) {
-    next if /\A#/ || !/\S/;
-    my ( $set, $k, $v ) = split /\t/, $_, 3;
-    if ( $set eq 'probes' ) { $want_total{$k} = $v; next }
-    $want_graph{ $k =~ s/\A@//r } = { map { split /=/ } grep { length } split /,/, $v // '' };
-}
-# (EMPTY SINCE STAGE 8: V6 is hard since stage 7, phi-arity since stage 8,
-# and nothing else is counted on these sets; a row a new rule adds is held)
-ok( slurp($BASELINE) =~ /\A# SoN::Verify on wire v2/, "$BASELINE is read" );
-my @rose = map { "probes: $_ " . ( $want_total{$_} // 0 ) . " -> $total{probes}{$_}" }
-    grep { $total{probes}{$_} > ( $want_total{$_} // 0 ) } sort keys +( $total{probes} // {} )->%*;
-for my $g ( sort keys %graph ) {
-    if ( !$want_graph{$g} ) { diag "lib: a graph not in the baseline: $g " . join ',', map { "$_=$graph{$g}{$_}" } sort keys $graph{$g}->%*; next }
-    push @rose, map { "lib: $g $_ " . ( $want_graph{$g}{$_} // 0 ) . " -> $graph{$g}{$_}" }
-        grep { $graph{$g}{$_} > ( $want_graph{$g}{$_} // 0 ) } sort keys $graph{$g}->%*;
-}
-is_deeply( \@rose, [], 'no rule above its baseline (V8, V9)' );
-my @fell = grep { ( $total{probes}{$_} // 0 ) < $want_total{$_} } sort keys %want_total;
-diag "probes: below the baseline (lower it): @fell" if @fell;
 done_testing;

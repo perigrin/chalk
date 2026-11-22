@@ -532,7 +532,6 @@ sub to_json ($named_graphs) {
 
     my $data = {
         version => 2,
-        profile => ['mem'],
         source  => undef,
         methods => \%methods,
     };
@@ -1299,29 +1298,21 @@ sub from_json ($json_string) {
     # ONE READER, OF WIRE V2 (docs/plans/2026-11-20-wire-v2.md). Wire v1 is
     # gone (stage 6): B::SoN writes v2 only, and a v1 wire, or one that does
     # not say, is refused by name -- its memory was a positional input no
-    # reader here takes for one. Of v2, the `mem` part is read; a wire that
-    # obeys the eval or loop parts says what this loader does not read yet.
+    # reader here takes for one. `profile`, the parts of v2 a wire obeyed
+    # while the migration ran, is gone too (stage 10): every part is v2, and a
+    # wire that lists them was written before -- refused by name, not let off
+    # a part it leaves out.
     my $version = $data->{version} // 'none';
     die "GAP: wire version $version is not one chalk reads (wire v2 only)\n" unless $version eq '2';
-    die "GAP: wire v2 profile `$_` is not read yet\n" for grep { !/\A(?:mem|eval|loop)\z/ } ( $data->{profile} // [] )->@*;
-    # THE `eval` PART (stage 8): a die's way out is an edge (Exc) to the eval's
-    # catch Region. A wire without it joined a caught die by no edge at all
-    # (no restore, no $@ store): one that holds an eval is refused.
-    unless ( grep { $_ eq 'eval' } ( $data->{profile} // [] )->@* ) {
-        for my $m ( values( ( $data->{methods} // {} )->%* ) ) {
-            for my $n ( _wire_nodes($m) ) {
-                my $f = $n->{fields} // {};
-                die "GAP: an eval on a wire without the `eval` profile (its die has no way out)\n"
-                    if defined $f->{eval_id} || defined $f->{eval_entry};
-            }
-        }
-    }
-    # B::SoN'S WIRE is held to the memory invariant (L1-L6), each of its
-    # graphs, before any is made. (B::SoN's says perl's warning switches,
-    # `dowarn`, as WireCheck asks below: a graph chalk wrote itself,
-    # to_json's, threads no memory.)
+    die 'GAP: wire v2 `profile` ' . ( ref $data->{profile} eq 'ARRAY' ? "[$data->{profile}->@*]" : $data->{profile} // 'null' )
+        . ": a wire from before wire v2 closed (stage 10); every part is v2 now\n" if exists $data->{profile};
+    # B::SoN'S WIRE is held to the memory invariant (L1-L8), each of its
+    # graphs, before any is made. HELD BY NAME: a wire with no `dowarn`, which
+    # B::SoN always writes, is chalk's own (to_json's, its tests' round trip):
+    # chalk's in-memory graphs thread no memory (a Return names none), so the
+    # invariant is not theirs to keep.
     if ( exists $data->{dowarn} ) {
-        my $inv = Chalk::IR::Serialize::WireInvariant->new( profile => $data->{profile} // [] );
+        my $inv = Chalk::IR::Serialize::WireInvariant->new;
         $inv->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;
         $inv->check( 'a ' . ( $_->{phase} // 'phase' ) . ' block', $_ ) for ( $data->{phase_blocks} // [] )->@*;
     }

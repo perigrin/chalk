@@ -184,9 +184,6 @@ my $WIRE = <<'JSON';
       "start" : 0
     }
   },
-  "profile" : [
-    "mem"
-  ],
   "version" : 2
 }
 JSON
@@ -423,9 +420,6 @@ subtest 'two identical MakeCells are two distinct cells' => sub {
       "start" : 0
     }
   },
-  "profile" : [
-    "mem"
-  ],
   "version" : 2
 }
 JSON
