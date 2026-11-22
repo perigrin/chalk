@@ -20,11 +20,9 @@ sub verdict ($src) {
 
 my $CALL2 = qr/a call used both as a list and as a scalar/;
 my $W5    = qr/a captured variable passed to a sub that writes its argument/;
-my $W6    = qr/a `local` \(\$main::g\) in a sub a die leaves, under an eval/;
-my $W6E   = qr/a store to a package variable \(\$main::\w+\) in an eval block that dies/;
 my $DIV   = qr/a (?:division|modulus) whose divisor may be zero, on no control chain/;
+my $W6C  = qr/a call that may die under a `local` \(\$main::g\), in a sub with no eval \(in main::t\)/;
 my $DEREF = qr/a dereference nothing reads, which may still die/;
-my $DIE   = qr/a die of what may be a reference, where an eval may catch it/;
 my $W8    = qr/a DESTROY method \(\w+::DESTROY\)/;
 my $W9    = qr/a read through an element that is not there, which perl makes/;
 
@@ -61,18 +59,25 @@ for my $case (
     [ q{my $x = 1; my $g = sub { $x }; sub setx { $_[0] = 12 } setx($x); print $g->(), "\n";}, $W5, 'W5: a named sub writes $_[0]' ],
     [ q{my $x = 1; my $g = sub { $x }; my $set = sub { $_[0] = 5 }; $set->($x); print $g->(), "\n";}, $W5, 'W5: a code reference writes $_[0]' ],
     [ q{my $x = 1; my $g = sub { $x }; sub twice { return $_[0] * 2 } print twice($x), $g->(), "\n";}, undef, 'W5: a sub that only reads $_[0]' ],
+    # W6 and W7's dies (wire v2 stage 8): the die's way out carries the restores and
+    # $@ holds what was thrown, so each of these is perl's output now, refused by nothing.
     # W6
-    [ q{our $g = 1; sub t { local $g = 2; die "x\n" } eval { t() }; print "$g\n";}, $W6, 'W6: a die out of a sub with a local' ],
+    [ q{our $g = 1; sub t { local $g = 2; die "x\n" } eval { t() }; print "$g\n";}, undef, 'W6: a die out of a sub with a local' ],
     [ q{our $v = 1; sub show { print $v } sub t { local $v = 2; show(); eval { local $v = 3; show(); die "x\n" }; show() } t(); show(); print "\n";},
-        $W6E, 'W6: a local in an eval block that dies' ],
+        undef, 'W6: a local in an eval block that dies' ],
     [ q{our $g = 1; sub t { local $g = 2; return $g + 1 } my $r = eval { t() }; print "$g $r\n";}, undef, 'W6: a local in a sub that cannot die' ],
+    # (a call that dies under a live `local`, in a sub with no eval: its way
+    # out would need a rethrow that restores first -- the plan's Q9 -- and is
+    # refused by name until then)
+    [ q{our $g = 1; sub u { die "x\n" } sub t { local $g = 2; u() } eval { t() }; print "$g $@";}, $W6C, 'W6: a call under a local in a sub with no eval' ],
+    [ q{our $g = 1; sub u { 1 } sub t { { local $g = 2; } u() } eval { t() }; print "$g\n";}, undef, 'W6: a call after the local is put back' ],
     # (B::SoN reads what a `local` is to put back, at the version its store
     # replaces: a store with no such read beside it is a plain one)
     [ q{our $g = 1; eval { $g = 2; die "x\n"; $g = 3 }; print "$g\n";}, undef, 'W6: a plain store in an eval block that dies (ev12)' ],
     [ q{our $g = 1; sub t { eval { $g = 2; die "x\n" }; return } t(); print "$g\n";}, undef, 'W6: a plain store in a dying eval, in a sub' ],
-    [ q{our $g = 1; eval { local $g = 2; die "x\n" }; print "$g\n";}, $W6E, 'W6: a local alone in an eval block that dies' ],
-    [ q{our $g = 1; eval { $g = $g + 2; die "x\n" }; print "$g\n";}, $W6E, 'W6: a store of what was read there: the wire of a local' ],
-    [ q{our $g = 1; for my $i (1, 2) { eval { $g = 5; die "x\n" }; print "$g\n" }}, $W6E, 'W6: a store in a dying eval in a loop' ],
+    [ q{our $g = 1; eval { local $g = 2; die "x\n" }; print "$g\n";}, undef, 'W6: a local alone in an eval block that dies' ],
+    [ q{our $g = 1; eval { $g = $g + 2; die "x\n" }; print "$g\n";}, undef, 'W6: a store of what was read there: the wire of a local' ],
+    [ q{our $g = 1; for my $i (1, 2) { eval { $g = 5; die "x\n" }; print "$g\n" }}, undef, 'W6: a store in a dying eval in a loop' ],
     [ q{use v5.42; no warnings; sub g ($x) { die "bad $x\n" if $x > 1; return $x } sub h ($x) { my $r = "n"; try { g($x); } catch ($e) { chomp $e; $r = "c:$e"; } return $r } $@ = "before"; print h(1), " ", h(2), " [$@]\n";},
         undef, 'W6: a try puts $@ back itself, and its chomp of $e is of a copy' ],
     [ q{use v5.42; no warnings; my %c; $c{a} = 1; sub f { 1 } sub g ($k) { return if $k eq "z"; if (exists $c{$k}) { try { f() } catch ($x) { die "A: $x" } 1 } else { 2 } } print g("a"), g("b"), "[", scalar(g("z")) // "u", "]\n";},
@@ -84,9 +89,9 @@ for my $case (
     [ q{my $d = @ARGV + 2; my $q = 7 / $d; print "$q\n";}, undef, 'W7: a division used where it stands' ],
     [ q{my $n = @ARGV + 5; my $q = -$n ** 2 / 3; my $m = $n % 2; print "x\n"; print "$q $m\n";}, undef, 'W7: a constant divisor, coerced' ],
     [ q{use strict; my $r; print "a\n"; my @l = @$r; print "b\n";}, $DEREF, 'W7: an unread deref of undef' ],
-    [ q{eval { die { code => 7 } }; print ref($@), " ", (ref $@ ? $@->{code} : "str"), "\n";}, $DIE, 'W7: a die of a hash reference' ],
+    [ q{eval { die { code => 7 } }; print ref($@), " ", (ref $@ ? $@->{code} : "str"), "\n";}, undef, 'W7: a die of a hash reference' ],
     [ q{package E; sub new { bless { m => $_[1] }, $_[0] } sub msg { $_[0]{m} } package main; eval { die E->new("oops") }; print ref($@) ? $@->msg : "str:$@", "\n";},
-        $DIE, 'W7: a die of an object' ],
+        undef, 'W7: a die of an object' ],
     [ q{eval { die "plain\n" }; print "got $@";}, undef, 'W7: a die of a string' ],
     # W8
     [ q{my @o; sub DESTROY { push @o, "d" } { my $x = bless [], "main"; } print "@o\n";}, $W8, 'W8: DESTROY' ],
@@ -135,6 +140,10 @@ for my $case (
     require Chalk::IR::Serialize::WireCheck;
     ok( !Chalk::IR::Serialize::WireCheck->can('_hash_assigns_read_as_scalars'),
         'hash assign: WireCheck holds no rule for a hash handed to a scalar reader' );
+    # (wire v2 stage 8: a die's way out is on the wire, its restores and $@
+    # store with it, and $@ holds what was thrown)
+    ok( !Chalk::IR::Serialize::WireCheck->can($_), "W6/W7: WireCheck holds no $_" )
+        for qw(_locals_a_die_skips _stores_in_a_dying_eval _may_be_a_local _dies_of_references);
 }
 
 done_testing;

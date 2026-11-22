@@ -22,9 +22,8 @@ use experimental 'class';
 #       the chains; that Assign is the version (the plan's section 3.3: a
 #       node an Assign stores through is a place).
 #   L6  a Phi has as many inputs as its Region has ways in (a Loop: two); a
-#       memory Phi's inputs are versions. (A trap's value Phi -- a block
-#       eval's join, a string eval's -- has one more on a wire without the
-#       `eval` profile, whose die has no exceptional edge.)
+#       memory Phi's inputs are versions. (An eval's join too, since stage 8:
+#       its catch is a way in like the body's end.)
 #   L7  (`eval` profile) every way into a catch Region leads back, by
 #       control_in, to an Exc: the exceptional edges of what died, and only
 #       they, merge there.
@@ -90,14 +89,6 @@ class Chalk::IR::Serialize::WireInvariant {
             $gap->( 'L5', $n, "$what and on no control chain (control_in)" ) unless defined $n->{control_in};
             $gap->( 'L5', $n, "$what and no memory version (mem_out)" ) unless $n->{mem_out};
         }
-        # A TRAP'S JOIN: a block eval's (eval_id), or a string eval's (its one
-        # way in the pinned compile of the code, a Coerce to Code).
-        my $trap = sub ($r) {
-            return 1 if defined( ( $r->{fields} // {} )->{eval_id} );
-            my @in = grep { defined } ( $r->{inputs} // [] )->@*;
-            my $c = @in == 1 ? $by{ $in[0] } : undef;
-            return $c && $c->{op} eq 'Coerce' && defined $c->{control_in} && ( ( $c->{fields} // {} )->{to_repr} // '' ) eq 'Code';
-        };
         for my $n ( grep { $_->{op} eq 'Phi' } @nodes ) {
             my $f = $n->{fields} // {};
             my $r = $by{ $f->{region} // '' };
@@ -106,7 +97,7 @@ class Chalk::IR::Serialize::WireInvariant {
             my $want = $r->{op} eq 'Loop' ? 2 : scalar grep { defined } ( $r->{inputs} // [] )->@*;
             my $have = scalar( ( $n->{inputs} // [] )->@* );
             $gap->( 'L6', $n, "has $have inputs for $want ways into $r->{op}#$r->{id}" )
-                if $have != $want && !( $have == $want + 1 && !$f->{memory} && !$edges && $trap->($r) );
+                if $have != $want;
             if ( $f->{memory} ) {
                 $gap->( 'L6', $n, 'is a memory Phi with input ' . $say->($_) . ', which is no memory version' )
                     for grep { !$version->($_) } grep { defined } ( $n->{inputs} // [] )->@*;

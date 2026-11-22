@@ -1291,8 +1291,12 @@ sub from_json ($json_string) {
     die "GAP: wire version $version is not one chalk reads (wire v2 only)\n" unless $version eq '2';
     die "GAP: wire v2 profile `$_` is not read yet\n" for grep { !/\A(?:mem|eval)\z/ } ( $data->{profile} // [] )->@*;
     # THE `eval` PART (stage 8): a die's way out is an edge (Exc) to the eval's
-    # catch Region; a wire without it joins a caught die as stage 6's did.
-    our $EVAL_EDGES = scalar grep { $_ eq 'eval' } ( $data->{profile} // [] )->@*;
+    # catch Region. A wire without it joined a caught die by no edge at all
+    # (no restore, no $@ store): one that holds an eval is refused.
+    die "GAP: an eval on a wire without the `eval` profile (its die has no way out)\n"
+        if !grep( { $_ eq 'eval' } ( $data->{profile} // [] )->@* )
+        && grep { my $f = $_->{fields} // {}; defined $f->{eval_id} || defined $f->{eval_entry} }
+           map { _wire_nodes($_) } values( ( $data->{methods} // {} )->%* );
     # B::SoN'S WIRE is held to the memory invariant (L1-L6), each of its
     # graphs, before any is made. (B::SoN's says perl's warning switches,
     # `dowarn`, as WireCheck asks below: a graph chalk wrote itself,
@@ -1399,7 +1403,7 @@ sub from_json ($json_string) {
     # are not placed by B::SoN's rules, and a hand-built one may float what it
     # likes. Nor does a fixture recorded from an older B::SoN, whose pinning
     # these rules were not written against.)
-    Chalk::IR::Serialize::WireCheck->new( methods => $data->{methods}, defined => \%defined, eval_edges => $EVAL_EDGES )->check
+    Chalk::IR::Serialize::WireCheck->new( methods => $data->{methods}, defined => \%defined )->check
         if exists $data->{dowarn};
     # ...and its class's record of it: a module's class keeps its shape, and
     # the name stays in its stash, unloaded (can() asks by name).

@@ -140,6 +140,9 @@ like( refused( encode_json($v1) ), qr/\AGAP: wire version 1\b/, 'a v1 wire is re
         return encode_json($w);
     };
     is( refused($EVAL), '', 'an eval wire with its catch edge loads' );
+    # (stage 8's end: the old join, a die with no way out, is not read)
+    like( refused( $bad_eval->( sub ($n, $all) { } ) =~ s/"profile":\["mem","eval"\]/"profile":["mem"]/r ),
+        qr/\AGAP: an eval on a wire without the `eval` profile/, 'an eval on a wire without the eval profile is refused by name' );
     like( refused( $bad_eval->( sub ($n, $all) { $n->{16}{inputs} = [11] } ) ), qr/\AGAP: wire invariant L7: main::__PROGRAM__: Region#16 /,
         'L7: a way into a catch Region that no Exc leads to is refused by its name' );
     like( refused( $bad_eval->( sub ($n, $all) { push @$all, { id => 29, op => 'Phi', inputs => [ 4, 1 ], fields => { region => 19 }, stamp => 'Maybe[Int]' } } ) ),
