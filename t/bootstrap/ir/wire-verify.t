@@ -189,7 +189,9 @@ for ( split /\n/, slurp($BASELINE) ) {
     if ( $set eq 'probes' ) { $want_total{$k} = $v; next }
     $want_graph{ $k =~ s/\A@//r } = { map { split /=/ } grep { length } split /,/, $v // '' };
 }
-ok( %want_total || %want_graph, "$BASELINE has rows" );
+# (EMPTY SINCE STAGE 8: V6 is hard since stage 7, phi-arity since stage 8,
+# and nothing else is counted on these sets; a row a new rule adds is held)
+ok( slurp($BASELINE) =~ /\A# SoN::Verify on wire v2/, "$BASELINE is read" );
 my @rose = map { "probes: $_ " . ( $want_total{$_} // 0 ) . " -> $total{probes}{$_}" }
     grep { $total{probes}{$_} > ( $want_total{$_} // 0 ) } sort keys +( $total{probes} // {} )->%*;
 for my $g ( sort keys %graph ) {
