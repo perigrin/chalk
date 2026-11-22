@@ -705,17 +705,30 @@ sub _iv_operand ( $user, $x, $st ) {
     return [ $lo, $hi ];
 }
 
+# _iv_test($Loop) -> the loop's test (wire v2's `loop` profile): the If that
+# is the one node following the Loop, whose Proj 1 is a way into the exit
+# Region the Loop heads; or undef (a test after effects, or none).
+sub _iv_test ($L) {
+    my @s = grep { $_->operation !~ /\A(?:Phi|Proj)\z/ } $L->successors;
+    return undef unless @s == 1 && $s[0]->operation eq 'If';
+    my ($out) = grep { $_->operation eq 'Proj' && $_->index == 1 } $s[0]->successors_by_input;
+    return undef unless $out && grep {
+        $_->operation eq 'Region' && blessed( $_->head ) && refaddr( $_->head ) == refaddr($L)
+    } ( $out->consumers // [] )->@*;
+    return $s[0];
+}
+
 # _iv_guard($Loop, $phi, $st) -> the bounds the loop's test puts on $phi in
 # its body ([lo, hi], either undef), or undef where it puts none: the test
-# is the one node pinned on the Loop, a numeric comparison (perhaps under a
-# not) of $phi with a value of known interval.
+# is the If on the Loop (_iv_test), its condition a numeric comparison
+# (perhaps under a not) of $phi with a value of known interval.
 my %IV_CMP = ( NumLt => 'lt', NumLe => 'le', NumGt => 'gt', NumGe => 'ge' );
 my %IV_FLIP = ( lt => 'gt', le => 'ge', gt => 'lt', ge => 'le' );
 my %IV_NOT = ( lt => 'ge', le => 'gt', gt => 'le', ge => 'lt' );
 sub _iv_guard ( $L, $p, $st ) {
-    my @pinned = grep { $_->operation !~ /\A(?:Phi|Proj)\z/ } $L->successors;
-    return undef unless @pinned == 1;
-    my $t = $pinned[0];
+    my $if = _iv_test($L) // return undef;
+    my $t = $if->inputs->[1];
+    return undef unless blessed($t);
     my $neg = 0;
     while ( $t->operation eq 'Not' && blessed( $t->inputs->[0] ) ) { $neg = !$neg; $t = $t->inputs->[0] }
     my $c = $IV_CMP{ $t->operation } // return undef;
@@ -766,12 +779,13 @@ sub _iv_in_body ( $n, $L, $st ) {
 }
 
 # _iv_ctl_in_body($ctl, $Loop) -> control $ctl is within the loop's body:
-# back up its chain to the loop's body Proj, not to the Loop itself.
+# back up its chain to the body Proj of the loop's test, not to the Loop.
 sub _iv_ctl_in_body ( $x, $L ) {
+    my $test = _iv_test($L);
     for ( 1 .. 100_000 ) {
         return 0 unless blessed($x);
         my $op = $x->operation;
-        return 1 if $op eq 'Proj' && blessed( $x->inputs->[0] ) && refaddr( $x->inputs->[0] ) == refaddr($L) && $x->index == 0;
+        return 1 if $op eq 'Proj' && $test && blessed( $x->inputs->[0] ) && refaddr( $x->inputs->[0] ) == refaddr($test) && $x->index == 0;
         return 0 if refaddr($x) == refaddr($L) || $op eq 'Start';
         $x = $op =~ /\A(?:Region|Proj|Loop)\z/ ? $x->inputs->[0] : $x->can('control_in') ? $x->control_in : undef;
     }
