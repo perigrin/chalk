@@ -18,6 +18,8 @@ use File::Spec;
 #              hard since stage 7: every read names a version), record: none.
 #   V8 arity   phi-arity: none (stage 8: an eval's catch is a way into its
 #              join; stage 9: a loop's Phis have one input per input of it).
+#   V8 trivial phi-trivial: none (stage 9b: a loop's Phi the pass never wrote
+#              is forwarded to its init, Braun's construction).
 #   V11 loop   loop: none (stage 9: a Loop is [entry, back], its test an If).
 #   the rest   (V8 phi-*, V9 control-fork): held to
 #              t/data/wire-verify-v2-baseline.tsv -- the probes by their totals,
@@ -38,7 +40,7 @@ plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$S
 unshift @INC, $SON;
 require SoN::Verify;
 
-my %HARD = map { ( $_ => 1 ) } qw(mem-in-not-version version-off-chain write-unreachable control-sink memory-order-disagrees record phi-arity loop);
+my %HARD = map { ( $_ => 1 ) } qw(mem-in-not-version version-off-chain write-unreachable control-sink memory-order-disagrees record phi-arity phi-trivial loop);
 my $BASELINE = 't/data/wire-verify-v2-baseline.tsv';
 # A V1-V5 OR V7 VIOLATION HELD, by file, graph and rule, each with why it is
 # not fixed yet. One that no longer occurs is printed: take it out.
