@@ -1236,6 +1236,7 @@ sub func {
     local $b->{eval_at} = { map { ( refaddr( $_->eval_entry ) => $_ ) } grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed( $_->eval_entry ) } $b->{own_nodes}->@* };
     local $b->{evals} = [];
     local $b->{eval_opened} = {};
+    local $b->{stmt};   # (the caller's statement is the caller's: exc_block)
     local $b->{in_func} = 1;
     local $b->{alias_strict};   # (the @_ a caller is building is not this sub's)
     local $b->{alias_writes};

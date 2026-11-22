@@ -502,7 +502,8 @@ sub exc_block {
 sub _common_memo {
     my (@preds) = @_;
     my $m = $preds[0]{memo};
-    return { map { ( $_ => $m->{$_} ) } grep { my $k = $_; !grep { !ref( $_->{memo}{$k} ) || refaddr( $_->{memo}{$k} ) != refaddr( $m->{$k} ) } @preds } keys $m->%* };
+    my $same = sub ( $x, $y ) { ref $x ? ref $y && refaddr($x) == refaddr($y) : !ref $y && ( $x // '' ) eq ( $y // '' ) && defined $x == defined $y };
+    return { map { ( $_ => $m->{$_} ) } grep { my $k = $_; !grep { !exists $_->{memo}{$k} || !$same->( $_->{memo}{$k}, $m->{$k} ) } @preds } keys $m->%* };
 }
 
 # _common_passed(@preds) -> the memory versions every pred passed, in order.
@@ -642,7 +643,7 @@ sub close_eval_edges {
         push @preds, $from_catch = { block => $b->{cur}, memo => $b->{memo}, stood => $b->{stood}, passed => $b->{passed}, end => $at };
     }
     my @ways = $r->inputs->@*;
-    my @pred_of = map { my $in = $_; ( grep { blessed($in) && refaddr( $preds[$_]{end} ) == refaddr($in) } 0 .. $#preds )[0] } @ways;
+    my @pred_of = map { my $in = $_; my ($i) = grep { blessed($in) && refaddr( $preds[$_]{end} ) == refaddr($in) } 0 .. $#preds; $i } @ways;
     # (a way in neither the body's live end nor the catch's: a return in the
     # body, or the body's end where it died)
     out('an eval whose body returns') if grep { !defined $pred_of[$_] && !( !$body && defined $end && blessed( $ways[$_] ) && refaddr( $ways[$_] ) == refaddr($end) ) } 0 .. $#ways;
