@@ -295,7 +295,7 @@ class Chalk::IR::Serialize::WireCheck {
         }
         $self->_captured_arguments_written;
         if ( $self->_has_eval && !$eval_edges ) { $self->_locals_a_die_skips($_) for sort keys $methods->%* }
-        $self->_dies_of_references;
+        $self->_dies_of_references unless $eval_edges;
         return;
     }
 }
