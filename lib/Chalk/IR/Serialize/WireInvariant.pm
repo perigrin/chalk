@@ -21,9 +21,14 @@ use experimental 'class';
 #       that stores through it (and calls it), reading memory (mem_in), off
 #       the chains; that Assign is the version (the plan's section 3.3: a
 #       node an Assign stores through is a place).
-#   L6  a Phi has as many inputs as its Region has ways in (a Loop: two); a
+#   L6  a Phi has as many inputs as its Region has ways in (a Loop: two; on
+#       the `loop` profile, its own inputs); a
 #       memory Phi's inputs are versions. (An eval's join too, since stage 8:
 #       its catch is a way in like the body's end.)
+#   L8  (`loop` profile) a Loop has one or two inputs (the way in, and the
+#       way round where a path goes round); the only forward references in
+#       a graph are a loop Phi's back input and a Loop's inputs[1]. A Loop's
+#       Phis have as many inputs as it (L6).
 #   L7  (`eval` profile) every way into a catch Region leads back, by
 #       control_in, to an Exc: the exceptional edges of what died, and only
 #       they, merge there.
@@ -71,6 +76,21 @@ class Chalk::IR::Serialize::WireInvariant {
                 }
             }
         }
+        my $loops = grep { $_ eq 'loop' } $profile->@*;
+        if ($loops) {
+            for my $n (@nodes) {
+                my $in = $n->{inputs} // [];
+                $gap->( 'L8', $n, 'has ' . scalar(@$in) . ' inputs (a Loop has one or two)' )
+                    if $n->{op} eq 'Loop' && ( @$in < 1 || @$in > 2 );
+                my $back = $n->{op} eq 'Loop' || $n->{op} eq 'Phi' && ( ( $by{ ( $n->{fields} // {} )->{region} // '' } // {} )->{op} // '' ) eq 'Loop';
+                for my $i ( 0 .. $#$in ) {
+                    next if $back && $i == 1;
+                    $gap->( 'L8', $n, "names $_, made after it" ) for grep { $_ >= $n->{id} } grep { defined && !ref } $in->[$i];
+                }
+                $gap->( 'L8', $n, "follows $_ (mem_in or control_in), made after it" )
+                    for grep { defined && $_ >= $n->{id} } $n->{mem_in}, $n->{control_in};
+            }
+        }
         my %uses;    # id -> [ [user, input index] ... ]
         for my $u (@nodes) {
             my $in = $u->{inputs} // [];
@@ -94,7 +114,7 @@ class Chalk::IR::Serialize::WireInvariant {
             my $r = $by{ $f->{region} // '' };
             $gap->( 'L6', $n, 'has no Region or Loop (region ' . $say->( $f->{region} ) . ')' )
                 unless $r && $r->{op} =~ /\A(?:Region|Loop)\z/;
-            my $want = $r->{op} eq 'Loop' ? 2 : scalar grep { defined } ( $r->{inputs} // [] )->@*;
+            my $want = $r->{op} eq 'Loop' ? ( $loops ? scalar( ( $r->{inputs} // [] )->@* ) : 2 ) : scalar grep { defined } ( $r->{inputs} // [] )->@*;
             my $have = scalar( ( $n->{inputs} // [] )->@* );
             $gap->( 'L6', $n, "has $have inputs for $want ways into $r->{op}#$r->{id}" )
                 if $have != $want;

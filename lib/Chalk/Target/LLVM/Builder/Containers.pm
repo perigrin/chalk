@@ -77,6 +77,13 @@ sub _loop_scope {
             my $p = $ctl->inputs->[0];
             return undef unless blessed($p) && $p->operation =~ /\A(?:If|Loop)\z/;
             return $ctl if $p->operation eq 'Loop' && $ctl->index == 0;
+            # (a loop's test, on the `loop` profile: Proj 0 its body, Proj 1
+            # its exit -- after the loop)
+            if ( $p->operation eq 'If' && ( my $L = _tested_loop($p) ) ) {
+                return $ctl if $ctl->index == 0;
+                ( $from, $ctl ) = ( $L, $L->control_in );
+                next;
+            }
             ( $from, $ctl ) = ( $ctl, $p );   # (an if's arm: the if's; a loop's exit: the loop's)
             next;
         }
@@ -103,7 +110,7 @@ sub agg_home {
         for my $i (grep { blessed( $p->inputs->[$_] ) && refaddr( $p->inputs->[$_] ) == refaddr($L) } 0 .. $p->inputs->$#*) {
             my $e;
             if ( blessed($r) && $r->operation eq 'Loop' ) {
-                $e = $i ? ( ( grep { $_->operation eq 'Proj' && $_->index == 0 } $r->successors_by_input )[0] // $r )
+                $e = $i ? ( loop_body_proj($r) // $r )
                         : _loop_scope( $r->control_in );
             }
             else {

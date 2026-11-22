@@ -549,6 +549,7 @@ sub _deserialize_graph ($method_data) {
 
     my @nodes;  # positional array of created node objects
     my @backedge_patches;  # [phi_position, backedge_index] deferred wirings
+    my @loop_back_patches; # [loop_position, back control index] (the `loop` profile)
 
     for my $nd (@node_data) {
         my $op     = $nd->{op};
@@ -569,8 +570,10 @@ sub _deserialize_graph ($method_data) {
         # naming the node/slot/index, so a future ordering bug is an immediate,
         # legible loader error rather than an opaque backend crash (zhi 019f26a5).
         my @input_idx = ($nd->{inputs} // [])->@*;
+        # (and, on the `loop` profile, a Loop's back input: the last control
+        # of its pass, made after it -- L8)
         my $phi_backedge_slot =
-            ($op eq 'Phi' && @input_idx == 2 && $input_idx[1] >= @nodes) ? 1 : -1;
+            ($op =~ /\A(?:Phi|Loop)\z/ && @input_idx == 2 && $input_idx[1] >= @nodes) ? 1 : -1;
         for my $slot (0 .. $#input_idx) {
             my $idx = $input_idx[$slot];
             next if $slot == $phi_backedge_slot;   # sanctioned deferred backedge
@@ -869,6 +872,10 @@ sub _deserialize_graph ($method_data) {
         }
 
         my $node;
+        if ($op eq 'Loop' && $phi_backedge_slot == 1) {
+            push @loop_back_patches, [ scalar @nodes, $input_idx[1] ];
+            $args{inputs} = [ $inputs[0] ];
+        }
         if ($is_cfg) {
             $node = $factory->make_cfg($op, %args);
         }
@@ -1061,6 +1068,8 @@ sub _deserialize_graph ($method_data) {
         my ($phi_idx, $val_idx) = @$patch;
         $nodes[$phi_idx]->set_backedge($nodes[$val_idx]);
     }
+    # (and the Loops' back inputs: the control each pass ends at)
+    $nodes[ $_->[0] ]->set_backedge_ctrl( $nodes[ $_->[1] ] ) for @loop_back_patches;
 
     my $start   = $nodes[ $method_data->{start} ];
     my @returns = map { $nodes[$_] } $method_data->{returns}->@*;
@@ -1291,7 +1300,7 @@ sub from_json ($json_string) {
     # obeys the eval or loop parts says what this loader does not read yet.
     my $version = $data->{version} // 'none';
     die "GAP: wire version $version is not one chalk reads (wire v2 only)\n" unless $version eq '2';
-    die "GAP: wire v2 profile `$_` is not read yet\n" for grep { !/\A(?:mem|eval)\z/ } ( $data->{profile} // [] )->@*;
+    die "GAP: wire v2 profile `$_` is not read yet\n" for grep { !/\A(?:mem|eval|loop)\z/ } ( $data->{profile} // [] )->@*;
     # THE `eval` PART (stage 8): a die's way out is an edge (Exc) to the eval's
     # catch Region. A wire without it joined a caught die by no edge at all
     # (no restore, no $@ store): one that holds an eval is refused.
