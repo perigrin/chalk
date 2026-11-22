@@ -215,7 +215,7 @@ fk3	SAME
 fk4	SAME	
 fk5	SAME	
 fk6	SAME	
-fk7	SAME	
+fk7	REFUSED	GAP: T2: out of its slices (a `my` scalar two list assignments bind one after the other (its reads are one node, at no memory version))
 fl1	SAME	
 fl10	SAME	
 fl11	REFUSED	load: from_json failed: GAP: a read through an element that is not there, which perl makes (autovivification) (in main::__PROGRAM__)
