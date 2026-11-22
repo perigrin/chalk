@@ -27,7 +27,7 @@ sub walk {
             # AN EVAL'S BODY THAT DIED where it ends (wire v2's `eval` profile:
             # no way from a die to the join but its catch's) is closed there.
             if ( my $f = ( $b->{evals} // [] )->[-1] ) {
-                if ( $f->{edges} && $b->{cur}{dead} && ( $b->{depth} // 0 ) == $f->{depth} ) { $ctl = $b->close_eval( $f->{region}, undef ); next }
+                if ( $b->{cur}{dead} && ( $b->{depth} // 0 ) == $f->{depth} ) { $ctl = $b->close_eval( $f->{region}, undef ); next }
             }
             # A MERGE AN EARLIER ARM JUMPED TO, this control its other way in.
             if (my $r = $b->join_jumps($ctl)) { $ctl = $r; next }
@@ -448,7 +448,6 @@ sub walk {
 # Its __DIE__ handler would be handed a string: refused where %SIG is used.
 sub dies_of_a_value {
     my ($b, $s) = @_;
-    return 0 unless $Chalk::IR::Serialize::JSON::EVAL_EDGES;
     my @m = grep { blessed($_) } $s->inputs->@*;
     return 0 unless @m == 1 && !_is_list( $m[0] ) && $m[0]->operation ne 'Constant'
         && ( $m[0]->stamp // '' ) !~ /\A(?:Str|Int|Num|Boolean)\z/;   # static type
@@ -477,11 +476,11 @@ sub dies_of_a_value {
 
 # EVAL FRAMES. B::SoN's block eval (and try): `$@ = ""` stored before it, its
 # body on the chain after the node eval_entry names, and a Region (eval_id)
-# its end -- whose phis' last input is the value a caught die gives (undef).
-# The body opens a frame: a die in it stores $@ and branches to the frame's
-# catch; a call in it that comes back dying (the flag a die in a sub sets)
-# does too. @t2_eval_depth counts the evals open at run time: a die where
-# none is exits.
+# its join, where the body's end and its catch meet (wire v2's `eval`
+# profile). The body opens a frame: a die in it stores $@ and branches to its
+# way out (exc_block); a call in it that comes back dying (the flag a die in
+# a sub sets) does too. @t2_eval_depth counts the evals open at run time: a
+# die where none is exits.
 sub open_eval {
     my ($b, $ctl) = @_;
     my $r = $b->{eval_at}{ refaddr($ctl) } or return;
@@ -493,19 +492,13 @@ sub open_eval {
     out('an eval in its caller\'s context') if defined $r->eval_want && $r->eval_want !~ /\A(?:list|scalar|void)\z/;
     $b->hash_reads_settled('an eval');
     $b->emit(op => 'EvalEnter', type => 'void');
-    push $b->{evals}->@*, { region => $r, catch => undef, depth => $b->{depth} // 0, start => $b->{cur}, made_before => { map { ( $_ => 1 ) } keys $b->{memo}->%* },
-                            edges => $Chalk::IR::Serialize::JSON::EVAL_EDGES ? 1 : 0, excs => [], passed => [ ( $b->{passed} // [] )->@* ] };
+    push $b->{evals}->@*, { region => $r, depth => $b->{depth} // 0, start => $b->{cur}, made_before => { map { ( $_ => 1 ) } keys $b->{memo}->%* },
+                            excs => [], passed => [ ( $b->{passed} // [] )->@* ] };
 }
 
 sub eval_catch {
     my ($b, $f) = @_;
-    return $b->exc_block($f) if $f->{edges};
-    return $f->{catch} //= do {
-        my $here = $b->{cur};
-        my $c = $b->new_block('catch');
-        $b->{cur} = $here;
-        $c;
-    };
+    return $b->exc_block($f);
 }
 
 # eval_region_after($ctl) -> the open eval's Region when $ctl is its body's end.
@@ -555,90 +548,13 @@ sub _common_passed {
     return [ @p[ 0 .. $n - 1 ] ];
 }
 
-sub close_eval {
-    my ($b, $r, $at) = @_;
-    return $b->close_eval_edges($r, $at) if $b->{evals}[-1]{edges};
-    # (popped once the body's value is made: a divide there is the eval's to catch)
-    my $f = $b->{evals}[-1];
-    out('an eval closed at another depth') if ( $b->{depth} // 0 ) != $f->{depth};
-    out('an eval Region of more than one way in') if $r->inputs->@* != 1;
-    my @phis = grep { $_->operation eq 'Phi' && blessed($_->region) && refaddr($_->region) == refaddr($r)
-                      && !$_->memory } ( $r->consumers // [] )->@*;
-    my %seen; @phis = grep { !$seen{ refaddr($_) }++ } @phis;
-    my $dead = $b->{cur}{dead};
-    my @in;
-    for my $p (@phis) {
-        my $ty = $b->phi_type($p);
-        push @in, [ $p, $ty, $dead ? undef : $b->phi_input( $p, $p->inputs->[0], $ty ) ];
-    }
-    pop $b->{evals}->@*;
-    my $end = $b->{cur};
-    unless ($dead) {
-        # AN EVAL ENDING WITHOUT A DIE leaves $@ "" (an inner one's caught die
-        # was left in it: "[x]" for "[]").
-        $b->emit(op => 'SetErr', type => 'void', inputs => [ $b->const_str('') ]);
-        $b->emit(op => 'EvalLeave', type => 'void');
-    }
-    my $join = $b->new_block('evaljoin');
-    $end->{term} = [ 'br', $join ] unless $dead;
-    my @from = $dead ? () : ($end);
-    my @cv;
-    if (my $c = $f->{catch}) {
-        $b->{cur} = $c;
-        $b->emit(op => 'EvalLeave', type => 'void');
-        $b->emit(op => 'ClearDying', type => 'void');
-        # (a value made here is the catch's: not seen after -- an undef made in
-        # one eval's catch was another's phi input, not dominating it)
-        local $b->{memo} = { $b->{memo}->%* };
-        local $b->{stood} = { ( $b->{stood} // {} )->%* };   # (as its memo: see _stood_already)
-        # (in list context a caught die gives the empty list, not B::SoN's undef)
-        @cv = map { ( $r->eval_want // '' ) eq 'list' && $_->[1] eq '%Array*'
-                    ? $b->emit(op => 'NewArray', type => '%Array*')
-                    : $b->as($b->value( $_->[0]->inputs->[-1] ), $_->[1]) } @in;
-        $c = $b->{cur};
-        $c->{term} = [ 'br', $join ];
-        push @from, $c;
-    }
-    # NO WAY TO ITS END (its body exits, and nothing in it can die): what
-    # follows never runs -- a block of its own, no way into it.
-    unless (@from) {
-        $join->{dead} = 1;
-        $b->{cur} = $join;
-        $b->{memo}{ refaddr( $_->[0] ) } = $b->emit(op => 'Undef', type => '%Slot') for grep { $_->[1] eq '%Slot' } @in;
-        out('an eval of no way to its end whose value is read') if grep { $_->[1] ne '%Slot' } @in;
-        push $b->{passed}->@*, $r, $r->memory_phis;
-        return $r;
-    }
-    # A VALUE THE BODY MADE past its first block need not dominate the join
-    # (a die skips it): a constant is made again where it is next read;
-    # anything else is refused (the 1 one try made was the next try's: "does
-    # not dominate all uses"). One made in the first block is before any die.
-    my %first = map { ( refaddr($_) => 1 ) } $f->{start}{nodes}->@*;
-    # (dropped here, not at that read: one made first in an arm went with the
-    # arm's copy, and the next eval read this one -- "does not dominate")
-    for my $k (grep { my $m = $b->{memo}{$_}; !$f->{made_before}{$_} && !( ref $m && $first{ refaddr($m) } ) } keys $b->{memo}->%*) {
-        $b->{past_eval}{$k} = 1;
-        delete $b->{memo}{$k};
-    }
-    $b->{cur} = $join;
-    for my $i (0 .. $#in) {
-        my ($p, $ty, $nv) = $in[$i]->@*;
-        my @vals = ( ( $dead ? () : $nv ), ( $f->{catch} ? $cv[$i] : () ) );
-        $b->{memo}{ refaddr($p) } = @vals == 1 ? $vals[0]
-            : $b->emit(op => 'Phi', type => $ty, inputs => \@vals, attr => { from => [@from] });
-    }
-    push $b->{passed}->@*, $r, $r->memory_phis;   # (its join's memory version: B::SoN's, the $@ a die set)
-    return $r;
-}
-
-# close_eval_edges($join, $end) -> the join, made: an eval on wire v2's `eval`
-# profile. Its ways in are the body's end ($end; undef where the body died)
+# close_eval($join, $end) -> the join, made (wire v2's `eval` profile). Its ways in are the body's end ($end; undef where the body died)
 # and its catch's: each Exc's block (exc_block) runs the restores on its edge
 # to the catch Region, where the evals open at run time and the dying flag are
 # put back and the edges' values merge (the exception each read); the $@ store
 # after it is the producer's. A value the body made past what all ways in
 # share is not seen after the join (a die may skip it; see value).
-sub close_eval_edges {
+sub close_eval {
     my ($b, $r, $end) = @_;
     my $f = $b->{evals}[-1];
     out('an eval closed at another depth') if ( $b->{depth} // 0 ) != $f->{depth};

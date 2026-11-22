@@ -1,5 +1,5 @@
 # ABOUTME: Checks a B::SoN wire before it is loaded for what chalk would lower wrong -- a read at no
-# ABOUTME: memory version beside a write, a DESTROY, a die skipping a local -- refused here, by name.
+# ABOUTME: memory version beside a write, a DESTROY, an argument a closure captured -- refused here, by name.
 use 5.42.0;
 use utf8;
 use experimental 'class';
@@ -16,6 +16,11 @@ use Chalk::Grammar::Perl::BuiltinTable;
 # refused here until wire v2 stage 6: on v2 the loader's invariant
 # (WireInvariant) refuses a memory version off the chain, and B::SoN pins a
 # division that may fault; with both rules off no audit probe changed.
+# A DIE SKIPPING A `local`, a store in an eval that dies, and a die of a
+# reference were refused here until wire v2 stage 8: on its `eval` profile a
+# die's way out (Exc) carries the restores, $@ is stored from the exception
+# in flight, and a die outside an eval puts its locals back before it. Only
+# a call dying under a `local` in a sub with no eval is left (W6, narrowed).
 #
 #   Chalk::IR::Serialize::WireCheck->new( methods => \%wire_graphs, defined => \%every_graph )->check;
 #
@@ -26,9 +31,6 @@ use Chalk::Grammar::Perl::BuiltinTable;
 class Chalk::IR::Serialize::WireCheck {
     field $methods :param;
     field $defined :param = {};    # every sub the program's own file defines (run or not): name => wire graph
-    # The wire's die has its way out (wire v2's `eval` profile): the restores
-    # on it and the eval's $@ store are on the wire, and W6 is not needed.
-    field $eval_edges :param = 0;
     field %index;    # graph name => { by => { id => node }, cons => { id => [[consumer, slot], ...] } }
 
     # A store that is a node of its own (each takes memory as an input), a
@@ -79,16 +81,6 @@ class Chalk::IR::Serialize::WireCheck {
         return Chalk::Grammar::Perl::BuiltinTable::fact( $self->_f( $n, 'name' ), $column );
     }
     method _is_bless($n)   { return ( $self->_builtin_fact( $n, 'kind' ) // '' ) eq 'blesses' ? 1 : 0 }
-
-    # What control reaches a node from: its control_in, a Region's every way
-    # in, an If's, Proj's or Loop's first input.
-    method _preds( $g, $n ) {
-        my @p = defined $n->{control_in} ? ( $n->{control_in} ) : ();
-        my @in = $self->_inputs($n);
-        push @p, $n->{op} eq 'Region' ? @in : $n->{op} =~ /\A(?:If|Proj|Loop)\z/ ? @in[ 0 .. ( @in ? 0 : -1 ) ] : ();
-        my %seen;
-        return grep { defined && !$seen{ $_->{id} }++ } map { defined $_ ? $g->{by}{$_} : undef } @p;
-    }
 
     # A package variable's name (`$main::g`), of its EntryDef.
     method _pkg_name($n) {
@@ -214,37 +206,35 @@ class Chalk::IR::Serialize::WireCheck {
         return;
     }
 
-    # W6. `local` IS PUT BACK ONLY ON THE WAYS OUT B::SoN WROTE A RESTORE FOR.
-    method _has_eval() {
-        return scalar grep { defined $self->_f( $_->[1], 'eval_id' ) || defined $self->_f( $_->[1], 'eval_entry' ) } $self->_all_nodes;
-    }
-
-    # A die leaves a sub by no way on the wire, so a `local` there is not put
-    # back: `sub t { local $g = 2; die } eval { t() }` left $g 2. Refused
-    # where an eval is in the program and a die of the sub's own stands
-    # between a `local` store and its restore. (A die in a sub it calls
-    # there is not seen: Test::Chalk's subtest, which every test would lose.)
-    method _locals_a_die_skips($name) {
+    # W6 (narrowed, stage 8). A CALL THAT DIES UNDER A LIVE `local`, in a sub
+    # with no eval of its own, leaves by no way on the wire: its die is the
+    # callee's, and the restore B::SoN writes stands after it (a die of the
+    # sub's own puts its locals back first; one in an eval has its edge).
+    # `sub t { local $g = 2; u() } eval { t() }` left $g 2. Refused where an
+    # eval is in the program, a sub call outside any eval of its graph, and a
+    # store to a package variable the graph restores somewhere stands before
+    # the call with no restore of it between (the plan's Q9: a rethrow that
+    # restores first is its way out).
+    method _calls_a_local_dies_through($name) {
         my $g = $self->_graph($name);
         my %restored;    # variable => { restore node id => 1 }
         for my $w ( grep { $_->{op} eq 'EntryWrite' } $g->{nodes}->@* ) {
             my $v   = $g->{by}{ ( $self->_inputs($w) )[1] // '' };
             my $var = $self->_written_pkg( $g, $w ) // next;
-            # (a try or an eval puts $@ back itself; a die sets it anyway)
-            next if $var eq '$main::@';
+            next if $var eq '$main::@';    # (an eval puts $@ back itself)
             $restored{$var}{ $w->{id} } = 1
-                if $self->_f( $w, 'binds' ) || defined $v && $v->{op} eq 'EntryDef' && defined $v->{mem_in} && $self->_pkg_name($v) eq $var;
+                if $self->_f( $w, 'binds' ) || defined $v && $v->{op} eq 'EntryDef' && defined $v->{mem_in} && ( $self->_pkg_name($v) // '' ) eq $var;
         }
         return unless %restored;
-        for my $u ( grep { $_->{op} eq 'Unwind' && !defined $self->_f( $_, 'eval_id' ) } $g->{nodes}->@* ) {
+        for my $c ( grep { $self->_is_sub_call($_) && defined $_->{control_in} && !defined $self->_f( $_, 'eval_id' ) && $self->_call_may_die($_) } $g->{nodes}->@* ) {
             my ( %seen, @q );
-            @q = $self->_preds( $g, $u );
+            @q = $self->_preds( $g, $c );
             while ( defined( my $x = shift @q ) ) {
                 next if $seen{ $x->{id} }++;
                 my $var = $self->_written_pkg( $g, $x );
                 if ( defined $var && $restored{$var} ) {
-                    next if $restored{$var}{ $x->{id} };    # (put back before the die)
-                    $self->_gap("a `local` ($var) in a sub a die leaves, under an eval: the die's way out restores nothing (in $name)");
+                    next if $restored{$var}{ $x->{id} };    # (put back before the call)
+                    $self->_gap("a call that may die under a `local` ($var), in a sub with no eval (in $name)");
                 }
                 push @q, $self->_preds( $g, $x );
             }
@@ -252,63 +242,34 @@ class Chalk::IR::Serialize::WireCheck {
         return;
     }
 
-    # A store to a package variable in an eval block that dies may be a
-    # `local`'s, whose restore the die skips and the wire does not write.
-    # B::SoN reads what a `local` is to put back at the memory version its
-    # store replaces (an EntryDef of the variable there, which nothing takes
-    # once the restore is gone), so a store with such a read beside it is
-    # refused -- `$g = $g + 2` has the same read -- and one without is a
-    # plain store. In a graph with a loop a `local` may save a value the
-    # loop carries instead, with no read: refused there as before.
-    method _stores_in_a_dying_eval($name) {
-        my $g = $self->_graph($name);
-        my $has_loop = grep { $_->{op} eq 'Loop' } $g->{nodes}->@*;
-        for my $u ( grep { $_->{op} eq 'Unwind' && defined $self->_f( $_, 'eval_id' ) } $g->{nodes}->@* ) {
-            my $id = $self->_f( $u, 'eval_id' );
-            my ($join) = grep { $_->{op} eq 'Region' && ( $self->_f( $_, 'eval_id' ) // '' ) eq $id } $g->{nodes}->@*;
-            my $entry = defined $join ? $self->_f( $join, 'eval_entry' ) : undef;
-            next unless defined $entry;
-            my ( %seen, @q );
-            @q = $self->_preds( $g, $u );
-            while ( defined( my $x = shift @q ) ) {
-                next if $seen{ $x->{id} }++ || $x->{id} == $entry;
-                my $var = $self->_written_pkg( $g, $x );
-                $self->_gap("a store to a package variable ($var) in an eval block that dies: the wire does not say whether it is a `local`, whose restore the die would skip (in $name)")
-                    if defined $var && $var ne '$main::@' && ( $has_loop || $self->_may_be_a_local( $g, $x, $var ) );
-                push @q, $self->_preds( $g, $x );
-            }
-        }
-        return;
+    # _call_may_die($call) -> false only for a direct call of a sub of this
+    # wire none of whose nodes may die: no die, no division or dereference
+    # that names where it dies, no call but such calls.
+    method _call_may_die($c) {
+        my $name = $self->_f( $c, 'name' ) // '';
+        return 1 unless ( $self->_f( $c, 'dispatch_kind' ) // '' ) eq 'direct' && exists $methods->{$name};
+        return $self->_graph_may_die($name, {});
     }
-
-    # _may_be_a_local($g, $store, $var) -> true where a read of $var from
-    # memory stands at the version $store replaces, or is taken by nothing:
-    # the read a `local` saves its old value with.
-    method _may_be_a_local( $g, $store, $var ) {
-        my $replaced = $store->{mem_in};
-        for my $r ( grep { $_->{op} eq 'EntryDef' && ( $self->_pkg_name($_) // '' ) eq $var } $g->{nodes}->@* ) {
-            my $at = $r->{mem_in};
-            next unless defined $at;    # (the variable's name, not a read of it)
-            return 1 if defined $replaced && $at == $replaced;
-            return 1 unless ( $g->{cons}{ $r->{id} } // [] )->@*;
+    method _graph_may_die( $name, $seen ) {
+        return 0 if $seen->{$name}++;
+        for my $n ( $self->_graph($name)->{nodes}->@* ) {
+            return 1 if $n->{op} eq 'Unwind' || defined $self->_f( $n, 'line' ) && $n->{op} =~ /\A(?:Divide|Modulo|PostfixDeref|Ref)\z/;
+            next unless $self->_is_sub_call($n);
+            my $callee = $self->_f( $n, 'name' ) // '';
+            return 1 unless ( $self->_f( $n, 'dispatch_kind' ) // '' ) eq 'direct' && exists $methods->{$callee};
+            return 1 if $self->_graph_may_die( $callee, $seen );
         }
         return 0;
     }
 
-    # W7. A DIE OF A REFERENCE: T2's $@ is the die's message, a string.
-    method _dies_of_references() {
-        return unless $self->_has_eval;
-        for my $e ( grep { $_->[1]{op} eq 'Unwind' } $self->_all_nodes ) {
-            my ( $name, $n ) = $e->@*;
-            my $g = $self->_graph($name);
-            for my $v ( map { $g->{by}{ $_ // '' } // () } $self->_inputs($n) ) {
-                next if $v->{op} eq 'MemStart' || $v->{op} eq 'Constant';
-                next if ( $v->{stamp} // '' ) =~ /\A(?:Str|Int|Num|Boolean)\z/;
-                next if ( $self->_pkg_name($v) // '' ) eq '$main::@';
-                $self->_gap("a die of what may be a reference, where an eval may catch it: \$@ would be its string, not the reference (in $name)");
-            }
-        }
-        return;
+    # What control reaches a node from: its control_in, a Region's every way
+    # in, an If's, Proj's or Loop's first input.
+    method _preds( $g, $n ) {
+        my @p = defined $n->{control_in} ? ( $n->{control_in} ) : ();
+        my @in = $self->_inputs($n);
+        push @p, $n->{op} eq 'Region' ? @in : $n->{op} =~ /\A(?:If|Proj|Loop|Exc)\z/ ? @in[ 0 .. ( @in ? 0 : -1 ) ] : ();
+        my %seen;
+        return grep { defined && !$seen{ $_->{id} }++ } map { defined $_ ? $g->{by}{$_} : undef } @p;
     }
 
     method check() {
@@ -331,11 +292,9 @@ class Chalk::IR::Serialize::WireCheck {
             $self->_flattened_package_aggregates($name);
             $self->_autovivifying_reads($name);
             $self->_unread_derefs($name);
-            $self->_stores_in_a_dying_eval($name) unless $eval_edges;
         }
         $self->_captured_arguments_written;
-        if ( $self->_has_eval && !$eval_edges ) { $self->_locals_a_die_skips($_) for sort keys $methods->%* }
-        $self->_dies_of_references unless $eval_edges;
+        if ( grep { defined $self->_f( $_->[1], 'eval_id' ) } $self->_all_nodes ) { $self->_calls_a_local_dies_through($_) for sort keys $methods->%* }
         return;
     }
 }
