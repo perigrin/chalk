@@ -126,6 +126,27 @@ my $v1 = decode_json($GOOD);
 $v1->{version} = 1;
 like( refused( encode_json($v1) ), qr/\AGAP: wire version 1\b/, 'a v1 wire is refused, not upgraded' );
 
+# THE `eval` PROFILE (stage 8): a die's way out is an Exc, and a block eval's
+# catch Region merges those edges (t/data/wire-v2-eval-catch-edge.json, the
+# plan's section 3.5). L7: every way into a catch Region leads back, by
+# control_in, to an Exc. And a trap's join is a merge like any other there:
+# L6 lets no value Phi have one more input than its Region has ways in.
+{
+    my $EVAL = do { local (@ARGV, $/) = 't/data/wire-v2-eval-catch-edge.json'; <> };
+    my $bad_eval = sub ($change) {
+        my $w = decode_json($EVAL);
+        my $nodes = $w->{methods}{'main::__PROGRAM__'}{nodes};
+        $change->( { map { ( $_->{id} => $_ ) } @$nodes }, $nodes );
+        return encode_json($w);
+    };
+    is( refused($EVAL), '', 'an eval wire with its catch edge loads' );
+    like( refused( $bad_eval->( sub ($n, $all) { $n->{16}{inputs} = [11] } ) ), qr/\AGAP: wire invariant L7: main::__PROGRAM__: Region#16 /,
+        'L7: a way into a catch Region that no Exc leads to is refused by its name' );
+    like( refused( $bad_eval->( sub ($n, $all) { push @$all, { id => 29, op => 'Phi', inputs => [ 4, 1 ], fields => { region => 19 }, stamp => 'Maybe[Int]' } } ) ),
+        qr/\AGAP: wire invariant L6: main::__PROGRAM__: Phi#29 has 2 inputs for 1 ways into Region#19/,
+        'L6: an eval join\'s value Phi with one input more than its ways in is refused on the eval profile' );
+}
+
 # A MEMORY EDGE NAMES A VERSION THE WIRE LISTED BEFORE IT. An upgraded v1
 # wire could name a merge's memory Phi listed after a node on the control
 # chain; B::SoN's v2 never does (it writes a node's memory first), so since

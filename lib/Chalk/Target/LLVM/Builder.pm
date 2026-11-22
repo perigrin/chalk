@@ -57,7 +57,7 @@ sub build {
     for (1 .. 100_000) {
         last if $start->operation eq 'Start';
         $start = $start->can('control_in') && blessed($start->control_in) ? $start->control_in
-               : $start->operation =~ /\A(?:Region|Proj)\z/ ? $start->inputs->[0]
+               : $start->operation =~ /\A(?:Region|Proj|Exc)\z/ ? $start->inputs->[0]
                : out('no way back to Start from ' . $start->operation);
     }
     $b->{ret} = $ret;
