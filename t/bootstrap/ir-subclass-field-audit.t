@@ -154,6 +154,13 @@ $SPEC{Proj} = sub ($f) {
     return ($node, { index => 1 });
 };
 
+# (an eval's way out: its one input the node that may die; no fields)
+$SPEC{Exc} = sub ($f) {
+    my $region = $f->make_cfg('Region', inputs => []);
+    my $node   = $f->make_cfg('Exc', inputs => [$region]);
+    return ($node, {});
+};
+
 $SPEC{PadAccess} = sub ($f) {
     my $node = $f->make('PadAccess', targ => 3, sigil => '$', symbol => 'x', inputs => []);
     return ($node, { targ => 3, sigil => '$', symbol => 'x' });
