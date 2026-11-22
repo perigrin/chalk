@@ -20,7 +20,7 @@ use Chalk::IR::Serialize::WireCheck;   # what the wire cannot order, refused
 use Chalk::IR::Serialize::WireInvariant; # a v2 wire's memory edges, checked
 
 # CFG node operations — these carry control tokens and are never hash-consed.
-my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop);
+my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop Exc);
 
 # B::SoN carries type info as a `stamp` drawn from the shared lattice (see
 # Chalk::Grammar::Perl::TypeLibrary, which is canonical); Chalk's backend
@@ -912,6 +912,7 @@ sub _deserialize_graph ($method_data) {
             if $op eq 'Region' && defined $nd->{fields} && defined $nd->{fields}{eval_want};
         $node->set_eval_may_die(1)
             if $op eq 'Region' && defined $nd->{fields} && $nd->{fields}{eval_may_die};
+        $node->set_catch(1) if $op eq 'Region' && defined $nd->{fields} && $nd->{fields}{catch};
         $node->set_kind($nd->{fields}{kind})
             if ($op eq 'Subscript' || $op eq 'Slice') && defined $nd->{fields} && defined $nd->{fields}{kind};
         # A key read of %main::: whether the key was there at compile time.
@@ -1288,7 +1289,10 @@ sub from_json ($json_string) {
     # obeys the eval or loop parts says what this loader does not read yet.
     my $version = $data->{version} // 'none';
     die "GAP: wire version $version is not one chalk reads (wire v2 only)\n" unless $version eq '2';
-    die "GAP: wire v2 profile `$_` is not read yet\n" for grep { $_ ne 'mem' } ( $data->{profile} // [] )->@*;
+    die "GAP: wire v2 profile `$_` is not read yet\n" for grep { !/\A(?:mem|eval)\z/ } ( $data->{profile} // [] )->@*;
+    # THE `eval` PART (stage 8): a die's way out is an edge (Exc) to the eval's
+    # catch Region; a wire without it joins a caught die as stage 6's did.
+    our $EVAL_EDGES = scalar grep { $_ eq 'eval' } ( $data->{profile} // [] )->@*;
     # B::SoN'S WIRE is held to the memory invariant (L1-L6), each of its
     # graphs, before any is made. (B::SoN's says perl's warning switches,
     # `dowarn`, as WireCheck asks below: a graph chalk wrote itself,
@@ -1395,7 +1399,7 @@ sub from_json ($json_string) {
     # are not placed by B::SoN's rules, and a hand-built one may float what it
     # likes. Nor does a fixture recorded from an older B::SoN, whose pinning
     # these rules were not written against.)
-    Chalk::IR::Serialize::WireCheck->new( methods => $data->{methods}, defined => \%defined )->check
+    Chalk::IR::Serialize::WireCheck->new( methods => $data->{methods}, defined => \%defined, eval_edges => $EVAL_EDGES )->check
         if exists $data->{dowarn};
     # ...and its class's record of it: a module's class keeps its shape, and
     # the name stays in its stash, unloaded (can() asks by name).

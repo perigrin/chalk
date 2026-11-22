@@ -28,6 +28,14 @@ class Chalk::IR::Node::Region :isa(Chalk::IR::Node) {
     field $eval_may_die :reader = 0;
     # The eval's id in its graph; each die it catches carries the same.
     field $eval_id :reader = undef;
+    # A BLOCK EVAL'S CATCH (wire v2's `eval` profile): the merge of the
+    # exceptional edges (Exc) of what may die in its body, before $@ is stored.
+    field $catch :reader = 0;
+
+    method set_catch($v) {
+        $catch = $v ? 1 : 0;
+        return;
+    }
 
     method set_eval_id($v) {
         $eval_id = $v;

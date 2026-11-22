@@ -84,6 +84,7 @@ use Chalk::IR::Node::Start;
 use Chalk::IR::Node::MemStart;
 use Chalk::IR::Node::Return;
 use Chalk::IR::Node::Unwind;
+use Chalk::IR::Node::Exc;
 use Chalk::IR::Node::If;
 use Chalk::IR::Node::Proj;
 use Chalk::IR::Node::Region;
@@ -138,7 +139,7 @@ my %DATA_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
 # Callers picking between the two pick by semantic intent: make() for shared
 # entry/exit/sentinel positions, make_cfg() for per-statement control nodes.
 my %CFG_CLASSES = map { $_ => "Chalk::IR::Node::$_" } qw(
-    Start Return Unwind If Proj Region Loop
+    Start Return Unwind If Proj Region Loop Exc
 );
 
 # %ROUTED_CFG is DELETED. It listed the ops with "CFG semantics (per-position

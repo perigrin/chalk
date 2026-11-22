@@ -26,6 +26,9 @@ use Chalk::Grammar::Perl::BuiltinTable;
 class Chalk::IR::Serialize::WireCheck {
     field $methods :param;
     field $defined :param = {};    # every sub the program's own file defines (run or not): name => wire graph
+    # The wire's die has its way out (wire v2's `eval` profile): the restores
+    # on it and the eval's $@ store are on the wire, and W6 is not needed.
+    field $eval_edges :param = 0;
     field %index;    # graph name => { by => { id => node }, cons => { id => [[consumer, slot], ...] } }
 
     # A store that is a node of its own (each takes memory as an input), a
@@ -328,10 +331,10 @@ class Chalk::IR::Serialize::WireCheck {
             $self->_flattened_package_aggregates($name);
             $self->_autovivifying_reads($name);
             $self->_unread_derefs($name);
-            $self->_stores_in_a_dying_eval($name);
+            $self->_stores_in_a_dying_eval($name) unless $eval_edges;
         }
         $self->_captured_arguments_written;
-        if ( $self->_has_eval ) { $self->_locals_a_die_skips($_) for sort keys $methods->%* }
+        if ( $self->_has_eval && !$eval_edges ) { $self->_locals_a_die_skips($_) for sort keys $methods->%* }
         $self->_dies_of_references;
         return;
     }

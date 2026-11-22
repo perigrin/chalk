@@ -1,4 +1,4 @@
-# ABOUTME: The memory invariant of a wire v2 (the plan's L1-L6), checked on the raw wire before
+# ABOUTME: The memory invariant of a wire v2 (the plan's L1-L7), checked on the raw wire before
 # ABOUTME: any graph is made: every edge names a version, every version is reached from the end.
 use 5.42.0;
 use utf8;
@@ -23,8 +23,11 @@ use experimental 'class';
 #       node an Assign stores through is a place).
 #   L6  a Phi has as many inputs as its Region has ways in (a Loop: two); a
 #       memory Phi's inputs are versions. (A trap's value Phi -- a block
-#       eval's join, a string eval's -- has one more until the exceptional
-#       edge of stage 8.)
+#       eval's join, a string eval's -- has one more on a wire without the
+#       `eval` profile, whose die has no exceptional edge.)
+#   L7  (`eval` profile) every way into a catch Region leads back, by
+#       control_in, to an Exc: the exceptional edges of what died, and only
+#       they, merge there.
 #
 #   Chalk::IR::Serialize::WireInvariant->new( profile => ['mem'] )->check($name, $graph);
 #
@@ -58,6 +61,16 @@ class Chalk::IR::Serialize::WireInvariant {
         }
         for my $n ( grep { $_->{op} eq 'Return' || $_->{op} eq 'Unwind' } @nodes ) {
             $gap->( 'L3', $n, 'names no memory (mem_in)' ) unless defined $n->{mem_in};
+        }
+        my $edges = grep { $_ eq 'eval' } $profile->@*;
+        if ($edges) {
+            for my $c ( grep { $_->{op} eq 'Region' && ( $_->{fields} // {} )->{catch} } @nodes ) {
+                for my $in ( grep { defined } ( $c->{inputs} // [] )->@* ) {
+                    my ( $x, %seen ) = ( $by{$in} );
+                    $x = $by{ $x->{control_in} // '' } while $x && $x->{op} ne 'Exc' && defined $x->{control_in} && !$seen{ $x->{id} }++;
+                    $gap->( 'L7', $c, 'has a way in (' . $say->($in) . ') no Exc leads to' ) unless $x && $x->{op} eq 'Exc';
+                }
+            }
         }
         my %uses;    # id -> [ [user, input index] ... ]
         for my $u (@nodes) {
@@ -93,7 +106,7 @@ class Chalk::IR::Serialize::WireInvariant {
             my $want = $r->{op} eq 'Loop' ? 2 : scalar grep { defined } ( $r->{inputs} // [] )->@*;
             my $have = scalar( ( $n->{inputs} // [] )->@* );
             $gap->( 'L6', $n, "has $have inputs for $want ways into $r->{op}#$r->{id}" )
-                if $have != $want && !( $have == $want + 1 && !$f->{memory} && $trap->($r) );
+                if $have != $want && !( $have == $want + 1 && !$f->{memory} && !$edges && $trap->($r) );
             if ( $f->{memory} ) {
                 $gap->( 'L6', $n, 'is a memory Phi with input ' . $say->($_) . ', which is no memory version' )
                     for grep { !$version->($_) } grep { defined } ( $n->{inputs} // [] )->@*;

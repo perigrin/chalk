@@ -16,7 +16,7 @@ sub walk {
         # A STATEMENT AN EVAL'S BODY FOLLOWS opens it; the body's end closes it
         # at its Region, where the body's end and its catch meet.
         $b->open_eval($ctl);
-        if (my $r = $b->eval_region_after($ctl)) { $ctl = $b->close_eval($r); next }
+        if (my $r = $b->eval_region_after($ctl)) { $ctl = $b->close_eval($r, $ctl); next }
         my @s = $ctl->successors;
         # ONLY THE PROGRAM'S Return ends it: another hung on the same control is
         # not this program's (a graph built over an earlier one).
@@ -24,6 +24,11 @@ sub walk {
         # (A LOOP'S TEST pinned beside its effect is made by the loop, not walked.)
         @s = grep { !$b->{loop_test}{ refaddr($_) } } @s;
         unless (@s) {
+            # AN EVAL'S BODY THAT DIED where it ends (wire v2's `eval` profile:
+            # no way from a die to the join but its catch's) is closed there.
+            if ( my $f = ( $b->{evals} // [] )->[-1] ) {
+                if ( $f->{edges} && $b->{cur}{dead} && ( $b->{depth} // 0 ) == $f->{depth} ) { $ctl = $b->close_eval( $f->{region}, undef ); next }
+            }
             # A MERGE AN EARLIER ARM JUMPED TO, this control its other way in.
             if (my $r = $b->join_jumps($ctl)) { $ctl = $r; next }
             return $ctl;
@@ -31,6 +36,7 @@ sub walk {
         out('a control node with ' . scalar(@s) . ' successors') if @s > 1;
         my $s = $s[0];
         my $op = $s->operation;
+        $b->{stmt} = $s;   # (a die lowering it goes to its way out: exc_block)
         # (WHERE EACH STATEMENT STANDS: its turn and its block -- hash_reads_settled
         # makes a waiting read at the store right after the read's own version)
         $b->{at}{ refaddr($s) } = [ ++$b->{seq}, refaddr( $b->{cur} // 0 ), $b->{depth} // 0 ];
@@ -451,11 +457,13 @@ sub open_eval {
     out('an eval in its caller\'s context') if defined $r->eval_want && $r->eval_want !~ /\A(?:list|scalar|void)\z/;
     $b->hash_reads_settled('an eval');
     $b->emit(op => 'EvalEnter', type => 'void');
-    push $b->{evals}->@*, { region => $r, catch => undef, depth => $b->{depth} // 0, start => $b->{cur}, made_before => { map { ( $_ => 1 ) } keys $b->{memo}->%* } };
+    push $b->{evals}->@*, { region => $r, catch => undef, depth => $b->{depth} // 0, start => $b->{cur}, made_before => { map { ( $_ => 1 ) } keys $b->{memo}->%* },
+                            edges => $Chalk::IR::Serialize::JSON::EVAL_EDGES ? 1 : 0, excs => [], passed => [ ( $b->{passed} // [] )->@* ] };
 }
 
 sub eval_catch {
     my ($b, $f) = @_;
+    return $b->exc_block($f) if $f->{edges};
     return $f->{catch} //= do {
         my $here = $b->{cur};
         my $c = $b->new_block('catch');
@@ -472,8 +480,47 @@ sub eval_region_after {
     return ( grep { blessed($_) && refaddr($_) == refaddr($ctl) } $r->inputs->@* ) ? $r : undef;
 }
 
+# exc_block($f) -> the block a die of the statement being lowered goes to, in
+# an eval on wire v2's `eval` profile: its Exc's, made once, the values made
+# so far its values (close_eval walks the restores on it, to the catch).
+sub exc_block {
+    my ($b, $f) = @_;
+    my $s = $b->{stmt};
+    my ($x) = blessed($s) ? grep { blessed($_) && $_->operation eq 'Exc' && refaddr( $_->inputs->[0] ) == refaddr($s) } ( $s->consumers // [] )->@* : ();
+    out( 'a die in an eval where the wire gives it no way out (' . ( blessed($s) ? $s->operation : 'no statement' ) . ')' ) unless $x;
+    my ($e) = grep { refaddr( $_->{exc} ) == refaddr($x) } $f->{excs}->@*;
+    return $e->{block} if $e;
+    my $here = $b->{cur};
+    my $blk  = $b->new_block('exc');
+    $b->{cur} = $here;
+    push $f->{excs}->@*, { exc => $x, block => $blk, memo => { $b->{memo}->%* }, stood => { ( $b->{stood} // {} )->%* }, passed => [ ( $b->{passed} // [] )->@* ] };
+    return $blk;
+}
+
+# _common(@preds) -> the memo every pred has, value for value: what was made
+# before they parted (a value one made alone does not reach the merge).
+sub _common_memo {
+    my (@preds) = @_;
+    my $m = $preds[0]{memo};
+    return { map { ( $_ => $m->{$_} ) } grep { my $k = $_; !grep { !ref( $_->{memo}{$k} ) || refaddr( $_->{memo}{$k} ) != refaddr( $m->{$k} ) } @preds } keys $m->%* };
+}
+
+# _common_passed(@preds) -> the memory versions every pred passed, in order.
+sub _common_passed {
+    my (@preds) = @_;
+    my @p = $preds[0]{passed}->@*;
+    my $n = @p;
+    for my $q (@preds) {
+        my $i = 0;
+        $i++ while $i < $n && $i < $q->{passed}->@* && refaddr( $q->{passed}[$i] ) == refaddr( $p[$i] );
+        $n = $i;
+    }
+    return [ @p[ 0 .. $n - 1 ] ];
+}
+
 sub close_eval {
-    my ($b, $r) = @_;
+    my ($b, $r, $at) = @_;
+    return $b->close_eval_edges($r, $at) if $b->{evals}[-1]{edges};
     # (popped once the body's value is made: a divide there is the eval's to catch)
     my $f = $b->{evals}[-1];
     out('an eval closed at another depth') if ( $b->{depth} // 0 ) != $f->{depth};
@@ -544,6 +591,104 @@ sub close_eval {
             : $b->emit(op => 'Phi', type => $ty, inputs => \@vals, attr => { from => [@from] });
     }
     push $b->{passed}->@*, $r, $r->memory_phis;   # (its join's memory version: B::SoN's, the $@ a die set)
+    return $r;
+}
+
+# close_eval_edges($join, $end) -> the join, made: an eval on wire v2's `eval`
+# profile. Its ways in are the body's end ($end; undef where the body died)
+# and its catch's: each Exc's block (exc_block) runs the restores on its edge
+# to the catch Region, where the evals open at run time and the dying flag are
+# put back and the edges' values merge (the exception each read); the $@ store
+# after it is the producer's. A value the body made past what all ways in
+# share is not seen after the join (a die may skip it; see value).
+sub close_eval_edges {
+    my ($b, $r, $end) = @_;
+    my $f = $b->{evals}[-1];
+    out('an eval closed at another depth') if ( $b->{depth} // 0 ) != $f->{depth};
+    pop $b->{evals}->@*;
+    my $body_memo = $b->{memo};
+    my ( @preds, $body );
+    if ( !$b->{cur}{dead} ) {
+        # (its end: an eval left normally; $@ is cleared by the producer's store)
+        $b->emit(op => 'EvalLeave', type => 'void');
+        push @preds, $body = { block => $b->{cur}, memo => $b->{memo}, stood => $b->{stood}, passed => $b->{passed}, end => $end };
+    }
+    my ( $catch, @cpreds );
+    for my $e ( $f->{excs}->@* ) {
+        local $b->{memo}   = $e->{memo};
+        local $b->{stood}  = $e->{stood};
+        local $b->{passed} = $e->{passed};
+        $b->{cur} = $e->{block};
+        # (the exception in flight: read before a restore of $@ puts back what it held)
+        $b->{memo}{ refaddr( $e->{exc} ) } = $b->emit(op => 'GLoad', type => '%Slot', attr => { global => '@t2_err' });
+        my $at = $b->walk( $e->{exc} );
+        my ($c) = grep { blessed($_) && $_->operation eq 'Region' && $_->catch && grep { blessed($_) && refaddr($_) == refaddr($at) } $_->inputs->@* } ( $at->consumers // [] )->@*;
+        out('an exceptional edge that reaches no catch of its eval') unless $c && ( $c->eval_id // '' ) eq ( $r->eval_id // '' ) && ( !$catch || refaddr($catch) == refaddr($c) );
+        $catch = $c;
+        push @cpreds, { block => $b->{cur}, memo => $b->{memo}, stood => $b->{stood}, passed => $b->{passed}, end => $at };
+    }
+    my $from_catch;
+    if (@cpreds) {
+        my ( $blk, $memo ) = $b->merge_at( $catch, 'catch', _common_memo(@cpreds), @cpreds );
+        local $b->{memo}   = $memo;
+        local $b->{stood}  = { ( $b->{stood} // {} )->%* };
+        local $b->{passed} = _common_passed(@cpreds);
+        $b->{cur} = $blk;
+        $b->emit(op => 'EvalLeave', type => 'void');
+        $b->emit(op => 'ClearDying', type => 'void');
+        push $b->{passed}->@*, $catch, $catch->memory_phis;
+        my $at = $b->walk($catch);
+        out('an eval whose catch does not reach its join') unless grep { blessed($_) && refaddr($_) == refaddr($at) } $r->inputs->@*;
+        push @preds, $from_catch = { block => $b->{cur}, memo => $b->{memo}, stood => $b->{stood}, passed => $b->{passed}, end => $at };
+    }
+    my @ways = $r->inputs->@*;
+    my @pred_of = map { my $in = $_; ( grep { blessed($in) && refaddr( $preds[$_]{end} ) == refaddr($in) } 0 .. $#preds )[0] } @ways;
+    # (a way in neither the body's live end nor the catch's: a return in the
+    # body, or the body's end where it died)
+    out('an eval whose body returns') if grep { !defined $pred_of[$_] && !( !$body && defined $end && blessed( $ways[$_] ) && refaddr( $ways[$_] ) == refaddr($end) ) } 0 .. $#ways;
+    my @phis = grep { $_->operation eq 'Phi' && blessed( $_->region ) && refaddr( $_->region ) == refaddr($r) && !$_->memory } ( $r->consumers // [] )->@*;
+    my %seen;
+    @phis = grep { !$seen{ refaddr($_) }++ } @phis;
+    # NO WAY TO ITS END: what follows never runs -- a block of its own.
+    unless (@preds) {
+        my $join = $b->new_block('evaljoin');
+        $join->{dead} = 1;
+        $b->{cur} = $join;
+        $b->{memo}{ refaddr($_) } = $b->emit(op => 'Undef', type => '%Slot') for grep { $b->phi_type($_) eq '%Slot' } @phis;
+        out('an eval of no way to its end whose value is read') if grep { $b->phi_type($_) ne '%Slot' } @phis;
+        push $b->{passed}->@*, $r, $r->memory_phis;
+        return $r;
+    }
+    my @made;
+    for my $p (@phis) {
+        my $ty = $b->phi_type($p);
+        my @in;
+        for my $k ( grep { defined $pred_of[$_] } 0 .. $#ways ) {
+            my $pr = $preds[ $pred_of[$k] ];
+            local $b->{cur}  = $pr->{block};
+            local $b->{memo} = $pr->{memo};
+            # (in list context a caught die gives the empty list)
+            push @in, [ $from_catch && $pr == $from_catch && ( $r->eval_want // '' ) eq 'list' && $ty eq '%Array*'
+                        ? $b->emit(op => 'NewArray', type => '%Array*')
+                        : $b->phi_input( $p, $p->inputs->[$k], $ty ), $pr ];
+            $pr->{block} = $b->{cur};
+        }
+        push @made, [ $p, $ty, \@in ];
+    }
+    my $join = $b->new_block('evaljoin');
+    $_->{block}{term} = [ 'br', $join ] for @preds;
+    $b->{cur}    = $join;
+    $b->{memo}   = _common_memo(@preds);
+    $b->{stood}  = { ( $preds[0]{stood} // {} )->%* };
+    $b->{passed} = _common_passed(@preds);
+    # (a value the body made that does not reach here is not read after: value)
+    $b->{past_eval}{$_} = 1 for grep { !exists $b->{memo}{$_} && !$f->{made_before}{$_} } keys $body_memo->%*;
+    for my $m (@made) {
+        my ( $p, $ty, $in ) = @$m;
+        $b->{memo}{ refaddr($p) } = $in->@* == 1 ? $in->[0][0]
+            : $b->emit(op => 'Phi', type => $ty, inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $_->[1]{block} } @$in ] });
+    }
+    push $b->{passed}->@*, $r, $r->memory_phis;
     return $r;
 }
 
