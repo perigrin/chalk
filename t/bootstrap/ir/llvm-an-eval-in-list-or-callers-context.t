@@ -79,6 +79,16 @@ for my $case (
     is($got, perl_says($pl // write_pl($src), {}), "$name: perl's answer") or diag $@;
 }
 
+# A LIST EVAL WHOSE BODY ALWAYS DIES gives the empty list. Its value had no
+# Phi at the join (B::SoN pushed undef alone), and T2 assigned (undef): 1 for
+# perl's 0 -- a silent wrong answer until the eval profile (wire v2 stage 8)
+# put the value at its join, where the context is read. Perl's, or refused.
+for my $src ( q{my @r = eval { die "x\n" }; print scalar(@r), "\n";}, q{my @r = eval { die "x\n"; (1) }; print scalar(@r), "\n";} ) {
+    my ($got, $pl) = eval { through_llvm($src, {}) };
+    if ( !defined $got ) { like( $@, qr/GAP: T2: out of its slices \(an eval in list context whose value is typed a scalar/, 'a list eval that always dies: refused by name' ); next }
+    is( $got, "0\n", "a list eval that always dies: perl's 0" );
+}
+
 sub write_pl ($src) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src; close $fh;
