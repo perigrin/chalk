@@ -213,6 +213,13 @@ sub hash_value {
         }
         return $h;
     }
+    # A `my` HASH READ WHOLE AT A MEMORY VERSION (B::SoN's mem_in): a copy of
+    # it as it is there, made where the read is (reads_before).
+    if ( $v->is_my_hash && $op eq 'PadAccess' && $v->is_versioned_read ) {
+        my $h = $b->emit(op => 'HNew', type => '%Slot');
+        $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_var($v) ]) ]);
+        return $h;
+    }
     return $b->hash_var($v) if $v->is_my_hash;
     # %$r READ WHOLE AS A LIST: its pairs, key then value, as they are where
     # it is read (a read through a reference, ordered as one). Taken as a
@@ -823,6 +830,12 @@ sub array_value {
         $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->array_of($in[0]) ]);
         return $a;
     }
+    # A `my` ARRAY READ WHOLE AT A MEMORY VERSION: a copy, as for a hash.
+    if ( $v->is_my_array && $op eq 'PadAccess' && $v->is_versioned_read ) {
+        my $a = $b->emit(op => 'NewArray', type => '%Array*');
+        $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->array_var($v) ]);
+        return $a;
+    }
     return $b->array_var($v) if $v->is_my_array;
     return $b->emit(op => 'Argv', type => '%Array*') if $v->is_argv;
     return $b->{argsarr} // out('@_ outside a sub taking it as a list') if $op eq 'ArgsSource';
@@ -1126,7 +1139,7 @@ sub array_of {
     return $b->value($n) if blessed($n) && $n->operation =~ /\A(?:Phi|ListAppend)\z/ && $b->type_of($n) eq '%Array*';
     # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`, a
     # merge of a hash's versions).
-    return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if ( $n isa Chalk::IR::Node && $n->is_named_hash )
+    return $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->hash_of($n) ]) if ( $n isa Chalk::IR::Node && ( $n->is_named_hash || $n->is_package_aggregate && $n->sigil eq '%' ) )
         || blessed($n) && $n->operation eq 'Phi' && !$n->memory && ( $b->agg_versions($n) // '' ) eq '%'
         || blessed($n) && $n->operation eq 'FieldAccess' && ( $b->field_of($n) )[1] eq '%';
     if (blessed($n) && $n->operation eq 'PostfixDeref' && ( $n->sigil // '' ) eq '%') {

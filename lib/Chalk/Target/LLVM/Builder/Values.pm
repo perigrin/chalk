@@ -506,7 +506,21 @@ sub _value {
     # them as package variables, of no match: never read as one.
     out( 'the match variable ' . ( $v->sigil // '$' ) . $v->symbol . ' (B::SoN ties it to no match)' )
         if $v->operation eq 'EntryDef' && ( $v->symbol // '' ) =~ /\A(?:[&`'+-]|\d+)\z/;
-    return $b->pkg_agg($v) if $v->is_package_aggregate;
+    if ($v->is_package_aggregate) {
+        # A READ AT A MEMORY VERSION (B::SoN's mem_in; W10): a list flattening
+        # the aggregate takes it as it is there -- a copy, made where the read
+        # is (reads_before), so a later store does not reach it. Without one
+        # it is the place: the aggregate itself.
+        return $b->pkg_agg($v) unless blessed( $v->mem_in );
+        if ( $v->sigil eq '@' ) {
+            my $a = $b->emit(op => 'NewArray', type => '%Array*');
+            $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->pkg_agg($v) ]);
+            return $a;
+        }
+        my $h = $b->emit(op => 'HNew', type => '%Slot');
+        $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->pkg_agg($v) ]) ]);
+        return $h;
+    }
     return $b->special_hash($v) if $v->operation eq 'EntryDef' && $v->metaobject_class;
     return $b->special_scalar($v) if $v->operation eq 'EntryDef' && $v->special_scalar;
     # $AUTOLOAD: a package scalar perl writes (a call an AUTOLOAD answers sets
@@ -684,6 +698,20 @@ sub _value {
         my $self = $b->{self} // out('a field outside a method');
         out('a field read of no one version') if $b->{unversioned}{ refaddr($v) };
         my $slot = $b->emit(op => 'HGet', type => '%Slot', inputs => [ $self, $b->const_str($key) ]);
+        # A FIELD ARRAY OR HASH READ WHOLE AT A MEMORY VERSION (B::SoN's
+        # mem_in): a copy as it is there, made where the read is
+        # (reads_before) -- `my @a = @f; push @f, 2` keeps @a. Without one it
+        # is the place: the field's own aggregate.
+        if ( $sg ne '$' && blessed( $v->mem_in ) ) {
+            if ( $sg eq '@' ) {
+                my $a = $b->emit(op => 'NewArray', type => '%Array*');
+                $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->emit(op => 'ADeref', type => '%Array*', inputs => [$slot]) ]);
+                return $a;
+            }
+            my $h = $b->emit(op => 'HNew', type => '%Slot');
+            $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $b->emit(op => 'HPairs', type => '%Array*', inputs => [$slot]) ]);
+            return $h;
+        }
         return $sg eq '@' ? $b->emit(op => 'ADeref', type => '%Array*', inputs => [$slot]) : $slot;
     }
     if ($v->is_package_scalar) {

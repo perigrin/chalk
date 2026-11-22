@@ -63,12 +63,18 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     # is_my_hash -> true for A `my %h` NAMED, NOT MADE HERE (`my %e;`): one hash
     # per variable, made at its function's entry. A shared one is read at a
     # memory version, and is still the one hash.
-    method is_my_hash() { return ( $sigil // '' ) eq '%' && ( !$self->inputs->@* && !blessed( $self->mem_in ) || $shared ) }
+    # (A read of it at a memory version -- mem_in, B::SoN's whole read of one
+    # the sub writes -- is of the same hash: the builder copies it there.)
+    method is_my_hash() { return ( $sigil // '' ) eq '%' && ( !$self->inputs->@* || $shared ) }
 
     # is_my_array -> true for A `my @a` NAMED, NOT MADE HERE: an array declared
     # once in its sub (one declared in a loop body or an arm is an ArrayLiteral
     # pinned there, made each time).
-    method is_my_array() { return ( $sigil // '' ) eq '@' && ( !$self->inputs->@* && !blessed( $self->mem_in ) || $shared ) }
+    method is_my_array() { return ( $sigil // '' ) eq '@' && ( !$self->inputs->@* || $shared ) }
+
+    # is_versioned_read -> true for a whole read of a `my` array or hash at a
+    # memory version (B::SoN's mem_in): the aggregate as it is there.
+    method is_versioned_read() { return ( $sigil // '' ) =~ /\A[\@%]\z/ && !$shared && blessed( $self->mem_in ) ? 1 : 0 }
 
     # is_named_hash -> a `my %h` is a named hash.
     method is_named_hash() { return $self->is_my_hash }

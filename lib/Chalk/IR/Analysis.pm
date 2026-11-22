@@ -1503,6 +1503,9 @@ sub _rewrite_tied_scalars ($graphs) {
                 $_ = $v for grep { blessed($_) && refaddr($_) == refaddr($t) } $c->inputs->@*;
                 $v->add_consumer($c);
             }
+            # (replaced, it reads nothing: B::SoN's memory version for it --
+            # an external read's, wire v2 stage 7 -- would have it made)
+            $t->set_mem_in(undef);
         }
     }
     return;

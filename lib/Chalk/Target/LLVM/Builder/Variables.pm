@@ -606,7 +606,8 @@ sub list_assign {
     for my $r (grep { blessed($_) && $_->operation eq 'PadAccess' && ( $_->sigil // '' ) eq '$' } ( $s->consumers // [] )->@*) {
         next if $b->{memo}{ refaddr($r) } || $b->{args}{ refaddr($r) };
         next if $r->is_assign_target;
-        next unless grep { blessed($_) && refaddr($_) == refaddr($s) } $r->inputs->@*;
+        # (B::SoN reads it AT this Assign's version: its mem_in)
+        next unless grep { blessed($_) && refaddr($_) == refaddr($s) } $r->inputs->@*, $r->mem_in;
         if ( exists $val{ $r->symbol } ) { $b->{memo}{ refaddr($r) } = $val{ $r->symbol }; next }
         my $last = $b->{lvals}{ $r->symbol } // out('a read after a list assignment of no target (' . $r->symbol . ')');
         # (an argument is read where it is: as `my (...) = @_` reads keep it)
