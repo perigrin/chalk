@@ -99,22 +99,6 @@ class Chalk::IR::Serialize::WireCheck {
         return $self->_pkg_name( $g->{by}{ ( $self->_inputs($n) )[0] // '' } );
     }
 
-    # A package array or hash read as a value with no memory version: its
-    # bare EntryDef, or the literal B::SoN names after it (`@main::st`).
-    method _pkg_aggregate($n) {
-        return undef unless defined $n;
-        return $self->_pkg_name($n)
-            if $n->{op} eq 'EntryDef' && ( $self->_f( $n, 'sigil' ) // '' ) =~ /\A[\@%]\z/ && !defined $n->{mem_in};
-        return $self->_f( $n, 'symbol' )
-            if $n->{op} =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( $self->_f( $n, 'symbol' ) // '' ) =~ /\A[\@%].*::/;
-        return undef;
-    }
-
-
-
-
-
-
     method _inert($name) {
         my $g = $self->_graph($name);
         for my $n ( $g->{nodes}->@* ) {
@@ -123,29 +107,6 @@ class Chalk::IR::Serialize::WireCheck {
             return 0 if $n->{op} eq 'Call' || $EFFECT_OP{ $n->{op} } || $IN_PLACE{ $n->{op} };
         }
         return 1;
-    }
-
-    # ------------------------------------------------------------------
-    # W10. A PACKAGE ARRAY OR HASH FLATTENED INTO A LIST carries no memory
-    # version, so the list is made at its first use -- after a later store
-    # to the array: `my @c = (@st, 2); @st = ()` read @st empty.
-    # ------------------------------------------------------------------
-    method _flattened_package_aggregates($name) {
-        my $g = $self->_graph($name);
-        for my $list ( grep { $_->{op} =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && !$self->_pinned($_) } $g->{nodes}->@* ) {
-            for my $x ( map { defined $_ ? $g->{by}{$_} : () } $self->_inputs($list) ) {
-                my $var = $self->_pkg_aggregate($x) // next;
-                my @writes = grep {
-                    my @in = $self->_inputs($_);
-                    $self->_is_sub_call($_)
-                        || ( ( $self->_written_pkg( $g, $_ ) // '' ) eq $var && ( $in[1] // -1 ) != $x->{id} && ( $in[1] // -1 ) != $list->{id} )
-                        || ( $self->_builtin_fact( $_, 'acts' ) && ( $self->_pkg_name( $g->{by}{ $in[0] // '' } ) // '' ) eq $var )
-                } $g->{nodes}->@*;
-                $self->_gap("a package array or hash ($var) flattened into a list at no memory version, where it is also written: the list would be made after the write (in $name)")
-                    if @writes;
-            }
-        }
-        return;
     }
 
     # ------------------------------------------------------------------
@@ -325,7 +286,6 @@ class Chalk::IR::Serialize::WireCheck {
             }
         }
         for my $name ( sort keys $methods->%* ) {
-            $self->_flattened_package_aggregates($name);
             $self->_autovivifying_reads($name);
             $self->_unread_derefs($name);
             $self->_stores_in_a_dying_eval($name);

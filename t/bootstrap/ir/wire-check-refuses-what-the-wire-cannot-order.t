@@ -27,7 +27,6 @@ my $DEREF = qr/a dereference nothing reads, which may still die/;
 my $DIE   = qr/a die of what may be a reference, where an eval may catch it/;
 my $W8    = qr/a DESTROY method \(\w+::DESTROY\)/;
 my $W9    = qr/a read through an element that is not there, which perl makes/;
-my $W10   = qr/a package array or hash \([\@%]main::\w+\) flattened into a list at no memory version/;
 
 # Does this B::SoN put a division that may fault on the control chain? (Its
 # `placement-pins` does; before it the division floats and is refused here.)
@@ -95,10 +94,11 @@ for my $case (
     [ q{my $h = { a => 1 }; my $v = $h->{b}{c}; print exists $h->{b} ? "viv" : "none", "\n";}, $W9, 'W9: a nested read of a missing key' ],
     [ q{my $h = { a => { c => 2 } }; my $v = $h->{a}{c}; print "$v\n";}, undef, 'W9: a nested read of a key that is there' ],
     [ q{my $r = {}; $r->{a}{b} = 3; print $r->{a}{b}, "\n";}, undef, 'W9: a nested read of what a store made' ],
-    # W10
-    [ q{our @st = (1); my @c = (@st, 2); @st = (); print "@c\n";}, $W10, 'W10: a package array in a list, then emptied' ],
-    [ q{our %g = (a => 1); my @k = (%g); %g = (); print scalar(@k), "\n";}, $W10, 'W10: a package hash in a list, then emptied' ],
-    [ q{our @g = (1); sub t { local @g = (@g, 2); return scalar @g } print t(), scalar(@g), "\n";}, $W10, 'W10: local of itself and more' ],
+    # W10: B::SoN reads a package aggregate flattened into a list at a memory
+    # version (wire v2 stage 7), and the rule that refused it is gone.
+    [ q{our @st = (1); my @c = (@st, 2); @st = (); print "@c\n";}, undef, 'W10: a package array in a list, then emptied' ],
+    [ q{our %g = (a => 1); my @k = (%g); %g = (); print scalar(@k), "\n";}, undef, 'W10: a package hash in a list, then emptied' ],
+    [ q{our @g = (1); sub t { local @g = (@g, 2); return scalar @g } print t(), scalar(@g), "\n";}, undef, 'W10: local of itself and more' ],
     [ q{our @g = (1,2); sub f { return (@g, 9) } my @r = f(); @g = (); print "@r\n";}, undef, 'W10: flattened in a sub that writes nothing' ],
     # hash truth: B::SoN reads a hash as a scalar by a Count at a memory
     # version, and the rule that refused the hash itself there is gone.
