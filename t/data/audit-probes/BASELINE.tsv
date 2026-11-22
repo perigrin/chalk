@@ -14,18 +14,18 @@ ag19	SAME
 ag2	SAME	
 ag20	SAME	
 ag21	SAME	
-ag22	REFUSED	no program graph
-ag23	REFUSED	no program graph
+ag22	SAME	
+ag23	SAME	
 ag24	SAME	
 ag25	SAME	
 ag26	SAME	
 ag27	SAME	
-ag28	REFUSED	no program graph
-ag29	REFUSED	no program graph
+ag28	SAME	
+ag29	SAME	
 ag3	SAME	
 ag30	SAME	
 ag31	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a call)
-ag32	REFUSED	no program graph
+ag32	SAME	
 ag33	SAME	
 ag34	SAME	
 ag35	SAME	
