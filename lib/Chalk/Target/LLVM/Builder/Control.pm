@@ -656,6 +656,10 @@ sub close_eval_edges {
         local $b->{stood}  = $e->{stood};
         local $b->{passed} = $e->{passed};
         $b->{cur} = $e->{block};
+        # (what died, made before its dying branch: a call's value, read on
+        # the body's way only, is there too)
+        my $t = $e->{exc}->inputs->[0];
+        $b->{memo}{ refaddr($t) } //= $body_memo->{ refaddr($t) } if exists $body_memo->{ refaddr($t) };
         # (the exception in flight: read before a restore of $@ puts back what it held)
         $b->{memo}{ refaddr( $e->{exc} ) } = $b->emit(op => 'GLoad', type => '%Slot', attr => { global => '@t2_err' });
         my $at = $b->walk( $e->{exc} );

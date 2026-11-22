@@ -1,7 +1,5 @@
 # SoN::Verify on wire v2 (t/bootstrap/ir/wire-verify.t): the probes' totals per rule, chalk's lib
 # per graph (the most one wire counts). Rewritten by CHALK_WIRE_VERIFY_UPDATE=1; a row only falls.
-probes	phi-arity	4
-probes	phi-arity:eval-join	25
 probes	read-unversioned:args	1
 probes	read-unversioned:cell	1
 probes	read-unversioned:external	14
@@ -49,12 +47,7 @@ lib	@Chalk::Bootstrap::Context::rule	read-unversioned:field=1
 lib	@Chalk::Bootstrap::Context::token	read-unversioned:field=1
 lib	@Chalk::Bootstrap::Context::walk_all	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::CoreItemIndex::count	read-unversioned:field=1
-lib	@Chalk::Bootstrap::Earley::_advance_from_completed	phi-arity:eval-join=1
-lib	@Chalk::Bootstrap::Earley::_complete	phi-arity:eval-join=2
 lib	@Chalk::Bootstrap::Earley::_free_unreachable_rows	read-unversioned:field=1,read-unversioned:my-aggregate=2
-lib	@Chalk::Bootstrap::Earley::_queue_late	phi-arity:eval-join=1
-lib	@Chalk::Bootstrap::Earley::_run_parse	phi-arity:eval-join=3
-lib	@Chalk::Bootstrap::Earley::_scan	phi-arity:eval-join=1
 lib	@Chalk::Bootstrap::Earley::core_index	read-unversioned:field=1
 lib	@Chalk::Bootstrap::Earley::grammar	read-unversioned:field=1
 lib	@Chalk::Bootstrap::Earley::semiring	read-unversioned:field=1
@@ -65,7 +58,6 @@ lib	@Chalk::Bootstrap::LR0DFA::state_count	read-unversioned:field=1
 lib	@Chalk::Bootstrap::Perl::Actions::AdjustBlock::__ANON__:183:5	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Actions::AnonymousSub::__ANON__:183:4	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Actions::AssignmentExpression::__ANON__:183:4	read-unversioned:my-aggregate=1
-lib	@Chalk::Bootstrap::Perl::Actions::Atom::__ANON__:1498:13	phi-arity:eval-join=1
 lib	@Chalk::Bootstrap::Perl::Actions::Atom::__ANON__:183:9	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Actions::Attribute::__ANON__:211:4	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Actions::BinaryExpression::__ANON__:183:4	read-unversioned:my-aggregate=1
@@ -95,15 +87,13 @@ lib	@Chalk::Bootstrap::Perl::Actions::_collect_ir_values::__ANON__:183:4	read-un
 lib	@Chalk::Bootstrap::Perl::Actions::_finalize_body_graph	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Actions::_find_constant::__ANON__:183:3	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Actions::_wire_postfix_body::__ANON__:183:20	read-unversioned:my-aggregate=1
-lib	@Chalk::Bootstrap::Perl::Target::C::_emit_anon_sub_expr	phi-arity:eval-join=1
 lib	@Chalk::Bootstrap::Perl::Target::C::_emit_builtin_call	read-unversioned:through-ref=1
 lib	@Chalk::Bootstrap::Perl::Target::C::_emit_complex_method	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Target::C::_emit_complex_sub_body	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Target::C::_emit_defop_for_xs_wrapper	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Target::C::_emit_interp_return	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Target::C::_emit_method_call_expr	read-unversioned:field=1,read-unversioned:my-aggregate=1
-lib	@Chalk::Bootstrap::Perl::Target::C::_emit_sub	phi-arity:eval-join=1
-lib	@Chalk::Bootstrap::Perl::Target::C::_generate_c_files	phi-arity:eval-join=2,read-unversioned:field=1
+lib	@Chalk::Bootstrap::Perl::Target::C::_generate_c_files	read-unversioned:field=1
 lib	@Chalk::Bootstrap::Perl::Target::ClassRegistry::compilation_order	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Target::EmitHelpers::__ADJUST_0	read-unversioned:field=1
 lib	@Chalk::Bootstrap::Perl::Target::EmitHelpers::_build_cfg_lookup	read-unversioned:field=1
@@ -124,11 +114,10 @@ lib	@Chalk::Bootstrap::Perl::Target::Perl::_format_subscript	read-unversioned:fi
 lib	@Chalk::Bootstrap::Perl::Target::Perl::_toposort_classes	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Perl::Target::Perl::emit_cfg_if	read-unversioned:field=1
 lib	@Chalk::Bootstrap::Semiring::FilterComposite::_annotation_semirings	read-unversioned:through-ref=1
-lib	@Chalk::Bootstrap::Semiring::FilterComposite::_filter_compare	phi-arity:eval-join=2,read-unversioned:my-aggregate=1
+lib	@Chalk::Bootstrap::Semiring::FilterComposite::_filter_compare	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Semiring::FilterComposite::semirings	read-unversioned:field=1
 lib	@Chalk::Bootstrap::Semiring::Precedence::_complete_prec	read-unversioned:through-ref=1
 lib	@Chalk::Bootstrap::Semiring::Precedence::_scan_multiply	read-unversioned:through-ref=2
-lib	@Chalk::Bootstrap::Semiring::SemanticAction::preserving_action_state	phi-arity:eval-join=1
 lib	@Chalk::Bootstrap::Semiring::TypeInferenceActions::ExpressionList::__ANON__:156:7	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Semiring::TypeInferenceActions::Subscript::__ANON__:156:8	read-unversioned:my-aggregate=1
 lib	@Chalk::Bootstrap::Semiring::TypeInferenceActions::_left_ends_in_bare_hash_op::__ANON__:156:5	read-unversioned:my-aggregate=1
@@ -419,7 +408,6 @@ lib	@Chalk::Target::LLVM::Builder::Args::_collect_positional_arg_reads	read-unve
 lib	@Chalk::Target::LLVM::Builder::_all_nodes	read-unversioned:through-ref=1
 lib	@Chalk::Target::LLVM::Builder::_bit_source_numified	read-unversioned:my-aggregate=1
 lib	@Chalk::Target::LLVM::Builder::_head_aggregates	read-unversioned:my-aggregate=1
-lib	@Chalk::Target::LLVM::Builder::_is_list	phi-arity:eval-join=1
 lib	@Chalk::Target::LLVM::Builder::_never_numified	read-unversioned:through-ref=1
 lib	@Chalk::Target::LLVM::Builder::_refs_each_item	read-unversioned:through-ref=1
 lib	@Chalk::Target::LLVM::Builder::_refs_made_of_made	read-unversioned:my-aggregate=1
@@ -435,17 +423,14 @@ lib	@Chalk::Target::LLVM::Builder::code_value	read-unversioned:through-ref=1
 lib	@Chalk::Target::LLVM::Builder::construct_with	read-unversioned:my-aggregate=1
 lib	@Chalk::Target::LLVM::Builder::impl_call	read-unversioned:my-aggregate=1
 lib	@Chalk::Target::LLVM::Builder::list_args_assign	read-unversioned:through-ref=1
-lib	@Chalk::Target::LLVM::Builder::list_only	phi-arity:eval-join=1
 lib	@Chalk::Target::LLVM::Builder::loop	read-unversioned:my-aggregate=1
 lib	@Chalk::Target::LLVM::Builder::loop_breaks	read-unversioned:through-ref=1
 lib	@Chalk::Target::LLVM::Builder::make_constant_arrays	read-unversioned:my-aggregate=1
 lib	@Chalk::Target::LLVM::Builder::method_by_name	read-unversioned:my-aggregate=1
 lib	@Chalk::Target::LLVM::Builder::pos_cells	read-unversioned:through-ref=1
-lib	@Chalk::Target::LLVM::Builder::regex_fn	phi-arity:eval-join=1
 lib	@Chalk::Target::LLVM::Builder::sprintf_value	read-unversioned:my-aggregate=1
-lib	@Chalk::Target::LLVM::Builder::translit	phi-arity:eval-join=1
 lib	@Chalk::Target::LLVM::Builder::value_readers	read-unversioned:through-ref=1
-lib	@Chalk::Target::LLVM::Lower::lower_program	phi-arity:eval-join=3,read-unversioned:through-ref=1
+lib	@Chalk::Target::LLVM::Lower::lower_program	read-unversioned:through-ref=1
 lib	@Chalk::Target::LLVM::Node::attr	read-unversioned:field=1
 lib	@Chalk::Target::LLVM::Node::inputs	read-unversioned:field=1
 lib	@Chalk::Target::LLVM::Node::name	read-unversioned:field=1
@@ -457,7 +442,7 @@ lib	@Cwd::fast_abs_path	read-unversioned:external=5
 lib	@Cwd::fast_realpath	read-unversioned:external=5
 lib	@Cwd::fastcwd_	read-unversioned:external=3
 lib	@Digest::SHA::addfile	read-unversioned:external=2
-lib	@DynaLoader::bootstrap	phi-arity:eval-join=1,read-unversioned:external=3,read-unversioned:package=2,read-unversioned:package-aggregate-literal=1
+lib	@DynaLoader::bootstrap	read-unversioned:external=3,read-unversioned:package=2,read-unversioned:package-aggregate-literal=1
 lib	@DynaLoader::dl_expandspec	read-unversioned:external=1
 lib	@File::Path::_mkpath	read-unversioned:external=3,read-unversioned:my-aggregate=1
 lib	@File::Path::mkpath	read-unversioned:through-ref=2
@@ -465,5 +450,4 @@ lib	@File::Spec::Unix::_cache_tmpdir	read-unversioned:args=1,read-unversioned:pa
 lib	@JSON::PP::PP_decode_json	read-unversioned:through-ref=3
 lib	@JSON::PP::PP_encode_json	read-unversioned:through-ref=2
 lib	@JSON::PP::get_boolean_values	read-unversioned:through-ref=1
-lib	@JSON::PP::tag	phi-arity:eval-join=1
 lib	@lib/Chalk/Bootstrap/Runtime.pm:main::__PROGRAM__	read-unversioned:external=2

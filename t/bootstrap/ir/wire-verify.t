@@ -15,11 +15,13 @@ use File::Spec;
 #
 #   V1-V5, V7  mem-in-not-version, version-off-chain, write-unreachable,
 #              control-sink, memory-order-disagrees, record: none.
+#   V8 arity   phi-arity: none (stage 8: an eval's catch is a way into its
+#              join), but the one-pass loops %HELD names (stage 9).
 #   the rest   (V6 read-unversioned:*, V8 phi-*, V9 control-fork): held to
 #              t/data/wire-verify-v2-baseline.tsv -- the probes by their totals,
 #              chalk's lib per graph (a recorded graph may not rise; one not
 #              recorded is printed: lib changes with every chalk stage). Stage 7
-#              takes V6 to zero, stage 8 the eval joins' phi-arity.
+#              takes V6 to zero.
 #
 # A WIRE IS CACHED (it takes B::SoN about an hour over chalk's lib) under
 # CHALK_WIRE_CACHE (default: a directory in the temp dir), keyed by the
@@ -35,7 +37,7 @@ plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$S
 unshift @INC, $SON;
 require SoN::Verify;
 
-my %HARD = map { ( $_ => 1 ) } qw(mem-in-not-version version-off-chain write-unreachable control-sink memory-order-disagrees record);
+my %HARD = map { ( $_ => 1 ) } qw(mem-in-not-version version-off-chain write-unreachable control-sink memory-order-disagrees record phi-arity);
 my $BASELINE = 't/data/wire-verify-v2-baseline.tsv';
 # A V1-V5 OR V7 VIOLATION HELD, by file, graph and rule, each with why it is
 # not fixed yet. One that no longer occurs is printed: take it out.
@@ -49,6 +51,10 @@ my %HELD = (
         'an Assign of @isa alone, on neither chain, beside `local *isa = *{"$module\\::ISA"}; local @isa = (...)`: '
       . 'a v1 floating store the v2 writer calls a record; small programs of that shape do not reproduce it, not traced yet' ) }
         qw(DynaLoader::bootstrap DynaLoader::bootstrap_inherit) ),
+    # (a loop no path goes round: its Phis have no back edge, the Loop two ways in -- stage 9's shape)
+    map( { ( "t/data/audit-probes/$_.pl:main::__PROGRAM__ phi-arity" =>
+        'a one-pass loop (`for my $y ($x)`): a Phi with the way in alone at a Loop of two ways in; T2 refuses it by '
+      . 'name ("a loop phi with other than two ways in"); stage 9 gives a loop no path goes round one input' ) } qw(al1 al2) ),
 );
 my $jobs     = $ENV{SON_WIRE_JOBS}    // 2;
 my $limit    = $ENV{SON_WIRE_TIMEOUT} // 900;
@@ -158,7 +164,7 @@ for my $set ( [ lib => \@lib ], [ probes => \@probes ] ) {
 }
 
 is_deeply( \@dropped, [], 'every file has a wire (none timed out or wrote no JSON)' );
-is_deeply( \@hard, [], 'no V1-V5 or V7 violation (but those %HELD names)' ) or diag join "\n", @hard[ 0 .. ( $#hard < 30 ? $#hard : 30 ) ];
+is_deeply( \@hard, [], 'no V1-V5, V7 or phi-arity violation (but those %HELD names)' ) or diag join "\n", @hard[ 0 .. ( $#hard < 30 ? $#hard : 30 ) ];
 diag "held, and no longer seen (take it out of %HELD): $_" for grep { !$held{$_} } sort keys %HELD;
 
 # THE BASELINE: `probes<TAB>RULE<TAB>N` and `lib<TAB>@GRAPH<TAB>rule=n,...`
