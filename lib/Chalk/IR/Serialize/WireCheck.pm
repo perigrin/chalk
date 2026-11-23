@@ -105,29 +105,31 @@ class Chalk::IR::Serialize::WireCheck {
     }
 
     # ------------------------------------------------------------------
-    # W10. A `my` ARRAY OR HASH A SUB ALSO REACHES (B::SoN's `shared`), read
-    # whole at a version a sub call then follows: the call may change it, and
-    # T2 reads such an aggregate where it is used, not as it was there --
-    # `(@a, f())` with f pushing onto @a gave `1 2 0` for `1 0`.
+    # W10. A `my` ARRAY OR HASH A SUB ALSO REACHES (B::SoN's `shared`),
+    # flattened beside a sub call -- in one list, one call's arguments, one
+    # join: the call may change it, and T2 reads such an aggregate where the
+    # list is made, after the call -- `(@a, f())` with f pushing onto @a gave
+    # `1 2 0` for `1 0`.
     # ------------------------------------------------------------------
     method _shared_aggregate_read_before_a_call($name) {
         my $g = $self->_graph($name);
-        my %killed = map { ( $_->{mem_in} => 1 ) }
-            grep { $_->{op} eq 'Call' && ( $self->_f( $_, 'dispatch_kind' ) // '' ) ne 'builtin' && defined $_->{mem_in} } $g->{nodes}->@*;
-        for my $n ( grep { $_->{op} eq 'PadAccess' && $self->_f( $_, 'shared' ) && defined $_->{mem_in} && $killed{ $_->{mem_in} } } $g->{nodes}->@* ) {
-            next unless ( $self->_f( $n, 'sigil' ) // '' ) =~ /\A[\@%]\z/;
-            # (as a store's target it is a place, not a read)
-            next unless grep { !( $_->[0]{op} =~ /\A(?:Assign|EntryWrite)\z/ && $_->[1] == 0 ) } ( $g->{cons}{ $n->{id} } // [] )->@*;
-            $self->_gap("a `my` aggregate a sub also reaches, read whole before a call that may change it (in $name)");
-        }
-        # (AN ARGUMENT TOO: `g(@a, $f->())` -- perl's @_ holds @a's elements
-        # as they were before $f ran; the wire passes @a's place)
-        for my $c ( grep { $_->{op} eq 'Call' && ( $self->_f( $_, 'dispatch_kind' ) // '' ) ne 'builtin' } $g->{nodes}->@* ) {
-            my @in = map { $g->{by}{$_} } grep { defined } $self->_inputs($c);
-            my ($agg) = grep { $in[$_] && $in[$_]{op} eq 'PadAccess' && ( $self->_f( $in[$_], 'sigil' ) // '' ) =~ /\A[\@%]\z/ } 0 .. $#in;
-            next unless defined $agg;
-            $self->_gap("a `my` aggregate passed to a call beside a call that may change it (in $name)")
-                if grep { $in[$_] && $in[$_]{op} eq 'Call' && ( $self->_f( $in[$_], 'dispatch_kind' ) // '' ) ne 'builtin' } $agg + 1 .. $#in;
+        my $call = sub ($id) {
+            my $c = $g->{by}{ $id // '' } // return 0;
+            $c = $g->{by}{ ( $self->_inputs($c) )[0] // '' } // return 0 while $c->{op} eq 'Coerce';
+            return $c->{op} eq 'Call' && ( $self->_f( $c, 'dispatch_kind' ) // '' ) ne 'builtin';
+        };
+        my $agg = sub ($id) {
+            my $n = $g->{by}{ $id // '' } // return 0;
+            return $n->{op} eq 'PadAccess' && $self->_f( $n, 'shared' ) && ( $self->_f( $n, 'sigil' ) // '' ) =~ /\A[\@%]\z/;
+        };
+        # (beside it: one list, one call's arguments, one join -- perl takes
+        # the aggregate's elements where it stands, before the call runs)
+        for my $n ( $g->{nodes}->@* ) {
+            my @in = grep { defined } $self->_inputs($n);
+            for my $i ( grep { $agg->( $in[$_] ) } 0 .. $#in ) {
+                $self->_gap("a `my` aggregate a sub also reaches, flattened beside a call that may change it (in $name)")
+                    if grep { $call->( $in[$_] ) } $i + 1 .. $#in;
+            }
         }
         return;
     }

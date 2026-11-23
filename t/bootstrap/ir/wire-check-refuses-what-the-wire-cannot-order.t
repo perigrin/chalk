@@ -95,8 +95,9 @@ for my $case (
     [ q{eval { die "plain\n" }; print "got $@";}, undef, 'W7: a die of a string' ],
     # W8
     [ q{my @o; sub DESTROY { push @o, "d" } { my $x = bless [], "main"; } print "@o\n";}, $W8, 'W8: DESTROY' ],
-    # W9
-    [ q{my $h = { a => 1 }; my $v = $h->{b}{c}; print exists $h->{b} ? "viv" : "none", "\n";}, $W9, 'W9: a nested read of a missing key' ],
+    # W9: B::SoN makes the element a read goes through (audit 2026-11-22), so
+    # perl's answer, not the refusal (which stays for a wire that does not)
+    [ q{my $h = { a => 1 }; my $v = $h->{b}{c}; print exists $h->{b} ? "viv" : "none", "\n";}, undef, 'W9: a nested read of a missing key' ],
     [ q{my $h = { a => { c => 2 } }; my $v = $h->{a}{c}; print "$v\n";}, undef, 'W9: a nested read of a key that is there' ],
     [ q{my $r = {}; $r->{a}{b} = 3; print $r->{a}{b}, "\n";}, undef, 'W9: a nested read of what a store made' ],
     # W10: B::SoN reads a package aggregate flattened into a list at a memory

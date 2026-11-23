@@ -49,7 +49,9 @@ sub walk {
         # version kills it: every read at this one is made first, whatever the
         # statement (Click's anti-dependence; audit 2026-11-22, risk 4 -- a
         # list assign made a read of its own target after its store).
-        $b->reads_before( $s->mem_in ) if $s->can('mem_out') && $s->mem_out && blessed( $s->mem_in );
+        # (Not in an eval's body: a read made there is the body's, and one used
+        # past the eval's end is then refused -- t2-what-an-eval-makes-flows-out.)
+        $b->reads_before( $s->mem_in ) if $s->can('mem_out') && $s->mem_out && blessed( $s->mem_in ) && !( $b->{evals} // [] )->@*;
         return $ctl if $op eq 'Return';
         if ($op eq 'Print') {
             # TO STDOUT OR STDERR BY NAME (B::SoN: has_filehandle, the glob
