@@ -13,7 +13,9 @@ use Chalk::CodeGen::Harness::LLI;
 my $LLI = Chalk::CodeGen::Harness::LLI->path;
 
 # The verdicts:
-#   SAME     chalk's program printed what perl printed, and ended as perl did
+#   SAME     chalk's program printed what perl printed, and ended as perl did:
+#            the same exit status (a die is 255, `exit 3` is 3), not only
+#            "failed" for both (audit 2026-11-22, risk 11)
 #   REFUSED  chalk (or B::SoN) declined the program, naming why
 #   LOUD     chalk's program stopped with an error where perl's did not
 #   WRONG    it ran and printed something else -- the one verdict nothing may have
@@ -26,7 +28,8 @@ sub _one_line ($s) { $s =~ s/\s+at \S+ line \d+\.?\s*\z//; $s =~ s/\s+/ /g; $s =
 sub run_probe ($file) {
     my $dir  = tempdir( CLEANUP => 1 );
     my $want = qx($^X $file 2>/dev/null </dev/null);
-    my $want_ok = $? == 0;
+    my $want_st = $?;
+    my $want_ok = $want_st == 0;
     require Chalk::CodeGen::Harness::Producer;
     my $wire = Chalk::CodeGen::Harness::Producer->wire_option;
     my $json = qx($^X -I$SON -MO=-q,SoN,json,not_package=SoN$wire $file 2>$dir/son.err);
@@ -50,14 +53,15 @@ sub run_probe ($file) {
     print $l $u->{ll};
     close $l;
     my $got    = qx(timeout 30 $LLI $dir/p.ll 2>$dir/lli.err </dev/null);
-    my $got_ok = $? == 0;
-    return [ 'SAME', '' ] if $got eq $want && $got_ok == $want_ok;
-    return [ 'WRONG', 'never ends' ] if ( $? >> 8 ) == 124;
+    my $got_st = $?;
+    my $got_ok = $got_st == 0;
+    return [ 'SAME', '' ] if $got eq $want && $got_st == $want_st;
+    return [ 'WRONG', 'never ends' ] if ( $got_st >> 8 ) == 124;
     if ( !$got_ok && $want_ok ) {
         my $why = do { local ( @ARGV, $/ ) = "$dir/lli.err"; <> } // '';
         return [ 'LOUD', _one_line($why) ];
     }
-    return [ 'WRONG', _one_line( "got=[$got] want=[$want]" . ( $got_ok == $want_ok ? '' : ' (exit differs)' ) ) ];
+    return [ 'WRONG', _one_line( "got=[$got] want=[$want]" . ( $got_st == $want_st ? '' : " (exit status $got_st, perl's $want_st)" ) ) ];
 }
 
 # run_all(\@files, jobs => 2, timeout => 180) -> { name => [verdict, why] }:
