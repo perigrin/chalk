@@ -52,7 +52,9 @@ for my $case (@refused) {
     my ($src, $name) = @$case;
     my $r = tap("$src\n");
     isnt $r->{verdict}, 'DIFFERS', "$name: never a wrong answer" or diag explain $r;
-    like $r->{why} // '', qr/T2: out of its slices/, "$name: refused by name" if $r->{verdict} eq 'REFUSED';
+    # (B::SoN's refusal of a sub the program calls is on the wire now, and the
+    # loader names it: re-audit 2026-11-23, section 3 H)
+    like $r->{why} // '', qr/T2: out of its slices|which the program calls, is refused in its module: GAP:/, "$name: refused by name" if $r->{verdict} eq 'REFUSED';
 }
 
 done_testing;

@@ -17,7 +17,10 @@ sub through_llvm ($src) {
     my ($fh, $pl) = tempfile(SUFFIX => '.pl', UNLINK => 1);
     print $fh $src;
     close $fh;
-    my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>/dev/null);
+    my $json = qx($^X -I$SON -MO=-q,SoN,json $pl 2>$pl.err);
+    my $son  = do { local ( @ARGV, $/ ) = "$pl.err"; <> } // '';
+    unlink "$pl.err";
+    die "B::SoN: $1\n" if $son =~ /skipped main::__PROGRAM__: (.*)/;
     my $select = sub ($graphs, $mop) {
         my $g = $graphs->{'main::__PROGRAM__'} or return ();
         my $ret = $g->returns->[0] or return ();
@@ -52,11 +55,13 @@ for my $c (
 }
 
 # perl's $_ is the array's own element: written through, it changes @a. The
-# walk here is of a copy, so a write is refused rather than lost.
+# walk here is of a copy, so a write is refused rather than lost. (B::SoN
+# refuses it first now, a grep whose block writes $_ read as a list:
+# re-audit 2026-11-23, class F.)
 for my $src (q{my @a = (1, 2, 3); my @g = grep { $_ = 9 } @a[0, 1]; print "@a|@g\n";},
              q{my @a = (1, 2, 3); my @g = grep { $_++ } @a[0, 1]; print "@a|@g\n";}) {
     eval { through_llvm($src) };
-    like($@, qr/perl aliases the array's element/, "a write through grep's \$_ is refused: $src");
+    like($@, qr/perl aliases the array's element|GAP: a grep whose block writes \$_, read as a list/, "a write through grep's \$_ is refused: $src");
 }
 
 done_testing;
