@@ -95,13 +95,301 @@ ar6	SAME
 ar7	SAME	
 ar8	REFUSED	GAP: T2: out of its slices (an argument perl aliases (Subscript) passed where a sub writes @_)
 ar9	SAME	
+aue1	REFUSED	no program graph
+aue2	REFUSED	GAP: T2: out of its slices (a statement Call builtin sleep)
+aue3	SAME	
+aue4	REFUSED	GAP: T2: out of its slices (a statement Call builtin srand)
+aue5	REFUSED	GAP: T2: out of its slices (an each in a program with a keys or values (which reset it, B::SoN places them nowhere))
+auk1	SAME	
+auk10	REFUSED	GAP: T2: out of its slices (an array first made in an arm or a loop body)
+auk11	SAME	
+auk12	SAME	
+auk13	SAME	
+auk14	SAME	
+auk15	REFUSED	GAP: T2: out of its slices (a loop body that ends neither going round nor leaving)
+auk16	SAME	
+auk17	SAME	
+auk18	SAME	
+auk2	SAME	
+auk3	SAME	
+auk4	SAME	
+auk5	SAME	
+auk6	SAME	
+auk7	SAME	
+auk8	SAME	
+auk9	SAME	
+aum1	SAME	
+aum10	REFUSED	GAP: T2: out of its slices (a phi stamped List)
+aum11	REFUSED	GAP: T2: out of its slices (a phi stamped List)
+aum12	REFUSED	no program graph
+aum13	SAME	
+aum14	REFUSED	GAP: T2: out of its slices (a phi stamped List)
+aum15	SAME	
+aum16	REFUSED	GAP: T2: out of its slices (a phi stamped List)
+aum17	SAME	
+aum18	SAME	
+aum19	SAME	
+aum2	SAME	
+aum20	SAME	
+aum21	SAME	
+aum22	SAME	
+aum23	SAME	
+aum24	REFUSED	no program graph
+aum25	SAME	
+aum26	SAME	
+aum3	SAME	
+aum30	SAME	
+aum31	SAME	
+aum32	SAME	
+aum33	SAME	
+aum34	SAME	
+aum35	SAME	
+aum36	SAME	
+aum37	SAME	
+aum38	SAME	
+aum4	SAME	
+aum40	REFUSED	load: from_json failed: GAP: a `my` aggregate a sub also reaches, flattened beside a call that may change it (in main::__PROGRAM__)
+aum41	SAME	
+aum42	REFUSED	load: from_json failed: GAP: a `my` aggregate a sub also reaches, flattened beside a call that may change it (in main::__PROGRAM__)
+aum43	REFUSED	load: from_json failed: GAP: a `my` aggregate a sub also reaches, flattened beside a call that may change it (in main::__PROGRAM__)
+aum44	SAME	
+aum45	REFUSED	load: from_json failed: GAP: a `my` aggregate a sub also reaches, flattened beside a call that may change it (in main::__PROGRAM__)
+aum46	REFUSED	load: from_json failed: GAP: a `my` aggregate a sub also reaches, flattened beside a call that may change it (in main::__PROGRAM__)
+aum5	REFUSED	no program graph
+aum50	SAME	
+aum51	REFUSED	GAP: T2: out of its slices (a read of $_ B::SoN folds to the element it aliases, where the program writes $_ (B::SoN sees no write through $_))
+aum52	SAME	
+aum53	SAME	
+aum54	REFUSED	GAP: T2: out of its slices (a read of $_ B::SoN folds to the element it aliases, where the program writes $_ (B::SoN sees no write through $_))
+aum55	SAME	
+aum56	SAME	
+aum57	SAME	
+aum58	SAME	
+aum6	SAME	
+aum60	REFUSED	load: from_json failed: GAP: a DESTROY method (main::AUTOLOAD), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+aum61	REFUSED	load: from_json failed: GAP: a DESTROY method (P::AUTOLOAD), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+aum62	REFUSED	load: from_json failed: GAP: a DESTROY method (B1::DESTROY), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+aum63	REFUSED	load: from_json failed: GAP: a DESTROY method (B1::DESTROY), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+aum64	REFUSED	load: from_json failed: GAP: a DESTROY method (B2::DESTROY), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+aum7	SAME	
+aum70	SAME	
+aum71	SAME	
+aum72	SAME	
+aum73	SAME	
+aum74	SAME	
+aum75	SAME	
+aum76	SAME	
+aum77	SAME	
+aum78	SAME	
+aum79	SAME	
+aum8	SAME	
+aum9	SAME	
+aun1	REFUSED	no program graph
+aun10	SAME	
+aun100	SAME	
+aun101	SAME	
+aun102	SAME	
+aun103	SAME	
+aun104	SAME	
+aun105	SAME	
+aun106	SAME	
+aun107	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a hash store)
+aun108	SAME	
+aun110	SAME	
+aun111	SAME	
+aun112	SAME	
+aun113	SAME	
+aun114	SAME	
+aun115	SAME	
+aun116	REFUSED	GAP: T2: out of its slices (a list perl may alias (Call) passed where a sub writes @_)
+aun117	SAME	
+aun118	SAME	
+aun119	SAME	
+aun12	SAME	
+aun120	SAME	
+aun121	SAME	
+aun122	SAME	
+aun123	SAME	
+aun124	SAME	
+aun125	SAME	
+aun126	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+aun127	SAME	
+aun128	SAME	
+aun129	SAME	
+aun12a	SAME	
+aun12b	SAME	
+aun12c	SAME	
+aun12d	SAME	
+aun12e	REFUSED	GAP: T2: out of its slices (a slice taken as a scalar (Coerce))
+aun12f	SAME	
+aun13	SAME	
+aun130	SAME	
+aun131	SAME	
+aun132	SAME	
+aun133	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+aun134	SAME	
+aun135	REFUSED	GAP: T2: out of its slices (a list assignment to a slice of @_)
+aun136	SAME	
+aun137	REFUSED	GAP: T2: out of its slices (sub main::m1 reads @_ other than by shifts, $_[N] or a signature)
+aun138	SAME	
+aun139	REFUSED	GAP: T2: out of its slices (PadAccess)
+aun14	SAME	
+aun140	SAME	
+aun141	SAME	
+aun142	SAME	
+aun143	SAME	
+aun144	SAME	
+aun145	SAME	
+aun146	SAME	
+aun147	SAME	
+aun148	SAME	
+aun149	SAME	
+aun15	SAME	
+aun150	SAME	
+aun151	SAME	
+aun152	SAME	
+aun153	SAME	
+aun154	SAME	
+aun155	SAME	
+aun156	SAME	
+aun16	REFUSED	load: from_json failed: GAP: a `my` aggregate a sub also reaches, flattened beside a call that may change it (in main::__PROGRAM__)
+aun160	REFUSED	load: from_json failed: GAP: a DESTROY method (E::DESTROY), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+aun161	REFUSED	load: from_json failed: GAP: a DESTROY method (main::AUTOLOAD), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+aun162	SAME	
+aun163	SAME	
+aun164	REFUSED	load: from_json failed: GAP: a dereference nothing reads, which may still die (of undef, under strict refs) (in main::__PROGRAM__)
+aun165	SAME	
+aun166	SAME	
+aun167	SAME	
+aun168	SAME	
+aun169	SAME	
+aun16a	SAME	
+aun16b	SAME	
+aun16c	SAME	
+aun16d	REFUSED	load: from_json failed: GAP: a DESTROY method (main::DESTROY), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+aun16e	REFUSED	load: from_json failed: GAP: a DESTROY method (T::DESTROY), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+aun16f	REFUSED	load: from_json failed: GAP: a DESTROY method (T::DESTROY), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+aun17	SAME	
+aun170	SAME	
+aun171	SAME	
+aun172	SAME	
+aun173	REFUSED	no program graph
+aun174	REFUSED	no program graph
+aun175	REFUSED	no program graph
+aun176	SAME	
+aun177	REFUSED	GAP: T2: out of its slices (an each in a program with a keys or values (which reset it, B::SoN places them nowhere))
+aun178	SAME	
+aun179	SAME	
+aun17a	SAME	
+aun17b	REFUSED	GAP: T2: out of its slices (a read of $_ B::SoN folds to the element it aliases, where the program writes $_ (B::SoN sees no write through $_))
+aun17c	SAME	
+aun17d	SAME	
+aun17e	REFUSED	no program graph
+aun17f	REFUSED	GAP: T2: out of its slices (the value of a list assignment to scalars)
+aun18	SAME	
+aun19	SAME	
+aun2	SAME	
+aun20	SAME	
+aun21	SAME	
+aun22	SAME	
+aun23	SAME	
+aun24	SAME	
+aun25	SAME	
+aun26	SAME	
+aun27	SAME	
+aun28	SAME	
+aun29	SAME	
+aun3	SAME	
+aun30	SAME	
+aun31	SAME	
+aun33	SAME	
+aun34	SAME	
+aun35	SAME	
+aun36	SAME	
+aun37	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+aun38	SAME	
+aun4	SAME	
+aun40	SAME	
+aun41	LOUD	a method named at run time by other than a plain name: stopped (chalk, T2)
+aun42	SAME	
+aun43	SAME	
+aun44	SAME	
+aun45	SAME	
+aun46	SAME	
+aun47	SAME	
+aun48	REFUSED	GAP: T2: out of its slices (Call builtin splice)
+aun49	SAME	
+aun5	SAME	
+aun50	SAME	
+aun51	REFUSED	no program graph
+aun52	SAME	
+aun53	SAME	
+aun55	SAME	
+aun56	SAME	
+aun57	SAME	
+aun58	SAME	
+aun59	SAME	
+aun5a	SAME	
+aun5b	SAME	
+aun5c	SAME	
+aun5d	SAME	
+aun6	SAME	
+aun60	SAME	
+aun61	SAME	
+aun62	SAME	
+aun63	SAME	
+aun64	SAME	
+aun7	SAME	
+aun70	REFUSED	load: from_json failed: GAP: a call that may die under a `local` ($main::g), in a sub with no eval (in main::t)
+aun71	SAME	
+aun72	SAME	
+aun73	REFUSED	GAP: T2: out of its slices (a local of an element where a die may unwind past it)
+aun74	SAME	
+aun75	SAME	
+aun76	REFUSED	GAP: T2: out of its slices (a die in an eval where the wire gives it no way out (EntryWrite))
+aun77	SAME	
+aun78	SAME	
+aun79	REFUSED	GAP: T2: out of its slices (a phi stamped List)
+aun8	SAME	
+aun80	REFUSED	GAP: T2: out of its slices (a require of No/Such/Mod.pm, not compiled in)
+aun81	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+aun82	REFUSED	GAP: T2: out of its slices (an eval whose body returns)
+aun83	REFUSED	GAP: T2: out of its slices (an open of a file (or of what is not a reference to a constant string))
+aun84	SAME	
+aun85	SAME	
+aun87	SAME	
+aun88	SAME	
+aun89	SAME	
+aun9	SAME	
+aun90	SAME	
+aun91	SAME	
+aun92	REFUSED	GAP: T2: out of its slices (a phi stamped List)
+aun93	SAME	
+aun94	SAME	
+aun95	REFUSED	no program graph
+aun96	SAME	
+aun97	SAME	
+aun98	SAME	
+aun99	SAME	
+aux1	REFUSED	GAP: T2: out of its slices (a statement Call builtin log)
+aux10	SAME	
+aux11	REFUSED	GAP: T2: out of its slices (a die in an eval where the wire gives it no way out (EntryWrite))
+aux12	SAME	
+aux2	REFUSED	GAP: T2: out of its slices (a statement Call builtin sqrt)
+aux3	REFUSED	GAP: T2: out of its slices (a statement Call builtin log)
+aux4	REFUSED	GAP: T2: out of its slices (a statement Call builtin log)
+aux5	REFUSED	GAP: T2: out of its slices (an eval whose body returns)
+aux6	REFUSED	GAP: T2: out of its slices (a phi stamped List)
+aux7	LOUD	chalk: refused at run time: a call of what is not a code value (T2)
+aux8	SAME	
+aux9	SAME	
 bless1	SAME	
 bless2	SAME	
 bt1	SAME	
 ca1	SAME	
 ca10	SAME	
 ca11	SAME	
-ca12	REFUSED	GAP: T2: out of its slices (a method no package defines (foo))
+ca12	REFUSED	load: from_json failed: GAP: a DESTROY method (A::AUTOLOAD), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
 ca13	SAME	
 ca14	SAME	
 ca15	SAME	
@@ -119,7 +407,7 @@ ca25	SAME
 ca26	SAME	
 ca27	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
 ca28	SAME	
-ca29	REFUSED	load: from_json failed: GAP: a DESTROY method (main::DESTROY): chalk never destroys an object, so it would never run
+ca29	REFUSED	load: from_json failed: GAP: a DESTROY method (main::DESTROY), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
 ca3	SAME	
 ca30	SAME	
 ca4	SAME	
@@ -181,7 +469,7 @@ ef18	SAME
 ef19	SAME	
 ef2	SAME	
 ef20	SAME	
-ef21	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+ef21	REFUSED	GAP: T2: out of its slices (EntryDef)
 ef22	REFUSED	GAP: T2: out of its slices (a variable a handle writes, read other than after a close)
 ef23	SAME	
 ef24	SAME	
@@ -229,9 +517,9 @@ fk6	SAME
 fk7	SAME	
 fl1	SAME	
 fl10	SAME	
-fl11	REFUSED	load: from_json failed: GAP: a read through an element that is not there, which perl makes (autovivification) (in main::__PROGRAM__)
+fl11	SAME	
 fl12	SAME	
-fl13	REFUSED	GAP: T2: out of its slices (Call builtin log)
+fl13	REFUSED	GAP: T2: out of its slices (a statement Call builtin log)
 fl14	REFUSED	no program graph
 fl2	SAME	
 fl20	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
@@ -261,8 +549,8 @@ hs9	SAME
 ht1	SAME	
 ht2	SAME	
 im1	REFUSED	load: from_json failed: GAP: a BEGIN block with effects of its own is not lowered (a BEGIN or END block runs outside the main program)
-im10	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
-im11	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+im10	REFUSED	GAP: T2: out of its slices ($" written)
+im11	REFUSED	GAP: T2: out of its slices (EntryDef)
 im12	REFUSED	GAP: T2: out of its slices (a capture read where its match may have failed (perl reads the last match that succeeded))
 im13	SAME	
 im14	SAME	
@@ -286,7 +574,7 @@ im3	REFUSED	load: from_json failed: GAP: a BEGIN block with effects of its own i
 im30	SAME	
 im4	REFUSED	GAP: T2: out of its slices (a tie of a scalar)
 im5	SAME	
-im6	REFUSED	load: from_json failed: GAP: a DESTROY method (D::DESTROY): chalk never destroys an object, so it would never run
+im6	REFUSED	load: from_json failed: GAP: a DESTROY method (D::DESTROY), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
 im7	SAME	
 im8	SAME	
 im9	SAME	
@@ -317,7 +605,7 @@ lo11	SAME
 lo12	SAME	
 lo13	SAME	
 lo14	SAME	
-lo15	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+lo15	REFUSED	GAP: T2: out of its slices (EntryDef)
 lo16	SAME	
 lo2	SAME	
 lo20	SAME	
