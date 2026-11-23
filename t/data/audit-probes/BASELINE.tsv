@@ -647,6 +647,102 @@ lp6	SAME
 lp7	SAME	
 lp8	REFUSED	no program graph
 lp9	REFUSED	no program graph
+lw1	SAME	
+lw10	SAME	
+lw11	SAME	
+lw12	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+lw13	SAME	
+lw14	SAME	
+lw15	SAME	
+lw16	SAME	
+lw17	SAME	
+lw18	SAME	
+lw19	SAME	
+lw2	SAME	
+lw20	REFUSED	GAP: T2: out of its slices (Call builtin splice)
+lw21	SAME	
+lw22	SAME	
+lw23	SAME	
+lw24	SAME	
+lw25	REFUSED	GAP: T2: out of its slices (a slice of an array B::SoN reads at no version, aliased where it may be written)
+lw26	REFUSED	GAP: T2: out of its slices (a local)
+lw27	REFUSED	GAP: T2: out of its slices (a local)
+lw28	SAME	
+lw29	SAME	
+lw3	SAME	
+lw30	SAME	
+lw31	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+lw32	SAME	
+lw33	SAME	
+lw34	SAME	
+lw35	SAME	
+lw36	SAME	
+lw37	SAME	
+lw38	SAME	
+lw39	SAME	
+lw4	SAME	
+lw40	SAME	
+lw41	REFUSED	GAP: T2: out of its slices (a read of $_ B::SoN folds to the element it aliases, where the program writes $_ (B::SoN sees no write through $_))
+lw42	SAME	
+lw43	SAME	
+lw44	SAME	
+lw45	SAME	
+lw46	SAME	
+lw47	SAME	
+lw48	SAME	
+lw49	SAME	
+lw5	SAME	
+lw50	SAME	
+lw51	SAME	
+lw52	SAME	
+lw53	REFUSED	no program graph
+lw54	SAME	
+lw55	SAME	
+lw56	SAME	
+lw57	SAME	
+lw58	SAME	
+lw59	SAME	
+lw6	SAME	
+lw60	SAME	
+lw61	SAME	
+lw62	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+lw63	SAME	
+lw64	SAME	
+lw65	SAME	
+lw66	SAME	
+lw67	SAME	
+lw68	SAME	
+lw69	SAME	
+lw7	REFUSED	GAP: T2: out of its slices (a list perl may alias (Call) passed where a sub writes @_)
+lw70	SAME	
+lw71	REFUSED	no program graph
+lw72	SAME	
+lw73	SAME	
+lw74	REFUSED	no program graph
+lw75	SAME	
+lw76	REFUSED	GAP: T2: out of its slices (a read of $_ B::SoN folds to the element it aliases, where the program writes $_ (B::SoN sees no write through $_))
+lw77	SAME	
+lw78	SAME	
+lw79	REFUSED	no program graph
+lw8	REFUSED	no program graph
+lw80	SAME	
+lw81	REFUSED	no program graph
+lw82	REFUSED	no program graph
+lw83	REFUSED	no program graph
+lw84	REFUSED	no program graph
+lw85	REFUSED	no program graph
+lw86	SAME	
+lw87	SAME	
+lw88	SAME	
+lw89	SAME	
+lw9	SAME	
+lw90	REFUSED	no program graph
+lw91	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+lw92	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+lw93	SAME	
+lw94	REFUSED	GAP: T2: out of its slices (PadAccess)
+lw95	SAME	
+lw96	REFUSED	no program graph
 m4	SAME	
 nv1	SAME	
 nv10	SAME	
