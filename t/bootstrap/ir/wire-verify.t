@@ -34,17 +34,14 @@ require SoN::Verify;
 # A VIOLATION HELD, by file, graph and rule, each with why it is
 # not fixed yet. One that no longer occurs is printed: take it out.
 my %HELD = (
-    't/data/audit-probes/pl13.pl:main::sw record' =>
-        'a list assignment to package scalars that is its sub\'s value: its EntryWrites store, and the Assign is '
-      . 'the value (a list in list context, the right side\'s count in scalar), on neither chain; what node that '
-      . 'value is wants a design (T2 refuses it by name: "the value of a list assignment to scalars")',
+    # (probes pl13 and aun17f, a list assignment to package scalars that is
+    # its sub's value, were held here as `record`: B::SoN gives the Return
+    # its two readings now, the targets after it and the right side's count)
     # (DynaLoader's two, held here as "not traced yet", are gone: perl
     # compiles it before B::SoN turns the peephole off, and B::SoN now
     # refuses its aelemfast by name -- the producer's
     # t/wire-a-fused-element-op-is-refused.t)
     # The goal audit's probes (2026-11-22), as the producer's ratchet holds them:
-    't/data/audit-probes/aun17f.pl:main::sw record' =>
-        'the same shape as pl13: a list assignment to package scalars that is its sub\'s value (T2 refuses it by name)',
     't/data/audit-probes/aun6.pl:main::bump read-unversioned:through-ref' =>
         'a compound assignment through a symbolic reference (`${"main::g"} += 10`): its read of the package scalar names '
       . 'no version; T2 gives perl\'s answer (the read is its own store\'s operand), B::SoN should version it -- open',

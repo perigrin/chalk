@@ -285,7 +285,7 @@ aun17b	REFUSED	GAP: T2: out of its slices (a read of $_ B::SoN folds to the elem
 aun17c	SAME	
 aun17d	SAME	
 aun17e	REFUSED	no program graph
-aun17f	REFUSED	GAP: T2: out of its slices (the value of a list assignment to scalars)
+aun17f	SAME	
 aun18	SAME	
 aun19	SAME	
 aun2	SAME	
@@ -690,7 +690,7 @@ pl1	SAME
 pl10	SAME	
 pl11	SAME	
 pl12	REFUSED	no program graph
-pl13	REFUSED	GAP: T2: out of its slices (the value of a list assignment to scalars)
+pl13	SAME	
 pl14	SAME	
 pl15	SAME	
 pl2	SAME	
