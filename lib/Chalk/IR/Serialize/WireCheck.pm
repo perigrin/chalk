@@ -217,7 +217,14 @@ class Chalk::IR::Serialize::WireCheck {
                 if $self->_f( $w, 'binds' ) || defined $v && $v->{op} eq 'EntryDef' && defined $v->{mem_in} && ( $self->_pkg_name($v) // '' ) eq $var;
         }
         return unless %restored;
-        for my $c ( grep { $self->_is_sub_call($_) && defined $_->{control_in} && !defined $self->_f( $_, 'eval_id' ) && $self->_call_may_die($_) } $g->{nodes}->@* ) {
+        # (A FAULT OF THE SUB'S OWN, a division or a dereference that names
+        # where it dies, leaves by no way either: `sub f { local $g = 2; 1/$_[0]
+        # } eval { f(0) }` left $g 2 -- re-audit 2026-11-23, class B.)
+        for my $c ( grep {
+                defined $_->{control_in} && !defined $self->_f( $_, 'eval_id' )
+                && ( $self->_faults_itself($_) || $self->_is_sub_call($_) && $self->_call_may_die($_) )
+            } $g->{nodes}->@* ) {
+            my $what = $self->_faults_itself($c) ? "a $c->{op}" : 'a call';
             my ( %seen, @q );
             @q = $self->_preds( $g, $c );
             while ( defined( my $x = shift @q ) ) {
@@ -225,7 +232,7 @@ class Chalk::IR::Serialize::WireCheck {
                 my $var = $self->_written_pkg( $g, $x );
                 if ( defined $var && $restored{$var} ) {
                     next if $restored{$var}{ $x->{id} };    # (put back before the call)
-                    $self->_gap("a call that may die under a `local` ($var), in a sub with no eval (in $name)");
+                    $self->_gap("$what that may die under a `local` ($var), in a sub with no eval (in $name)");
                 }
                 push @q, $self->_preds( $g, $x );
             }
@@ -241,10 +248,15 @@ class Chalk::IR::Serialize::WireCheck {
         return 1 unless ( $self->_f( $c, 'dispatch_kind' ) // '' ) eq 'direct' && exists $methods->{$name};
         return $self->_graph_may_die($name, {});
     }
+    # _faults_itself($node) -> a division or a dereference that names where it
+    # dies (B::SoN gives such a node its line).
+    method _faults_itself($n) {
+        return defined $self->_f( $n, 'line' ) && $n->{op} =~ /\A(?:Divide|Modulo|PostfixDeref|Ref)\z/ ? 1 : 0;
+    }
     method _graph_may_die( $name, $seen ) {
         return 0 if $seen->{$name}++;
         for my $n ( $self->_graph($name)->{nodes}->@* ) {
-            return 1 if $n->{op} eq 'Unwind' || defined $self->_f( $n, 'line' ) && $n->{op} =~ /\A(?:Divide|Modulo|PostfixDeref|Ref)\z/;
+            return 1 if $n->{op} eq 'Unwind' || $self->_faults_itself($n);
             next unless $self->_is_sub_call($n);
             my $callee = $self->_f( $n, 'name' ) // '';
             return 1 unless ( $self->_f( $n, 'dispatch_kind' ) // '' ) eq 'direct' && exists $methods->{$callee};
