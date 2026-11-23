@@ -34,6 +34,22 @@ require Chalk::Target::LLVM::Printer;   # its %CONVERT: which conversions there 
 
 sub out { die "T2: out of its slices ($_[0])\n" }
 
+# eval_regions_at(@nodes) -> { entry node address => the eval's Region }. A TRY MAKES NO NODE
+# WHERE IT BEGINS, so a try or eval beginning its body names the same entry,
+# and a map keyed by it kept one of the two: the outer catch was lost (re-audit
+# 2026-11-23, section 3 H: `try { try { die } catch ($e) { die "o" } } catch
+# ($e) { ... }` died "o"). Refused by name.
+sub eval_regions_at (@nodes) {
+    my %at;
+    for my $r ( grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed( $_->eval_entry ) } @nodes ) {
+        my $k = refaddr( $r->eval_entry );
+        out('two evals entered at one node (a try whose body begins with a try or an eval)')
+            if $at{$k} && $at{$k} != $r;
+        $at{$k} = $r;
+    }
+    return \%at;
+}
+
 sub new_block {
     my ($b, $label) = @_;
     my $blk = { label => $label . scalar($b->{blocks}->@*), nodes => [], term => undef };
@@ -69,7 +85,7 @@ sub build {
     # {ret} is the sub's -- a question asked there first saw only the sub)
     $b->{root_ret} = $ret;
     $b->{own_nodes} = [ Chalk::IR::Graph::own_nodes($ret) ];
-    $b->{eval_at} = { map { ( refaddr( $_->eval_entry ) => $_ ) } grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed( $_->eval_entry ) } $b->{own_nodes}->@* };
+    $b->{eval_at} = eval_regions_at( $b->{own_nodes}->@* );
     $b->{evals} = [];
     $b->{passed} = [ grep { $_->operation eq 'MemStart' } Chalk::IR::Graph::own_nodes($ret) ];
     $b->index_readers(Chalk::IR::Graph::own_nodes($ret));

@@ -1233,7 +1233,7 @@ sub func {
     local $b->{cells} = $closure ? $o{cells} : undef;
     local $b->{env} = $closure ? do { my $e = Chalk::Target::LLVM::Node::_n(op => 'Arg', type => '%Slot**', attr => { index => 1 }); $e->set_name('%env'); $e } : undef;
     local $b->{own_nodes} = [ $g->component ];
-    local $b->{eval_at} = { map { ( refaddr( $_->eval_entry ) => $_ ) } grep { $_->operation eq 'Region' && $_->can('eval_entry') && blessed( $_->eval_entry ) } $b->{own_nodes}->@* };
+    local $b->{eval_at} = eval_regions_at( $b->{own_nodes}->@* );
     local $b->{evals} = [];
     local $b->{eval_opened} = {};
     local $b->{stmt};   # (the caller's statement is the caller's: exc_block)
