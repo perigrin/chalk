@@ -38,11 +38,19 @@ my %HELD = (
         'a list assignment to package scalars that is its sub\'s value: its EntryWrites store, and the Assign is '
       . 'the value (a list in list context, the right side\'s count in scalar), on neither chain; what node that '
       . 'value is wants a design (T2 refuses it by name: "the value of a list assignment to scalars")',
-    # (perl's own DynaLoader, which chalk's runtime module follows)
-    map( { ( "lib/Chalk/Bootstrap/Runtime.pm:$_ record" =>
-        'an Assign of @isa alone, on neither chain, beside `local *isa = *{"$module\\::ISA"}; local @isa = (...)`: '
-      . 'a v1 floating store the v2 writer calls a record; small programs of that shape do not reproduce it, not traced yet' ) }
-        qw(DynaLoader::bootstrap DynaLoader::bootstrap_inherit) ),
+    # (DynaLoader's two, held here as "not traced yet", are gone: perl
+    # compiles it before B::SoN turns the peephole off, and B::SoN now
+    # refuses its aelemfast by name -- the producer's
+    # t/wire-a-fused-element-op-is-refused.t)
+    # The goal audit's probes (2026-11-22), as the producer's ratchet holds them:
+    't/data/audit-probes/aun17f.pl:main::sw record' =>
+        'the same shape as pl13: a list assignment to package scalars that is its sub\'s value (T2 refuses it by name)',
+    't/data/audit-probes/aun6.pl:main::bump read-unversioned:through-ref' =>
+        'a compound assignment through a symbolic reference (`${"main::g"} += 10`): its read of the package scalar names '
+      . 'no version; T2 gives perl\'s answer (the read is its own store\'s operand), B::SoN should version it -- open',
+    't/data/audit-probes/aun5d.pl:main::__PROGRAM__ effect-floating' =>
+        'a division that may fault after a `next unless` guard in a loop body floats: the rest of the body is walked as '
+      . 'an arm, where B::SoN does not pin; T2 makes it at its use, after the guard -- open, B::SoN should pin it',
 );
 my $jobs     = $ENV{SON_WIRE_JOBS}    // 2;
 my $limit    = $ENV{SON_WIRE_TIMEOUT} // 900;
