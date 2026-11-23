@@ -46,7 +46,11 @@ sub run_probe ($file) {
     my ( $units, undef, undef, $err ) = eval { Chalk::CodeGen::Pipeline->new->run_detail( $json, $select, program_mode => 1 ) };
     $err //= $@ if $@;
     return [ 'REFUSED', 'load: ' . _one_line($err) ] if $err;
-    my $u = ( $units // [] )->[0] or return [ 'REFUSED', 'no program graph' ];
+    # (B::SoN skipped the program: say why in its words -- re-audit 2026-11-23)
+    my $u = ( $units // [] )->[0] or do {
+        my $err = do { local ( @ARGV, $/ ) = "$dir/son.err"; <> } // '';
+        return [ 'REFUSED', $err =~ /skipped main::__PROGRAM__: (.*)/ ? 'B::SoN: ' . _one_line($1) : 'no program graph' ];
+    };
     return [ 'REFUSED', _one_line( $u->{err} // 'lowering failed' ) ] unless $u->{ok};
     open my $l, '>', "$dir/p.ll" or die $!;
     binmode $l, ':utf8';
