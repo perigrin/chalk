@@ -162,7 +162,7 @@ subtest 'case_change: which case, of what' => sub {
 
 subtest 'reads_state: its value is of state a later store may change' => sub {
     ok( builtin($_)->reads_state, "$_ reads it" )
-        for qw(keys values each sort caller pos tie untie bless formline join warn);
+        for qw(keys values each sort caller pos tie untie bless formline join warn time rand);
     ok( !builtin($_)->reads_state, "$_ does not" ) for qw(chdir require int substr lc);
     ok( !sub_call( 'direct', 'keys' )->reads_state, 'a sub named keys is not the builtin' );
 };

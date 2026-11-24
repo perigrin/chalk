@@ -162,9 +162,10 @@ class Chalk::Grammar::Perl::BuiltinTable {
         # values or next pair, a list's order or join, the call stack, a
         # string's pos, a variable's tie (tie, untie: every later access is
         # the tie's), an object's class (bless), the format accumulator
-        # (formline), %SIG's __WARN__ (warn). Read where it stands, not
-        # later.
-        reads_state => { map { ( $_ => 1 ) } qw(keys values each sort caller pos tie untie bless formline join warn) },
+        # (formline), %SIG's __WARN__ (warn), the clock a sleep moves (time),
+        # the random stream an srand reseeds and a rand advances (rand). Read
+        # where it stands, not later (B::SoN pins each).
+        reads_state => { map { ( $_ => 1 ) } qw(keys values each sort caller pos tie untie bless formline join warn time rand) },
 
         # IT CHANGES STATE A LATER READ SEES: chdir the working directory
         # (the next -d's), require %INC and the subs it compiles in.
