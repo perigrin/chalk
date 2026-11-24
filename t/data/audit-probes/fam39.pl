@@ -1,0 +1,1 @@
+my $s="abc"; my $c = chop($s) . "!"; print "$c\n";

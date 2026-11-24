@@ -1,0 +1,1 @@
+use feature 'class'; no warnings; class Pt { field $x :param; field @h; method mv($d) { push @h,$x; $x+=$d; $self } method x { $x } method hist { scalar @h } } my $p=Pt->new(x=>1); my $q=Pt->new(x=>10); $p->mv(1)->mv(1); print $p->x, $q->x, $p->hist, $q->hist, "\n";

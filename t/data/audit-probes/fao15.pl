@@ -1,0 +1,1 @@
+package Q; sub new { bless {q=>[]}, shift } sub put { my $s=shift; push @{$s->{q}}, @_; scalar @{$s->{q}} } sub get { shift @{$_[0]{q}} } package main; my $q=Q->new; $q->put(1,2); my $a=$q->get; my $n=$q->put(3); print "$a$n", $q->get, "\n";

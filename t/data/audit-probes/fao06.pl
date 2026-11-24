@@ -1,0 +1,1 @@
+package P; sub new { bless {v=>[1,2]}, shift } sub clone { my $s=shift; bless { v=>[@{$s->{v}}] }, ref $s } package main; my $a=P->new; my $b=$a->clone; push @{$b->{v}},3; print scalar(@{$a->{v}}), scalar(@{$b->{v}}), "\n";

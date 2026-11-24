@@ -1,0 +1,1 @@
+package T; sub new { bless {k=>{}}, shift } sub ins { my ($s,@p)=@_; my $n=$s->{k}; $n=$n->{$_}//={} for @p; $n->{end}=1 } sub has { my ($s,@p)=@_; my $n=$s->{k}; for (@p) { $n=$n->{$_} or return 0 } $n->{end}?1:0 } package main; my $t=T->new; $t->ins(qw(a b)); print $t->has(qw(a b)), $t->has("a"), $t->has(qw(a c)), "\n";

@@ -1,0 +1,1 @@
+package A; our $log=""; sub new { bless {}, shift } sub go { my $s=shift; $log.="a"; $s->step; $log.="c" } sub step { $log.="b" } package B; our @ISA=('A'); sub step { $A::log.="B" } package main; A->new->go; B->new->go; print "$A::log\n";

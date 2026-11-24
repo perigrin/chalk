@@ -1,0 +1,1 @@
+package S; sub new { bless {i=>[]}, shift } sub add { push @{$_[0]{i}}, $_[1]; $_[0] } sub size { scalar @{$_[0]{i}} } package main; my $s=S->new; my $t=S->new; $s->add(1)->add(2); print $s->size, $t->size, "\n";

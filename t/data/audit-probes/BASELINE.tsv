@@ -543,6 +543,853 @@ ex1	SAME
 ex2	SAME	
 ex3	SAME	
 ex4	SAME	
+faa01	SAME	
+faa02	SAME	
+faa03	SAME	
+faa04	SAME	
+faa05	REFUSED	load: from_json failed: GAP: main::f, which the program calls, is refused in its module: GAP: a write to a foreach iterator over @_ is not yet lowered -- @_ aliases t
+faa06	SAME	
+faa07	SAME	
+faa08	SAME	
+faa09	SAME	
+faa10	SAME	
+faa11	SAME	
+faa12	SAME	
+faa13	SAME	
+faa14	REFUSED	GAP: T2: out of its slices (a store through an element not made a hash or array first)
+faa15	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a hash store)
+faa16	REFUSED	GAP: T2: out of its slices (a local aggregate restored with no save made)
+faa17	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+faa18	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+faa19	SAME	
+faa20	SAME	
+faa21	SAME	
+faa22	REFUSED	GAP: T2: out of its slices (a list perl may alias (Phi) passed where a sub writes @_)
+faa23	REFUSED	GAP: T2: out of its slices (a list perl may alias (Phi) passed where a sub writes @_)
+faa24	SAME	
+faa25	REFUSED	GAP: T2: out of its slices (the value of a list assignment to scalars)
+faa26	SAME	
+faa27	REFUSED	GAP: T2: out of its slices (a list perl may alias (HashLiteral) passed where a sub writes @_)
+faa28	SAME	
+faa29	SAME	
+faa30	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+faa31	SAME	
+faa32	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+faa33	SAME	
+faa34	SAME	
+faa35	SAME	
+faa36	SAME	
+faa37	SAME	
+faa38	SAME	
+faa39	SAME	
+faa40	SAME	
+faa41	SAME	
+faa42	SAME	
+faa43	SAME	
+faa44	SAME	
+faa45	SAME	
+faa46	SAME	
+faa47	REFUSED	B::SoN: GAP: a scalar operand is read by alias and a later operand stores it through a reference
+faa48	SAME	
+faa49	SAME	
+faa50	SAME	
+faa51	SAME	
+faa52	SAME	
+faa53	SAME	
+faa54	SAME	
+faa55	SAME	
+faa56	SAME	
+faa57	SAME	
+faa58	SAME	
+faa59	SAME	
+faa60	SAME	
+faa61	SAME	
+faa62	SAME	
+faa63	SAME	
+faa64	SAME	
+faa65	SAME	
+faa66	SAME	
+faa67	REFUSED	B::SoN: GAP: an element perl's alias may make exist is not yet lowered -- a foreach, map, grep or call over it creates it, and the wire does not
+faa68	SAME	
+faa69	SAME	
+faa70	SAME	
+faa71	SAME	
+faa72	SAME	
+faa73	SAME	
+faa74	REFUSED	GAP: T2: out of its slices (a list assignment to a slice of @_)
+faa75	REFUSED	load: from_json failed: GAP: main::tw, which the program calls, is refused in its module: GAP: a write to a foreach iterator over @_ is not yet lowered -- @_ aliases
+faa76	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+faa77	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+faa78	SAME	
+faa79	SAME	
+faa80	SAME	
+faa81	SAME	
+faa82	SAME	
+faa83	REFUSED	GAP: T2: out of its slices (Call builtin splice)
+faa84	SAME	
+faa85	SAME	
+fab01	SAME	
+fab02	SAME	
+fab03	SAME	
+fab04	SAME	
+fab05	REFUSED	GAP: T2: out of its slices (Call builtin splice)
+fab06	SAME	
+fab07	SAME	
+fab08	SAME	
+fab09	SAME	
+fab10	SAME	
+fab11	SAME	
+fab12	SAME	
+fab13	SAME	
+fab14	SAME	
+fab15	SAME	
+fab16	REFUSED	GAP: T2: out of its slices (a capture read where its match may have failed (perl reads the last match that succeeded))
+fab17	SAME	
+fab18	SAME	
+fab19	SAME	
+fab20	SAME	
+fab21	SAME	
+fab22	SAME	
+fab23	SAME	
+fab24	SAME	
+fab25	SAME	
+fab26	SAME	
+fab27	SAME	
+fab28	SAME	
+fab29	SAME	
+fab30	SAME	
+fab31	SAME	
+fab32	SAME	
+fab33	SAME	
+fab34	SAME	
+fab35	SAME	
+fab36	SAME	
+fab37	SAME	
+fab38	REFUSED	GAP: T2: out of its slices (Call builtin splice)
+fab39	SAME	
+fab40	SAME	
+fab41	SAME	
+fab42	SAME	
+fab43	SAME	
+fab44	SAME	
+fab45	SAME	
+fab46	SAME	
+fab47	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fab48	SAME	
+fab49	SAME	
+fab50	SAME	
+fab51	SAME	
+fab52	SAME	
+fab53	REFUSED	B::SoN: GAP: `//=` into something other than a lexical scalar or an element
+fab54	SAME	
+fab55	SAME	
+fab56	REFUSED	B::SoN: GAP: a chomp/chop whose subject is a `SoN::IR::Node::ArrayLiteral` has no slot to store back into
+fab57	SAME	
+fab58	SAME	
+fab59	REFUSED	GAP: T2: out of its slices (wantarray in a sub (T2 has no void context))
+fab60	SAME	
+fab61	SAME	
+fab62	SAME	
+fab63	SAME	
+fab64	SAME	
+fab65	SAME	
+fab66	SAME	
+fab67	SAME	
+fab68	SAME	
+fab69	LOUD	chalk: refused at run time: a hash element read through no HASH reference
+fab70	REFUSED	GAP: T2: out of its slices (a value stamped List (Assign))
+fab71	SAME	
+fab72	SAME	
+fab73	SAME	
+fab74	SAME	
+fab75	SAME	
+fab76	SAME	
+fab77	SAME	
+fab78	SAME	
+fab79	SAME	
+fab80	SAME	
+fab81	SAME	
+fab82	SAME	
+fab83	SAME	
+fab84	SAME	
+fab85	SAME	
+fab86	SAME	
+fab87	SAME	
+fab88	SAME	
+fab89	SAME	
+fab90	SAME	
+fab91	SAME	
+fab92	SAME	
+fab93	SAME	
+fab94	SAME	
+fab95	SAME	
+fac01	SAME	
+fac02	SAME	
+fac03	SAME	
+fac04	SAME	
+fac05	REFUSED	GAP: T2: out of its slices (a list assignment to a slice whose indices are a list made at run time)
+fac06	SAME	
+fac07	SAME	
+fac08	SAME	
+fac09	SAME	
+fac10	SAME	
+fac11	SAME	
+fac12	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+fac13	SAME	
+fac14	SAME	
+fac15	SAME	
+fac16	SAME	
+fac17	REFUSED	GAP: T2: out of its slices (sub main::g returns a list as one value)
+fac18	SAME	
+fac19	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+fac20	SAME	
+fac21	SAME	
+fac22	SAME	
+fac23	SAME	
+fac24	SAME	
+fac25	SAME	
+fac26	SAME	
+fac27	SAME	
+fac28	SAME	
+fac29	SAME	
+fac30	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+fac31	REFUSED	GAP: T2: out of its slices (a statement EntryWrite)
+fac32	SAME	
+fac33	SAME	
+fac34	SAME	
+fac35	SAME	
+fac36	SAME	
+fac37	SAME	
+fac38	SAME	
+fac39	SAME	
+fac40	SAME	
+fac41	SAME	
+fac42	SAME	
+fac43	SAME	
+fac44	SAME	
+fac45	SAME	
+fac46	SAME	
+fac47	SAME	
+fac48	REFUSED	GAP: T2: out of its slices (a list perl may alias (Call) passed where a sub writes @_)
+fac49	SAME	
+fac50	SAME	
+fac51	SAME	
+fac52	SAME	
+fac53	SAME	
+fac54	SAME	
+fac55	SAME	
+fac56	SAME	
+fac57	SAME	
+fac58	SAME	
+fac59	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a hash store)
+fac60	SAME	
+fac61	SAME	
+fac62	SAME	
+fac63	REFUSED	GAP: T2: out of its slices (PadAccess)
+fac64	SAME	
+fac65	SAME	
+fad01	SAME	
+fad02	SAME	
+fad03	SAME	
+fad04	SAME	
+fad05	REFUSED	GAP: T2: out of its slices (a local of an element where a die may unwind past it)
+fad06	SAME	
+fad07	SAME	
+fad08	REFUSED	GAP: T2: out of its slices (an eval in its caller's context)
+fad09	REFUSED	GAP: T2: out of its slices (EntryDef)
+fad10	SAME	
+fad11	SAME	
+fad12	SAME	
+fad13	REFUSED	GAP: T2: out of its slices (a local)
+fad14	SAME	
+fad15	SAME	
+fad16	SAME	
+fad17	SAME	
+fad18	SAME	
+fad19	SAME	
+fad20	SAME	
+fad21	SAME	
+fad22	SAME	
+fad23	REFUSED	load: from_json failed: GAP: main::f, which the program calls, is refused in its module: GAP: an anonymous sub closing over $n has a capture that does not resolve to
+fad24	SAME	
+fad25	SAME	
+fad26	SAME	
+fad27	REFUSED	B::SoN: GAP: a block eval in list or caller context whose body leaves a list is not yet lowered -- its value merges only the last element
+fad28	REFUSED	GAP: T2: out of its slices (a die in an eval where the wire gives it no way out (If))
+fad29	SAME	
+fad30	SAME	
+fad31	SAME	
+fad32	SAME	
+fad33	SAME	
+fad34	SAME	
+fad35	SAME	
+fad36	SAME	
+fad37	REFUSED	GAP: T2: out of its slices (a tail call of a sub not made yet (recursion))
+fad38	SAME	
+fad39	REFUSED	load: from_json failed: GAP: main::f, which the program calls, is refused in its module: GAP: a try body that returns or leaves a loop is not yet lowered -- inside th
+fad40	REFUSED	GAP: T2: out of its slices (an eval closed at another depth)
+fad41	SAME	
+fad42	REFUSED	B::SoN: GAP: a loop control (`last`) inside a branch arm is not yet lowered -- the arm walk carries no loop exit edge to route it to
+fad43	REFUSED	GAP: T2: out of its slices (a phi stamped List)
+fad44	REFUSED	GAP: T2: out of its slices (a value an eval made, read past its end)
+fad45	SAME	
+fad46	REFUSED	B::SoN: GAP: a scalar operand is read by alias and a later operand stores it
+fad47	SAME	
+fad48	SAME	
+fad49	SAME	
+fad50	SAME	
+fad51	SAME	
+fad52	SAME	
+fad53	SAME	
+fad54	SAME	
+fad55	SAME	
+fad56	SAME	
+fad57	SAME	
+fad58	LOUD	chalk: refused at run time: a call of what is not a code value (T2)
+fad59	SAME	
+fad60	SAME	
+fad61	SAME	
+fad62	REFUSED	GAP: T2: out of its slices (a tail call of a sub not made yet (recursion))
+fad63	SAME	
+fad64	SAME	
+fad65	SAME	
+fad66	REFUSED	GAP: T2: out of its slices (an eval in list context whose value is typed a scalar (a die gives the empty list))
+fad67	LOUD	chalk: refused at run time: a hash element read through no HASH reference
+fad68	LOUD	chalk: refused at run time: an array element read through no ARRAY reference
+fad69	REFUSED	GAP: T2: out of its slices (a statement Call builtin sqrt)
+fad70	LOUD	substr outside of string (perl warns): stopped (chalk, T2)
+fad71	REFUSED	GAP: T2: out of its slices (Call builtin splice)
+fad72	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+fad73	REFUSED	GAP: T2: out of its slices (a direct call with no sub)
+fad74	SAME	
+fad75	REFUSED	GAP: T2: out of its slices (a local)
+fae01	SAME	
+fae02	SAME	
+fae03	REFUSED	load: from_json failed: GAP: main::f, which the program calls, is refused in its module: GAP: a block eval in list or caller context whose body leaves a list is not y
+fae04	SAME	
+fae05	SAME	
+fae06	SAME	
+fae07	REFUSED	GAP: T2: out of its slices (an eval in list context whose value is typed a scalar (a die gives the empty list))
+fae08	SAME	
+fae09	SAME	
+fae10	SAME	
+fae11	SAME	
+fae12	REFUSED	GAP: T2: out of its slices (an eval whose body returns)
+fae13	REFUSED	B::SoN: GAP: a block eval whose body rebinds a variable from outside it is not yet lowered -- after a die the variable holds what the body had stored by then, which the
+fae14	SAME	
+fae15	SAME	
+fae16	SAME	
+fae17	REFUSED	B::SoN: GAP: an until whose condition is not a negatable comparison is not yet lowered
+fae18	SAME	
+fae19	SAME	
+fae20	REFUSED	GAP: T2: out of its slices (wantarray in a sub (T2 has no void context))
+fae21	SAME	
+fae22	SAME	
+fae23	SAME	
+fae24	REFUSED	B::SoN: GAP: a foreach over a package variable whose body writes it and can die past its restore not yet lowered
+fae25	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fae26	SAME	
+fae27	SAME	
+fae28	SAME	
+fae29	SAME	
+fae30	SAME	
+fae31	REFUSED	load: from_json failed: GAP: main::f, which the program calls, is refused in its module: GAP: a try body that returns or leaves a loop is not yet lowered -- inside th
+fae32	REFUSED	GAP: T2: out of its slices (a value an eval made, read past its end)
+fae33	SAME	
+fae34	SAME	
+fae35	SAME	
+fae36	SAME	
+fae37	SAME	
+fae38	SAME	
+fae39	SAME	
+fae40	SAME	
+fae41	SAME	
+fae42	REFUSED	GAP: T2: out of its slices (a die in an eval where the wire gives it no way out (RegexSubst))
+fae43	SAME	
+fae44	SAME	
+fae45	SAME	
+fae46	REFUSED	GAP: T2: out of its slices (an eval in list context whose value is typed a scalar (a die gives the empty list))
+fae47	SAME	
+fae48	SAME	
+fae49	REFUSED	GAP: T2: out of its slices (a store into @_ of no site, in a program with an eval)
+fae50	SAME	
+fae51	SAME	
+fae52	SAME	
+fae53	SAME	
+fae54	SAME	
+fae55	SAME	
+fae56	SAME	
+fae57	SAME	
+fae58	SAME	
+fae59	SAME	
+fae60	SAME	
+fae61	SAME	
+fae62	SAME	
+fae63	SAME	
+fae64	SAME	
+fae65	REFUSED	GAP: T2: out of its slices (an eval whose body returns)
+fag01	SAME	
+fag02	SAME	
+fag03	SAME	
+fag04	SAME	
+fag05	SAME	
+fag06	SAME	
+fag07	SAME	
+fag08	SAME	
+fag09	SAME	
+fag10	SAME	
+fag11	SAME	
+fag12	SAME	
+fag13	SAME	
+fag14	SAME	
+fag15	SAME	
+fag16	SAME	
+fag17	SAME	
+fag18	SAME	
+fag19	SAME	
+fag20	SAME	
+fag21	SAME	
+fag22	SAME	
+fag23	SAME	
+fag24	SAME	
+fag25	SAME	
+fag26	SAME	
+fag27	SAME	
+fag28	SAME	
+fag29	SAME	
+fag30	SAME	
+fag31	SAME	
+fag32	SAME	
+fag33	SAME	
+fag34	SAME	
+fag35	SAME	
+fag36	SAME	
+fag37	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a hash store)
+fag38	SAME	
+fag39	SAME	
+fag40	SAME	
+fag41	SAME	
+fag42	SAME	
+fag43	SAME	
+fag44	SAME	
+fag45	SAME	
+fag46	SAME	
+fag47	SAME	
+fag48	REFUSED	GAP: T2: out of its slices (PadAccess)
+fag49	SAME	
+fag50	SAME	
+fag51	SAME	
+fag52	SAME	
+fag53	SAME	
+fag54	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a hash store)
+fag55	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a shift)
+fag56	REFUSED	GAP: T2: out of its slices (sub P::items returns a list as one value)
+fag57	SAME	
+fag58	SAME	
+fag59	SAME	
+fag60	SAME	
+fah01	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah02	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah03	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah04	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah05	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah06	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah07	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah08	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah09	SAME	
+fah10	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah11	SAME	
+fah12	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah13	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah14	SAME	
+fah15	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah16	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah17	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah18	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah19	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fah20	REFUSED	B::SoN: GAP: a variable passed to a sub that stores it by name and reads its arguments is not yet lowered -- $_[N] is the variable, and the wire passes its value as it
+fai01	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost
+fai02	REFUSED	B::SoN: GAP: a ?: used as the target of an op= is not yet lowered -- its store would be lost
+fai03	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost
+fai04	REFUSED	B::SoN: GAP: a ternary whose arm stores an element is an lvalue (a call argument, a reference or a foreach list); the alias is not yet lowered
+fai05	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai06	REFUSED	B::SoN: GAP: a string op= whose target is multiconcat (a Concat) is not yet lowered -- its store would be lost
+fai07	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai08	REFUSED	B::SoN: GAP: s/// on a target that is not a named scalar (an element, a dereference or an assignment) not yet lowered
+fai09	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai10	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai11	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai12	REFUSED	B::SoN: GAP: loop-carried value loses its stamp (unstamped back-edge); fixpoint restamping not yet lowered
+fai13	REFUSED	GAP: T2: out of its slices (PadAccess)
+fai14	REFUSED	B::SoN: GAP: an assignment used as the target of a sub's write through $_[N] is not yet lowered -- the store would be lost
+fai15	SAME	
+fai16	REFUSED	GAP: T2: out of its slices (PadAccess)
+fai17	REFUSED	B::SoN: GAP: a ?: used as the target of a sub's write through $_[N] is not yet lowered -- the store would be lost
+fai18	REFUSED	B::SoN: GAP: a ternary whose arm stores an element is an lvalue (a call argument, a reference or a foreach list); the alias is not yet lowered
+fai19	REFUSED	B::SoN: GAP: a ?: used as the target of an increment is not yet lowered -- its store would be lost
+fai20	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai21	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai22	REFUSED	B::SoN: GAP: `||=` whose result is itself modified
+fai23	REFUSED	B::SoN: GAP: `//=` whose result is itself modified
+fai24	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost
+fai25	REFUSED	B::SoN: GAP: a ternary whose arm stores an element is an lvalue (a call argument, a reference or a foreach list); the alias is not yet lowered
+fai26	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+fai27	REFUSED	B::SoN: GAP: a scalar operand is read by alias and a later operand stores it
+fai28	SAME	
+faj01	SAME	
+faj02	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj03	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj04	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj05	REFUSED	B::SoN: GAP: `//=` into something other than a lexical scalar or an element
+faj06	REFUSED	GAP: T2: out of its slices (an element of an array B::SoN reads at no version, aliased where it may be written)
+faj07	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj08	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj09	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj10	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj11	REFUSED	B::SoN: GAP: a chomp/chop whose subject is a `SoN::IR::Node::Subscript` has no slot to store back into
+faj12	REFUSED	load: from_json failed: GAP: main::tw, which the program calls, is refused in its module: GAP: a write to a foreach iterator over @_ is not yet lowered -- @_ aliases
+faj13	SAME	
+faj14	SAME	
+faj15	SAME	
+faj16	REFUSED	B::SoN: GAP: an element perl's alias may make exist is not yet lowered -- a foreach, map, grep or call over it creates it, and the wire does not
+faj17	REFUSED	B::SoN: GAP: an element perl's alias may make exist is not yet lowered -- a foreach, map, grep or call over it creates it, and the wire does not
+faj18	REFUSED	B::SoN: GAP: an element or a slice perl's alias may make exist is not yet lowered -- a foreach, map, grep or call over it creates it, and the wire does not
+faj19	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj20	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj21	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+faj22	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj23	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj24	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+faj25	REFUSED	B::SoN: GAP: an element or a slice perl's alias may make exist is not yet lowered -- a foreach, map, grep or call over it creates it, and the wire does not
+faj26	SAME	
+faj27	REFUSED	B::SoN: GAP: an element or a slice perl's alias may make exist is not yet lowered -- a foreach, map, grep or call over it creates it, and the wire does not
+faj28	REFUSED	B::SoN: GAP: an element or a slice perl's alias may make exist is not yet lowered -- a foreach, map, grep or call over it creates it, and the wire does not
+fak01	SAME	
+fak02	SAME	
+fak03	SAME	
+fak04	REFUSED	GAP: T2: out of its slices (a captured variable that is not one kept in memory)
+fak05	SAME	
+fak06	SAME	
+fak07	SAME	
+fak08	SAME	
+fak09	REFUSED	GAP: T2: out of its slices (a captured variable that is not one kept in memory)
+fak10	SAME	
+fak11	REFUSED	GAP: T2: out of its slices (a hash first made in an arm or a loop body)
+fak12	REFUSED	B::SoN: GAP: an anonymous sub closing over $c is not yet lowered -- it is built once per pass of a loop that gives it a fresh variable, and its lifted body reads one
+fak13	SAME	
+fak14	SAME	
+fak15	SAME	
+fak16	SAME	
+fak17	REFUSED	B::SoN: GAP: an anonymous sub closing over $g has a capture that does not resolve to a slot in the enclosing pad (a nested closure's grandparent capture)
+fak18	SAME	
+fak19	REFUSED	load: from_json failed: GAP: main::c, which the program calls, is refused in its module: GAP: a `state` initialiser that can run more than once is not yet lowered --
+fak20	REFUSED	load: from_json failed: GAP: main::c, which the program calls, is refused in its module: GAP: a `state` variable with no initialiser, where it can be reached more tha
+fak21	REFUSED	GAP: T2: out of its slices (a captured variable that is not one kept in memory)
+fak22	SAME	
+fak23	SAME	
+fak24	SAME	
+fak25	REFUSED	B::SoN: GAP: an anonymous sub closing over $x is not yet lowered -- it is built once per pass of a loop that gives it a fresh variable, and its lifted body reads one
+fak26	SAME	
+fak27	SAME	
+fak28	SAME	
+fak29	REFUSED	B::SoN: GAP: a sort comparator chosen at runtime (a subref, not a block or a named sub) is not yet lowered -- no static name addresses it
+fak30	SAME	
+fak31	SAME	
+fak32	SAME	
+fak33	REFUSED	GAP: T2: out of its slices (a hash a closure shares)
+fak34	SAME	
+fak35	REFUSED	B::SoN: GAP: an anonymous sub closing over $n is not yet lowered -- it is built once per pass of a loop that gives it a fresh variable, and its lifted body reads one
+fak36	SAME	
+fak37	SAME	
+fak38	SAME	
+fak39	SAME	
+fak40	SAME	
+fak41	SAME	
+fak42	SAME	
+fak43	SAME	
+fak44	SAME	
+fak45	SAME	
+fal01	SAME	
+fal02	SAME	
+fal03	SAME	
+fal04	REFUSED	B::SoN: GAP: a foreach whose body writes its alias and may reshape the array (a shift, push, splice, list assign or call) not yet lowered
+fal05	SAME	
+fal06	SAME	
+fal07	SAME	
+fal08	SAME	
+fal09	SAME	
+fal10	SAME	
+fal11	SAME	
+fal12	SAME	
+fal13	SAME	
+fal14	SAME	
+fal15	SAME	
+fal16	REFUSED	GAP: T2: out of its slices (a list perl may alias (Call) passed where a sub writes @_)
+fal17	REFUSED	GAP: T2: out of its slices (an array B::SoN reads at no version, aliased where it may be written)
+fal18	REFUSED	GAP: T2: out of its slices (an array B::SoN reads at no version, aliased where it may be written)
+fal19	REFUSED	GAP: T2: out of its slices (a list perl may alias (Call) passed where a sub writes @_)
+fal20	REFUSED	GAP: T2: out of its slices (a list perl may alias (Call) passed where a sub writes @_)
+fal21	REFUSED	GAP: T2: out of its slices (a slice of an array B::SoN reads at no version, aliased where it may be written)
+fal22	SAME	
+fal23	SAME	
+fal24	REFUSED	GAP: T2: out of its slices (PadAccess)
+fal25	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
+fal26	SAME	
+fal27	REFUSED	B::SoN: GAP: void-context 'and' arm did not converge (statement-modifier loop or unhandled arm op)
+fal28	SAME	
+fal29	SAME	
+fal30	SAME	
+fal31	SAME	
+fal32	SAME	
+fal33	SAME	
+fal34	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+fal35	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+fal36	REFUSED	GAP: T2: out of its slices (a reference to what is not an array)
+fal37	SAME	
+fal38	REFUSED	GAP: T2: out of its slices (a value stamped List (Assign))
+fal39	SAME	
+fal40	SAME	
+fal41	SAME	
+fal42	SAME	
+fal43	REFUSED	B::SoN: GAP: a foreach over a package variable whose body calls a sub (the callee sees the variable, not the element) not yet lowered
+fal44	REFUSED	B::SoN: GAP: a reference to a foreach iterator is not yet lowered -- the iterator is a copy written back each pass, and the reference can outlive the pass
+fal45	SAME	
+fal46	REFUSED	B::SoN: GAP: an anonymous sub closing over $i is not yet lowered -- it is built once per pass of a loop that gives it a fresh variable, and its lifted body reads one
+fal47	REFUSED	B::SoN: GAP: an anonymous sub closing over $j is not yet lowered -- it is built once per pass of a loop that gives it a fresh variable, and its lifted body reads one
+fal48	REFUSED	B::SoN: GAP: an anonymous sub closing over @l is not yet lowered -- it is built once per pass of a loop that gives it a fresh variable, and its lifted body reads one
+fal49	SAME	
+fal50	SAME	
+fal51	SAME	
+fal52	SAME	
+fal53	SAME	
+fal54	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+fal55	SAME	
+fal56	SAME	
+fal57	SAME	
+fal58	SAME	
+fal59	SAME	
+fal60	SAME	
+fal61	SAME	
+fal62	SAME	
+fal63	SAME	
+fal64	SAME	
+fal65	SAME	
+fal66	REFUSED	GAP: T2: out of its slices (Call builtin splice)
+fal67	SAME	
+fal68	SAME	
+fal69	REFUSED	B::SoN: GAP: capture $1 inside a s///e replacement reads the substitution's OWN match, which is a cycle the wire has no defer-patch for (only a loop Phi's backedge is a
+fal70	SAME	
+fam01	SAME	
+fam02	SAME	
+fam03	REFUSED	B::SoN: GAP: a chomp/chop whose subject is a `SoN::IR::Node::ArrayLiteral` has no slot to store back into
+fam04	REFUSED	B::SoN: GAP: a chomp/chop whose subject is a `SoN::IR::Node::Constant` has no slot to store back into
+fam05	REFUSED	GAP: T2: out of its slices (EntryDef)
+fam06	SAME	
+fam07	REFUSED	B::SoN: GAP: a chomp/chop whose subject is a `SoN::IR::Node::HashLiteral` has no slot to store back into
+fam08	REFUSED	GAP: T2: out of its slices (EntryDef)
+fam09	REFUSED	GAP: T2: out of its slices (Call builtin splice)
+fam10	SAME	
+fam11	SAME	
+fam12	REFUSED	GAP: T2: out of its slices (Call builtin rindex)
+fam13	SAME	
+fam14	SAME	
+fam15	REFUSED	GAP: T2: out of its slices (a statement Delete)
+fam16	SAME	
+fam17	SAME	
+fam18	SAME	
+fam19	SAME	
+fam20	SAME	
+fam21	SAME	
+fam22	SAME	
+fam23	SAME	
+fam24	SAME	
+fam25	SAME	
+fam26	SAME	
+fam27	SAME	
+fam28	SAME	
+fam29	SAME	
+fam30	SAME	
+fam31	REFUSED	B::SoN: GAP: a chomp/chop whose subject is a `SoN::IR::Node::Constant` has no slot to store back into
+fam32	SAME	
+fam33	SAME	
+fam34	SAME	
+fam35	SAME	
+fam36	REFUSED	B::SoN: GAP: a chomp/chop whose subject is a `SoN::IR::Node::Subscript` has no slot to store back into
+fam37	REFUSED	B::SoN: GAP: a chomp/chop whose subject is a `SoN::IR::Node::Subscript` has no slot to store back into
+fam38	SAME	
+fam39	SAME	
+fam40	SAME	
+fan02	REFUSED	B::SoN: GAP: a foreach over a package variable whose body writes it and can die past its restore not yet lowered
+fan03	SAME	
+fan04	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan05	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan06	SAME	
+fan07	SAME	
+fan08	SAME	
+fan09	REFUSED	GAP: T2: out of its slices (a phi stamped List)
+fan10	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan11	REFUSED	B::SoN: GAP: loop control (last) inside a loop body not yet lowered
+fan12	REFUSED	GAP: T2: out of its slices (a loop body that ends neither going round nor leaving)
+fan13	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan14	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan15	SAME	
+fan16	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan17	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan18	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan19	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan20	SAME	
+fan21	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan22	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan23	REFUSED	B::SoN: GAP: a foreach iterator written in a pass a die may leave is not yet lowered -- its write-back is at the pass's end, and the die's way out does not carry it
+fan24	SAME	
+fan25	REFUSED	GAP: T2: out of its slices (an eval whose body makes a value that may die)
+fao01	SAME	
+fao02	SAME	
+fao03	SAME	
+fao04	SAME	
+fao05	SAME	
+fao06	SAME	
+fao07	SAME	
+fao08	SAME	
+fao09	SAME	
+fao10	REFUSED	load: from_json failed: GAP: a DESTROY method (D::DESTROY), or an AUTOLOAD perl calls for one: chalk never destroys an object, so it would never run
+fao11	SAME	
+fao12	REFUSED	GAP: T2: out of its slices (UNIVERSAL::isa is XS: there is no Perl source to compile)
+fao13	SAME	
+fao14	REFUSED	B::SoN: GAP: a method that stores $_[0] is not yet lowered -- $_[0] is the caller's invocant variable, and the wire passes the invocant as a value
+fao15	REFUSED	GAP: T2: out of its slices (sub Q::put reads @_ other than by shifts, $_[N] or a signature)
+fao16	SAME	
+fao17	REFUSED	load: from_json failed: GAP: T::ins, which the program calls, is refused in its module: GAP: `//=` into an element of an aggregate rebound inside the loop
+fao18	SAME	
+fao19	REFUSED	GAP: T2: out of its slices (sub V::new reads @_ other than by shifts, $_[N] or a signature)
+fao20	SAME	
+fap01	SAME	
+fap02	REFUSED	B::SoN: GAP: a method that stores $_[0] is not yet lowered -- $_[0] is the caller's invocant variable, and the wire passes the invocant as a value
+fap03	REFUSED	B::SoN: GAP: a method that stores $_[0] is not yet lowered -- $_[0] is the caller's invocant variable, and the wire passes the invocant as a value
+fap04	SAME	
+fap05	SAME	
+fap06	SAME	
+fap07	REFUSED	B::SoN: GAP: a method that stores $_[0] is not yet lowered -- $_[0] is the caller's invocant variable, and the wire passes the invocant as a value
+fap08	REFUSED	GAP: T2: out of its slices (an argument perl aliases (Subscript) passed where a sub writes @_)
+fap09	SAME	
+fap10	SAME	
+fap11	REFUSED	B::SoN: GAP: a method that stores $_[0] is not yet lowered -- $_[0] is the caller's invocant variable, and the wire passes the invocant as a value
+fap12	SAME	
+faq01	SAME	
+faq02	SAME	
+faq03	REFUSED	GAP: T2: out of its slices (a capture read where its match may have failed (perl reads the last match that succeeded))
+faq04	SAME	
+faq05	SAME	
+faq06	LOUD	a capture read where its match failed (perl reads the last match that succeeded): stopped (chalk, T2)
+faq07	SAME	
+faq08	SAME	
+faq09	REFUSED	GAP: T2: out of its slices (a capture read where its match may have failed (perl reads the last match that succeeded))
+faq10	SAME	
+faq11	SAME	
+faq12	REFUSED	GAP: T2: out of its slices (a hash element of a named hash)
+faq13	REFUSED	GAP: T2: out of its slices (the match variable $` (B::SoN ties it to no match))
+faq14	SAME	
+faq15	SAME	
+faq16	SAME	
+faq17	REFUSED	GAP: T2: out of its slices (a capture read where its match may have failed (perl reads the last match that succeeded))
+faq18	SAME	
+faq19	SAME	
+faq20	SAME	
+faq21	SAME	
+faq22	SAME	
+faq23	SAME	
+faq24	SAME	
+faq25	REFUSED	GAP: T2: out of its slices (a pos() of what is not a `my` scalar kept here)
+fas01	SAME	
+fas02	SAME	
+fas03	SAME	
+fas04	SAME	
+fas05	SAME	
+fas06	SAME	
+fas07	REFUSED	GAP: T2: out of its slices ($" written)
+fas08	REFUSED	GAP: T2: out of its slices (EntryDef)
+fas09	SAME	
+fas10	SAME	
+fas11	SAME	
+fas12	SAME	
+fas13	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost
+fas14	SAME	
+fas15	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+fas16	SAME	
+fas17	SAME	
+fas18	SAME	
+fas19	SAME	
+fas20	SAME	
+fas21	SAME	
+fas22	SAME	
+fas23	SAME	
+fas24	SAME	
+fas25	SAME	
+fas26	SAME	
+fas27	SAME	
+fas28	SAME	
+fas29	SAME	
+fas30	SAME	
+fas31	SAME	
+fas32	SAME	
+fas33	SAME	
+fas34	SAME	
+fas35	REFUSED	B::SoN: GAP: an element operand is read by alias and a later operand calls a sub that may reshape its container or replace what holds it -- not yet lowered
+fas36	SAME	
+fas37	SAME	
+fas38	SAME	
+fas39	REFUSED	GAP: T2: out of its slices (a slice taken as a scalar (Coerce))
+fas40	SAME	
+fas41	SAME	
+fas42	SAME	
+fas43	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a hash store)
+fas44	REFUSED	GAP: T2: out of its slices (a slice of kind )
+fas45	SAME	
+fas46	SAME	
+fas47	SAME	
+fas48	SAME	
+fas49	SAME	
+fas50	SAME	
+fas51	SAME	
+fas52	SAME	
+fas53	SAME	
+fas54	SAME	
+fas55	SAME	
+fas56	SAME	
+fas57	SAME	
+fas58	SAME	
+fas59	SAME	
+fas60	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+faw01	SAME	
+faw02	SAME	
+faw03	REFUSED	GAP: T2: out of its slices (sub main::cl returns a list as one value)
+faw04	SAME	
+faw05	SAME	
+faw06	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+faw07	SAME	
+faw08	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+faw09	SAME	
+faw10	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+faw11	SAME	
+faw12	SAME	
+faw13	SAME	
+faw14	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+faw15	SAME	
+faw16	SAME	
+faw17	SAME	
+faw18	SAME	
+faw19	SAME	
+faw20	SAME	
+faw21	SAME	
+faw22	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+faw23	SAME	
+faw24	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
+faw25	SAME	
+faw26	SAME	
+faw27	SAME	
+faw28	SAME	
+faw29	REFUSED	GAP: T2: out of its slices (a list assignment to a slice and then another target (B::SoN binds what follows a slice one place per slice))
+faw30	SAME	
 fk1	SAME	
 fk2	SAME	
 fk3	SAME	
@@ -699,7 +1546,7 @@ lw21	SAME
 lw22	SAME	
 lw23	SAME	
 lw24	SAME	
-lw25	REFUSED	GAP: T2: out of its slices (a slice of an array B::SoN reads at no version, aliased where it may be written)
+lw25	REFUSED	B::SoN: GAP: an element or a slice perl's alias may make exist is not yet lowered -- a foreach, map, grep or call over it creates it, and the wire does not
 lw26	REFUSED	GAP: T2: out of its slices (a local)
 lw27	REFUSED	GAP: T2: out of its slices (a local)
 lw28	SAME	
@@ -969,7 +1816,7 @@ ree26	SAME
 ree27	SAME	
 ree28	REFUSED	GAP: T2: out of its slices (PadAccess)
 ree29	SAME	
-ree30	REFUSED	B::SoN: GAP: a foreach over a scalar variable its body may write is not yet lowered -- the iterator is perl's alias of the variable, and the walk binds it to the value
+ree30	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
 ree31	REFUSED	B::SoN: GAP: a foreach over a scalar variable its body may write is not yet lowered -- the iterator is perl's alias of the variable, and the walk binds it to the value
 ree32	REFUSED	B::SoN: GAP: a reference to a foreach iterator is not yet lowered -- the iterator is a copy written back each pass, and the reference can outlive the pass
 ree33	SAME	
@@ -1296,7 +2143,7 @@ req08	REFUSED	B::SoN: GAP: a foreach over a scalar variable its body may write i
 req09	REFUSED	GAP: T2: out of its slices (PadAccess)
 req10	REFUSED	GAP: T2: out of its slices (PadAccess)
 req11	REFUSED	B::SoN: GAP: a foreach over a scalar variable its body may write is not yet lowered -- the iterator is perl's alias of the variable, and the walk binds it to the value
-req12	REFUSED	B::SoN: GAP: a foreach over a scalar variable its body may write is not yet lowered -- the iterator is perl's alias of the variable, and the walk binds it to the value
+req12	REFUSED	B::SoN: GAP: a package scalar aliased by a foreach, map or grep is not yet lowered -- the list holds its name, not its value, and a write through the alias is lost
 req13	SAME	
 req14	REFUSED	B::SoN: GAP: a grep whose block writes $_, read as a list, is not yet lowered -- what grep returns are the elements, written after the walk read them
 req15	REFUSED	B::SoN: GAP: a grep whose block writes $_, read as a list, is not yet lowered -- what grep returns are the elements, written after the walk read them

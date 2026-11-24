@@ -1,0 +1,1 @@
+package M; sub new { bless {c=>{}}, shift } sub memo { my ($s,$k)=@_; $s->{c}{$k} //= do { $s->{n}++; $k*2 } } package main; my $m=M->new; $m->memo(2); $m->memo(2); $m->memo(3); print $m->{n}, $m->memo(3), "\n";

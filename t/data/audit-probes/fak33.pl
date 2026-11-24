@@ -1,0 +1,1 @@
+sub mk { my %s; return { set=>sub { $s{$_[0]}=$_[1] }, get=>sub { $s{$_[0]} }, n=>sub { scalar keys %s } } } my $a=mk(); my $b=mk(); $a->{set}->(x=>1); $b->{set}->(x=>2); $b->{set}->(y=>3); print $a->{get}->("x"), $b->{get}->("x"), $a->{n}->(), $b->{n}->(), "\n";

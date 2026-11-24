@@ -1,0 +1,1 @@
+package A; sub new { bless {n=>0}, shift } sub inc { $_[0]{n}++ } package B; our @ISA=('A'); sub inc { my $s=shift; $s->SUPER::inc(); $s->SUPER::inc(); } package main; my $o=B->new; $o->inc; print $o->{n},"\n";
