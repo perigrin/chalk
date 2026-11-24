@@ -21,8 +21,6 @@ sub verdict ($src) {
 my $CALL2 = qr/a call used both as a list and as a scalar/;
 my $W5    = qr/a captured variable passed to a sub that writes its argument/;
 my $DIV   = qr/a (?:division|modulus) whose divisor may be zero, on no control chain/;
-my $W6C  = qr/a call that may die under a `local` \(\$main::g\), in a sub with no eval \(in main::t\)/;
-my $W6F   = qr/a (?:Divide|Modulo|PostfixDeref|Ref) that may die under a `local` \(\$main::g\), in a sub with no eval \(in main::f\)/;
 my $DEREF = qr/a dereference nothing reads, which may still die/;
 my $W8    = qr/a DESTROY method \(\w+::DESTROY\)/;
 my $W9    = qr/a read through an element that is not there, which perl makes/;
@@ -70,16 +68,21 @@ for my $case (
     # (a call that dies under a live `local`, in a sub with no eval: its way
     # out would need a rethrow that restores first -- the plan's Q9 -- and is
     # refused by name until then)
-    [ q{our $g = 1; sub u { die "x\n" } sub t { local $g = 2; u() } eval { t() }; print "$g $@";}, $W6C, 'W6: a call under a local in a sub with no eval' ],
+    [ q{our $g = 1; sub u { die "x\n" } sub t { local $g = 2; u() } eval { t() }; print "$g $@";}, undef, 'W6: a call under a local in a sub with no eval' ],
     [ q{our $g = 1; sub u { 1 } sub t { { local $g = 2; } u() } eval { t() }; print "$g\n";}, undef, 'W6: a call after the local is put back' ],
     # A FAULT OF THE SUB'S OWN under a `local` leaves by no way on the wire
     # either (re-audit 2026-11-23, class B): the rule asked sub calls only, so
     # `sub f { local $g=2; my $z=shift; 1/$z } eval { f(0) }` left $g 2.
-    [ q{our $g = 1; sub f { local $g = 2; my $z = shift; 1/$z } eval { f(0) }; print "$g ", ($@ ? 1 : 0), "\n";}, $W6F, 'W6: a division under a local in a sub with no eval' ],
-    [ q{our $g = 1; sub f { local $g = 2; my $z = shift; 5 % $z } eval { f(0) }; print "$g\n";}, $W6F, 'W6: a modulus' ],
-    [ q{our $g = 1; sub f { local $g = 2; my $r = shift; use strict; $$r } eval { f("str") }; print "$g\n";}, $W6F, 'W6: a strict dereference' ],
-    [ q{our $g = 1; sub f { for my $i (1) { local $g = 2; my $q = 1/$_[0] } } eval { f(0) }; print "$g\n";}, $W6F, 'W6: the local in a loop' ],
+    [ q{our $g = 1; sub f { local $g = 2; my $z = shift; 1/$z } eval { f(0) }; print "$g ", ($@ ? 1 : 0), "\n";}, undef, 'W6: a division under a local in a sub with no eval' ],
+    [ q{our $g = 1; sub f { local $g = 2; my $z = shift; 5 % $z } eval { f(0) }; print "$g\n";}, undef, 'W6: a modulus' ],
+    [ q{our $g = 1; sub f { local $g = 2; my $r = shift; use strict; $$r } eval { f("str") }; print "$g\n";}, undef, 'W6: a strict dereference' ],
+    [ q{our $g = 1; sub f { for my $i (1) { local $g = 2; my $q = 1/$_[0] } } eval { f(0) }; print "$g\n";}, undef, 'W6: the local in a loop' ],
     [ q{our $g = 1; sub f { { local $g = 2; } 1/$_[0] } eval { f(0) }; print "$g\n";}, undef, 'W6: a division after the local is put back' ],
+    # (design B1: each of these leaves by a rethrow edge -- Exc, restores,
+    # Unwind marked rethrow -- and W6 is gone)
+    [ q{our ($g, $h) = (1, 1); sub u { die "u\n" } sub t { local $h = 3; u() } sub f { local $g = 2; t(); 1 } eval { f() }; print "$g $h $@";}, undef, 'W6: locals in two subs a die passes through' ],
+    [ q{our @g = (1); sub f { local @g = (2, 3); 1 / $_[0] } eval { f(0) }; print "@g ", ($@ ? 1 : 0), "\n";}, undef, 'W6: a local array' ],
+    [ q{our $g = 1; sub f { local $g = 2; my $r = eval { 1 / $_[0] }; 1 / $_[0] } eval { f(0) }; print "$g\n";}, undef, 'W6: an eval in the sub, the die after it' ],
     # (B::SoN reads what a `local` is to put back, at the version its store
     # replaces: a store with no such read beside it is a plain one)
     [ q{our $g = 1; eval { $g = 2; die "x\n"; $g = 3 }; print "$g\n";}, undef, 'W6: a plain store in an eval block that dies (ev12)' ],
@@ -153,7 +156,7 @@ for my $case (
     # (wire v2 stage 8: a die's way out is on the wire, its restores and $@
     # store with it, and $@ holds what was thrown)
     ok( !Chalk::IR::Serialize::WireCheck->can($_), "W6/W7: WireCheck holds no $_" )
-        for qw(_locals_a_die_skips _stores_in_a_dying_eval _may_be_a_local _dies_of_references);
+        for qw(_locals_a_die_skips _stores_in_a_dying_eval _may_be_a_local _dies_of_references _calls_a_local_dies_through);
 }
 
 done_testing;

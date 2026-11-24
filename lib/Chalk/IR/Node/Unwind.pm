@@ -27,6 +27,16 @@ class Chalk::IR::Node::Unwind :isa(Chalk::IR::Node) {
         return;
     }
 
+    # A RETHROW (B::SoN, design B1): the end of the way out of something that
+    # died under a live `local` with no eval of its graph open -- its input
+    # the Exc, the restores on that edge before it. The die goes on up.
+    field $rethrow :reader = false;
+
+    method set_rethrow($v) {
+        $rethrow = $v ? true : false;
+        return;
+    }
+
     # The file and line of its statement (B::SoN), which perl's message
     # names when it does not end in a newline; undef when the wire has none.
     field $file :reader = undef;

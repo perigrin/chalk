@@ -33,7 +33,7 @@ sub after_call {
     return unless $f || $b->{in_func};
     my $d = $b->emit(op => 'IsDying', type => 'i1');
     my $here = $b->{cur};
-    my $go = $f ? $b->eval_catch($f) : do {
+    my $go = $f ? $b->eval_catch($f) : $b->rethrow_way // do {
         my $up = $b->new_block('unwind');
         $up->{term} = [ 'retval', $b->emit(op => 'Undef', type => '%Slot') ];
         $up;
@@ -41,6 +41,31 @@ sub after_call {
     my $cont = $b->new_block('cont');
     $here->{term} = [ 'condbr', $d, $go, $cont ];
     $b->{cur} = $cont;
+}
+
+# rethrow_way() -> with no eval open in this function, the block the statement
+# being lowered goes to when it comes back dying, where B::SoN gave it a way
+# out (design B1: an Exc, the restores of the `local`s live there, an Unwind
+# marked rethrow): walked now, in a block of its own, from the values made so
+# far; undef where it has none (nothing live: the default unwind is right).
+sub rethrow_way ($b) {
+    my $s = $b->{stmt};
+    my ($x) = blessed($s) ? grep { blessed($_) && $_->operation eq 'Exc' && refaddr( $_->inputs->[0] ) == refaddr($s) } ( $s->consumers // [] )->@* : ();
+    return undef unless $x;
+    $b->{rethrows_taken}{ refaddr($x) } = 1;
+    my $here = $b->{cur};
+    my $blk  = $b->new_block('rethrow');
+    {
+        local $b->{memo}        = { $b->{memo}->%* };
+        local $b->{stood}       = { ( $b->{stood} // {} )->%* };
+        local $b->{passed}      = [ ( $b->{passed} // [] )->@* ];
+        local $b->{arm_settled} = { ( $b->{arm_settled} // {} )->%* };
+        local $b->{stmt};
+        my $at = $b->walk($x);
+        out('a rethrow edge that ends in no rethrow') unless blessed($at) && $at->operation eq 'Unwind' && $at->rethrow;
+    }
+    $b->{cur} = $here;
+    return $blk;
 }
 
 # isa_write($EntryWrite) -> true when it is `our @ISA = (LIST)` (any
@@ -1330,7 +1355,12 @@ sub func {
     $b->make_constant_arrays($g->component);
     local $b->{jumps} = {};   # this function's early exits
     local $b->{loopx};        # (a loop its caller is walking is not its)
+    local $b->{rethrows_taken} = {};
     $b->walk($start);
+    # (a way out B::SoN gave that T2 never took would skip its restores)
+    out('a rethrow edge T2 never takes (a ' . $_->inputs->[0]->operation . ')')
+        for grep { $b->{has_eval} && !$b->{rethrows_taken}{ refaddr($_) } }
+            grep { $_->operation eq 'Exc' && grep { blessed($_) && $_->operation eq 'Unwind' && $_->rethrow } ( $_->consumers // [] )->@* } $g->component;
     out('an early exit to a merge never reached') if $b->{jumps}->%*;
     out('an eval left open at the end') if $b->{evals}->@*;
     my $v = $ret->inputs->[0];

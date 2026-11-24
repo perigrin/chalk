@@ -183,6 +183,17 @@ sub walk {
         # AN UNCAUGHT DIE: its message (a list joined) to STDERR, " at FILE
         # line N.\n" added where it does not end in a newline, and exit 255.
         # The block ends there: nothing after it in its arm runs.
+        # A RETHROW (B::SoN, design B1): the end of a way out with no eval,
+        # the restores walked before it -- on up, the dying flag still set.
+        elsif ($op eq 'Unwind' && $s->rethrow) {
+            out('a rethrow outside a sub') unless $b->{in_func};
+            $b->{cur}{term} = [ 'retval', $b->emit(op => 'Undef', type => '%Slot') ];
+            $b->{cur}{dead} = 1;
+            my $dead = $b->new_block('dead');
+            $dead->{term} = ['unreachable'];
+            $dead->{dead} = 1;
+            $ctl = $s;
+        }
         elsif ($op eq 'Unwind' && $b->dies_of_a_value($s)) { $ctl = $s }
         elsif ($op eq 'Unwind') {
             my @m = grep { blessed($_) } $s->inputs->@*;

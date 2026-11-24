@@ -935,6 +935,8 @@ sub _deserialize_graph ($method_data) {
         $node->set_site($nd->{fields}{file}, $nd->{fields}{line}, ( $op eq 'Call' ? $nd->{fields}{package} : () ))
             if ( $op eq 'Unwind' || $op eq 'Call' || $op eq 'Ref' ) && defined $nd->{fields} && defined $nd->{fields}{line};
         $node->set_xs(1) if $op eq 'Call' && $nd->{fields} && $nd->{fields}{xs};
+        # A rethrow: the end of a way out with no eval (design B1).
+        $node->set_rethrow(1) if $op eq 'Unwind' && $nd->{fields} && $nd->{fields}{rethrow};
         # A block eval's id, on its join and on each die it lexically holds.
         $node->set_eval_id($nd->{fields}{eval_id})
             if ($op eq 'Region' || $op eq 'Unwind' || $op eq 'Call') && defined $nd->{fields}

@@ -1,0 +1,22 @@
+{ "version": 2, "source": null, "classes": {},
+  "dowarn": { "on": false, "all_on": false, "all_off": false },
+  "methods": { "main::f": { "returns": [14], "start": 0, "nodes": [
+   {"id":0,"inputs":[],"op":"Start"},
+   {"fields":{"const_type":"integer","value":"1"},"id":1,"inputs":[],"op":"Constant","stamp":"Int"},
+   {"fields":{"from_repr":"Int","to_repr":"Num"},"id":2,"inputs":[1],"op":"Coerce","stamp":"Num"},
+   {"id":3,"inputs":[],"op":"ArgsSource","stamp":"Array"},
+   {"fields":{"const_type":"integer","value":"0"},"id":4,"inputs":[],"op":"Constant","stamp":"Int"},
+   {"fields":{"package":"main","sigil":"$","symbol":"g"},"id":5,"inputs":[],"op":"EntryDef","stamp":"Scalar"},
+   {"fields":{"const_type":"integer","value":"2"},"id":6,"inputs":[],"op":"Constant","stamp":"Int"},
+   {"id":7,"inputs":[],"op":"MemStart"},
+   {"control_in":0,"id":8,"inputs":[5,6],"mem_in":7,"mem_out":true,"op":"EntryWrite","stamp":"Unknown"},
+   {"fields":{"kind":"array"},"id":9,"inputs":[3,4],"mem_in":8,"op":"Subscript","stamp":"Scalar"},
+   {"fields":{"from_repr":"Scalar","to_repr":"Num"},"id":10,"inputs":[9],"op":"Coerce","stamp":"Num"},
+   {"control_in":8,"fields":{"file":"-","line":1},"id":11,"inputs":[2,10],"op":"Divide","stamp":"Num"},
+   {"fields":{"package":"main","sigil":"$","symbol":"g"},"id":12,"inputs":[],"mem_in":7,"op":"EntryDef","stamp":"Scalar"},
+   {"control_in":11,"id":13,"inputs":[5,12],"mem_in":8,"mem_out":true,"op":"EntryWrite","stamp":"Unknown"},
+   {"control_in":13,"fields":{"implicit":true},"id":14,"inputs":[11],"mem_in":13,"op":"Return"},
+   {"id":15,"inputs":[11],"op":"Exc"},
+   {"control_in":15,"id":16,"inputs":[5,12],"mem_in":8,"mem_out":true,"op":"EntryWrite","stamp":"Unknown"},
+   {"control_in":16,"fields":{"rethrow":true},"id":17,"inputs":[15],"mem_in":16,"op":"Unwind"}
+] } } }

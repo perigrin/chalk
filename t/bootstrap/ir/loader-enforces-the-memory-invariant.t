@@ -155,6 +155,37 @@ like( refused( encode_json($v1) ), qr/\AGAP: wire version 1\b/, 'a v1 wire is re
         'L6: an eval join\'s value Phi with one input more than its ways in is refused' );
 }
 
+# A WAY OUT WITH NO EVAL (design B1, docs/plans/2026-11-24-copy-and-local-unwind.md
+# in B::SoN): `our $g=1; sub f { local $g = 2; 1/$_[0] } eval { f(0) }`. The
+# division in f stands under a live local with no eval of f open; its way out
+# is Exc#15, the restore of $g (EntryWrite#16), and Unwind#17 marked rethrow.
+# L7 holds each part: an Exc outside an eval ends in its own rethrow, a
+# rethrow is of its own edge's Exc, and what may die under a live local
+# outside an eval has a way out that puts the local back.
+{
+    my $RE = do { local (@ARGV, $/) = 't/data/wire-v2-rethrow-edge.json'; <> };
+    my $bad_re = sub ($change) {
+        my $w = decode_json($RE);
+        my $nodes = $w->{methods}{'main::f'}{nodes};
+        $change->( { map { ( $_->{id} => $_ ) } @$nodes }, $nodes );
+        $w->{methods}{'main::f'}{nodes} = [ grep { !$_->{gone} } @$nodes ];
+        return encode_json($w);
+    };
+    is( refused($RE), '', 'a wire with a rethrow edge loads' );
+    like( refused( $bad_re->( sub ($n, $all) { $n->{$_}{gone} = 1 for 15, 16, 17 } ) ),
+        qr/\AGAP: wire invariant L7: main::f: Divide#11 may die under a live local/,
+        'L7: a division under a live local, outside an eval, with no way out' );
+    like( refused( $bad_re->( sub ($n, $all) { $n->{16}{gone} = 1; $n->{17}{control_in} = 15; $n->{17}{mem_in} = 8 } ) ),
+        qr/\AGAP: wire invariant L7: main::f: Exc#15 .*puts back no \$main::g/,
+        'L7: a rethrow edge with its restore removed' );
+    like( refused( $bad_re->( sub ($n, $all) { delete $n->{17}{fields} } ) ),
+        qr/\AGAP: wire invariant L7: main::f: Exc#15 .*ends in no rethrow/,
+        'L7: an Exc outside an eval ending in a plain die' );
+    like( refused( $bad_re->( sub ($n, $all) { $n->{17}{inputs} = [11] } ) ),
+        qr/\AGAP: wire invariant L7: main::f: Unwind#17 .*rethrow/,
+        'L7: a rethrow not of its own edge\'s Exc' );
+}
+
 # A MEMORY EDGE NAMES A VERSION THE WIRE LISTED BEFORE IT. An upgraded v1
 # wire could name a merge's memory Phi listed after a node on the control
 # chain; B::SoN's v2 never does (it writes a node's memory first), so since

@@ -28,6 +28,12 @@ use experimental 'class';
 #       too, since stage 8: its catch is a way in like the body's end.)
 #   L7  every way into a catch Region leads back, by control_in, to an
 #       Exc: the exceptional edges of what died, and only they, merge there.
+#       An Exc outside an eval ends in an Unwind marked rethrow whose input
+#       it is (design B1), and a rethrow is of its own edge's Exc; and what
+#       may die outside an eval -- a sub call, a division or dereference that
+#       names where it dies -- while a `local` is live (its store reached
+#       back along control before its restore) has a way out that puts it
+#       back (W6 of the wire check, until B1 gave it a way).
 #   L8  a Loop has one or two inputs (the way in, and the way round where a
 #       path goes round); the only forward references in a graph are a loop
 #       Phi's back input and a Loop's inputs[1]. A Loop's Phis have as many
@@ -50,6 +56,75 @@ use experimental 'class';
 class Chalk::IR::Serialize::WireInvariant {
     my %SUB_CALL = map { $_ => 1 } qw(direct method dynamic_method indirect);
     my %STORE    = map { $_ => 1 } qw(EntryWrite CellWrite Delete ElemRestore MakeCell);
+
+    # _rethrow_edges(\@nodes, \%by, $gap): L7's part outside an eval (design B1).
+    method _rethrow_edges( $nodes, $by, $gap ) {
+        my $f   = sub ( $x, $k ) { ( $x->{fields} // {} )->{$k} };
+        my $sym = sub ($x) { $x && $x->{op} eq 'EntryDef' ? ( $f->( $x, 'sigil' ) // '$' ) . ( $f->( $x, 'package' ) // 'main' ) . '::' . ( $f->( $x, 'symbol' ) // '' ) : '' };
+        my ( %succ, %pred );
+        for my $n (@$nodes) {
+            my @p = defined $n->{control_in} ? ( $n->{control_in} ) : ();
+            push @p, grep { defined && !ref } ( $n->{inputs} // [] )->@* if $n->{op} eq 'Region' || $n->{op} eq 'Loop';
+            push @p, $n->{inputs}[0] if ( $n->{op} eq 'If' || $n->{op} eq 'Proj' ) && defined $n->{inputs}[0];
+            $pred{ $n->{id} } = \@p;
+            push $succ{ $n->{control_in} }->@*, $n if defined $n->{control_in};
+        }
+        my %join = map { ( $f->( $_, 'eval_id' ) => 1 ) } grep { $_->{op} eq 'Region' && defined $f->( $_, 'eval_id' ) && !$f->( $_, 'catch' ) } @$nodes;
+        my $in_eval = sub ($t) { my $e = $f->( $t // {}, 'eval_id' ); defined $e && $join{$e} };
+        # (the nodes on an Exc's edge, in order, to where it ends)
+        my $edge = sub ($x) {
+            my ( @c, %seen );
+            for ( my @s = ( $succ{ $x->{id} } // [] )->@*; @s == 1 && !$seen{ $s[0]{id} }++; @s = ( $succ{ $s[0]{id} } // [] )->@* ) { push @c, $s[0] }
+            return @c;
+        };
+        my @exc = grep { $_->{op} eq 'Exc' } @$nodes;
+        my %on_edge = map { ( $_->{id} => 1 ) } map { $edge->($_) } @exc;
+        for my $u ( grep { $_->{op} eq 'Unwind' && $f->( $_, 'rethrow' ) } @$nodes ) {
+            my $x = $by->{ $u->{inputs}[0] // '' };
+            $gap->( 'L7', $u, 'is a rethrow not of its own edge\'s Exc' )
+                unless $x && $x->{op} eq 'Exc' && grep { $_ == $u } $edge->($x);
+        }
+        for my $x ( grep { !$in_eval->( $by->{ $_->{inputs}[0] // '' } ) } @exc ) {
+            my @c = $edge->($x);
+            $gap->( 'L7', $x, 'is outside an eval and its way out ends in no rethrow' )
+                unless @c && $c[-1]{op} eq 'Unwind' && $f->( $c[-1], 'rethrow' ) && ( $c[-1]{inputs}[0] // -1 ) == $x->{id};
+        }
+        # A RESTORE: an EntryWrite of the value its target held, read at an
+        # earlier version (the save); its `local` the store made there.
+        my @restore = grep {
+            my $v = $by->{ $_->{inputs}[1] // '' };
+            $_->{op} eq 'EntryWrite' && $v && $v->{op} eq 'EntryDef' && defined $v->{mem_in} && $sym->( $by->{ $_->{inputs}[0] // '' } ) eq $sym->($v)
+        } @$nodes;
+        my @pairs;
+        for my $r ( grep { !$on_edge{ $_->{id} } } @restore ) {
+            my $save = $by->{ $r->{inputs}[1] };
+            my ($local) = grep { $_->{op} eq 'EntryWrite' && ( $_->{mem_in} // -1 ) == $save->{mem_in} && $sym->( $by->{ $_->{inputs}[0] // '' } ) eq $sym->($save) } @$nodes;
+            push @pairs, [ $local, $save, $r ] if $local;
+        }
+        return unless @pairs;
+        my %exc_of = map { ( ( $_->{inputs}[0] // -1 ) => $_ ) } @exc;
+        for my $t (@$nodes) {
+            next unless defined $t->{control_in} && !$in_eval->($t) && !$on_edge{ $t->{id} };
+            next unless $t->{op} eq 'Call' && $SUB_CALL{ $f->( $t, 'dispatch_kind' ) // '' }
+                || $t->{op} =~ /\A(?:Divide|Modulo|PostfixDeref|Ref)\z/ && defined $f->( $t, 'line' );
+            for my $pr (@pairs) {
+                my ( $local, $save, $r ) = @$pr;
+                my ( @q, %seen ) = ( $pred{ $t->{id} }->@* );
+                my $live = 0;
+                while ( defined( my $id = shift @q ) ) {
+                    next if $seen{$id}++ || $id == $r->{id};
+                    if ( $id == $local->{id} ) { $live = 1; last }
+                    push @q, ( $pred{$id} // [] )->@*;
+                }
+                next unless $live;
+                my $x = $exc_of{ $t->{id} };
+                $gap->( 'L7', $t, 'may die under a live local (' . $sym->($save) . '), outside an eval, and has no way out' ) unless $x;
+                $gap->( 'L7', $x, 'is a way out that puts back no ' . $sym->($save) )
+                    unless grep { $_->{op} eq 'EntryWrite' && ( $_->{inputs}[1] // -1 ) == $save->{id} } $edge->($x);
+            }
+        }
+        return;
+    }
 
     # check($name, $graph): the graph $name of a v2 wire ({ nodes => [...] }).
     method check( $name, $g ) {
@@ -82,6 +157,7 @@ class Chalk::IR::Serialize::WireInvariant {
                 $gap->( 'L7', $c, 'has a way in (' . $say->($in) . ') no Exc leads to' ) unless $x && $x->{op} eq 'Exc';
             }
         }
+        $self->_rethrow_edges( \@nodes, \%by, $gap );
         for my $n (@nodes) {
             my $in = $n->{inputs} // [];
             $gap->( 'L8', $n, 'has ' . scalar(@$in) . ' inputs (a Loop has one or two)' )
