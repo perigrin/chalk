@@ -962,6 +962,8 @@ sub _value {
         out('a chop where a string goes past ASCII') if $kind eq 'chop' && $b->past_ascii;
         out("a $kind T2 does not have") unless $kind =~ /\A(?:chomp|chop)\z/;
         my $s = $b->as( $b->value( $v->inputs->[0] ), '%Str' );
+        # chop's value is the character it took off; chomp's, how many
+        return $b->as( $b->emit(op => 'ChopChar', type => '%Str', inputs => [$s]), $ty ) if $op eq 'ChompValue' && $kind eq 'chop';
         return $b->as( $b->emit(op => $op eq 'Chomp' ? 'Chomp' : 'ChompN', type => $op eq 'Chomp' ? '%Str' : 'i64', inputs => [$s], attr => { chop => $kind eq 'chop' }), $ty );
     }
     # `$o isa C`: through the run-time MOP's @ISA.

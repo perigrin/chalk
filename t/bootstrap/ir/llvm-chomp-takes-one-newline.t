@@ -39,6 +39,12 @@ sub through_llvm ($src) {
 # Chomp had no lowering (pvm 137).
 for my $c (
     [ q{use v5.42; no warnings; sub g ($x) { die "bad $x\n" if $x > 1; return $x } sub h ($x) { my $r = "n"; try { g($x); } catch ($e) { chomp $e; $r = "c:$e"; } return $r } $@ = "before"; print h(1), " ", h(2), " [$@]\n";} ],
+    # chop's value is the character it took off, not a count (final audit, class F)
+    [ q{my $s="abc"; my $c=chop $s; print "$c $s\n";} ],
+    [ q{my $s="ab\n"; my $c=chomp($s); my $d=chop($s); print "$c$d$s\n";} ],
+    [ q{my $s="abc"; my $o=""; while (length $s) { $o.=chop $s; } print "$o [$s]\n";} ],
+    [ q{our $s="abc"; my $c=chop $s; print "$c $s\n";} ],
+    [ q{my $s="x"; my $c=chop $s; my $d=chop $s; print "[$c][$d][$s]\n";} ],
 ) {
     my ($src) = @$c;
     my $want = qx($^X -e '$src');

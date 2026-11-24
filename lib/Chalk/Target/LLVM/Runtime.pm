@@ -7759,6 +7759,16 @@ one:
 none:
   ret i64 0
 }
+; t2_chop_char(s) -> what chop takes off: the last character, or "" of "".
+define internal %Str @t2_chop_char(%Str %s) {
+  %p = extractvalue %Str %s, 0
+  %n = extractvalue %Str %s, 1
+  %k = call i64 @t2_chomp_n(%Str %s, i1 1)
+  %m = sub i64 %n, %k
+  %q = getelementptr i8, i8* %p, i64 %m
+  %r = call %Str @t2_str(i8* %q, i64 %k)
+  ret %Str %r
+}
 define internal %Str @t2_chomp(%Str %s, i1 %chop) {
   %p = extractvalue %Str %s, 0
   %n = extractvalue %Str %s, 1
