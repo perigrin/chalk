@@ -395,6 +395,11 @@ sub regex_capture {
     my $yes = $b->emit(op => 'Const', type => 'i1', attr => { value => 1 });
     my $sub = $b->emit(op => 'Substr', type => '%Slot', inputs => [ $str, $s, $len, $yes, $yes ]);
     my $none = $b->emit(op => 'Cmp', type => 'i1', inputs => [ $s, $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }) ], attr => { op => 'lt' });
+    # A GROUP ITS PATTERN DOES NOT HAVE is undef: `$2` after `/(c)/` is not
+    # the $2 of a match before it (its result is shorter than 2n+2)
+    my $past = $b->emit(op => 'Cmp', type => 'i1', inputs => [ $b->emit(op => 'ALen', type => 'i64', inputs => [$arr]),
+        $b->emit(op => 'Const', type => 'i64', attr => { value => 2 * $n + 2 }) ], attr => { op => 'lt' });
+    $none = $b->emit(op => 'Select', type => 'i1', inputs => [ $past, $b->emit(op => 'Const', type => 'i1', attr => { value => 1 }), $none ]);
     return $b->as( $b->emit(op => 'Select', type => '%Slot', inputs => [ $none, $b->emit(op => 'Undef', type => '%Slot'), $sub ]), $b->type_of($c) );
 }
 
