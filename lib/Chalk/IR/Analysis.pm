@@ -3520,8 +3520,10 @@ sub _element_repr ($container) {
     # SO DOES A NAMED ARRAY: `map { $_ + 1 } @r` walks (@r), each element read
     # by its tag; read as a nested array, lli rejected the module.
     # SO DOES `@a && LIST`: either side's list, flattened (pvm 089).
+    # SO DOES A DEREF: `my @c = @$r` (Test::Chalk::_isa_ok2's `@classes`, whose
+    # element a foreach iterator in memory reads since aliases-as-places).
     return 'Scalar' if grep { /\A(?:List|Hash)\z/ } @reprs
-        or grep { blessed($_) && $_->operation =~ /\A(?:Call|Phi|TernaryExpr|PadAccess|And|Or)\z/ && ( $_->stamp // '' ) eq 'Array' } @elems
+        or grep { blessed($_) && $_->operation =~ /\A(?:Call|Phi|TernaryExpr|PadAccess|PostfixDeref|And|Or)\z/ && ( $_->stamp // '' ) eq 'Array' } @elems
         or ( grep { $_ eq 'Array' } @reprs ) && grep { $_ ne 'Array' } @reprs;
     # A NESTED aggregate: the elements are themselves aggregates ([[1,2],[3,4]]).
     # Aggregate reprs (ArrayRef/HashRef) are not scalar-widenable, so the element
