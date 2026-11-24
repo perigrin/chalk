@@ -83,6 +83,9 @@ for my $case (
     [ q{our ($g, $h) = (1, 1); sub u { die "u\n" } sub t { local $h = 3; u() } sub f { local $g = 2; t(); 1 } eval { f() }; print "$g $h $@";}, undef, 'W6: locals in two subs a die passes through' ],
     [ q{our @g = (1); sub f { local @g = (2, 3); 1 / $_[0] } eval { f(0) }; print "@g ", ($@ ? 1 : 0), "\n";}, undef, 'W6: a local array' ],
     [ q{our $g = 1; sub f { local $g = 2; my $r = eval { 1 / $_[0] }; 1 / $_[0] } eval { f(0) }; print "$g\n";}, undef, 'W6: an eval in the sub, the die after it' ],
+    # (a call at a loop's top, before the pass's local: not live there -- the
+    # back edge passes the pass-end restore; probe p/lo22)
+    [ q{our $g = 1; sub b { $g++ } for my $i (1..3) { b(); local $g = $g + 10; next if $i == 2; print "$g\n"; } eval { 1 }; print "$g\n";}, undef, 'L7: a call before a loop pass\'s local' ],
     # (B::SoN reads what a `local` is to put back, at the version its store
     # replaces: a store with no such read beside it is a plain one)
     [ q{our $g = 1; eval { $g = 2; die "x\n"; $g = 3 }; print "$g\n";}, undef, 'W6: a plain store in an eval block that dies (ev12)' ],

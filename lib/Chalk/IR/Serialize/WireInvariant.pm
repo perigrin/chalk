@@ -115,10 +115,13 @@ class Chalk::IR::Serialize::WireInvariant {
                 || $t->{op} =~ /\A(?:Divide|Modulo|PostfixDeref|Ref)\z/ && defined $f->( $t, 'line' );
             for my $pr (@pairs) {
                 my ( $local, $save, $r ) = @$pr;
+                # (back to the local, not through a restore of it: the one
+                # paired, or another -- a loop pass's end, an arm's)
+                my %put_back = map { ( $_->{id} => 1 ) } grep { ( $_->{inputs}[1] // -1 ) == $save->{id} } @restore;
                 my ( @q, %seen ) = ( $pred{ $t->{id} }->@* );
                 my $live = 0;
                 while ( defined( my $id = shift @q ) ) {
-                    next if $seen{$id}++ || $id == $r->{id};
+                    next if $seen{$id}++ || $put_back{$id};
                     if ( $id == $local->{id} ) { $live = 1; last }
                     push @q, ( $pred{$id} // [] )->@*;
                 }
