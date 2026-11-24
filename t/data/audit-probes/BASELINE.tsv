@@ -386,6 +386,13 @@ aux9	SAME
 bless1	SAME	
 bless2	SAME	
 bt1	SAME	
+c3t1	REFUSED	GAP: T2: out of its slices (a statement Call builtin sleep)
+c3t2	SAME	
+c3t3	REFUSED	GAP: T2: out of its slices (a statement Call builtin srand)
+c3t4	REFUSED	GAP: T2: out of its slices (a statement Call builtin srand)
+c3t5	REFUSED	GAP: T2: out of its slices (a statement Call builtin srand)
+c3t6	REFUSED	GAP: T2: out of its slices (a statement Call builtin sleep)
+c3t7	SAME	
 ca1	SAME	
 ca10	SAME	
 ca11	SAME	
