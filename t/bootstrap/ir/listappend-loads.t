@@ -47,7 +47,7 @@ sub graph_with_listappend (@extra) {
 
 sub load_one ($name, @extra) {
     my $json = JSON::PP->new->encode({
-        version => 2,
+        version => 2, writer => 'chalk',
         source  => 'listappend-test',
         methods => { 'main::f' => graph_with_listappend(@extra) },
     });
@@ -103,7 +103,7 @@ sub listappend_of ($graphs) {
 # borrowing correctness from Phi's identity rather than stating this node's.
 {
     my $json = JSON::PP->new->encode({
-        version => 2, source => 'listappend-dup',
+        version => 2, writer => 'chalk', source => 'listappend-dup',
         methods => { 'main::f' => {
             start => 0, returns => [9],
             nodes => [

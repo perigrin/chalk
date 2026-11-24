@@ -54,7 +54,7 @@ sub print_returned_value ($f, $ret_node) {
 
 sub run_ternary ($cond_value) {
     my $json = JSON::PP->new->encode({
-        version => 2,
+        version => 2, writer => 'chalk',
         source  => 'ternary-truthiness',
         methods => {
             'main::f' => {

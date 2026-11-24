@@ -534,6 +534,9 @@ sub to_json ($named_graphs) {
         version => 2,
         source  => undef,
         methods => \%methods,
+        # (chalk's own: its graphs thread no memory, and the loader holds
+        # every other wire to the invariant -- from_json)
+        writer  => 'chalk',
     };
 
     return JSON::PP->new->canonical->pretty->encode($data);
@@ -1308,12 +1311,13 @@ sub from_json ($json_string) {
     die "GAP: wire version $version is not one chalk reads (wire v2 only)\n" unless $version eq '2';
     die 'GAP: wire v2 `profile` ' . ( ref $data->{profile} eq 'ARRAY' ? '[' . join( ' ', $data->{profile}->@* ) . ']' : $data->{profile} // 'null' )
         . ": a wire from before wire v2 closed (stage 10); every part is v2 now\n" if exists $data->{profile};
-    # B::SoN'S WIRE is held to the memory invariant (L1-L8), each of its
-    # graphs, before any is made. HELD BY NAME: a wire with no `dowarn`, which
-    # B::SoN always writes, is chalk's own (to_json's, its tests' round trip):
-    # chalk's in-memory graphs thread no memory (a Return names none), so the
-    # invariant is not theirs to keep.
-    if ( exists $data->{dowarn} ) {
+    # EVERY WIRE is held to the memory invariant (L1-L9), each of its graphs,
+    # before any is made -- but one chalk wrote itself (to_json's, its tests'
+    # round trip: `writer: chalk`), whose in-memory graphs thread no memory (a
+    # Return names none). It was keyed on `dowarn`, and a wire that left that
+    # out was let off both checks (final audit 2026-11-24, clause 4).
+    my $theirs = ( $data->{writer} // '' ) ne 'chalk';
+    if ($theirs) {
         my $inv = Chalk::IR::Serialize::WireInvariant->new;
         $inv->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;
         $inv->check( 'a ' . ( $_->{phase} // 'phase' ) . ' block', $_ ) for ( $data->{phase_blocks} // [] )->@*;
@@ -1410,13 +1414,10 @@ sub from_json ($json_string) {
     # reach, so nothing after this can see a store B::SoN left floating.
     my %defined = map { ( $_ => $data->{methods}{$_} ) } grep { !defined $data->{methods}{$_}{module} } keys %ON_WIRE;
     delete $data->{methods}->@{@gone};
-    # (ONLY A WIRE THAT SAYS perl's warning switches, `dowarn`: B::SoN's since
-    # 2026-11-15. A graph chalk wrote itself, to_json's, does not: its nodes
-    # are not placed by B::SoN's rules, and a hand-built one may float what it
-    # likes. Nor does a fixture recorded from an older B::SoN, whose pinning
-    # these rules were not written against.)
+    # (NOT A WIRE CHALK WROTE ITSELF, to_json's: its nodes are not placed by
+    # B::SoN's rules. Every other is checked -- `dowarn` or none.)
     Chalk::IR::Serialize::WireCheck->new( methods => $data->{methods}, defined => \%defined )->check
-        if exists $data->{dowarn};
+        if $theirs;
     # ...and its class's record of it: a module's class keeps its shape, and
     # the name stays in its stash, unloaded (can() asks by name).
     my %gone = map { $_ => 1 } @gone;

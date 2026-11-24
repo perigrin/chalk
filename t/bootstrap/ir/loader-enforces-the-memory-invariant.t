@@ -121,12 +121,19 @@ SKIP: {
     }
 }
 
-# A GRAPH CHALK WROTE ITSELF (to_json's: no `dowarn`) is not B::SoN's wire
-# and threads no memory: not held to it.
+# A GRAPH CHALK WROTE ITSELF (to_json's: `writer: chalk`) is not B::SoN's
+# wire and threads no memory: not held to it. ANY OTHER IS HELD, `dowarn` or
+# none -- the loader skipped the invariant and WireCheck for a wire with no
+# `dowarn` (final audit 2026-11-24, clause 4): taking it away let a broken
+# B::SoN wire through.
 {
     my $own = decode_json(bad( sub ($n, $all) { delete $n->{21}{mem_in} } ));
     delete $own->{dowarn};
-    is( refused( encode_json($own) ), '', 'a wire chalk wrote (no dowarn) is not held to the invariant' );
+    like( refused( encode_json($own) ), qr/\AGAP: wire invariant L/, 'a wire with no dowarn is held to the invariant' );
+    $own->{writer} = 'chalk';
+    is( refused( encode_json($own) ), '', 'a wire chalk wrote (writer: chalk) is not' );
+    my $w = decode_json( Chalk::IR::Serialize::JSON::to_json( {} ) );
+    is( $w->{writer}, 'chalk', 'to_json says chalk wrote it' );
 }
 
 # A V1 WIRE IS REFUSED (stage 6 deleted v1; t/bootstrap/ir/loader-refuses-wire-v1.t).

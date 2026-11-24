@@ -43,7 +43,7 @@ my $LOAD = \&Chalk::IR::Serialize::JSON::from_json;
 # constant, an Int add, and a Str constant.
 my $WIRE = <<'JSON';
 {
-  "version": 2,
+  "version": 2, "writer": "chalk",
   "methods": {
     "main::__PROGRAM__": {
       "start": 0,

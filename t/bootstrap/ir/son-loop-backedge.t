@@ -23,7 +23,7 @@ use Chalk::IR::Serialize::JSON ();
 #   my $n = 3; my $s = 0; while ($n > 0) { $s += $n; $n-- } $s   => 6
 
 my $json = JSON::PP->new->encode({
-    version => 2,
+    version => 2, writer => 'chalk',
     source  => 'loop-backedge',
     methods => {
         'main::f' => {
