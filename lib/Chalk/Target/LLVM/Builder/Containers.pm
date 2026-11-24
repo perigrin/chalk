@@ -238,7 +238,9 @@ sub hash_value {
     # -- a later store through r does not reach it. (r no hash: a stop.)
     if ($op eq 'PostfixDeref' && ( $v->sigil // '' ) eq '%' && $v->copy) {
         my $h = $b->emit(op => 'HNew', type => '%Slot');
-        my $pairs = $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->whole_hash($v, $b->as($b->value($in[0]), '%Slot')) ]);
+        # (an undef reference without strict refs is an empty hash, as perl's)
+        my $pairs = $b->emit(op => 'HPairs', type => '%Array*', inputs => [ $b->emit(op => 'HDerefR', type => '%Slot',
+            inputs => [ $b->whole_hash($v, $b->as($b->value($in[0]), '%Slot')) ]) ]);
         $b->emit(op => 'HFromArray', type => 'void', inputs => [ $h, $pairs ]);
         return $h;
     }
