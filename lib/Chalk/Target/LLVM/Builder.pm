@@ -329,7 +329,8 @@ sub list_only {
         my @pos = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
         next unless @pos;
         my $op = $u->operation;
-        next if $op =~ /\A(?:Loop|Region|If|Proj)\z/;
+        # (an Exc's input is what may die, its way out: no value taken)
+        next if $op =~ /\A(?:Loop|Region|If|Proj|Exc)\z/;
         next if $op eq 'Phi' && $u->memory;   # (a merge of memory versions)
         my $at0 = grep { $_ == 0 } @pos;
         next if $op eq 'Coerce' && !grep { blessed($_) && $_->operation ne 'Print' } ( $u->consumers // [] )->@*;

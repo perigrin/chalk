@@ -159,9 +159,8 @@ like( refused( encode_json($v1) ), qr/\AGAP: wire version 1\b/, 'a v1 wire is re
 # in B::SoN): `our $g=1; sub f { local $g = 2; 1/$_[0] } eval { f(0) }`. The
 # division in f stands under a live local with no eval of f open; its way out
 # is Exc#15, the restore of $g (EntryWrite#16), and Unwind#17 marked rethrow.
-# L7 holds each part: an Exc outside an eval ends in its own rethrow, a
-# rethrow is of its own edge's Exc, and what may die under a live local
-# outside an eval has a way out that puts the local back.
+# L7 holds the edge's shape: an Exc outside an eval ends in its own
+# rethrow, and a rethrow is of its own edge's Exc.
 {
     my $RE = do { local (@ARGV, $/) = 't/data/wire-v2-rethrow-edge.json'; <> };
     my $bad_re = sub ($change) {
@@ -177,12 +176,13 @@ like( refused( encode_json($v1) ), qr/\AGAP: wire version 1\b/, 'a v1 wire is re
     # carries no eval_id; chalk-found-gaps:27)
     my $SORT = do { local (@ARGV, $/) = 't/data/wire-v2-eval-die-in-sort-block.json'; <> };
     is( refused($SORT), '', 'an Exc into a catch, of a die with no eval_id, loads' );
-    like( refused( $bad_re->( sub ($n, $all) { $n->{$_}{gone} = 1 for 15, 16, 17 } ) ),
-        qr/\AGAP: wire invariant L7: main::f: Divide#11 may die under a live local/,
-        'L7: a division under a live local, outside an eval, with no way out' );
-    like( refused( $bad_re->( sub ($n, $all) { $n->{16}{gone} = 1; $n->{17}{control_in} = 15; $n->{17}{mem_in} = 8 } ) ),
-        qr/\AGAP: wire invariant L7: main::f: Exc#15 .*puts back no \$main::g/,
-        'L7: a rethrow edge with its restore removed' );
+    # (that what may die under a live local HAS an edge is not L7's: a
+    # local and a value saved and put back by hand are one shape on the
+    # wire -- Test::Chalk::subtest's `my $count = $COUNT; ...; $COUNT =
+    # $count`. B::SoN makes the edges; SoN::Verify's V10 checks them over
+    # the ratchet's wires.)
+    is( refused( $bad_re->( sub ($n, $all) { $n->{$_}{gone} = 1 for 15, 16, 17 } ) ), '',
+        'L7 does not ask for an edge where a local may be live (the wire cannot say it is a local)' );
     like( refused( $bad_re->( sub ($n, $all) { delete $n->{17}{fields} } ) ),
         qr/\AGAP: wire invariant L7: main::f: Exc#15 .*ends in no rethrow/,
         'L7: an Exc outside an eval ending in a plain die' );
