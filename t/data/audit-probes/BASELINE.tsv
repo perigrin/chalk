@@ -89,6 +89,18 @@ alc13	SAME
 alc14	SAME	
 alc15	SAME	
 alc16	SAME	
+ald01	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+ald02	SAME	
+ald03	REFUSED	B::SoN: GAP: a string op= whose target is multiconcat (a Concat) is not yet lowered -- its store would be lost
+ald04	SAME	
+ald05	SAME	
+ald06	SAME	
+ald07	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost (one of two `my` scalars is: an arm that is a package scalar, an ele
+ald08	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost (one of two `my` scalars is: an arm that is a package scalar, an ele
+ald09	SAME	
+ald10	REFUSED	B::SoN: GAP: an assignment used as the target of a sub's write through $_[N] is not yet lowered -- the store would be lost
+ald11	SAME	
+ald12	REFUSED	B::SoN: GAP: a string op= whose target is multiconcat (a Concat) is not yet lowered -- its store would be lost
 ale01	SAME	
 ale02	SAME	
 ale03	SAME	
@@ -715,7 +727,7 @@ fab43	SAME
 fab44	SAME	
 fab45	SAME	
 fab46	SAME	
-fab47	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fab47	SAME	
 fab48	SAME	
 fab49	SAME	
 fab50	SAME	
@@ -1049,30 +1061,30 @@ fah17	SAME
 fah18	SAME	
 fah19	SAME	
 fah20	SAME	
-fai01	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost
+fai01	SAME	
 fai02	REFUSED	B::SoN: GAP: a ?: used as the target of an op= is not yet lowered -- its store would be lost
-fai03	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost
+fai03	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost (one of two `my` scalars is: an arm that is a package scalar, an ele
 fai04	REFUSED	B::SoN: GAP: a ternary whose arm stores an element is an lvalue (a call argument, a reference or a foreach list); the alias is not yet lowered
-fai05	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai05	SAME	
 fai06	REFUSED	B::SoN: GAP: a string op= whose target is multiconcat (a Concat) is not yet lowered -- its store would be lost
-fai07	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai07	SAME	
 fai08	REFUSED	B::SoN: GAP: s/// on a target that is not a named scalar (an element, a dereference or an assignment) not yet lowered
-fai09	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
-fai10	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
-fai11	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai09	SAME	
+fai10	SAME	
+fai11	SAME	
 fai12	SAME	
 fai13	SAME	
-fai14	REFUSED	B::SoN: GAP: an assignment used as the target of a sub's write through $_[N] is not yet lowered -- the store would be lost
+fai14	SAME	
 fai15	SAME	
 fai16	REFUSED	GAP: T2: out of its slices (PadAccess)
 fai17	REFUSED	GAP: T2: out of its slices (an argument perl aliases (TernaryExpr) passed where a sub writes @_)
 fai18	REFUSED	B::SoN: GAP: a ternary whose arm stores an element is an lvalue (a call argument, a reference or a foreach list); the alias is not yet lowered
-fai19	REFUSED	B::SoN: GAP: a ?: used as the target of an increment is not yet lowered -- its store would be lost
-fai20	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
-fai21	REFUSED	B::SoN: GAP: an assignment used as the target of an op= is not yet lowered -- its store would be lost
+fai19	SAME	
+fai20	SAME	
+fai21	SAME	
 fai22	REFUSED	B::SoN: GAP: `||=` whose result is itself modified
 fai23	REFUSED	B::SoN: GAP: `//=` whose result is itself modified
-fai24	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost
+fai24	SAME	
 fai25	REFUSED	B::SoN: GAP: a ternary whose arm stores an element is an lvalue (a call argument, a reference or a foreach list); the alias is not yet lowered
 fai26	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
 fai27	REFUSED	B::SoN: GAP: a scalar operand is read by alias and a later operand stores it
@@ -1353,7 +1365,7 @@ fas09	SAME
 fas10	SAME	
 fas11	SAME	
 fas12	SAME	
-fas13	REFUSED	B::SoN: GAP: a ?: used as the target of an assignment is not yet lowered -- its store would be lost
+fas13	SAME	
 fas14	SAME	
 fas15	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
 fas16	SAME	
