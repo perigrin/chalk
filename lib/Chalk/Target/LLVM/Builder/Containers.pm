@@ -275,9 +275,9 @@ sub hash_value {
     if ($op eq 'Call' && $v->lists_a_hash) {
         # %$r READ WHOLE: the hash the reference holds; an undefined one is an
         # empty hash here, as in perl (a store through it would autovivify: not this).
-        # (A COPY's -- `my %c = %$h; keys %c` -- is read where B::SoN may say
-        # perl dies: whole_hash)
-        my $h = blessed($in[0]) && $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%'
+        # (A COPY's -- `my %c = %$h; keys %c` -- is its own hash, made where it
+        # stands through whole_hash: not the source as it is here)
+        my $h = blessed($in[0]) && $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%' && !$in[0]->copy
             ? $b->emit(op => 'HDerefR', type => '%Slot', inputs => [ $b->whole_hash($in[0], $b->as($b->value( $in[0]->inputs->[0] ), '%Slot')) ])
             : $b->hash_of($in[0]);
         return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]) if $v->lists_a_hash eq 'keys' && ( $v->can('want') ? $v->want // '' : '' ) eq 'scalar';
@@ -542,7 +542,8 @@ sub read_as_a_truth {
 sub _count_may_be_undef {
     my ($b, $v) = @_;
     my $d = $v->inputs->[0];
-    return 0 unless blessed($d) && $d->operation eq 'PostfixDeref' && $d->is_array_deref && defined $d->line && !$d->strict;
+    # (a copy is an array of its own, made where it stands: counted, never undef)
+    return 0 unless blessed($d) && $d->operation eq 'PostfixDeref' && $d->is_array_deref && defined $d->line && !$d->strict && !$d->copy;
     # (through what a scalar holds -- a variable, an element: an array itself is no reference)
     return 0 unless blessed( $d->inputs->[0] ) && $b->type_of( $d->inputs->[0] ) eq '%Slot';
     return $b->{memo}{ 'count_undef:' . refaddr($v) } //= $b->_read_as_a_number($v) ? 0 : 1;
@@ -841,7 +842,10 @@ sub array_value {
         local $b->{whole_die} = defined $v->line ? $v : undef;
         # `my @p = @$r` IS A COPY (B::SoN's copy): its own array, of the
         # elements as they are here.
-        return $b->array_of($in[0]) unless $v->can('copy') && $v->copy;
+        # (AN RVALUE READ MADE BEFORE A STORE THAT KILLS ITS VERSION --
+        # reads_before -- is the array as it is there: a copy too, or a list
+        # flattening it later, `my @d = (0, @$l); push @$l, 2`, saw the push)
+        return $b->array_of($in[0]) unless $v->can('copy') && $v->copy || ( $b->{snapshot} // 0 ) == refaddr($v) && defined $v->line;
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
         $b->emit(op => 'AAppend', type => 'void', inputs => [ $a, $b->array_of($in[0]) ]);
         return $a;
@@ -860,7 +864,8 @@ sub array_value {
     # (a package hash by name -- `our %g; scalar(%g)`, `%g ? :` -- as a `my %h`)
     if ($op eq 'Count' && blessed($in[0]) && ( $in[0]->is_named_hash || $in[0]->is_package_aggregate && $in[0]->sigil eq '%'
                                                || $in[0]->operation eq 'PostfixDeref' && ( $in[0]->sigil // '' ) eq '%' || $in[0]->operation eq 'FieldAccess' && ( $b->field_of($in[0]) )[1] eq '%' )) {
-        my $h = $in[0]->operation eq 'PostfixDeref' ? $b->hash_of($in[0]->inputs->[0]) : $b->hash_of($in[0]);
+        # (`my %c = %$h` is a hash of its own: its keys, not the source's now)
+        my $h = $in[0]->operation eq 'PostfixDeref' && !$in[0]->copy ? $b->hash_of($in[0]->inputs->[0]) : $b->hash_of($in[0]);
         return $b->emit(op => 'HCount', type => 'i64', inputs => [$h]);
     }
     # A COUNT OF AN ARRAY THROUGH A REFERENCE WITHOUT STRICT REFS, where perl
