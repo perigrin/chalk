@@ -990,7 +990,9 @@ sub func {
     # elements or its count. A list return too.
     my $arrret = $ret->inputs->@* == 1 && blessed( $ret->inputs->[0] ) && !$hkv
         && ( $ret->inputs->[0]->is_my_array || $ret->inputs->[0]->operation eq 'ArrayLiteral' && ( $ret->inputs->[0]->stamp // '' ) eq 'Array'   # static type
-             || $ret->inputs->[0]->operation eq 'FieldAccess' && ( $b->field_of( $ret->inputs->[0] ) )[1] eq '@' )
+             || $ret->inputs->[0]->operation eq 'FieldAccess' && ( $b->field_of( $ret->inputs->[0] ) )[1] eq '@'
+             # (a package array, read at a version: `sub z { @a }`, `sub z { @a = () }`)
+             || $ret->inputs->[0]->is_package_aggregate && $ret->inputs->[0]->sigil eq '@' )
         ? $ret->inputs->[0] : undef;
     # `return /x/` (a match its last statement): its groups in a list, its
     # truth in a scalar.

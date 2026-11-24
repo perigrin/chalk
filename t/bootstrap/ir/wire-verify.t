@@ -48,10 +48,8 @@ my %HELD = (
     't/data/audit-probes/aun5d.pl:main::__PROGRAM__ effect-floating' =>
         'a division that may fault after a `next unless` guard in a loop body floats: the rest of the body is walked as '
       . 'an arm, where B::SoN does not pin; T2 makes it at its use, after the guard -- open, B::SoN should pin it',
-    # The re-audit's probes (2026-11-23, `re<name>`), as the producer's ratchet holds them:
-    't/data/audit-probes/rea12.pl:main::z read-unversioned:package-aggregate-literal' =>
-        'a sub whose value is a list assign to a package array (`sub z { @a = () }`): its Return reads the new '
-      . 'ArrayLiteral at no version, as pl13 was for package scalars before its Return took two readings -- open',
+    # (rea12, held here at 8f6e3670, is gone: B::SoN reads @a at its store's
+    # version, and T2 returns a package array)
 );
 my $jobs     = $ENV{SON_WIRE_JOBS}    // 2;
 my $limit    = $ENV{SON_WIRE_TIMEOUT} // 900;
