@@ -41,6 +41,12 @@ use experimental 'class';
 #   L9  inputs hold values only: MemStart and a memory Phi, which are
 #       versions and no value, are named by mem_in and memory Phis alone
 #       (stage 10).
+#   L10 a place (fields.place, aliases-as-places) is storage: on no chain
+#       (no mem_in, control_in, mem_out), of an access kind (PadAccess,
+#       EntryDef, Subscript, FieldAccess, CellRead), used only where perl
+#       binds an alias -- a sub call's input, or an item of an alias list
+#       (an ArrayLiteral of no symbol). `vivify` is a Subscript place's.
+#       (That an alias carried as a value is private is SoN::Verify's V12.)
 #
 # WHAT IT DOES NOT CHECK: that every read names a version. Telling a read
 # from a place takes its uses and the effect table; that is SoN::Verify's V6,
@@ -138,6 +144,18 @@ class Chalk::IR::Serialize::WireInvariant {
         }
         for my $n ( grep { $STORE{ $_->{op} } } @nodes ) {
             $gap->( 'L5', $n, 'is a store and no memory version (mem_out)' ) unless $n->{mem_out};
+        }
+        for my $n ( grep { ( $_->{fields} // {} )->{place} || ( $_->{fields} // {} )->{vivify} } @nodes ) {
+            my $f = $n->{fields};
+            $gap->( 'L10', $n, 'is a place of no access kind' ) unless $n->{op} =~ /\A(?:PadAccess|EntryDef|Subscript|FieldAccess|CellRead)\z/;
+            $gap->( 'L10', $n, 'vivifies and is no element place' ) if $f->{vivify} && !( $f->{place} && $n->{op} eq 'Subscript' );
+            $gap->( 'L10', $n, "is a place with $_" ) for grep { defined $n->{$_} } qw(mem_in control_in mem_out);
+            for my $u ( ( $uses{ $n->{id} } // [] )->@* ) {
+                my ( $x, $xf ) = ( $u->[0], $u->[0]{fields} // {} );
+                $gap->( 'L10', $n, "is a place $x->{op}#$x->{id} uses, where perl binds no alias" )
+                    unless $x->{op} eq 'Call' && $SUB_CALL{ $xf->{dispatch_kind} // '' }
+                        || $x->{op} eq 'ArrayLiteral' && !defined $xf->{symbol};
+            }
         }
         for my $n ( grep { !$memphi->($_) } @nodes ) {
             for my $in ( grep { defined && !ref } ( $n->{inputs} // [] )->@* ) {

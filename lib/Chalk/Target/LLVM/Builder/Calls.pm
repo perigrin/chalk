@@ -552,7 +552,10 @@ sub method_call {
     out('a method call on a list') if _is_list($args[0]);
     # @_, the invocant and the arguments, aliased.
     my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
-    my $inv = $b->as($b->value($args[0]), '%Slot');
+    # (A PLACE invocant is read through its alias, @_'s first, as it is now)
+    my $inv = blessed( $args[0] ) && $args[0]->can('place') && $args[0]->place
+        ? $b->emit(op => 'AGet', type => '%Slot', inputs => [ $arr, $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }) ])
+        : $b->as($b->value($args[0]), '%Slot');
     $b->hash_reads_settled('a method call');
     $b->set_want($c);   # whichever sub it finds may return a list
     # (where perl dies -- no class, no method -- a die, an eval's to catch)
@@ -716,6 +719,10 @@ sub arg_alias {
     if ($op eq 'PadAccess' && ( $n->sigil // '' ) eq '$' && $n->is_location) {
         return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->location($n) ]);
     }
+    # (a captured variable's place: its cell)
+    if ($op eq 'CellRead' && $n->place) {
+        return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->value( $n->inputs->[0] ) ]);
+    }
     if ($n->is_package_scalar) {
         out('a package scalar of no one version passed as an argument') if $b->{unversioned}{ refaddr($n) };
         return $b->topic_raw if $b->is_topic($n) && $b->topic_alias;   # (what $_ is now: its alias)
@@ -738,7 +745,7 @@ sub arg_alias {
             if $b->may_write_args && _folded($c);
         if (( $n->can('kind') ? $n->kind // 'array' : 'array' ) eq 'hash') {
             my $key = $b->as($b->value($k), '%Str');
-            return $b->emit(op => 'ElvH', type => '%Slot', inputs => [ $b->hash_of($c), $key ]);
+            return $b->emit(op => ( $n->can('vivify') && $n->vivify ? 'ElvHViv' : 'ElvH' ), type => '%Slot', inputs => [ $b->hash_of($c), $key ]);
         }
         my $ix = $b->as($b->value($k), 'i64');
         # (an element of a list written out -- a foreach's over `($x, @a[1, 2])`
@@ -748,7 +755,7 @@ sub arg_alias {
         # element is, through undef undef)
         my $arr = blessed($c) && $c->operation eq 'ArrayLiteral' && !defined $c->symbol && ( $c->stamp // '' ) eq 'Array' ? $b->alias_list($c)   # static type
             : do { local $b->{ $b->may_write_args ? 'writing' : 'elem_read' } = 1; $b->array_of($c) };
-        return $b->emit(op => 'ElvA', type => '%Slot', inputs => [ $arr, $ix ]);
+        return $b->emit(op => ( $n->can('vivify') && $n->vivify ? 'ElvAViv' : 'ElvA' ), type => '%Slot', inputs => [ $arr, $ix ]);
     }
     if ($n->operation eq 'FieldAccess' && ( $b->field_of($n) )[1] eq '$') {
         my $self = $b->{self} // out('a field outside a method');
@@ -1095,6 +1102,16 @@ sub func {
     # container: @_ taken as that array of aliases too.)
     $list ||= !$is_method && !$declared && !$shifted
         && grep { $_->operation eq 'Ref' && $_->element_subscript && !$_->is_alias_ref && blessed( $_->element_subscript->inputs->[0] ) && $_->element_subscript->inputs->[0]->operation eq 'ArgsSource' } $g->component;
+    # A SUB SOME CALL PASSES A PLACE (B::SoN could not prove the alias
+    # private: aliases-as-places): its @_ reads -- `$_[N]`, a shift, `my (...)
+    # = @_` -- see the caller's variable as it is when they run, so it takes
+    # @_ as the array of aliases its caller builds.
+    $list ||= !$is_method && !$declared && grep {
+        my $k = $_;
+        $k->operation eq 'Call' && $k->is_sub_call
+            && grep( { blessed($_) && $_->can('place') && $_->place } $k->inputs->@* )
+            && grep { refaddr($_) == refaddr($sub) } $b->call_targets($k)
+    } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} );
     # A SUB A CALL PASSES A LIST (`f(@$r)`): its count is the list's, known at
     # run time only -- @_ as that one array too.
     $list ||= !$is_method && !$declared && grep {

@@ -24,6 +24,11 @@ class Chalk::IR::Node::CellRead :isa(Chalk::IR::Value) {
     # rather than as an opaque box.
     method operation() { 'CellRead' }
 
+    # A PLACE (wire `fields.place`): the captured variable's cell itself, an
+    # alias bound to it (Chalk::IR::Node::Access's, for a cell).
+    field $place  :param :reader = false;
+    field $vivify :param :reader = false;
+
     # A MUTABLE-LOCATION LOAD, exactly like PadAccess/Subscript/FieldAccess.
     # Its lowered value is program-point-dependent -- a later write changes
     # what an identical read returns -- so it must re-lower at every

@@ -745,7 +745,7 @@ sub _deserialize_graph ($method_data) {
             # typed it) is what a read stamped where no store is in sight says.
             # A `my $x` KEPT IN MEMORY (read at a memory version -- handed to
             # a call) is a location too, and likewise.
-            my $location = $fields->{shared}
+            my $location = $fields->{shared} || $fields->{place}
                 || ( ( $fields->{sigil} // '' ) eq '$' && blessed( $args{mem_in} ) );
             $nd->{stamp} = 'Scalar'
                 if $location && ( $nd->{stamp} // 'Unknown' ) eq 'Unknown';
@@ -876,6 +876,11 @@ sub _deserialize_graph ($method_data) {
             $args{to_repr}   = $fields->{to_repr};
         }
 
+        # A PLACE: the storage an alias is bound to (aliases-as-places).
+        if ( $fields->{place} ) {
+            $args{place}  = true;
+            $args{vivify} = true if $fields->{vivify};
+        }
         my $node;
         if ($op eq 'Loop' && $phi_backedge_slot == 1) {
             push @loop_back_patches, [ scalar @nodes, $input_idx[1] ];
@@ -1128,7 +1133,7 @@ sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
     # SURE: the program's own graphs, and what a sure graph calls by name, by a
     # named class's method, or lifts. A method call on an unknown invocant only
     # MAY reach a sub of its name: loaded, but never reason to refuse.
-    my %sure = map { $_ => 1 } grep { !defined $methods->{$_}{module} } keys %$methods;
+    my %sure = map { $_ => 1 } grep { !defined $methods->{$_}{module} } keys $methods->%*;
     my %seen = %sure;
     my @work = keys %seen;
     my %by_sub;
@@ -1159,6 +1164,17 @@ sub _reachable_methods ($methods, $classes = {}, $refused = {}) {
             # program cannot be compiled without it -- say why, in its words.
             die "GAP: $runs, which the program calls, is refused in its module: $refused->{$runs}\n"
                 if $sure{$g} && defined $runs && defined $refused->{$runs};
+            # A METHOD CALL OF NO CLASS KNOWN HERE may run a refused sub of its
+            # name in one of the program's own packages (not a followed
+            # module's): perl would run it, so say why it cannot be compiled.
+            if ( $sure{$g} && !defined $runs && ( $f->{dispatch_kind} // '' ) eq 'method' ) {
+                my $short = $name =~ s/\A.*:://r;
+                for my $r ( sort grep { /::\Q$short\E\z/ } keys $refused->%* ) {
+                    my ($pkg) = $r =~ /\A(.*)::/;
+                    die "GAP: a method call that may run $r, which is refused in its module: $refused->{$r}\n"
+                        if grep { /\A\Q$pkg\E::\w+\z/ && !defined $methods->{$_}{module} } keys $methods->%*;
+                }
+            }
             $CALLED{ $runs // $name } = 1;
             if ( defined $runs ) { push @sure, $runs }
             else { push @maybe, $name, +($by_sub{ $name =~ s/\A.*:://r } // [])->@* }

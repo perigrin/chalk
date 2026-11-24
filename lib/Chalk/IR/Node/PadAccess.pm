@@ -39,7 +39,7 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     # one name in one sub apart, so (graph, symbol) names the variable.
     method is_location() {
         return 0 unless $sigil eq '$';
-        return 1 if $shared;
+        return 1 if $shared || $self->place;
         return blessed( $self->mem_in ) ? 1 : 0;
     }
 

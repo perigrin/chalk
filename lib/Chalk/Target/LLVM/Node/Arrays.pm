@@ -82,6 +82,8 @@ class Chalk::Target::LLVM::Node::APushAlias :isa(Chalk::Target::LLVM::Node) { me
 class Chalk::Target::LLVM::Node::AAppendAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_aappend_alias') } }
 class Chalk::Target::LLVM::Node::ElvA :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_a') } }
 class Chalk::Target::LLVM::Node::ElvH :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_h') } }
+class Chalk::Target::LLVM::Node::ElvAViv :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_a_viv') } }
+class Chalk::Target::LLVM::Node::ElvHViv :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_h_viv') } }
 class Chalk::Target::LLVM::Node::ASliceAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_aslice_alias') } }
 class Chalk::Target::LLVM::Node::HSliceAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Array* @t2_hslice_alias') } }
 class Chalk::Target::LLVM::Node::Fresh :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_fresh') } }

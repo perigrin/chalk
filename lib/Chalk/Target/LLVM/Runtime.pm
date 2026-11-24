@@ -3795,6 +3795,31 @@ define internal %Slot @t2_elv_h(%Slot %h, %Str %k) {
   %s = call %Slot @t2_elv(i8 1, %Slot %h, %Slot %x)
   ret %Slot %s
 }
+; t2_elv_a_viv(a, i) / t2_elv_h_viv(h, k) -> an element alias, the element
+; made to exist first (undef): perl\'s foreach, map or grep binds its item so
+; (`for ($a[2]) {}` grows @a to 3). One before an array\'s start dies.
+define internal %Slot @t2_elv_a_viv(%Array* %a, i64 %i) {
+entry:
+  %ex = call i1 @t2_aexists(%Array* %a, i64 %i)
+  br i1 %ex, label %done, label %make
+make:
+  call void @t2_aset(%Array* %a, i64 %i, %Slot zeroinitializer, i8* null, i64 0)
+  br label %done
+done:
+  %s = call %Slot @t2_elv_a(%Array* %a, i64 %i)
+  ret %Slot %s
+}
+define internal %Slot @t2_elv_h_viv(%Slot %h, %Str %k) {
+entry:
+  %ex = call i1 @t2_hexists(%Slot %h, %Str %k)
+  br i1 %ex, label %done, label %make
+make:
+  call void @t2_hset(%Slot %h, %Str %k, %Slot zeroinitializer)
+  br label %done
+done:
+  %s = call %Slot @t2_elv_h(%Slot %h, %Str %k)
+  ret %Slot %s
+}
 ; t2_alias_val(raw) -> the value an element of @_ stands for now
 define internal %Slot @t2_alias_val(%Slot %r) {
 entry:

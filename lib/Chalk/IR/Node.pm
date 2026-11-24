@@ -255,6 +255,8 @@ class Chalk::IR::Node {
             }
         }
         push @parts, 'mem=' . $mem_in->id() if blessed($mem_in);
+        # (a place is not a read of the same variable: two nodes)
+        push @parts, 'place' . ( $self->vivify ? '+vivify' : '' ) if ( $self isa Chalk::IR::Node::Access || $self isa Chalk::IR::Node::CellRead ) && $self->place;
         return @parts;
     }
 

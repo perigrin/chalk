@@ -713,6 +713,11 @@ sub array_value {
         # (a [...] B::SoN does not pin, at the function's own scope only)
         out('an array first made in an arm or a loop body') if !$v->is_pinned
             && ( ( $v->stamp // '' ) eq 'ArrayRef' ? $b->{depth} : !$b->agg_made_here($v) );   # static type: a [...] is made where it runs
+        # AN ALIAS LIST holding a place (B::SoN's foreach, map or grep over
+        # package scalars or elements): an array of aliases, each item the
+        # variable or element itself, read and stored through.
+        return $b->args_array(@in)
+            if ( $v->stamp // '' ) ne 'ArrayRef' && grep { blessed($_) && $_->can('place') && $_->place } @in;   # static type
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
         for my $e (@in) {
             # A LIST IN IT is flattened: its elements appended (`(keys %h)`, `(@a, 4)`).
