@@ -41,13 +41,13 @@ my %HELD = (
     # compiles it before B::SoN turns the peephole off, and B::SoN now
     # refuses its aelemfast by name -- the producer's
     # t/wire-a-fused-element-op-is-refused.t)
-    # The goal audit's probes (2026-11-22), as the producer's ratchet holds them:
+    # The goal audit's probes (2026-11-22), held here as the producer's ratchet held them:
     # (aun6, `${"main::g"} += 10` as its sub's value, is gone: B::SoN names
     # the store as the read's memory version -- the producer's
     # t/wire-a-compound-store-through-a-reference-is-read-at-its-version.t)
-    't/data/audit-probes/aun5d.pl:main::__PROGRAM__ effect-floating' =>
-        'a division that may fault after a `next unless` guard in a loop body floats: the rest of the body is walked as '
-      . 'an arm, where B::SoN does not pin; T2 makes it at its use, after the guard -- open, B::SoN should pin it',
+    # (aun5d, a division that may fault after a `next unless` guard in a loop
+    # body, is gone: B::SoN pins in the rest of the body -- the producer's
+    # t/wire-the-rest-after-a-loop-guard-pins-what-may-fault.t)
     # (rea12, held here at 8f6e3670, is gone: B::SoN reads @a at its store's
     # version, and T2 returns a package array)
 );
