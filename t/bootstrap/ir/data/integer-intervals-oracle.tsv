@@ -2169,8 +2169,8 @@ node	loops:10	main::__PROGRAM__|Constant|const_type=integer|value=1#0	iv,e53
 node	loops:10	main::__PROGRAM__|Count|ArrayLiteral#8|Assign#4#0	iv
 node	loops:10	main::__PROGRAM__|Phi#9#0	iv
 case	loops:11	ba82fcf1a0ec800d47905df2ae7cddbd	OK
-node	loops:11	main::__PROGRAM__|Add|Constant|const_type=integer|value=1|Multiply|Call#4|Constant|const_type=integer|value=0#0	iv,e53
-node	loops:11	main::__PROGRAM__|Add|Constant|const_type=integer|value=2|Multiply|Call#5|Constant|const_type=integer|value=0#0	iv,e53
+node	loops:11	main::__PROGRAM__|Add|Constant|const_type=integer|value=1|Multiply|Call#3|Constant|const_type=integer|value=0#0	iv,e53
+node	loops:11	main::__PROGRAM__|Add|Constant|const_type=integer|value=2|Multiply|Call#4|Constant|const_type=integer|value=0#0	iv,e53
 node	loops:11	main::__PROGRAM__|Add|Phi#16|Constant|const_type=integer|value=1#0	iv
 node	loops:11	main::__PROGRAM__|Add|Phi#25|Constant|const_type=integer|value=1#0	iv
 node	loops:11	main::__PROGRAM__|Add|Phi#7|Constant|const_type=integer|value=1#0	iv
@@ -2180,8 +2180,8 @@ node	loops:11	main::__PROGRAM__|Constant|const_type=integer|value=2#0	iv,e53
 node	loops:11	main::__PROGRAM__|Count|ArrayLiteral#15|MemStart#0	iv
 node	loops:11	main::__PROGRAM__|Count|ArrayLiteral#24|MemStart#0	iv
 node	loops:11	main::__PROGRAM__|Count|ArrayLiteral#6|MemStart#0	iv
+node	loops:11	main::__PROGRAM__|Multiply|Call#3|Constant|const_type=integer|value=0#0	iv,e53
 node	loops:11	main::__PROGRAM__|Multiply|Call#4|Constant|const_type=integer|value=0#0	iv,e53
-node	loops:11	main::__PROGRAM__|Multiply|Call#5|Constant|const_type=integer|value=0#0	iv,e53
 node	loops:11	main::__PROGRAM__|Phi#16#0	iv
 node	loops:11	main::__PROGRAM__|Phi#25#0	iv
 node	loops:11	main::__PROGRAM__|Phi#7#0	iv
