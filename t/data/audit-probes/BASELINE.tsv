@@ -113,7 +113,7 @@ ale09	REFUSED	B::SoN: GAP: a foreach over a scalar variable its body may write i
 ale10	SAME	
 alg01	REFUSED	GAP: T2: out of its slices (an eval whose body makes a value that may die)
 alg02	REFUSED	GAP: T2: out of its slices (a store into @_ of no site, in a program with an eval)
-alg03	REFUSED	B::SoN: GAP: an increment of padsv (a Subscript) is not yet lowered -- its store would be lost
+alg03	SAME	
 alg04	SAME	
 alg05	REFUSED	B::SoN: GAP: loop control (last) inside a loop body not yet lowered
 alg06	SAME	
