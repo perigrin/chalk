@@ -172,6 +172,11 @@ like( refused( encode_json($v1) ), qr/\AGAP: wire version 1\b/, 'a v1 wire is re
         return encode_json($w);
     };
     is( refused($RE), '', 'a wire with a rethrow edge loads' );
+    # (an Exc is in an eval by where its edge goes -- into a catch -- not by
+    # a field of what died: a die in a sort comparator inlined in an eval
+    # carries no eval_id; chalk-found-gaps:27)
+    my $SORT = do { local (@ARGV, $/) = 't/data/wire-v2-eval-die-in-sort-block.json'; <> };
+    is( refused($SORT), '', 'an Exc into a catch, of a die with no eval_id, loads' );
     like( refused( $bad_re->( sub ($n, $all) { $n->{$_}{gone} = 1 for 15, 16, 17 } ) ),
         qr/\AGAP: wire invariant L7: main::f: Divide#11 may die under a live local/,
         'L7: a division under a live local, outside an eval, with no way out' );

@@ -79,12 +79,17 @@ class Chalk::IR::Serialize::WireInvariant {
         };
         my @exc = grep { $_->{op} eq 'Exc' } @$nodes;
         my %on_edge = map { ( $_->{id} => 1 ) } map { $edge->($_) } @exc;
+        # (an Exc is an eval's by where its edge goes, into a catch: a die in a
+        # sort block inlined in an eval carries no eval_id)
+        my %into_catch = map { ( $_ => 1 ) } grep { defined && !ref } map { ( $_->{inputs} // [] )->@* }
+            grep { $_->{op} eq 'Region' && $f->( $_, 'catch' ) } @$nodes;
+        my $to_catch = sub ($x) { my @c = $edge->($x); $into_catch{ @c ? $c[-1]{id} : $x->{id} } };
         for my $u ( grep { $_->{op} eq 'Unwind' && $f->( $_, 'rethrow' ) } @$nodes ) {
             my $x = $by->{ $u->{inputs}[0] // '' };
             $gap->( 'L7', $u, 'is a rethrow not of its own edge\'s Exc' )
                 unless $x && $x->{op} eq 'Exc' && grep { $_ == $u } $edge->($x);
         }
-        for my $x ( grep { !$in_eval->( $by->{ $_->{inputs}[0] // '' } ) } @exc ) {
+        for my $x ( grep { !$to_catch->($_) } @exc ) {
             my @c = $edge->($x);
             $gap->( 'L7', $x, 'is outside an eval and its way out ends in no rethrow' )
                 unless @c && $c[-1]{op} eq 'Unwind' && $f->( $c[-1], 'rethrow' ) && ( $c[-1]{inputs}[0] // -1 ) == $x->{id};
@@ -105,6 +110,7 @@ class Chalk::IR::Serialize::WireInvariant {
         my %exc_of = map { ( ( $_->{inputs}[0] // -1 ) => $_ ) } @exc;
         for my $t (@$nodes) {
             next unless defined $t->{control_in} && !$in_eval->($t) && !$on_edge{ $t->{id} };
+            next if $exc_of{ $t->{id} } && $to_catch->( $exc_of{ $t->{id} } );
             next unless $t->{op} eq 'Call' && $SUB_CALL{ $f->( $t, 'dispatch_kind' ) // '' }
                 || $t->{op} =~ /\A(?:Divide|Modulo|PostfixDeref|Ref)\z/ && defined $f->( $t, 'line' );
             for my $pr (@pairs) {
