@@ -42,9 +42,9 @@ my %HELD = (
     # refuses its aelemfast by name -- the producer's
     # t/wire-a-fused-element-op-is-refused.t)
     # The goal audit's probes (2026-11-22), as the producer's ratchet holds them:
-    't/data/audit-probes/aun6.pl:main::bump read-unversioned:through-ref' =>
-        'a compound assignment through a symbolic reference (`${"main::g"} += 10`): its read of the package scalar names '
-      . 'no version; T2 gives perl\'s answer (the read is its own store\'s operand), B::SoN should version it -- open',
+    # (aun6, `${"main::g"} += 10` as its sub's value, is gone: B::SoN names
+    # the store as the read's memory version -- the producer's
+    # t/wire-a-compound-store-through-a-reference-is-read-at-its-version.t)
     't/data/audit-probes/aun5d.pl:main::__PROGRAM__ effect-floating' =>
         'a division that may fault after a `next unless` guard in a loop body floats: the rest of the body is walked as '
       . 'an arm, where B::SoN does not pin; T2 makes it at its use, after the guard -- open, B::SoN should pin it',
