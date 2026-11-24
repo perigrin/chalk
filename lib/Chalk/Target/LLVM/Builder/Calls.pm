@@ -1109,7 +1109,7 @@ sub func {
     $list ||= !$is_method && !$declared && grep {
         my $k = $_;
         $k->operation eq 'Call' && $k->is_sub_call
-            && grep( { blessed($_) && $_->can('place') && $_->place } $k->inputs->@* )
+            && ( grep { blessed($_) && $_->can('place') && $_->place } $k->inputs->@* )
             && grep { refaddr($_) == refaddr($sub) } $b->call_targets($k)
     } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} );
     # A SUB A CALL PASSES A LIST (`f(@$r)`): its count is the list's, known at
