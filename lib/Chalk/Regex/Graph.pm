@@ -543,8 +543,9 @@ sub build_split ($g) {
         $g->while_( sub { $g->eq_( $g->get('done'), $g->int_(0) ) }, sub {
             $g->if_( $g->and_( $g->lt_( $g->int_(0), $g->{limit} ), $g->op2( 'NumGe', $g->get('fields'), $g->{limit} ) ), sub { $g->set( done => $g->int_(1) ) }, sub {
                 $g->search( $g->get('last'), $g->get('last') );
-                # (an empty match at the end splits nothing)
-                $g->if_( $g->or_( $g->lt_( $g->get('found'), $g->int_(0) ), $g->and_( $g->eq_( $g->get('r0'), $g->get('r1') ), $g->eq_( $g->get('r0'), $g->{len} ) ) ),
+                # (an empty match at the end splits nothing -- but with a limit
+                # it does: `split //, "ab", 5` is a, b and "" -- audit 3, N12)
+                $g->if_( $g->or_( $g->lt_( $g->get('found'), $g->int_(0) ), $g->and_( $g->and_( $g->eq_( $g->get('r0'), $g->get('r1') ), $g->eq_( $g->get('r0'), $g->{len} ) ), $g->or_( $g->eq_( $g->{limit}, $g->int_(0) ), $g->eq_( $g->get('last'), $g->{len} ) ) ) ),
                     sub { $g->set( done => $g->int_(1) ) }, sub {
                         $push->( $g->text( $g->get('last'), $g->get('r0') ) );
                         for my $k ( 1 .. $g->{ng} ) {
