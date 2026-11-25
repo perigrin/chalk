@@ -219,11 +219,16 @@ subtest 'a source name resolving to conflicting signatures DIES' => sub {
         'no IR-routed source name has conflicting signatures'
         or diag "conflicting: @conflicts";
 
-    # And the detector must actually detect. `-` is in BOTH the binary table
+    # And the detector must actually detect. `+` is in BOTH the binary table
     # (Num,Num->Num) and the unary table (Num->Num); those AGREE, so it is
     # arity overloading and not a conflict.
-    ok !Chalk::Grammar::Perl::TypeLibrary::_signature_conflict_for('-'),
+    ok !Chalk::Grammar::Perl::TypeLibrary::_signature_conflict_for('+'),
         'agreeing tables across arities are not a conflict';
+    # `-` is not: subtraction numifies, negation does not (-"abc" is
+    # "-abc"), so the unary row is Scalar. Neither is routed by %IR_OP_SOURCE_NAME,
+    # which is why the empty list above still holds.
+    ok Chalk::Grammar::Perl::TypeLibrary::_signature_conflict_for('-'),
+        'binary and unary `-` differ, and the detector says so';
 
     # A fabricated disagreement IS one.
     ok Chalk::Grammar::Perl::TypeLibrary::_signatures_conflict(
