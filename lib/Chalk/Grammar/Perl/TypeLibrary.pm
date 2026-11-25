@@ -151,6 +151,15 @@ class Chalk::Grammar::Perl::TypeLibrary {
         Format    => 'Unknown',     # write() templates
     );
 
+    # lattice_parents() -> { type => [direct parents] }, a copy: every lattice
+    # name (Unknown and None included, with none) and its parent. B::SoN's
+    # SoN::IR::Stamp::lattice_parents gives the same shape;
+    # t/bootstrap/lattice-agrees-with-b-son.t compares the two.
+    sub lattice_parents() {
+        return { Unknown => [], None => [],
+                 map { $_ => [ $PARENT{$_} ] } keys %PARENT };
+    }
+
     # Cache for is_subtype lookups
     my %subtype_cache;
 
