@@ -246,7 +246,7 @@ sub call {
     }
     if ($fn->{list}) {
         # @_ BUILT HERE: the caller's arguments, aliased.
-        my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
+        my $arr = do { local $b->{arg_call} = $c; local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
         $b->hash_reads_settled('a call');
         $b->set_want($c) if $fn->{listret};
         return $b->emit_call(op => 'Call', type => '%Slot', inputs => [ $arr, @self ], attr => { fn => $fn->{name} }, site => $c);
@@ -338,7 +338,7 @@ sub glob_call {
     out('an & call of a sub a glob is given at run time') if $c->can('shares_args') && $c->shares_args;
     my ( $pkg, $name ) = ( $c->name // '' ) =~ /\A(.*)::([^:]+)\z/ or out('a call of a glob\'s sub of no package');
     my @args = $c->inputs->@*;
-    my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
+    my $arr = do { local $b->{arg_call} = $c; local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
     $b->hash_reads_settled('a call');
     $b->set_want($c);
     my $at = ' at ' . ( $c->can('file') ? $c->file // '-' : '-' ) . ' line ' . ( $c->can('line') ? $c->line // 0 : 0 ) . ".\n";
@@ -551,7 +551,7 @@ sub method_call {
     out('a method call with no invocant') unless @args && blessed($args[0]);
     out('a method call on a list') if _is_list($args[0]);
     # @_, the invocant and the arguments, aliased.
-    my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
+    my $arr = do { local $b->{arg_call} = $c; local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
     # (A PLACE invocant is read through its alias, @_'s first, as it is now)
     my $inv = blessed( $args[0] ) && $args[0]->can('place') && $args[0]->place
         ? $b->emit(op => 'AGet', type => '%Slot', inputs => [ $arr, $b->emit(op => 'Const', type => 'i64', attr => { value => 0 }) ])
@@ -725,6 +725,15 @@ sub arg_alias {
     }
     if ($n->is_package_scalar) {
         out('a package scalar of no one version passed as an argument') if $b->{unversioned}{ refaddr($n) };
+        # A READ AT AN OLDER VERSION THAN THE CALL'S, which B::SoN did not
+        # pass as a place, is the value it read, not the variable now:
+        # `f($g, $g++)` hands f the old $g, a copy -- passed as $g itself,
+        # it was read after the increment's store (`2 2` for `2 1`, audit 2,
+        # K6). Made at its version (the chain walk's read-before-kill).
+        my $call = $b->{arg_call};
+        return $b->emit(op => 'Fresh', type => '%Slot', inputs => [ $b->as($b->value($n), '%Slot') ])
+            if !$n->place && blessed( $n->mem_in ) && blessed($call) && blessed( $call->mem_in )
+            && refaddr( $n->mem_in ) != refaddr( $call->mem_in );
         return $b->topic_raw if $b->is_topic($n) && $b->topic_alias;   # (what $_ is now: its alias)
         return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_of($n) }) ]);
     }
@@ -985,7 +994,7 @@ sub code_call {
         $b->set_want($c);
         return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $b->{argsarr} ], site => $c);
     }
-    my $arr = do { local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
+    my $arr = do { local $b->{arg_call} = $c; local $b->{alias_writes} = $b->call_writes_args($c); local $b->{alias_refs} = $b->call_refs_args($c); $b->args_array(@args) };
     $b->hash_reads_settled('a call of a code value');
     $b->set_want($c);
     return $b->emit_call(op => 'CallCode', type => '%Slot', inputs => [ $code, $arr ], site => $c);
