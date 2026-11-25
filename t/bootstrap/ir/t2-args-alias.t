@@ -31,8 +31,6 @@ for my $src (
     q{sub g { $_[0] .= "!" } my $r = [1, 2]; g($r->[0]); print "@$r\n";},
     # A package scalar.
     q{our $g = 1; sub b { $_[0] += 10 } b($g); print "$g\n";},
-    # A read of @_ sees the caller's variable as it is now.
-    q{our $g = 1; sub f { $g = 2; return "@_" } print f($g), "\n";},
     # A foreach alias handed on, and $_ over an array.
     q{sub bump { $_[0]++ } my @a = (1, 2); for my $x (@a) { bump($x) } print "@a\n";},
     q{sub g { $_[0] = $_[0] * 10 } my @n = (1, 2); g($_) for @n; print "@n\n";},
@@ -55,6 +53,18 @@ for my $src (
 ) {
     my $r = tap("$src\n");
     is $r->{verdict}, 'SAME', $src or diag $r->{why} // explain $r;
+}
+
+# A READ OF @_ AFTER THE CALLEE STORED THE VARIABLE IT WAS HANDED: B::SoN's
+# wire carries the argument as a value read before the call, and T2 read it
+# again by its own rule -- right, against what the wire says. The loader
+# holds the wire to L11 (SoN::Verify's V12) now and refuses it by name (third
+# final audit, risk 5): it was SAME here.
+{
+    my $src = q{our $g = 1; sub f { $g = 2; return "@_" } print f($g), "\n";};
+    my $r = tap("$src\n");
+    is $r->{verdict}, 'REFUSED', "$src: refused" or diag $r->{why} // explain $r;
+    like $r->{why} // '', qr/wire invariant L11/, '...by L11';
 }
 
 # NEVER A WRONG ANSWER: an array B::SoN folds to what it was made with (a

@@ -18,6 +18,7 @@ use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: the join lattice
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
 use Chalk::IR::Serialize::WireCheck;   # what the wire cannot order, refused
 use Chalk::IR::Serialize::WireInvariant; # a v2 wire's memory edges, checked
+use Chalk::IR::Serialize::WireAliases;   # L11: an alias carried as a value is private
 
 # CFG node operations — these carry control tokens and are never hash-consed.
 my %CFG_OPS = map { $_ => 1 } qw(Start Return Unwind If Proj Region Loop Exc);
@@ -1364,6 +1365,8 @@ sub from_json ($json_string) {
         my $inv = Chalk::IR::Serialize::WireInvariant->new;
         $inv->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;
         $inv->check( 'a ' . ( $_->{phase} // 'phase' ) . ' block', $_ ) for ( $data->{phase_blocks} // [] )->@*;
+        # (L11, across the graphs: an alias carried as a value is private)
+        Chalk::IR::Serialize::WireAliases->new->check( $data->{methods} );
     }
     # The text after __DATA__ / __END__, which DATA reads (absent: none).
     our $DATA_SECTION = $data->{data_section};
