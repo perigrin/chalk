@@ -49,7 +49,11 @@ sub run_probe ($file) {
     # (B::SoN skipped the program: say why in its words -- re-audit 2026-11-23)
     my $u = ( $units // [] )->[0] or do {
         my $err = do { local ( @ARGV, $/ ) = "$dir/son.err"; <> } // '';
-        return [ 'REFUSED', $err =~ /skipped main::__PROGRAM__: (.*)/ ? 'B::SoN: ' . _one_line($1) : 'no program graph' ];
+        return [ 'REFUSED', 'B::SoN: ' . _one_line($1) ] if $err =~ /skipped main::__PROGRAM__: (.*)/;
+        # (perl itself did not compile it: st3, `isa` with no feature for it)
+        return [ 'REFUSED', 'perl: the program does not compile: ' . _one_line( ( grep { !/had compilation errors/ } split /\n/, $err )[0] // '' ) ]
+            if $err =~ /had compilation errors|syntax error/;
+        return [ 'REFUSED', 'no program graph' ];
     };
     return [ 'REFUSED', _one_line( $u->{err} // 'lowering failed' ) ] unless $u->{ok};
     open my $l, '>', "$dir/p.ll" or die $!;
