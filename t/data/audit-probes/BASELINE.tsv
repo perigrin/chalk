@@ -1697,6 +1697,52 @@ pa1	SAME
 pa2	SAME	
 pa3	SAME	
 pa4	SAME	
+pepa01	SAME	
+pepa02	SAME	
+pepa03	SAME	
+pepa04	SAME	
+pepa05	SAME	
+pepa06	SAME	
+pepa07	SAME	
+pepa08	SAME	
+pepc01	SAME	
+pepc02	SAME	
+pepc03	SAME	
+pepc04	SAME	
+pepd01	SAME	
+pepe01	SAME	
+pepe02	SAME	
+pepe03	SAME	
+pepe04	SAME	
+pepe05	SAME	
+pepe06	SAME	
+pepk01	SAME	
+pepk02	SAME	
+pepk03	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+pepk04	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+pepk05	SAME	
+pepk06	SAME	
+pepk07	SAME	
+pepk08	SAME	
+pepk09	REFUSED	B::SoN: GAP: an anonymous sub closing over $x has a capture that does not resolve to a slot in the enclosing pad (a nested closure's grandparent capture)
+pepk10	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
+pepk11	SAME	
+pepk12	SAME	
+pepl01	SAME	
+pepl02	SAME	
+pepl03	SAME	
+pepl04	SAME	
+pepl05	SAME	
+pepl06	SAME	
+pepm01	SAME	
+pepn01	SAME	
+pepo01	SAME	
+pepo02	SAME	
+pepo03	REFUSED	B::SoN: GAP: a foreach over a package variable whose body calls a sub (the callee sees the variable, not the element) not yet lowered
+pepr01	SAME	
+peps01	SAME	
+peps02	SAME	
+peps03	SAME	
 pg1	SAME	
 pg10	SAME	
 pg11	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
