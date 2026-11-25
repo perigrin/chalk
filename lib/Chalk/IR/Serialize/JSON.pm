@@ -1344,6 +1344,11 @@ sub from_json ($json_string) {
     die "GAP: wire version $version is not one chalk reads (wire v2 only)\n" unless $version eq '2';
     die 'GAP: wire v2 `profile` ' . ( ref $data->{profile} eq 'ARRAY' ? '[' . join( ' ', $data->{profile}->@* ) . ']' : $data->{profile} // 'null' )
         . ": a wire from before wire v2 closed (stage 10); every part is v2 now\n" if exists $data->{profile};
+    # WHAT RAN BEFORE THE MAIN LINE AND IS NOT ON THE WIRE -- an INIT or
+    # CHECK block, a followed module's file-level code beyond plain package
+    # data -- B::SoN names (`start_up`, third final audit, N9): the program
+    # would run from a guess at its start state. Refused in its words.
+    die( ( $data->{start_up} =~ s/\n?\z/\n/r ) ) if defined $data->{start_up};
     # EVERY WIRE is held to the memory invariant (L1-L11), each of its graphs,
     # before any is made -- but one chalk wrote itself (to_json's, its tests'
     # round trip: `writer: chalk`) whose graphs are PROVABLY MEMORY-FREE: no
