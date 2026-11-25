@@ -3810,10 +3810,27 @@ cell:
 ; shift or unshift after it moves the cell and the alias with it, as perl\'s
 ; @_ holds the scalar, not the index (audit 3, N2). One that does not exist is
 ; perl\'s deferred element: the index alias (t2_elv_a), made only if stored.
+; (An array of aliases -- an @_, an alias list -- holds its element\'s cell
+; already, or a literal: that cell, else the index alias. A tied one: the
+; index alias, its FETCH and STORE.)
 define internal %Slot @t2_elv_a_cell(%Array* %a, i64 %i) {
 entry:
   %ex = call i1 @t2_aexists(%Array* %a, i64 %i)
-  br i1 %ex, label %cell, label %elv
+  br i1 %ex, label %kind, label %elv
+kind:
+  %m = call %Meta* @t2_meta(%Array* %a)
+  %pl = icmp eq %Meta* %m, @t2_meta_default
+  br i1 %pl, label %cell, label %al
+al:
+  %isal = icmp eq %Meta* %m, @t2_meta_alias
+  br i1 %isal, label %raw, label %elv
+raw:
+  %r = call %Slot @t2_aget_d(%Array* %a, i64 %i)
+  %rt = extractvalue %Slot %r, 0
+  %rc = icmp eq i8 %rt, 9
+  br i1 %rc, label %rawcell, label %elv
+rawcell:
+  ret %Slot %r
 cell:
   %c = call %Slot @t2_aelem_ref(%Array* %a, i64 %i, i8* null, i64 0)
   ret %Slot %c
