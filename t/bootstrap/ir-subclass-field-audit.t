@@ -42,9 +42,26 @@ my %ABSTRACT_BASE = map { $_ => 1 } qw(
 # the audit documents the loss rather than silently not checking it.
 # -----------------------------------------------------------------------
 
+# (A NODE THAT STORES OR READS MEMORY is threaded as wire v2 threads it: a
+# store on both chains and a version, a read at a version, and the Return
+# naming the memory. A wire chalk writes is held to the invariant unless it
+# touches no memory -- third final audit, risk 10.)
+my %STORES = map { ( $_ => 1 ) } qw(EntryWrite CellWrite Delete ElemRestore MakeCell);
 sub _base_graph ($f, $value_node) {
     my $start = $f->make_cfg('Start');
-    my $ret   = $f->make_cfg('Return', inputs => [$start, $value_node]);
+    my $op    = $value_node->operation;
+    my $store = $STORES{$op} || $op eq 'Call' && ( $value_node->dispatch_kind // 'builtin' ) ne 'builtin';   # (a sub call is a version too)
+    my $ms    = $store || $op =~ /\A(?:CellRead|Unwind)\z/ ? $f->make('MemStart') : undef;
+    my $control = $start;
+    if ($store) {
+        $value_node->set_control_in($start); $value_node->set_mem_in($ms); $value_node->set_mem_out(1);
+        $control = $value_node;
+    }
+    $value_node->set_mem_in($ms) if $op =~ /\A(?:CellRead|Unwind)\z/;
+    # (MemStart is a version, no value: the Return names it as its memory)
+    my $ret   = $f->make_cfg('Return', inputs => [$control, $op eq 'MemStart' ? _const($f, '0') : $value_node]);
+    $ret->set_mem_in( $store ? $value_node : $ms ) if $ms;
+    $ret->set_mem_in($value_node) if $op eq 'MemStart';
     return Chalk::IR::Graph->new(start => $start, returns => [$ret]);
 }
 
@@ -98,10 +115,13 @@ for my $op (@BINOP_FAMILY) {
     $SPEC{$op} = sub ($f) {
         my $l = _const($f, '1');
         my $r = _const($f, '2');
-        my $node = $op eq 'Range' || $op eq 'Repeat'
-            ? $f->make($op, inputs => [$l, $r])
+        # (an Assign that is no record is a store, on both chains: a wire
+        # chalk writes is held to the invariant unless it touches no memory
+        # -- third final audit, risk 10. A record is a binding.)
+        my $node = $op eq 'Assign'
+            ? $f->make($op, record => 1, inputs => [$l, $r])
             : $f->make($op, inputs => [$l, $r]);
-        return ($node, {});
+        return ($node, $op eq 'Assign' ? { record => 1 } : {});
     };
 }
 

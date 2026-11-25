@@ -65,7 +65,7 @@ sub make_effectful_loop_graph {
     # Chalk::IR::Node::Phi::is_memory's detection (an input is
     # MemStart, or an Assign over a Subscript).
     my $mem_start = $f->make('MemStart');
-    my $mem_phi   = $f->make('Phi', region => $loop, values => [$mem_start]);
+    my $mem_phi   = $f->make('Phi', region => $loop, values => [$mem_start], memory => 1);
 
     # value-Phi: the induction variable $i, entry 0.
     my $zero   = $f->make('Constant', value => '0', const_type => 'integer');
@@ -81,6 +81,12 @@ sub make_effectful_loop_graph {
     my $i_plus_1 = $f->make('Add', inputs => [$i_phi, $one]);
     my $store    = $f->make('Assign', inputs => [$body_proj, $lvalue, $i_plus_1]);
     $mem_phi->set_backedge($store);
+    # (WIRE V2: the store is a version, after the header's memory Phi, on
+    # the body's control, and the pass goes round from it -- a wire chalk
+    # writes is held to the invariant unless it touches no memory, third
+    # final audit, risk 10)
+    $store->set_control_in($body_proj); $store->set_mem_in($mem_phi); $store->set_mem_out(1);
+    $loop->set_backedge_ctrl($store);
 
     # loop body: $i = $i + 1 (control-threaded after the store)
     my $i_next = $f->make('Add', inputs => [$i_phi, $one]);
@@ -106,9 +112,11 @@ sub make_effectful_loop_graph {
 
     # post-loop read: $a[0], pinned to the merged (memory-Phi) heap.
     my $idx0  = $f->make('Constant', value => '0', const_type => 'integer');
-    my $read  = $f->make('Subscript', inputs => [$i_phi, $idx0, $mem_phi]);
+    my $read  = $f->make('Subscript', inputs => [$i_phi, $idx0]);
+    $read->set_mem_in($mem_phi);
 
     my $ret = $f->make_cfg('Return', inputs => [$region, $read]);
+    $ret->set_mem_in($mem_phi);
 
     # Stamped as B::SoN stamps this loop: a memory Phi Unknown, an element
     # Scalar, the induction variable Int.
@@ -421,6 +429,10 @@ sub equiv {
             }
             if ($n->can('control_in') && defined $n->control_in) {
                 $expected_consumers_of{ _node_key($n->control_in, $memo) }{$key} = 1;
+            }
+            # (wire v2: the version a node reads or follows is a use-def edge)
+            if ($n->can('mem_in') && blessed($n->mem_in)) {
+                $expected_consumers_of{ _node_key($n->mem_in, $memo) }{$key} = 1;
             }
             # Phi's region is also a use-def edge (NodeFactory registers it).
             if ($n->operation eq 'Phi' && defined $n->region) {

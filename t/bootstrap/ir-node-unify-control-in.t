@@ -38,9 +38,12 @@ sub make_forward_control_ref_graph {
 
     # The value chain ($c->val) and the Return are built and would, absent a
     # fix, be topo-ordered/emitted BEFORE the void inc() call below.
+    # (A pure builtin's value, abs(10): a sub call is on both chains -- a wire
+    # chalk writes is held to the invariant unless it touches no memory,
+    # third final audit, risk 10 -- and this one's place is not the point.)
     my $n10 = $f->make('Constant', value => '10', const_type => 'integer');
     my $val = $f->make('Call',
-        dispatch_kind => 'method', name => 'val', inputs => [$n10]);
+        dispatch_kind => 'builtin', name => 'abs', inputs => [$n10]);
     $val->set_stamp('Scalar');   # the producer stamps every call
     my $ret = $f->make_cfg('Return', inputs => [$val]);
 
@@ -52,6 +55,10 @@ sub make_forward_control_ref_graph {
     $inc->set_stamp('Int');
     $inc->set_control_in($start);
     $ret->set_control_in($inc);
+    # (the call is a memory version, and the Return names it)
+    my $ms = $f->make('MemStart');
+    $inc->set_mem_in($ms); $inc->set_mem_out(1);
+    $ret->set_mem_in($inc);
 
     my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
     return ($graph, { start => $start, val => $val, inc => $inc, ret => $ret });

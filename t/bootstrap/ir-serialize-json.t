@@ -190,7 +190,13 @@ sub make_simple_graph {
     my $call  = $f->make(q{Call}, dispatch_kind => q{method}, name => q{new},
         param_names => [q{left}, q{right}], inputs => [$cap, $env]);
     $call->set_stamp(q{Object});   # the producer stamps every call
-    my $ret   = $f->make_cfg(q{Return}, inputs => [$start, $call]);
+    # (A SUB CALL IS ON BOTH CHAINS, a memory version, and the Return names
+    # it: a wire chalk writes is held to the invariant unless it touches no
+    # memory -- third final audit, risk 10)
+    my $ms    = $f->make(q{MemStart});
+    $call->set_control_in($start); $call->set_mem_in($ms); $call->set_mem_out(1);
+    my $ret   = $f->make_cfg(q{Return}, inputs => [$call, $call]);
+    $ret->set_mem_in($call);
     my $graph = Chalk::IR::Graph->new(start => $start, returns => [$ret]);
 
     my $json   = to_json({ g7 => $graph });

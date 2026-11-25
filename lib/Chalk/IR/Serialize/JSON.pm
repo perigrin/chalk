@@ -524,6 +524,23 @@ sub _serialize_graph ($graph) {
 # -----------------------------------------------------------------------
 # to_json(\%named_graphs) — serialize named graphs to a JSON string.
 # -----------------------------------------------------------------------
+# _memory_free($graph) -> true for a wire graph that touches no memory: no
+# node names a version or is one (mem_in, mem_out, MemStart, a memory Phi),
+# and none is of a kind that stores whenever it runs, reads a variable that
+# lives in memory, or runs a sub (a sub Call, a non-record Assign). Only
+# such a graph, of chalk's own writing, is not held to the invariant.
+my %MEMORY_KIND = map { ( $_ => 1 ) } qw(MemStart EntryWrite CellWrite CellRead Delete ElemRestore MakeCell Unwind);
+sub _memory_free ($g) {
+    for my $n ( ( $g->{nodes} // [] )->@* ) {
+        my $f = $n->{fields} // {};
+        return false if defined $n->{mem_in} || $n->{mem_out} || $MEMORY_KIND{ $n->{op} // '' };
+        return false if ( $n->{op} // '' ) eq 'Phi' && $f->{memory};
+        return false if ( $n->{op} // '' ) eq 'Assign' && !$f->{record};
+        return false if ( $n->{op} // '' ) eq 'Call' && ( $f->{dispatch_kind} // 'builtin' ) ne 'builtin';
+    }
+    return true;
+}
+
 sub to_json ($named_graphs) {
     my %methods;
     for my $name (sort keys $named_graphs->%*) {
@@ -1327,12 +1344,17 @@ sub from_json ($json_string) {
     die "GAP: wire version $version is not one chalk reads (wire v2 only)\n" unless $version eq '2';
     die 'GAP: wire v2 `profile` ' . ( ref $data->{profile} eq 'ARRAY' ? '[' . join( ' ', $data->{profile}->@* ) . ']' : $data->{profile} // 'null' )
         . ": a wire from before wire v2 closed (stage 10); every part is v2 now\n" if exists $data->{profile};
-    # EVERY WIRE is held to the memory invariant (L1-L9), each of its graphs,
+    # EVERY WIRE is held to the memory invariant (L1-L11), each of its graphs,
     # before any is made -- but one chalk wrote itself (to_json's, its tests'
-    # round trip: `writer: chalk`), whose in-memory graphs thread no memory (a
-    # Return names none). It was keyed on `dowarn`, and a wire that left that
-    # out was let off both checks (final audit 2026-11-24, clause 4).
-    my $theirs = ( $data->{writer} // '' ) ne 'chalk';
+    # round trip: `writer: chalk`) whose graphs are PROVABLY MEMORY-FREE: no
+    # memory edge, no MemStart or memory Phi, and no node of a kind that reads
+    # or writes memory (_memory_free). Such a graph threads no memory (a
+    # Return names none), and there is none to break. `writer: chalk` alone
+    # let any wire off (third final audit, risk 10); it was keyed on `dowarn`
+    # before, and a wire that left that out was let off both checks (final
+    # audit 2026-11-24, clause 4).
+    my $theirs = ( $data->{writer} // '' ) ne 'chalk'
+        || grep { !_memory_free($_) } values( ( $data->{methods} // {} )->%* ), ( $data->{phase_blocks} // [] )->@*;
     if ($theirs) {
         my $inv = Chalk::IR::Serialize::WireInvariant->new;
         $inv->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;

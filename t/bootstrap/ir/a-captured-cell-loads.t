@@ -41,150 +41,161 @@ sub load ($json) {
 
 # A minimal document exercising all four ops: an outer scope that allocates a
 # cell and hands it to a closure, and a body that reads and writes through it.
+# (Its stores and the call are memory versions on both chains, as B::SoN
+# writes them: a wire that says `writer: chalk` is held to the invariant
+# unless it touches no memory -- third final audit, risk 10.)
 my $WIRE = <<'JSON';
 {
-  "methods" : {
-    "main::__PROGRAM__" : {
-      "nodes" : [
-        {
-          "id" : 0,
-          "inputs" : [],
-          "op" : "Start"
-        },
-        {
-          "id" : 1,
-          "inputs" : [],
-          "op" : "MemStart"
-        },
-        {
-          "fields" : {
-            "const_type" : "integer",
-            "value" : "5"
-          },
-          "id" : 2,
-          "inputs" : [],
-          "op" : "Constant",
-          "stamp" : "Int"
-        },
-        {
-          "fields" : {
-            "captured_written" : true,
-            "cell_name" : "$n"
-          },
-          "id" : 3,
-          "inputs" : [
-            2
-          ],
-          "mem_in" : 1,
-          "op" : "MakeCell",
-          "stamp" : "Int"
-        },
-        {
-          "fields" : {
-            "name" : "main::__PROGRAM__::__ANON__:2:1"
-          },
-          "id" : 4,
-          "inputs" : [
-            3
-          ],
-          "op" : "AnonSub",
-          "stamp" : "CodeRef"
-        },
-        {
-          "fields" : {
-            "dispatch_kind" : "direct",
-            "name" : "main::__PROGRAM__::__ANON__:2:1"
-          },
-          "id" : 5,
-          "inputs" : [
-            4
-          ],
-          "op" : "Call",
-          "stamp" : "Int"
-        },
-        {
-          "control_in" : 0,
-          "id" : 6,
-          "inputs" : [
-            5
-          ],
-          "mem_in" : 1,
-          "op" : "Return"
-        }
-      ],
-      "returns" : [
-        6
-      ],
-      "start" : 0
-    },
-    "main::__PROGRAM__::__ANON__:2:1" : {
-      "nodes" : [
-        {
-          "id" : 0,
-          "inputs" : [],
-          "op" : "Start"
-        },
-        {
-          "id" : 1,
-          "inputs" : [],
-          "op" : "MemStart"
-        },
-        {
-          "fields" : {
-            "index" : 0,
-            "name" : "$n"
-          },
-          "id" : 2,
-          "inputs" : [],
-          "op" : "CellParam",
-          "stamp" : "Int"
-        },
-        {
-          "fields" : {
-            "const_type" : "integer",
-            "value" : "1"
-          },
-          "id" : 3,
-          "inputs" : [],
-          "op" : "Constant",
-          "stamp" : "Int"
-        },
-        {
-          "id" : 4,
-          "inputs" : [
-            2,
-            3
-          ],
-          "mem_in" : 1,
-          "op" : "CellWrite",
-          "stamp" : "Int"
-        },
-        {
-          "id" : 5,
-          "inputs" : [
-            2
-          ],
-          "mem_in" : 4,
-          "op" : "CellRead",
-          "stamp" : "Int"
-        },
-        {
-          "control_in" : 0,
-          "id" : 6,
-          "inputs" : [
-            5
-          ],
-          "mem_in" : 1,
-          "op" : "Return"
-        }
-      ],
-      "returns" : [
-        6
-      ],
-      "start" : 0
-    }
-  },
-  "version" : 2, "writer" : "chalk"
+   "methods": {
+      "main::__PROGRAM__": {
+         "nodes": [
+            {
+               "id": 0,
+               "inputs": [],
+               "op": "Start"
+            },
+            {
+               "id": 1,
+               "inputs": [],
+               "op": "MemStart"
+            },
+            {
+               "fields": {
+                  "const_type": "integer",
+                  "value": "5"
+               },
+               "id": 2,
+               "inputs": [],
+               "op": "Constant",
+               "stamp": "Int"
+            },
+            {
+               "control_in": 0,
+               "fields": {
+                  "captured_written": true,
+                  "cell_name": "$n"
+               },
+               "id": 3,
+               "inputs": [
+                  2
+               ],
+               "mem_in": 1,
+               "mem_out": true,
+               "op": "MakeCell",
+               "stamp": "Int"
+            },
+            {
+               "fields": {
+                  "name": "main::__PROGRAM__::__ANON__:2:1"
+               },
+               "id": 4,
+               "inputs": [
+                  3
+               ],
+               "op": "AnonSub",
+               "stamp": "CodeRef"
+            },
+            {
+               "control_in": 3,
+               "fields": {
+                  "dispatch_kind": "direct",
+                  "name": "main::__PROGRAM__::__ANON__:2:1"
+               },
+               "id": 5,
+               "inputs": [
+                  4
+               ],
+               "mem_in": 3,
+               "mem_out": true,
+               "op": "Call",
+               "stamp": "Int"
+            },
+            {
+               "control_in": 5,
+               "id": 6,
+               "inputs": [
+                  5
+               ],
+               "mem_in": 5,
+               "op": "Return"
+            }
+         ],
+         "returns": [
+            6
+         ],
+         "start": 0
+      },
+      "main::__PROGRAM__::__ANON__:2:1": {
+         "nodes": [
+            {
+               "id": 0,
+               "inputs": [],
+               "op": "Start"
+            },
+            {
+               "id": 1,
+               "inputs": [],
+               "op": "MemStart"
+            },
+            {
+               "fields": {
+                  "index": 0,
+                  "name": "$n"
+               },
+               "id": 2,
+               "inputs": [],
+               "op": "CellParam",
+               "stamp": "Int"
+            },
+            {
+               "fields": {
+                  "const_type": "integer",
+                  "value": "1"
+               },
+               "id": 3,
+               "inputs": [],
+               "op": "Constant",
+               "stamp": "Int"
+            },
+            {
+               "control_in": 0,
+               "id": 4,
+               "inputs": [
+                  2,
+                  3
+               ],
+               "mem_in": 1,
+               "mem_out": true,
+               "op": "CellWrite",
+               "stamp": "Int"
+            },
+            {
+               "id": 5,
+               "inputs": [
+                  2
+               ],
+               "mem_in": 4,
+               "op": "CellRead",
+               "stamp": "Int"
+            },
+            {
+               "control_in": 4,
+               "id": 6,
+               "inputs": [
+                  5
+               ],
+               "mem_in": 4,
+               "op": "Return"
+            }
+         ],
+         "returns": [
+            6
+         ],
+         "start": 0
+      }
+   },
+   "version": 2,
+   "writer": "chalk"
 }
 JSON
 
@@ -234,193 +245,206 @@ subtest 'two identical MakeCells are two distinct cells' => sub {
     # loader indexes nodes by array position, not by id.
     my $two = <<'JSON';
 {
-  "methods" : {
-    "main::__PROGRAM__" : {
-      "nodes" : [
-        {
-          "id" : 0,
-          "inputs" : [],
-          "op" : "Start"
-        },
-        {
-          "id" : 1,
-          "inputs" : [],
-          "op" : "MemStart"
-        },
-        {
-          "fields" : {
-            "const_type" : "integer",
-            "value" : "5"
-          },
-          "id" : 2,
-          "inputs" : [],
-          "op" : "Constant",
-          "stamp" : "Int"
-        },
-        {
-          "fields" : {
-            "captured_written" : true,
-            "cell_name" : "$n"
-          },
-          "id" : 3,
-          "inputs" : [
-            2
-          ],
-          "mem_in" : 1,
-          "op" : "MakeCell",
-          "stamp" : "Int"
-        },
-        {
-          "fields" : {
-            "captured_written" : true,
-            "cell_name" : "$n"
-          },
-          "id" : 4,
-          "inputs" : [
-            2
-          ],
-          "mem_in" : 1,
-          "op" : "MakeCell",
-          "stamp" : "Int"
-        },
-        {
-          "fields" : {
-            "name" : "main::__PROGRAM__::__ANON__:2:1"
-          },
-          "id" : 5,
-          "inputs" : [
-            3
-          ],
-          "op" : "AnonSub",
-          "stamp" : "CodeRef"
-        },
-        {
-          "fields" : {
-            "name" : "main::__PROGRAM__::__ANON__:2:1"
-          },
-          "id" : 6,
-          "inputs" : [
-            4
-          ],
-          "op" : "AnonSub",
-          "stamp" : "CodeRef"
-        },
-        {
-          "fields" : {
-            "dispatch_kind" : "direct",
-            "name" : "main::__PROGRAM__::__ANON__:2:1"
-          },
-          "id" : 7,
-          "inputs" : [
-            5
-          ],
-          "op" : "Call",
-          "stamp" : "Int"
-        },
-        {
-          "fields" : {
-            "dispatch_kind" : "direct",
-            "name" : "main::__PROGRAM__::__ANON__:2:1"
-          },
-          "id" : 8,
-          "inputs" : [
+   "methods": {
+      "main::__PROGRAM__": {
+         "nodes": [
+            {
+               "id": 0,
+               "inputs": [],
+               "op": "Start"
+            },
+            {
+               "id": 1,
+               "inputs": [],
+               "op": "MemStart"
+            },
+            {
+               "fields": {
+                  "const_type": "integer",
+                  "value": "5"
+               },
+               "id": 2,
+               "inputs": [],
+               "op": "Constant",
+               "stamp": "Int"
+            },
+            {
+               "control_in": 0,
+               "fields": {
+                  "captured_written": true,
+                  "cell_name": "$n"
+               },
+               "id": 3,
+               "inputs": [
+                  2
+               ],
+               "mem_in": 1,
+               "mem_out": true,
+               "op": "MakeCell",
+               "stamp": "Int"
+            },
+            {
+               "control_in": 3,
+               "fields": {
+                  "captured_written": true,
+                  "cell_name": "$n"
+               },
+               "id": 4,
+               "inputs": [
+                  2
+               ],
+               "mem_in": 3,
+               "mem_out": true,
+               "op": "MakeCell",
+               "stamp": "Int"
+            },
+            {
+               "fields": {
+                  "name": "main::__PROGRAM__::__ANON__:2:1"
+               },
+               "id": 5,
+               "inputs": [
+                  3
+               ],
+               "op": "AnonSub",
+               "stamp": "CodeRef"
+            },
+            {
+               "fields": {
+                  "name": "main::__PROGRAM__::__ANON__:2:1"
+               },
+               "id": 6,
+               "inputs": [
+                  4
+               ],
+               "op": "AnonSub",
+               "stamp": "CodeRef"
+            },
+            {
+               "control_in": 4,
+               "fields": {
+                  "dispatch_kind": "direct",
+                  "name": "main::__PROGRAM__::__ANON__:2:1"
+               },
+               "id": 7,
+               "inputs": [
+                  5
+               ],
+               "mem_in": 4,
+               "mem_out": true,
+               "op": "Call",
+               "stamp": "Int"
+            },
+            {
+               "control_in": 7,
+               "fields": {
+                  "dispatch_kind": "direct",
+                  "name": "main::__PROGRAM__::__ANON__:2:1"
+               },
+               "id": 8,
+               "inputs": [
+                  6
+               ],
+               "mem_in": 7,
+               "mem_out": true,
+               "op": "Call",
+               "stamp": "Int"
+            },
+            {
+               "id": 9,
+               "inputs": [
+                  7,
+                  8
+               ],
+               "op": "Add",
+               "stamp": "Int"
+            },
+            {
+               "control_in": 8,
+               "id": 10,
+               "inputs": [
+                  9
+               ],
+               "mem_in": 8,
+               "op": "Return"
+            }
+         ],
+         "returns": [
+            10
+         ],
+         "start": 0
+      },
+      "main::__PROGRAM__::__ANON__:2:1": {
+         "nodes": [
+            {
+               "id": 0,
+               "inputs": [],
+               "op": "Start"
+            },
+            {
+               "id": 1,
+               "inputs": [],
+               "op": "MemStart"
+            },
+            {
+               "fields": {
+                  "index": 0,
+                  "name": "$n"
+               },
+               "id": 2,
+               "inputs": [],
+               "op": "CellParam",
+               "stamp": "Int"
+            },
+            {
+               "fields": {
+                  "const_type": "integer",
+                  "value": "1"
+               },
+               "id": 3,
+               "inputs": [],
+               "op": "Constant",
+               "stamp": "Int"
+            },
+            {
+               "control_in": 0,
+               "id": 4,
+               "inputs": [
+                  2,
+                  3
+               ],
+               "mem_in": 1,
+               "mem_out": true,
+               "op": "CellWrite",
+               "stamp": "Int"
+            },
+            {
+               "id": 5,
+               "inputs": [
+                  2
+               ],
+               "mem_in": 4,
+               "op": "CellRead",
+               "stamp": "Int"
+            },
+            {
+               "control_in": 4,
+               "id": 6,
+               "inputs": [
+                  5
+               ],
+               "mem_in": 4,
+               "op": "Return"
+            }
+         ],
+         "returns": [
             6
-          ],
-          "op" : "Call",
-          "stamp" : "Int"
-        },
-        {
-          "id" : 9,
-          "inputs" : [
-            7,
-            8
-          ],
-          "op" : "Add",
-          "stamp" : "Int"
-        },
-        {
-          "control_in" : 0,
-          "id" : 10,
-          "inputs" : [
-            9
-          ],
-          "mem_in" : 1,
-          "op" : "Return"
-        }
-      ],
-      "returns" : [
-        10
-      ],
-      "start" : 0
-    },
-    "main::__PROGRAM__::__ANON__:2:1" : {
-      "nodes" : [
-        {
-          "id" : 0,
-          "inputs" : [],
-          "op" : "Start"
-        },
-        {
-          "id" : 1,
-          "inputs" : [],
-          "op" : "MemStart"
-        },
-        {
-          "fields" : {
-            "index" : 0,
-            "name" : "$n"
-          },
-          "id" : 2,
-          "inputs" : [],
-          "op" : "CellParam",
-          "stamp" : "Int"
-        },
-        {
-          "fields" : {
-            "const_type" : "integer",
-            "value" : "1"
-          },
-          "id" : 3,
-          "inputs" : [],
-          "op" : "Constant",
-          "stamp" : "Int"
-        },
-        {
-          "id" : 4,
-          "inputs" : [
-            2,
-            3
-          ],
-          "mem_in" : 1,
-          "op" : "CellWrite",
-          "stamp" : "Int"
-        },
-        {
-          "id" : 5,
-          "inputs" : [
-            2
-          ],
-          "mem_in" : 4,
-          "op" : "CellRead",
-          "stamp" : "Int"
-        },
-        {
-          "control_in" : 0,
-          "id" : 6,
-          "inputs" : [
-            5
-          ],
-          "mem_in" : 1,
-          "op" : "Return"
-        }
-      ],
-      "returns" : [
-        6
-      ],
-      "start" : 0
-    }
-  },
-  "version" : 2, "writer" : "chalk"
+         ],
+         "start": 0
+      }
+   },
+   "version": 2,
+   "writer": "chalk"
 }
 JSON
 

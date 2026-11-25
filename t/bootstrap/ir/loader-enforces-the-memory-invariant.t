@@ -135,8 +135,16 @@ SKIP: {
     my $own = decode_json(bad( sub ($n, $all) { delete $n->{21}{mem_in} } ));
     delete $own->{dowarn};
     like( refused( encode_json($own) ), qr/\AGAP: wire invariant L/, 'a wire with no dowarn is held to the invariant' );
+    # (third final audit, risk 10: `writer: chalk` let any wire off. Only a
+    # graph that touches no memory is: one with a store, a memory edge or a
+    # sub call is held like any other.)
     $own->{writer} = 'chalk';
-    is( refused( encode_json($own) ), '', 'a wire chalk wrote (writer: chalk) is not' );
+    like( refused( encode_json($own) ), qr/\AGAP: wire invariant L3/, 'a wire chalk wrote (writer: chalk) that touches memory is held too' );
+    my $free = { version => 2, writer => 'chalk', methods => { main => { start => 0, returns => [2], nodes => [
+        { id => 0, op => 'Start', inputs => [] },
+        { id => 1, op => 'Constant', inputs => [], fields => { const_type => 'integer', value => '1' }, stamp => 'Int' },
+        { id => 2, op => 'Return', inputs => [ 0, 1 ] } ] } } };
+    is( refused( encode_json($free) ), '', 'one that touches no memory is not (a Return with no memory to name)' );
     my $w = decode_json( Chalk::IR::Serialize::JSON::to_json( {} ) );
     is( $w->{writer}, 'chalk', 'to_json says chalk wrote it' );
 }
