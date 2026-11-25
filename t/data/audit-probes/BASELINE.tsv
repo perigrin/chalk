@@ -2659,48 +2659,48 @@ yyc96	SAME
 yyc97	SAME	
 yyc98	SAME	
 yyc99	SAME	
-yyd01	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd02	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd03	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd04	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd05	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd06	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd07	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd08	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd09	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd10	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd11	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd12	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd13	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd14	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd15	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd16	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd17	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd18	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd19	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd20	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd21	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd22	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd23	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
+yyd01	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd02	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd03	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd04	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd05	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd06	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd07	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd08	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd09	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd10	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd11	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd12	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd13	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd14	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd15	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd16	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd17	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd18	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd19	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd20	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd21	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd22	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd23	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
 yyd24	REFUSED	load: from_json failed: GAP: an INIT block of the program runs before the main line and is not on the wire -- not yet lowered
-yyd25	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd26	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
+yyd25	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd26	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
 yyd27	REFUSED	GAP: T2: out of its slices (a require of YInit.pm, not compiled in)
-yyd28	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd29	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd30	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd31	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd32	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd33	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd34	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd35	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: multideref) runs before the main line and is not on the wire -- not ye
-yyd36	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: multideref) runs before the main line and is not on the wire -- not ye
-yyd37	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: multideref) runs before the main line and is not on the wire -- not ye
-yyd38	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: multideref) runs before the main line and is not on the wire -- not ye
-yyd39	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: multideref) runs before the main line and is not on the wire -- not ye
-yyd40	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: multideref) runs before the main line and is not on the wire -- not ye
-yyd41	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: multideref) runs before the main line and is not on the wire -- not ye
-yyd42	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: multideref) runs before the main line and is not on the wire -- not ye
+yyd28	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd29	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd30	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd31	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd32	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd33	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd34	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd35	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: reference) runs before the main line and is not on the wire -- not yet
+yyd36	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: reference) runs before the main line and is not on the wire -- not yet
+yyd37	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: reference) runs before the main line and is not on the wire -- not yet
+yyd38	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: reference) runs before the main line and is not on the wire -- not yet
+yyd39	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: reference) runs before the main line and is not on the wire -- not yet
+yyd40	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: reference) runs before the main line and is not on the wire -- not yet
+yyd41	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: reference) runs before the main line and is not on the wire -- not yet
+yyd42	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YRef: reference) runs before the main line and is not on the wire -- not yet
 yyd43	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YPriv: padav) runs before the main line and is not on the wire -- not yet lo
 yyd44	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YPriv: padav) runs before the main line and is not on the wire -- not yet lo
 yyd45	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YPriv: padav) runs before the main line and is not on the wire -- not yet lo
@@ -2708,10 +2708,10 @@ yyd46	REFUSED	load: from_json failed: GAP: a followed module's file-level code b
 yyd47	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YPriv: padav) runs before the main line and is not on the wire -- not yet lo
 yyd48	REFUSED	load: from_json failed: GAP: a followed module's file-level code (YPrint: print) runs before the main line and is not on the wire -- not yet lowered
 yyd49	REFUSED	load: from_json failed: GAP: a followed module's file-level code (YPrint: print) runs before the main line and is not on the wire -- not yet lowered
-yyd50	REFUSED	load: from_json failed: GAP: a followed module's file-level code (YMain: store-into-Other) runs before the main line and is not on the wire -- not yet lowered
-yyd51	REFUSED	load: from_json failed: GAP: a followed module's file-level code (YMain: store-into-Other) runs before the main line and is not on the wire -- not yet lowered
-yyd52	REFUSED	load: from_json failed: GAP: a followed module's file-level code (YMain: store-into-Other) runs before the main line and is not on the wire -- not yet lowered
-yyd53	REFUSED	load: from_json failed: GAP: a followed module's file-level code (YMain: store-into-Other) runs before the main line and is not on the wire -- not yet lowered
+yyd50	REFUSED	load: from_json failed: GAP: a followed module's file-level code (YMain: store-into-main) runs before the main line and is not on the wire -- not yet lowered
+yyd51	REFUSED	load: from_json failed: GAP: a followed module's file-level code (YMain: store-into-main) runs before the main line and is not on the wire -- not yet lowered
+yyd52	REFUSED	load: from_json failed: GAP: a followed module's file-level code (YMain: store-into-main) runs before the main line and is not on the wire -- not yet lowered
+yyd53	REFUSED	load: from_json failed: GAP: a followed module's file-level code (YMain: store-into-main) runs before the main line and is not on the wire -- not yet lowered
 yyd54	REFUSED	load: from_json failed: GAP: the import of a followed module (YImp) storing into another package runs before the main line and is not on the wire -- not yet lowered
 yyd55	REFUSED	load: from_json failed: GAP: the import of a followed module (YImp) storing into another package runs before the main line and is not on the wire -- not yet lowered
 yyd56	REFUSED	load: from_json failed: GAP: the import of a followed module (YImp) storing into another package runs before the main line and is not on the wire -- not yet lowered
@@ -2719,26 +2719,26 @@ yyd57	LOUD	Can't locate object method "new" via package "YKid"
 yyd58	SAME	
 yyd59	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInitSub: entersub) runs before the main line and is not on the wire -- not
 yyd60	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInitSub: entersub) runs before the main line and is not on the wire -- not
-yyd61	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YBeg: preinc) runs before the main line and is not on the wire -- not yet lo
+yyd61	SAME	
 yyd62	SAME	
 yyd63	LOUD	Can't locate object method "PI" via package "YConst"
-yyd64	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd65	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
+yyd64	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd65	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
 yyd66	SAME	
 yyd67	SAME	
 yyd68	SAME	
 yyd69	REFUSED	load: from_json failed: GAP: a followed module's INIT block (YPhase) runs before the main line and is not on the wire -- not yet lowered
 yyd70	REFUSED	load: from_json failed: GAP: a followed module's INIT block (YPhase) runs before the main line and is not on the wire -- not yet lowered
-yyd71	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd72	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd73	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd74	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd75	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd76	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd77	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd78	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd79	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
-yyd80	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: add) runs before the main line and is not on the wire -- not yet lowe
+yyd71	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd72	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd73	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd74	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd75	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd76	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd77	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd78	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd79	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
+yyd80	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (YInit: padsv_store) runs before the main line and is not on the wire -- not
 yye01	SAME	
 yye02	SAME	
 yye03	SAME	
@@ -3418,17 +3418,17 @@ yyn60	SAME
 yyn61	SAME	
 yyo01	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (File::Basename: entersub) runs before the main line and is not on the wire -
 yyo02	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (File::Basename: entersub) runs before the main line and is not on the wire -
-yyo03	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Text::Wrap: cond_expr) runs before the main line and is not on the wire -- n
+yyo03	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Text::Wrap: padsv) runs before the main line and is not on the wire -- not y
 yyo04	REFUSED	load: from_json failed: GAP: Text::Wrap::wrap, which the program calls, is refused in its module: GAP: an until whose condition is not a negatable comparison is not y
 yyo05	REFUSED	load: from_json failed: GAP: Text::Tabs::unexpand, which the program calls, is refused in its module: GAP: `split` with a runtime-interpolated pattern is not yet lowe
 yyo06	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Text::ParseWords: require) runs before the main line and is not on the wire
 yyo07	REFUSED	load: from_json failed: GAP: Text::Abbrev::abbrev, which the program calls, is refused in its module: GAP: a loop control (`next`) inside a branch arm is not yet lowe
-yyo08	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (File::Spec::Unix: defined) runs before the main line and is not on the wire
+yyo08	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (File::Spec::Unix: padhv) runs before the main line and is not on the wire --
 yyo09	REFUSED	GAP: T2: out of its slices (main::catfile is XS: there is no Perl source to compile)
 yyo10	REFUSED	load: from_json failed: GAP: Time::Local::_daygm, which the program calls, is refused in its module: GAP: `||=` into an element whose value is read across another wri
-yyo11	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Symbol: mapstart) runs before the main line and is not on the wire -- not ye
-yyo12	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: and) runs before the main line and is not on the wire -- not yet lower
-yyo13	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: and) runs before the main line and is not on the wire -- not yet lower
+yyo11	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Symbol: padhv) runs before the main line and is not on the wire -- not yet l
+yyo12	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: padsv) runs before the main line and is not on the wire -- not yet low
+yyo13	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: padsv) runs before the main line and is not on the wire -- not yet low
 yyo14	REFUSED	GAP: T2: out of its slices (main::floor is XS: there is no Perl source to compile)
 yyo15	REFUSED	GAP: T2: out of its slices (main::sum is XS: there is no Perl source to compile)
 yyo16	REFUSED	GAP: T2: out of its slices (main::looks_like_number is XS: there is no Perl source to compile)
@@ -3441,7 +3441,7 @@ yyo22	SAME
 yyo23	REFUSED	load: from_json failed: GAP: a followed module's file-level code (Config: die) runs before the main line and is not on the wire -- not yet lowered
 yyo25	REFUSED	GAP: T2: out of its slices (main::time is XS: there is no Perl source to compile)
 yyo26	REFUSED	no program graph
-yyo27	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: and) runs before the main line and is not on the wire -- not yet lower
+yyo27	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: padsv) runs before the main line and is not on the wire -- not yet low
 yyo28	REFUSED	load: from_json failed: GAP: Getopt::Long::GetOptions, which the program calls, is refused in its module: GAP: `goto` transfers control and is not compiled; the jump,
 yyo29	REFUSED	GAP: T2: out of its slices (main::getcwd is XS: there is no Perl source to compile)
 yyo30	REFUSED	load: from_json failed: GAP: wire invariant L4: Benchmark::import: EntryWrite#56 is a memory version no Return or Unwind reaches backwards
