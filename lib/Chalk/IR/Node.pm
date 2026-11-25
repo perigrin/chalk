@@ -94,6 +94,17 @@ class Chalk::IR::Node {
     # decoration, not a structural property of the node's content.
     field $schedule_data :reader = undef;
 
+    # T1's integer interval for this value, [lo, hi], as Chalk::IR::Analysis's
+    # integer_intervals proved it; undef where nothing is proven. Cached on the
+    # node, like Simple's _idepth, so it lives and dies with the node: no table
+    # beside the graph, and nothing chalk cannot compile when it compiles
+    # itself (CLAUDE.md constraint 5). Excluded from content_hash: a fact about
+    # the value, not part of its content.
+    field $int_interval :reader = undef;
+
+    # On a Return: its program's nodes have had integer_intervals run over them.
+    field $intervals_analysed :reader = false;
+
     # NO SEPARATE `representation` FIELD. It was folded into `stamp` above:
     # `representation`/`set_representation` are a deprecated ALIAS for
     # `stamp`/`set_stamp` (see the bottom of this class for why, and for the
@@ -269,6 +280,17 @@ class Chalk::IR::Node {
     # surface syntax each control-affecting node should emit.
     method set_schedule_data($meta) {
         $schedule_data = $meta;
+        return;
+    }
+
+    # Set by Chalk::IR::Analysis::integer_intervals only.
+    method set_int_interval($iv) {
+        $int_interval = $iv;
+        return;
+    }
+
+    method mark_intervals_analysed() {
+        $intervals_analysed = true;
         return;
     }
 

@@ -17,7 +17,6 @@ my %KNOWN = (
     # the loader reads B::SoN's JSON wire until it moves to Sereal (Chalk::Loader::Sereal)
     'lib/Chalk/IR/Serialize/JSON.pm'  => [qw(JSON::PP Exporter)],
     'lib/Chalk/Impl.pm'               => [qw(JSON::PP File::Spec File::Path File::Basename Digest::SHA)],
-    'lib/Chalk/IR/Analysis.pm'        => [qw(Hash::Util::FieldHash)],
     'lib/Chalk/IR/Graph/TypedInvariant.pm'    => [qw(Carp)],
     'lib/Chalk/Target/LLVM.pm'        => [qw(parent)],
     'lib/Chalk/Bootstrap/BNF/Target/XS.pm' => [qw(XSLoader)],

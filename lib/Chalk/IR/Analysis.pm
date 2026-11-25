@@ -358,16 +358,17 @@ sub narrow_return_type ($meta, $type) {
 # which is what keeps a counter's `$i + 1` an IV. Sound throughout: nothing is
 # guessed, a node it cannot model is anything.
 # ============================================================================
-use Hash::Util::FieldHash qw(fieldhash);
-fieldhash my %INTERVAL;    # node => [lo, hi]
-fieldhash my %ANALYSED;    # Return node => 1: its program's nodes analysed
-
+# WHERE THE ANSWERS ARE KEPT. On the nodes: a value's interval in its
+# int_interval, and a Return's intervals_analysed once its program has been
+# run. Each lives and dies with its node, so no table beside the graph is
+# needed, and nothing outside chalk is loaded (CLAUDE.md constraint 5).
 use constant { IV_MAX => 9223372036854775807, IV_MIN => -9223372036854775807 - 1 };
 
 # int_interval($node) -> ($lo, $hi) perl's value of $node lies in (each
 # within [IV_MIN, IV_MAX], undef for unbounded), or () where nothing is proven.
 sub int_interval ($node) {
-    my $iv = $INTERVAL{$node} // return ();
+    return () unless blessed($node) && $node->can('int_interval');
+    my $iv = $node->int_interval // return ();
     return ( $iv->[0], $iv->[1] );
 }
 
@@ -423,13 +424,13 @@ sub is_fractional_constant ($node) {
 # the Returns end (Chalk::IR::Graph::program_nodes: callees included). A
 # Return already analysed is not again.
 sub integer_intervals (@returns) {
-    my @todo = grep { blessed($_) && !$ANALYSED{$_} } @returns;
+    my @todo = grep { blessed($_) && $_->can('intervals_analysed') && !$_->intervals_analysed } @returns;
     return unless @todo;
     my ( %seen, @nodes );
     for my $r (@todo) {
         push @nodes, grep { !$seen{ refaddr($_) }++ } Chalk::IR::Graph::program_nodes($r);
     }
-    $ANALYSED{$_} = 1 for grep { $_->operation eq 'Return' } @nodes;
+    $_->mark_intervals_analysed for grep { $_->operation eq 'Return' } @nodes;
     # (inputs before their users, roughly: program_nodes walks back from the Return)
     my @vals = reverse grep { _iv_modelled($_) } @nodes;
     my %modelled = map { ( refaddr($_) => 1 ) } @vals;
@@ -463,7 +464,7 @@ sub integer_intervals (@returns) {
     }
     for my $n (@vals) {
         my $iv = $st->{iv}{ refaddr($n) } // next;
-        $INTERVAL{$n} = $iv;
+        $n->set_int_interval($iv);
     }
     return;
 }
