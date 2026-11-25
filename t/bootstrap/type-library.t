@@ -378,8 +378,9 @@ is(Chalk::Grammar::Perl::TypeLibrary::get_binary_op('???'), undef,
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op('-');
     ok(defined $sig, 'get_unary_op(-) returns defined value');
-    is($sig->{operand}, 'Num', 'unary - operand is Num');
-    is($sig->{result}, 'Num', 'unary - result is Num');
+    # -"abc" is "-abc": not numeric on a string (perl 5.42.0)
+    is($sig->{operand}, 'Scalar', 'unary - operand is Scalar');
+    is($sig->{result}, 'Scalar', 'unary - result is Scalar');
 }
 
 {
