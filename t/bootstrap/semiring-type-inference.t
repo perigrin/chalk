@@ -1354,12 +1354,13 @@ TODO: {
         'UnaryExpression consumes op_text');
 }
 
-# UnaryExpression with op_text '-' (standalone, no ambiguous) → type => 'Num'
+# UnaryExpression with op_text '-' (standalone, no operand type) → type => 'Scalar'
+# (-"abc" is "-abc"; only a number's negation is a number)
 {
     my $val = make_ctx(op_text => '-');
     my $result = $ti->multiply($val, $make_complete->($val, 'UnaryExpression', 0, 10, 0));
-    is(get_tags($result)->{type}, 'Num',
-        'UnaryExpression "-" tags type => Num');
+    is(get_tags($result)->{type}, 'Scalar',
+        'UnaryExpression "-" tags type => Scalar');
 }
 
 # UnaryExpression with op_text '\\' → type => 'Ref'

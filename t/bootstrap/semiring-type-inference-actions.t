@@ -105,12 +105,18 @@ subtest 'BinaryExpression type from operator' => sub {
 
 # Test 5: UnaryExpression (rich rule - op_text determines type)
 subtest 'UnaryExpression type from operator' => sub {
-    # Unary minus → Num
+    # Unary minus: a number's negation is the same kind of number, anything
+    # else's a Scalar (-"abc" is "-abc"), as B::SoN's Negate says.
     my $op_ctx = mock_ctx({ op_text => '-' });
     my $ctx = mul_ctx($op_ctx);
 
     my $result = $actions->UnaryExpression($ctx);
-    is_deeply($result, { valid => true, type => 'Num' }, 'UnaryExpression - returns Num');
+    is_deeply($result, { valid => true, type => 'Scalar' }, 'UnaryExpression - of nothing known is a Scalar');
+    for my $t (qw(Int Num Str)) {
+        $result = $actions->UnaryExpression(mul_ctx(mock_ctx({ op_text => '-' }), mock_ctx({ type => $t })));
+        is_deeply($result, { valid => true, type => $t eq 'Str' ? 'Scalar' : $t },
+            "UnaryExpression - of $t");
+    }
 
     # Logical not → Boolean
     $op_ctx = mock_ctx({ op_text => '!' });

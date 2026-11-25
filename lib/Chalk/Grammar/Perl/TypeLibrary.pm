@@ -283,7 +283,8 @@ class Chalk::Grammar::Perl::TypeLibrary {
         # `time - 1` is time() - 1, never time(-1).
         time      => { min_arity => 0, max_arity => 0, arg_types => [], return_type => 'Int' },
         times     => { min_arity => 0, max_arity => 0, arg_types => [], return_type => 'List' },
-        wantarray => { min_arity => 0, max_arity => 0, arg_types => [] },
+        # 1, "" or undef by the caller's context: a Scalar (B::SoN's Wantarray)
+        wantarray => { min_arity => 0, max_arity => 0, arg_types => [], return_type => 'Scalar' },
         wait      => { min_arity => 0, max_arity => 0, arg_types => [], return_type => 'Int' },
         fork      => { min_arity => 0, max_arity => 0, arg_types => [] },
         getppid   => { min_arity => 0, max_arity => 0, arg_types => [], return_type => 'Int' },
@@ -588,23 +589,29 @@ class Chalk::Grammar::Perl::TypeLibrary {
         my $int_int_int  = { left => 'Int',    right => 'Int',   result => 'Int' };
 
         # Arithmetic
-        for my $op (qw(+ - * / % **)) {
+        for my $op (qw(+ - * / **)) {
             $BINARY_OP_SIGNATURES{$op} = $num_num_num;
         }
+        # `%` is an integer whatever arrives: 7.5 % 2 is 1, 1e30 % 7 is 5
+        # (perl 5.42.0), as B::SoN's Modulo row says.
+        $BINARY_OP_SIGNATURES{'%'} = { left => 'Num', right => 'Num', result => 'Int' };
 
         # String
         $BINARY_OP_SIGNATURES{'.'} = $str_str_str;
         $BINARY_OP_SIGNATURES{'x'} = { left => 'Str', right => 'Int', result => 'Str' };
 
-        # Numeric comparison
-        for my $op (qw(== != < > <= >= <=>)) {
+        # Numeric comparison. `<=>` and `cmp` yield -1, 0 or 1: an Int, not a
+        # Boolean (1 <=> 2 is -1), as B::SoN's NumCmp and StrCmp rows say.
+        for my $op (qw(== != < > <= >=)) {
             $BINARY_OP_SIGNATURES{$op} = $num_num_bool;
         }
+        $BINARY_OP_SIGNATURES{'<=>'} = { left => 'Num', right => 'Num', result => 'Int' };
 
         # String comparison
-        for my $op (qw(eq ne lt gt le ge cmp)) {
+        for my $op (qw(eq ne lt gt le ge)) {
             $BINARY_OP_SIGNATURES{$op} = $str_str_bool;
         }
+        $BINARY_OP_SIGNATURES{'cmp'} = { left => 'Str', right => 'Str', result => 'Int' };
 
         # Logical (short-circuit, return operand)
         for my $op ('&&', '||', '//', 'and', 'or') {
@@ -639,7 +646,9 @@ class Chalk::Grammar::Perl::TypeLibrary {
 
     # Unary operator signatures: operand type and result type.
     my %UNARY_OP_SIGNATURES = (
-        '-'   => { operand => 'Num', result => 'Num' },
+        # NOT NUMERIC ON A STRING: -"abc" is "-abc" (pp_negate), so a negation
+        # is a Scalar, as B::SoN's Negate row says.
+        '-'   => { operand => 'Scalar', result => 'Scalar' },
         '+'   => { operand => 'Num', result => 'Num' },
         '!'   => { operand => 'List', result => 'Boolean' },
         'not' => { operand => 'List', result => 'Boolean' },
@@ -651,6 +660,11 @@ class Chalk::Grammar::Perl::TypeLibrary {
     sub get_unary_op($op) {
         return $UNARY_OP_SIGNATURES{$op};
     }
+
+    # Every operator each table describes. For the agreement test with
+    # B::SoN's table (t/bootstrap/operator-table-agrees-with-b-son.t).
+    sub binary_ops() { return sort keys %BINARY_OP_SIGNATURES }
+    sub unary_ops()  { return sort keys %UNARY_OP_SIGNATURES }
 
     # ------------------------------------------------------------------
     # Operand types for the IR

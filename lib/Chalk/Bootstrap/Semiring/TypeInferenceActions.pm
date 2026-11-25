@@ -227,6 +227,12 @@ class Chalk::Bootstrap::Semiring::TypeInferenceActions {
             my $t = _get_rightmost_type($ctx);
             return { valid => true, (defined $t ? (type => $t) : ()) };
         }
+        # A number's negation is the same kind of number; anything else's is
+        # the table's Scalar (-"abc" is "-abc"). B::SoN's Negate, the same rule.
+        if (defined $op && $op eq '-') {
+            my $t = _get_rightmost_type($ctx);
+            return { valid => true, type => $t } if defined $t && ($t eq 'Int' || $t eq 'Num');
+        }
         if (defined $op) {
             my $sig = Chalk::Grammar::Perl::TypeLibrary::get_unary_op($op);
             $result_type = $sig->{result} if $sig;
