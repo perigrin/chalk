@@ -333,7 +333,9 @@ sub type_of {
     return '%Slot' if $op eq 'HashLiteral' && ( $v->stamp // '' ) =~ /\A(?:HashRef|Hash)\z/; # static type
     return '%Slot' if $v->is_my_hash;
     # length of a scalar: undef for undef, so a %Slot; of a string, an i64.
-    return ( ( $v->inputs->[0]->stamp // '' ) !~ /\A(?:Array|ArrayRef)\z/ && $b->type_of($v->inputs->[0]) eq '%Slot' ) ? '%Slot' : 'i64' if $op eq 'Length'; # static type
+    return ( ( $v->inputs->[0]->stamp // '' ) !~ /\A(?:Array|ArrayRef)\z/ && ( $b->type_of($v->inputs->[0]) eq '%Slot'
+        # (undef, or what may be: perl's length of undef is undef -- audit 3, N12)
+        || ( $v->inputs->[0]->stamp // '' ) =~ /\A(?:Undef|Maybe\[|Scalar\z|Unknown\z)/ ) ) ? '%Slot' : 'i64' if $op eq 'Length'; # static type
     my $hk = $v->can('kind') ? $v->kind // '' : '';
     return 'i1' if $op eq 'Exists' && $hk =~ /\A(?:hash|array)\z/;
     return '%Slot' if $op eq 'Delete' && $hk eq 'hash';
