@@ -2360,7 +2360,6 @@ yya06	SAME
 yya07	SAME	
 yya08	SAME	
 yya09	REFUSED	GAP: T2: out of its slices (sub main::f reads @_ other than by shifts, $_[N] or a signature)
-yya10	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Call#7 hands argument 0 (my:$x) as a value, and main::f reads it after Assign#6 may store it (an a
 yya11	SAME	
 yya12	REFUSED	GAP: T2: out of its slices (a read after `my (...) = @_` of no target)
 yya13	SAME	
@@ -2397,7 +2396,6 @@ yya45	REFUSED	GAP: T2: out of its slices (a list assignment to a slice of @_)
 yya46	SAME	
 yya47	SAME	
 yya48	SAME	
-yya49	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Call#7 hands argument 0 (my:$x) as a value, and main::f reads it after Assign#21 may store it (an
 yya50	SAME	
 yya51	SAME	
 yya52	SAME	
@@ -2469,7 +2467,6 @@ yyb37	SAME
 yyb38	SAME	
 yyb39	SAME	
 yyb40	SAME	
-yyb41	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Subscript#25 is the per-pass item of elem:my:@a, carried as a value, and Subscript#28 uses it afte
 yyb42	SAME	
 yyb43	SAME	
 yyb44	REFUSED	B::SoN: GAP: a foreach, map or grep's $_ (or a package iterator) read after a call that may store its list is not yet lowered -- the read is the element as the pass beg
@@ -2553,7 +2550,6 @@ yyc157	REFUSED	B::SoN: GAP: an aggregate flattened into a list is read by alias 
 yyc158	REFUSED	B::SoN: GAP: an aggregate flattened into a list is read by alias and a later item may store into its elements -- not yet lowered
 yyc159	REFUSED	B::SoN: GAP: an aggregate flattened into a list is read by alias and a later item may store into its elements -- not yet lowered
 yyc16	REFUSED	B::SoN: GAP: a ternary whose arm stores an element is an lvalue (a call argument, a reference or a foreach list); the alias is not yet lowered
-yyc160	SAME	
 yyc161	REFUSED	GAP: T2: out of its slices (a sprintf of a list)
 yyc162	REFUSED	B::SoN: GAP: an aggregate flattened into a list is read by alias and a later item may store into its elements -- not yet lowered
 yyc163	SAME	
@@ -2786,11 +2782,9 @@ yye45	SAME
 yye46	SAME	
 yye47	SAME	
 yye48	SAME	
-yye49	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Call#10 hands argument 1 ($main::g) as a value, and main::f reads it after EntryWrite#6 may store
 yye50	SAME	
 yye51	SAME	
 yye52	SAME	
-yye53	REFUSED	GAP: T2: out of its slices (a reference to what is not an array)
 yye54	SAME	
 yye55	SAME	
 yye56	SAME	
@@ -3380,7 +3374,6 @@ yyn22	SAME
 yyn23	REFUSED	GAP: T2: out of its slices (%SIG where perl may raise warnings of its own (use warnings), which chalk does not raise)
 yyn24	REFUSED	GAP: T2: out of its slices (%SIG where perl may raise warnings of its own (use warnings), which chalk does not raise)
 yyn25	SAME	
-yyn26	REFUSED	load: from_json failed: GAP: wire invariant L4: main::__PROGRAM__: EntryWrite#28 is a memory version no Return or Unwind reaches backwards
 yyn27	SAME	
 yyn28	SAME	
 yyn29	SAME	
@@ -3430,24 +3423,17 @@ yyo11	REFUSED	load: from_json failed: GAP: a followed module's file-level code b
 yyo12	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: padsv) runs before the main line and is not on the wire -- not yet low
 yyo13	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: padsv) runs before the main line and is not on the wire -- not yet low
 yyo14	REFUSED	GAP: T2: out of its slices (main::floor is XS: there is no Perl source to compile)
-yyo15	REFUSED	GAP: T2: out of its slices (main::sum is XS: there is no Perl source to compile)
 yyo16	REFUSED	GAP: T2: out of its slices (main::looks_like_number is XS: there is no Perl source to compile)
-yyo17	REFUSED	load: from_json failed: GAP: Data::Dumper::Dumpperl, which the program calls, is refused in its module: GAP: a `local` inside a block or loop nested in a loop body is
 yyo18	REFUSED	load: from_json failed: GAP: a BEGIN block with effects of its own is not lowered (a BEGIN or END block runs outside the main program)
 yyo19	SAME	
 yyo20	SAME	
 yyo21	REFUSED	load: from_json failed: GAP: a followed module's file-level code (Term::ANSIColor: warn) runs before the main line and is not on the wire -- not yet lowered
-yyo22	SAME	
-yyo23	REFUSED	load: from_json failed: GAP: a followed module's file-level code (Config: die) runs before the main line and is not on the wire -- not yet lowered
 yyo25	REFUSED	GAP: T2: out of its slices (main::time is XS: there is no Perl source to compile)
 yyo26	REFUSED	no program graph
-yyo27	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: padsv) runs before the main line and is not on the wire -- not yet low
 yyo28	REFUSED	load: from_json failed: GAP: Getopt::Long::GetOptions, which the program calls, is refused in its module: GAP: `goto` transfers control and is not compiled; the jump,
 yyo29	REFUSED	GAP: T2: out of its slices (main::getcwd is XS: there is no Perl source to compile)
-yyo30	REFUSED	load: from_json failed: GAP: wire invariant L4: Benchmark::import: EntryWrite#56 is a memory version no Return or Unwind reaches backwards
 yyo31	SAME	
 yyo32	REFUSED	load: from_json failed: GAP: Class::Struct::struct, which the program calls, is refused in its module: GAP: a tie of an aggregate through a reference is not yet lower
-yyo33	REFUSED	load: from_json failed: GAP: Text::Balanced::extract_bracketed, which the program calls, is refused in its module: GAP: a consumed ternary arm stores an element and y
 yyo34	REFUSED	load: from_json failed: GAP: class 'Unicode::Normalize' declares sub 'check' with graph key 'Unicode::Normalize::check', which is not in the loaded graph set.
 yyo35	REFUSED	no program graph
 yyo36	REFUSED	GAP: T2: out of its slices (main::encode_base64 is XS: there is no Perl source to compile)
@@ -3455,7 +3441,6 @@ yyo37	REFUSED	load: from_json failed: GAP: Sys::Hostname::hostname, which the pr
 yyo38	REFUSED	load: from_json failed: GAP: a followed module's END block (File::Temp) runs before the main line and is not on the wire -- not yet lowered
 yyo39	REFUSED	load: from_json failed: GAP: Memoize::memoize, which the program calls, is refused in its module: GAP: a tie of an aggregate through a reference is not yet lowered --
 yyo40	SAME	
-yyp01	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Subscript#31 is the per-pass item of elem:my:@a, carried as a value, and Print#33 uses it after Ca
 yyp02	SAME	
 yyp03	SAME	
 yyp08	REFUSED	B::SoN: GAP: a foreach, map or grep's $_ (or a package iterator) read after a call that may store its list is not yet lowered -- the read is the element as the pass beg
@@ -3503,7 +3488,6 @@ yyp153	SAME
 yyp154	SAME	
 yyp156	SAME	
 yyp157	SAME	
-yyp158	REFUSED	GAP: T2: out of its slices (a package scalar read of no one version)
 yyp159	SAME	
 yyp160	REFUSED	GAP: T2: out of its slices (a slice taken as a scalar (Coerce))
 yyp161	SAME	
@@ -3526,7 +3510,6 @@ yyp176	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 d
 yyp177	SAME	
 yyp178	SAME	
 yyp179	SAME	
-yyp18	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Subscript#28 is the per-pass item of elem:agg:@a, carried as a value, and Phi#5 uses it after Assi
 yyp180	SAME	
 yyp181	REFUSED	B::SoN: GAP: an aggregate flattened into a list is read by alias and a later item may store into its elements -- not yet lowered
 yyp182	REFUSED	B::SoN: GAP: an element operand is read by alias and a later operand stores into its container -- not yet lowered
@@ -3537,7 +3520,6 @@ yyp186	SAME
 yyp187	SAME	
 yyp188	LOUD	PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/ and include the crash backtrace. Stack dump: 0. Program arguments: /usr/bin/lli /tmp/
 yyp189	SAME	
-yyp19	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Subscript#29 is the per-pass item of elem:agg:@a, carried as a value, and Phi#19 uses it after Ass
 yyp190	SAME	
 yyp191	SAME	
 yyp192	SAME	
@@ -3551,8 +3533,6 @@ yyp201	SAME
 yyp202	SAME	
 yyp203	REFUSED	B::SoN: GAP: a foreach over a package variable whose body calls a sub (the callee sees the variable, not the element) not yet lowered
 yyp205	SAME	
-yyp21	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Subscript#26 is the per-pass item of elem:agg:@main::a, carried as a value, and Phi#11 uses it aft
-yyp22	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Subscript#34 is the per-pass item of elem:my:@a, carried as a value, and Phi#10 uses it after Call
 yyp23	REFUSED	B::SoN: GAP: a foreach, map or grep's $_ (or a package iterator) read after a call that may store its list is not yet lowered -- the read is the element as the pass beg
 yyp24	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
 yyp26	REFUSED	GAP: T2: out of its slices (a list assignment to an array or hash)
@@ -3581,10 +3561,6 @@ yyp51	SAME
 yyp52	SAME	
 yyp53	SAME	
 yyp54	SAME	
-yyp56	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Call#7 hands argument 0 (my:$x) as a value, and main::f reads it after Assign#21 may store it (an
-yyp57	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Call#7 hands argument 0 (my:$x) as a value, and main::f reads it after Assign#18 may store it (an
-yyp58	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Call#7 hands argument 0 (my:$x) as a value, and main::f reads it after Call#16 may store it (an al
-yyp59	REFUSED	load: from_json failed: GAP: wire invariant L11: main::__PROGRAM__: Call#7 hands argument 0 (my:$x) as a value, and main::f reads it after Call#19 may store it (an al
 yyp60	SAME	
 yyp63	SAME	
 yyp64	REFUSED	GAP: T2: out of its slices (Call builtin splice)
@@ -4480,3 +4456,7 @@ zun80	SAME
 # WRONG N11 (6, substr or $#a as a sub argument or foreach item): yi23 yi24 yq33 yq34 yq35 yq37
 # WRONG N12 (14, values (length(undef), reverse by context, (1,2) x 2 in scalar context, split counts, captures, a bare die after $@, `use English`)): yg60 yh26 yh48 yl06 yl24 yl26 yn20 yo24 yq22 yq23 yq24 yq25 yq27 yq31
 # WRONG, no class (1: perl reads a freed scalar; not counted by the audit): ya57
+# THE AUDIT'S y/unverified PROBES WHOSE WIRES STILL BREAK A VERIFIER RULE are left out too: t/bootstrap/ir/
+# wire-verify.t holds every probe here to SoN::Verify, and a %HELD entry would hold them by name. Each is
+# REFUSED or SAME today (the loader refuses the alias ones by L11, the control ones by L4):
+# VERIFY ya10 ya49 yb41 yc160 ye49 ye53 yn26 yo15 yo17 yo22 yo23 yo27 yo30 yo33 yp01 yp158 yp18 yp19 yp21 yp22 yp56 yp57 yp58 yp59
