@@ -878,6 +878,15 @@ sub alias_list {
         my $arr = do { local $b->{ $b->may_write_args ? 'writing' : 'elem_read' } = 1; $b->array_of($src) };
         return $b->emit(op => 'ASliceAlias', type => '%Array*', inputs => [ $arr, $list ]);
     }
+    # `values %h`: AN ALIAS OF EACH VALUE, in its keys' order (perl's values
+    # are the hash's own scalars): the hash's slice by its own keys.
+    if ( $op eq 'Call' && ( $n->lists_a_hash // '' ) eq 'values' ) {
+        my $in0 = $n->inputs->[0];
+        my $h = blessed($in0) && $in0->operation eq 'PostfixDeref' && ( $in0->sigil // '' ) eq '%' && !$in0->copy
+            ? $b->emit(op => 'HDerefR', type => '%Slot', inputs => [ $b->whole_hash($in0, $b->as($b->value( $in0->inputs->[0] ), '%Slot')) ])
+            : $b->hash_of($in0);
+        return $b->emit(op => 'HSliceAlias', type => '%Array*', inputs => [ $h, $b->emit(op => 'HKeys', type => '%Array*', inputs => [$h]) ]);
+    }
     # (A LIST A SUB RETURNS is of copies, temporaries none else holds -- not an
     # :lvalue sub's, whose list is its variables: its array, aliased, is them)
     if ( $op eq 'Call' && $n->is_sub_call && $b->may_write_args ) {
