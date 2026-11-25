@@ -740,10 +740,7 @@ sub array_value {
             if ( my $why = $v->hash_element_ref_unsound ) { out($why) }
             my ($c, $k) = $v->hash_element_subscript->inputs->@[0, 1];
             out('a reference to an element through an element not made a hash first')
-                if blessed($c) && $c->operation eq 'Subscript' && !$b->{args}{ refaddr($c) }
-        # (an argument read from @_ by place, `$_[0]{n} = 1` in a sub handed
-        # places: the argument, as the by-value form's is)
-        && !( $b->{argsarr} && blessed( $c->inputs->[0] ) && $c->inputs->[0]->operation eq 'ArgsSource' );
+                if blessed($c) && $c->operation eq 'Subscript' && !$b->{args}{ refaddr($c) };
             my $key = $b->as($b->value($k), '%Str');
             my $h = $b->hash_of($c);
             # (taking it may make the key: a read of the hash still to be made,
