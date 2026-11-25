@@ -740,7 +740,10 @@ sub array_value {
             if ( my $why = $v->hash_element_ref_unsound ) { out($why) }
             my ($c, $k) = $v->hash_element_subscript->inputs->@[0, 1];
             out('a reference to an element through an element not made a hash first')
-                if blessed($c) && $c->operation eq 'Subscript' && !$b->{args}{ refaddr($c) };
+                if blessed($c) && $c->operation eq 'Subscript' && !$b->{args}{ refaddr($c) }
+        # (an argument read from @_ by place, `$_[0]{n} = 1` in a sub handed
+        # places: the argument, as the by-value form's is)
+        && !( $b->{argsarr} && blessed( $c->inputs->[0] ) && $c->inputs->[0]->operation eq 'ArgsSource' );
             my $key = $b->as($b->value($k), '%Str');
             my $h = $b->hash_of($c);
             # (taking it may make the key: a read of the hash still to be made,
@@ -1362,7 +1365,10 @@ sub element_place {
     # (STORED THROUGH AN ELEMENT B::SoN did not make a hash or array first -- a
     # reference from elsewhere: refused, not stopped at run time where it is undef)
     out('a store through an element not made a hash or array first')
-        if blessed($c) && $c->operation eq 'Subscript' && !$b->{args}{ refaddr($c) };
+        if blessed($c) && $c->operation eq 'Subscript' && !$b->{args}{ refaddr($c) }
+        # (an argument read from @_ by place, `$_[0]{n} = 1` in a sub handed
+        # places: the argument, as the by-value form's is)
+        && !( $b->{argsarr} && blessed( $c->inputs->[0] ) && $c->inputs->[0]->operation eq 'ArgsSource' );
     # (AN ELEMENT OF A SLICE -- grep's or map's $_ over `@a[0, 1]` -- is the
     # array's own element in perl; the slice here is a copy: refused)
     out("a store into a slice's element (perl aliases the array's element)")
