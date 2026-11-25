@@ -7,6 +7,9 @@ no warnings 'experimental::class';
 use Chalk::IR::Value;
 class Chalk::IR::Node::EntryWrite :isa(Chalk::IR::Value) {
     field $binds :param :reader = 0;
+    # A `local` of the name (B::SoN, design B): the name bound to a new scalar
+    # holding the value; the scalar it was bound to keeps its own.
+    field $local :param :reader = 0;
     method operation() { 'EntryWrite' }
 
     # A MEMORY VERSION: a store (a read after it reads at it).

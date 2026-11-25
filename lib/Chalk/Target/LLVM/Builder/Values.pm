@@ -719,6 +719,7 @@ sub _value {
     if ($v->is_package_scalar) {
         out('a package scalar read of no one version') if $b->{unversioned}{ refaddr($v) };
         return $b->emit(op => 'AliasVal', type => '%Slot', inputs => [ $b->topic_raw ]) if $b->is_topic($v) && $b->topic_alias;
+        return $b->emit(op => 'Load', type => '%Slot', inputs => [ $b->scalar_addr($v) ]) if $b->bound_scalar($v);
         return $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_of($v) });
     }
     if ($op eq 'Call' && $v->changes_case) {
@@ -1562,6 +1563,27 @@ sub as {
     return $n if $n->type eq $ty;
     out("a conversion " . $n->type . " -> $ty") unless exists $Chalk::Target::LLVM::Printer::CONVERT{ $n->type . '>' . $ty };
     return $b->emit(op => 'Convert', type => $ty, inputs => [$n], attr => { from => $n->type });
+}
+
+# bound_scalar($EntryDef) -> a package scalar some `local` of the program
+# binds to a new scalar (B::SoN's EntryWrite `local`, design B section 4): its
+# name is a binding (bind::NAME, a reference to the scalar's cell, undef for
+# its global), read through on each access. Any other is its global.
+sub bound_scalar {
+    my ($b, $n) = @_;
+    $b->{bound_scalars} //= { map { ( $b->global_of( $_->inputs->[0] ) => 1 ) }
+        grep { $_->operation eq 'EntryWrite' && $_->can('local') && $_->local && blessed( $_->inputs->[0] ) && $_->inputs->[0]->is_package_scalar }
+        _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} ),
+        map { $_->graph ? $_->graph->component : () } map { $_->methods } $b->{mop} ? $b->{mop}->classes : () };
+    return blessed($n) && $n->is_package_scalar && !$b->is_topic($n) && $b->{bound_scalars}{ $b->global_of($n) } ? 1 : 0;
+}
+# scalar_addr($EntryDef) -> the %Slot* of the scalar its name is bound to now.
+sub scalar_addr {
+    my ($b, $n) = @_;
+    my $static = $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_of($n) });
+    return $static unless $b->bound_scalar($n);
+    my $bind = $b->emit(op => 'GLoad', type => '%Slot', attr => { global => $b->global_named( 'bind::' . $n->qualified_name ) });
+    return $b->emit(op => 'BindAddr', type => '%Slot*', inputs => [ $bind, $static ]);
 }
 
 1;

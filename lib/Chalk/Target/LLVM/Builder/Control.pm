@@ -346,6 +346,36 @@ sub walk {
             push $b->{passed}->@*, $s;
             $ctl = $s;
         }
+        # A `local` OF A PACKAGE SCALAR (B::SoN, design B section 4): the name
+        # bound to a new scalar holding the value. The scalar it was bound to
+        # is what a save (`\$x` at this store's memory) holds, made first;
+        # THE RESTORE (a bind of the name to that save) puts it back.
+        elsif ($op eq 'EntryWrite' && $s->can('local') && $s->local && $b->bound_scalar( $s->inputs->[0] )) {
+            my $t = $s->inputs->[0];
+            my $val = $b->as($b->value($s->inputs->[1]), '%Slot');
+            $b->hash_reads_settled('a package store');
+            $b->reads_before($_) for $b->{passed}->@*;
+            my $mem = $s->mem_in;
+            for my $r ( grep { blessed($_) && $_->operation eq 'Ref' } _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret}) ) {
+                my $in = $r->inputs->[0];
+                next unless blessed($in) && $in->is_package_scalar && $b->global_of($in) eq $b->global_of($t)
+                    && blessed( $in->mem_in ) && blessed($mem) && refaddr( $in->mem_in ) == refaddr($mem);
+                $b->{agg_save}{ refaddr($r) } //= $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->scalar_addr($t) ]);
+            }
+            $b->emit(op => 'GStore', type => 'void', inputs => [ $b->emit(op => 'Fresh', type => '%Slot', inputs => [$val]) ],
+                attr => { global => $b->global_named( 'bind::' . $t->qualified_name ) });
+            push $b->{passed}->@*, $s;
+            $ctl = $s;
+        }
+        elsif ($op eq 'EntryWrite' && $s->binds && $b->bound_scalar( $s->inputs->[0] ) && blessed( $s->inputs->[1] ) && $s->inputs->[1]->operation eq 'Ref') {
+            my $t = $s->inputs->[0];
+            my $r = $s->inputs->[1];
+            my $slot = $b->{agg_save}{ refaddr($r) } // out('a local scalar restored with no save made');
+            $b->reads_before($_) for $b->{passed}->@*;
+            $b->emit(op => 'GStore', type => 'void', inputs => [$slot], attr => { global => $b->global_named( 'bind::' . $t->qualified_name ) });
+            push $b->{passed}->@*, $s;
+            $ctl = $s;
+        }
         # A PACKAGE SCALAR WRITTEN: what it held is read first, then stored.
         elsif ($op eq 'EntryWrite' && ( $s->inputs->[0] isa Chalk::IR::Node && $s->inputs->[0]->is_package_scalar )) {
             out('a local') if $s->can('local') && $s->local;
@@ -361,6 +391,7 @@ sub walk {
                 $at = $b->deref_at($line) if $line;
                 $b->emit(op => 'AliasStore', type => 'void', inputs => [ $b->topic_raw, $val ], attr => { msg => $at->{msg}, id => $at->{id} });
             }
+            elsif ( $b->bound_scalar( $s->inputs->[0] ) ) { $b->emit(op => 'Store', type => 'void', inputs => [ $val, $b->scalar_addr( $s->inputs->[0] ) ]) }
             else { $b->emit(op => 'GStore', type => 'void', inputs => [$val], attr => { global => $b->global_of($s->inputs->[0]) }) }
             push $b->{passed}->@*, $s;
             $ctl = $s;
