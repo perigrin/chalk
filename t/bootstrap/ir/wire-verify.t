@@ -7,6 +7,7 @@ use JSON::PP ();
 use Digest::SHA qw(sha256_hex);
 use File::Path qw(make_path);
 use File::Spec;
+use POSIX ();
 
 # WHY (wire v2 plan, stage 5; section 8.2). The memory rules the producer is
 # held to are checked on the wires of chalk's own code and of the probes in
@@ -124,7 +125,9 @@ ok( scalar(@lib) > 100 && scalar(@probes) > 100, sprintf( 'the sets: %d lib modu
     for my $f ( grep { !cached($_) } @lib, @probes ) {
         if ( keys %kids >= $jobs ) { delete $kids{ waitpid -1, 0 } }
         my $pid = fork // die "fork: $!";
-        if ( !$pid ) { compile($f); exec '/bin/true' }
+        # _exit, not exec of a program that may not be there (macOS has no
+        # /bin/true): a child that got past this line would run the loop too.
+        if ( !$pid ) { compile($f); POSIX::_exit(0) }
         $kids{$pid} = 1;
     }
     waitpid $_, 0 for keys %kids;
