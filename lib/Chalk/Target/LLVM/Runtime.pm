@@ -3790,6 +3790,22 @@ define internal %Slot @t2_elv_a(%Array* %a, i64 %i) {
   %s = call %Slot @t2_elv(i8 0, %Slot %c, %Slot %x)
   ret %Slot %s
 }
+; t2_elv_a_cell(a, i) -> an alias of an array element that is THE ELEMENT\'S
+; SCALAR where it exists: the array made one of cells (t2_aelem_ref), so a
+; shift or unshift after it moves the cell and the alias with it, as perl\'s
+; @_ holds the scalar, not the index (audit 3, N2). One that does not exist is
+; perl\'s deferred element: the index alias (t2_elv_a), made only if stored.
+define internal %Slot @t2_elv_a_cell(%Array* %a, i64 %i) {
+entry:
+  %ex = call i1 @t2_aexists(%Array* %a, i64 %i)
+  br i1 %ex, label %cell, label %elv
+cell:
+  %c = call %Slot @t2_aelem_ref(%Array* %a, i64 %i, i8* null, i64 0)
+  ret %Slot %c
+elv:
+  %e = call %Slot @t2_elv_a(%Array* %a, i64 %i)
+  ret %Slot %e
+}
 define internal %Slot @t2_elv_h(%Slot %h, %Str %k) {
   %x = call %Slot @t2_box_str(%Str %k)
   %s = call %Slot @t2_elv(i8 1, %Slot %h, %Slot %x)
@@ -4030,7 +4046,7 @@ raw:
   call void @t2_apush_d(%Array* %d, %Slot %r)
   br label %next
 el:
-  %e = call %Slot @t2_elv_a(%Array* %s, i64 %i)
+  %e = call %Slot @t2_elv_a_cell(%Array* %s, i64 %i)
   call void @t2_apush_d(%Array* %d, %Slot %e)
   br label %next
 next:

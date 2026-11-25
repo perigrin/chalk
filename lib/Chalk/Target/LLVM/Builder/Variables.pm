@@ -463,6 +463,22 @@ sub list_assign {
     out('a local') if $s->can('local') && $s->local;
     my @in = $s->inputs->@*;
     my @t = splice @in, 0, $s->targets;
+    # @_ ASSIGNED WHOLE (`@_ = ()`, `@_ = (1, 2)`): its elements are the new
+    # values, no longer the caller's aliases (audit 3, N2: `@_ = ()` was not
+    # applied). The sub's @_ array cleared and refilled where it stands.
+    if (@t == 1 && blessed($t[0]) && $t[0]->operation eq 'ArgsSource') {
+        my $list = $b->emit(op => 'NewArray', type => '%Array*');
+        for my $e (grep { blessed($_) } @in) {
+            if (_is_list($e)) { $b->emit(op => 'AAppend', type => 'void', inputs => [ $list, $b->array_of($e) ]) }
+            else { $b->emit(op => 'APush', type => 'void', inputs => [ $list, $b->as($b->value($e), '%Slot') ]) }
+        }
+        $b->reads_before($_) for $b->{passed}->@*;
+        my $args = $b->{argsarr} // out('@_ assigned whole in a sub not taking it as a list');
+        $b->emit(op => 'AAssign', type => 'void', inputs => [ $args, $list ]);
+        $b->{list_assigned}{ refaddr($s) } = [ $b->emit(op => 'ALen', type => 'i64', inputs => [$list]), $args ];
+        push $b->{passed}->@*, $s;
+        return;
+    }
     # AN ARRAY OR HASH FIELD ASSIGNED WHOLE (`@l = (9)`, `%h = $r->%*`): the
     # list made first (it may read the field), then the field's own
     # aggregate cleared and refilled -- a reference to it sees the new
