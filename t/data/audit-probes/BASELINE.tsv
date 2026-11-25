@@ -3338,7 +3338,7 @@ yym33	REFUSED	GAP: T2: out of its slices (a list perl may alias (Phi) passed whe
 yym34	REFUSED	GAP: T2: out of its slices (a list perl may alias (Phi) passed where a sub writes @_)
 yym35	REFUSED	GAP: T2: out of its slices (a list perl may alias (Call) passed where a sub writes @_)
 yym36	SAME	
-yym37	REFUSED	B::SoN: GAP: an assignment as an item of a foreach, map or grep list whose body may write its alias is not yet lowered -- the store would be lost
+yym37	REFUSED	GAP: T2: out of its slices (a phi stamped List)
 yym38	REFUSED	B::SoN: GAP: a chomp/chop whose subject is a `SoN::IR::Node::Subscript` has no slot to store back into
 yym39	SAME	
 yym40	SAME	
@@ -3416,36 +3416,35 @@ yyn58	REFUSED	GAP: T2: out of its slices ($" written)
 yyn59	SAME	
 yyn60	SAME	
 yyn61	SAME	
-yyo01	REFUSED	load: from_json failed: GAP: a followed module's file-level code (File::Basename: store-into-main) runs before the main line and is not on the wire -- not yet lowered
-yyo02	REFUSED	load: from_json failed: GAP: a followed module's file-level code (File::Basename: store-into-main) runs before the main line and is not on the wire -- not yet lowered
-yyo03	REFUSED	load: from_json failed: GAP: the import of a followed module (Exporter) storing into another package runs before the main line and is not on the wire -- not yet lower
-yyo04	REFUSED	load: from_json failed: GAP: the import of a followed module (Exporter) storing into another package runs before the main line and is not on the wire -- not yet lower
-yyo05	REFUSED	load: from_json failed: GAP: the import of a followed module (Exporter) storing into another package runs before the main line and is not on the wire -- not yet lower
-yyo06	REFUSED	load: from_json failed: GAP: the import of a followed module (Exporter) storing into another package runs before the main line and is not on the wire -- not yet lower
+yyo01	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (File::Basename: entersub) runs before the main line and is not on the wire -
+yyo02	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (File::Basename: entersub) runs before the main line and is not on the wire -
+yyo03	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Text::Wrap: cond_expr) runs before the main line and is not on the wire -- n
+yyo04	REFUSED	load: from_json failed: GAP: Text::Wrap::wrap, which the program calls, is refused in its module: GAP: an until whose condition is not a negatable comparison is not y
+yyo05	REFUSED	load: from_json failed: GAP: Text::Tabs::unexpand, which the program calls, is refused in its module: GAP: `split` with a runtime-interpolated pattern is not yet lowe
+yyo06	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Text::ParseWords: require) runs before the main line and is not on the wire
 yyo07	REFUSED	load: from_json failed: GAP: Text::Abbrev::abbrev, which the program calls, is refused in its module: GAP: a loop control (`next`) inside a branch arm is not yet lowe
-yyo08	REFUSED	load: from_json failed: GAP: a followed module's file-level code (Cwd: store-into-main) runs before the main line and is not on the wire -- not yet lowered
-yyo09	REFUSED	load: from_json failed: GAP: a followed module's file-level code (Cwd: store-into-main) runs before the main line and is not on the wire -- not yet lowered
+yyo08	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (File::Spec::Unix: defined) runs before the main line and is not on the wire
+yyo09	REFUSED	GAP: T2: out of its slices (main::catfile is XS: there is no Perl source to compile)
 yyo10	REFUSED	load: from_json failed: GAP: Time::Local::_daygm, which the program calls, is refused in its module: GAP: `||=` into an element whose value is read across another wri
 yyo11	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Symbol: mapstart) runs before the main line and is not on the wire -- not ye
 yyo12	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: and) runs before the main line and is not on the wire -- not yet lower
 yyo13	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: and) runs before the main line and is not on the wire -- not yet lower
-yyo14	REFUSED	load: from_json failed: GAP: the import of a followed module (Exporter) storing into another package runs before the main line and is not on the wire -- not yet lower
+yyo14	REFUSED	GAP: T2: out of its slices (main::floor is XS: there is no Perl source to compile)
 yyo15	REFUSED	GAP: T2: out of its slices (main::sum is XS: there is no Perl source to compile)
 yyo16	REFUSED	GAP: T2: out of its slices (main::looks_like_number is XS: there is no Perl source to compile)
 yyo17	REFUSED	load: from_json failed: GAP: Data::Dumper::Dumpperl, which the program calls, is refused in its module: GAP: a `local` inside a block or loop nested in a loop body is
 yyo18	REFUSED	load: from_json failed: GAP: a BEGIN block with effects of its own is not lowered (a BEGIN or END block runs outside the main program)
 yyo19	SAME	
 yyo20	SAME	
-yyo21	REFUSED	load: from_json failed: GAP: the import of a followed module (Exporter) storing into another package runs before the main line and is not on the wire -- not yet lower
+yyo21	REFUSED	load: from_json failed: GAP: a followed module's file-level code (Term::ANSIColor: warn) runs before the main line and is not on the wire -- not yet lowered
 yyo22	SAME	
 yyo23	REFUSED	load: from_json failed: GAP: a followed module's file-level code (Config: die) runs before the main line and is not on the wire -- not yet lowered
-yyo24	REFUSED	load: from_json failed: GAP: the import of a followed module (English) storing into another package runs before the main line and is not on the wire -- not yet lowere
 yyo25	REFUSED	GAP: T2: out of its slices (main::time is XS: there is no Perl source to compile)
 yyo26	REFUSED	no program graph
 yyo27	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Carp: and) runs before the main line and is not on the wire -- not yet lower
-yyo28	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Exporter: orassign) runs before the main line and is not on the wire -- not
-yyo29	REFUSED	load: from_json failed: GAP: a followed module's file-level code (Cwd: store-into-main) runs before the main line and is not on the wire -- not yet lowered
-yyo30	REFUSED	load: from_json failed: GAP: a followed module's file-level code beyond plain `our` data (Benchmark: entersub) runs before the main line and is not on the wire -- not
+yyo28	REFUSED	load: from_json failed: GAP: Getopt::Long::GetOptions, which the program calls, is refused in its module: GAP: `goto` transfers control and is not compiled; the jump,
+yyo29	REFUSED	GAP: T2: out of its slices (main::getcwd is XS: there is no Perl source to compile)
+yyo30	REFUSED	load: from_json failed: GAP: wire invariant L4: Benchmark::import: EntryWrite#56 is a memory version no Return or Unwind reaches backwards
 yyo31	SAME	
 yyo32	REFUSED	load: from_json failed: GAP: Class::Struct::struct, which the program calls, is refused in its module: GAP: a tie of an aggregate through a reference is not yet lower
 yyo33	REFUSED	load: from_json failed: GAP: Text::Balanced::extract_bracketed, which the program calls, is refused in its module: GAP: a consumed ternary arm stores an element and y
@@ -4479,5 +4478,5 @@ zun80	SAME
 # WRONG N7 (5, a method call's argument stored by a later argument): ye20 yp147 yp151 yp152 yp155
 # WRONG N10 (5, my $i; for $i (...) seen by a closure, sub or reference): yf81 yp197 yp198 yp199 yp204
 # WRONG N11 (6, substr or $#a as a sub argument or foreach item): yi23 yi24 yq33 yq34 yq35 yq37
-# WRONG N12 (13, values (length(undef), reverse by context, (1,2) x 2 in scalar context, split counts, captures, a bare die after $@)): yg60 yh26 yh48 yl06 yl24 yl26 yn20 yq22 yq23 yq24 yq25 yq27 yq31
+# WRONG N12 (14, values (length(undef), reverse by context, (1,2) x 2 in scalar context, split counts, captures, a bare die after $@, `use English`)): yg60 yh26 yh48 yl06 yl24 yl26 yn20 yo24 yq22 yq23 yq24 yq25 yq27 yq31
 # WRONG, no class (1: perl reads a freed scalar; not counted by the audit): ya57
