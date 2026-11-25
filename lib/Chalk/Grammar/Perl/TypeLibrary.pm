@@ -811,7 +811,9 @@ class Chalk::Grammar::Perl::TypeLibrary {
         #
         # The narrowing is the PRODUCER's to make, because it decides which
         # node to emit. The consumer stays permissive.
-        Length => { map { $_ => 1 } qw(Array ArrayRef Hash HashRef Str) },
+        # (and a scalar that may be undef, as is: perl's length of undef is
+        # undef, and a Str coercion made it 0 -- audit 3, N12)
+        Length => { map { $_ => 1 } qw(Array ArrayRef Hash HashRef Str Undef Scalar) },
         # Count is the aggregate half. `List` is the lattice parent over Array
         # and Hash: scalar(%h) is the key count and the answer is Int either
         # way, so the set spans both the concrete kinds and their parent.
