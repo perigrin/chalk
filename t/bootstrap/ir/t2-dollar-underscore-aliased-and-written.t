@@ -56,7 +56,10 @@ for my $case (@refused) {
     my ($src, $name) = @$case;
     my $r = tap("$src\n");
     isnt $r->{verdict}, 'DIFFERS', "$name: never a wrong answer" or diag explain $r;
-    like $r->{why} // '', qr/T2: out of its slices/, "$name: refused by name" if $r->{verdict} eq 'REFUSED';
+    # (by T2, or by B::SoN where its rule names the case first: audit 2, K3 --
+    # `$_` read after a call that may store its list)
+    like $r->{why} // '', qr/T2: out of its slices|GAP: a foreach, map or grep's \$_ \(or a package iterator\) read after a call that may store its list/,
+        "$name: refused by name" if $r->{verdict} eq 'REFUSED';
 }
 
 done_testing;
