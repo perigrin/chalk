@@ -248,7 +248,7 @@ sub _extract_fields ($node, $id_remap) {
         return { ( defined $node->cell_name ? ( cell_name => $node->cell_name ) : () ),
                  captured_written => $node->captured_written ? 1 : 0 };
     }
-    if ($op eq 'EntryWrite')    { return { binds => $node->binds ? 1 : 0 } }
+    if ($op eq 'EntryWrite')    { return { binds => $node->binds ? 1 : 0, ( $node->local ? ( local => 1 ) : () ) } }
     if ($op eq 'LocalAlias')    { return { ( defined $node->name ? ( name => $node->name ) : () ) } }
     if ($op eq 'PackageMark')   { return { package => $node->package } }
     if ($op eq 'SubDefined') {
@@ -868,6 +868,7 @@ sub _deserialize_graph ($method_data) {
         }
         elsif ($op eq 'EntryWrite') {
             $args{binds} = $fields->{binds} ? 1 : 0;
+            $args{local} = $fields->{local} ? 1 : 0;
         }
         elsif ($op eq 'LocalAlias') {
             $args{name} = $fields->{name} if defined $fields->{name};

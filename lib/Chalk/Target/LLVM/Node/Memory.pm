@@ -62,6 +62,11 @@ class Chalk::Target::LLVM::Node::GArray :isa(Chalk::Target::LLVM::Node) {
 class Chalk::Target::LLVM::Node::GAddr :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { $self->name . ' = getelementptr %Slot, %Slot* ' . $self->attr->{global} . ', i64 0' }
 }
+# The scalar a package name is bound to now (t2_bind_addr): its global, or
+# the new scalar a `local` bound it to.
+class Chalk::Target::LLVM::Node::BindAddr :isa(Chalk::Target::LLVM::Node) {
+    method to_ll () { my @in = $self->inputs->@*; $self->name . ' = call %Slot* @t2_bind_addr(%Slot ' . $in[0]->name . ', %Slot* ' . $in[1]->name . ')' }
+}
 class Chalk::Target::LLVM::Node::GStore :isa(Chalk::Target::LLVM::Node) {
     method to_ll () { 'store %Slot ' . $self->inputs->[0]->name . ', %Slot* ' . $self->attr->{global} }
 }

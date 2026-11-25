@@ -3790,6 +3790,21 @@ define internal %Slot @t2_elv_a(%Array* %a, i64 %i) {
   %s = call %Slot @t2_elv(i8 0, %Slot %c, %Slot %x)
   ret %Slot %s
 }
+; t2_bind_addr(b, static) -> the scalar a package name is bound to: its
+; static global until a `local` binds it to a new scalar (b, a reference to
+; that scalar\'s cell; undef while unbound). B::SoN design B, section 4.
+define internal %Slot* @t2_bind_addr(%Slot %b, %Slot* %st) {
+entry:
+  %t = extractvalue %Slot %b, 0
+  %u = icmp eq i8 %t, 0
+  br i1 %u, label %stat, label %cell
+stat:
+  ret %Slot* %st
+cell:
+  %p = extractvalue %Slot %b, 1
+  %c = inttoptr i64 %p to %Slot*
+  ret %Slot* %c
+}
 ; t2_elv_a_cell(a, i) -> an alias of an array element that is THE ELEMENT\'S
 ; SCALAR where it exists: the array made one of cells (t2_aelem_ref), so a
 ; shift or unshift after it moves the cell and the alias with it, as perl\'s

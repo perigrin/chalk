@@ -735,7 +735,7 @@ sub arg_alias {
             if !$n->place && blessed( $n->mem_in ) && blessed($call) && blessed( $call->mem_in )
             && refaddr( $n->mem_in ) != refaddr( $call->mem_in );
         return $b->topic_raw if $b->is_topic($n) && $b->topic_alias;   # (what $_ is now: its alias)
-        return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_of($n) }) ]);
+        return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->scalar_addr($n) ]);
     }
     # (a foreach alias read, B::SoN's ${ \ $a[i] }: the element)
     $n = $n->alias_element if $op eq 'PostfixDeref' && $n->alias_element;
