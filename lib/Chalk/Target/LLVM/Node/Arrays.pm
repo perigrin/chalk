@@ -80,7 +80,7 @@ class Chalk::Target::LLVM::Node::ASetLen :isa(Chalk::Target::LLVM::Node) { metho
 class Chalk::Target::LLVM::Node::NewArgs :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->name . ' = call %Array* @t2_new_args()' } }
 class Chalk::Target::LLVM::Node::APushAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_apush_alias') } }
 class Chalk::Target::LLVM::Node::AAppendAlias :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_void('@t2_aappend_alias') } }
-class Chalk::Target::LLVM::Node::ElvA :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_a') } }
+class Chalk::Target::LLVM::Node::ElvA :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_a_cell') } }
 class Chalk::Target::LLVM::Node::ElvH :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_h') } }
 class Chalk::Target::LLVM::Node::ElvAViv :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_a_viv') } }
 class Chalk::Target::LLVM::Node::ElvHViv :isa(Chalk::Target::LLVM::Node) { method to_ll () { $self->_call('%Slot @t2_elv_h_viv') } }
