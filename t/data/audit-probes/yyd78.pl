@@ -1,0 +1,1 @@
+use lib 'ylib', 'docs/research/son-ir-audit-2026-11-19/probes/y/ylib', 't/data/audit-probes/ylib'; use YInit; print $YInit::one == 1 ? "eq" : "ne", $YInit::one eq "1" ? "eq" : "ne", $YInit::zs + 0, "\n";

@@ -1,0 +1,1 @@
+use lib 'ylib', 'docs/research/son-ir-audit-2026-11-19/probes/y/ylib', 't/data/audit-probes/ylib'; use YLocal; sub t { local $YLocal::lv = 8; YLocal::inner() } print t(), YLocal::with(), "$YLocal::lv\n";

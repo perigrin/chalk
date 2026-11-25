@@ -1,0 +1,1 @@
+package A; sub new { bless {v=>1}, shift } sub m { "A" . $_[0]{v} } package B; our @ISA = ("A"); sub m { my $s = shift; "B" . $s->SUPER::m() } package C; our @ISA = ("B"); sub m { my $s = shift; "C" . $s->SUPER::m() } package main; print C->new->m, "\n";

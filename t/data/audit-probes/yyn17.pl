@@ -1,0 +1,1 @@
+use strict; eval { my $r = 5; my $v = $$r; }; print $@ =~ /as a SCALAR ref/ ? "strict" : "other"; eval { my $r = []; my $v = $r->{a}; }; print $@ =~ /Not a HASH reference/ ? "hash" : "other"; eval { my $r = {}; my @v = @$r; }; print $@ =~ /Not an ARRAY reference/ ? "arr" : "other", "\n";

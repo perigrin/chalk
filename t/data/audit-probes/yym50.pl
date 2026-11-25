@@ -1,0 +1,1 @@
+my @a = (1,2,3,4,5); my @h = @a[0..1]; my @t = @a[-2..-1]; my @m = @a[1..$#a-1]; my @rv = @a[reverse 0..$#a]; my @ev = @a[grep { $_ % 2 == 0 } 0..$#a]; my $l = $a[$#a]; my $cnt = @a[1,2]; print "@h|@t|@m|@rv|@ev|$l$cnt\n";

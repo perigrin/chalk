@@ -1,0 +1,1 @@
+use constant PI => 3.14159; use constant { E => 2.718, NAME => "c" }; use constant LIST => (1,2,3); print PI, E, NAME, scalar(my @l = LIST), (LIST)[1], PI + 1, "@{[ PI ]}", __PACKAGE__->can("PI") ? "can" : "no", "\n";

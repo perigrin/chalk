@@ -1,0 +1,1 @@
+my $d = { list => [ { n => 1 }, { n => 2, sub => [7,8] } ] }; print $d->{list}[1]{sub}[-1], scalar(@{ $d->{list} }), $d->{list}->[0]->{n}, exists $d->{list}[0]{sub} ? 1 : 0, join("", map { $_->{n} } @{ $d->{list} }), "\n";

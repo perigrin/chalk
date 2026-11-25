@@ -1,0 +1,1 @@
+my %h = (a=>1,b=>2,c=>3); my @v = @h{qw(a c)}; my %s = %h{qw(a b)}; my @d = delete @h{qw(a b)}; my @a = (5,6,7); my %i = %a[0,2]; print "@v", scalar(keys %s), "@d", scalar(keys %h), join(",", map { "$_$i{$_}" } sort keys %i), "\n";

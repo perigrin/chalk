@@ -1,0 +1,1 @@
+my %h = (a=>3, b=>1, c=>2); my @k = sort { $h{$a} <=> $h{$b} } keys %h; my @v = sort { $a <=> $b } values %h; my ($min) = sort { $a <=> $b } values %h; my ($maxk) = sort { $h{$b} <=> $h{$a} } keys %h; print "@k@v$min$maxk\n";

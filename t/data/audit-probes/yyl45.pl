@@ -1,0 +1,1 @@
+my $s = "2+3*4"; my @tok = $s =~ /(\d+|[+*])/g; my @num = grep { /^\d+$/ } @tok; my @op = grep { !/^\d+$/ } @tok; my $e = join " ", map { /\d/ ? $_ * 2 : $_ } @tok; print scalar(@tok), "@num@op $e\n";

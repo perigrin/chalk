@@ -1,0 +1,1 @@
+use feature 'class'; no warnings; class A { field $v :param; method v { $v } method d { "A" . $self->v } } class B :isa(A) { field $w :param = 9; method d { "B" . $self->SUPER::d() . $w } } print B->new(v => 1)->d, ref(B->new(v => 2)), "\n";

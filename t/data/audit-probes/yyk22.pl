@@ -1,0 +1,1 @@
+package P; sub new { bless {l=>[]}, shift } sub add { my $s = shift; push @{$s->{l}}, @_; $s } sub all { @{$_[0]{l}} } sub n { scalar @{$_[0]{l}} } package main; my $o = P->new->add(1,2)->add(3); my @l = $o->all; my $c = $o->all; print "@l$c", $o->n, "\n";

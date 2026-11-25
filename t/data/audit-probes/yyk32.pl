@@ -1,0 +1,1 @@
+use feature 'class'; no warnings; class P { field $x :param = 1; field @l; method x { $x } method inc { $x++; $self } method add($v) { push @l, $v; scalar @l } } my $o = P->new(x => 3); print $o->inc->x, P->new->x, $o->add(5), $o->add(6), "\n";

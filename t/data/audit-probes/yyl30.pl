@@ -1,0 +1,1 @@
+my $re = qr/a(b)/i; "xAB" =~ $re; my $g = $1; my $p = "a.c"; print $g, "abc" =~ /$p/ ? 1 : 0, "abc" =~ /^\Q$p\E$/ ? 1 : 0, "a.c" =~ /^\Q$p\E$/ ? 1 : 0, quotemeta("a.b*c"), "xab" =~ /x$re/ ? 1 : 0, "\n";

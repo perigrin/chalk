@@ -1,0 +1,1 @@
+package P; sub new { bless {}, shift } package main; my $o = P->new; print ref($o), ref(\$o), ref([]), ref({}), ref(sub {}), ref(\1), ref(\\1), ref(""), $o->isa("P") ? 1 : 0, UNIVERSAL::isa($o, "HASH") ? 1 : 0, "\n";

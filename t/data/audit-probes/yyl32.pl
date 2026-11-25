@@ -1,0 +1,1 @@
+my $s = "abcabc"; (my $t = $s) =~ tr/a-c/A-C/; my $n = ($s =~ tr/a//); (my $u = $s) =~ tr/a-b//d; (my $v = "aabbcc") =~ tr/a-c//s; (my $w = $s) =~ tr/a/x/r; my $r = $s =~ tr/abc/x/r; print "$t$n$u$v$r\n";

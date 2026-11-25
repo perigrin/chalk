@@ -1,0 +1,1 @@
+use feature 'class'; no warnings; class P { field $x :param; method set($v) { my $old = $x; $x = $v; $old } method swap($o) { my $t = $x; $x = $o->set($t); $self } method x { $x } } my $p = P->new(x => 1); my $q = P->new(x => 2); $p->swap($q); print $p->x, $q->x, "\n";

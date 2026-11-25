@@ -1,0 +1,1 @@
+use feature 'class'; no warnings; class P { field @items; method add(@v) { push @items, @v; $self } method each($f) { $f->($_) for @items; $self } method n { scalar @items } } my $s = 0; my $o = P->new->add(1,2,3)->each(sub { $s += $_[0] }); print $s, $o->n, "\n";

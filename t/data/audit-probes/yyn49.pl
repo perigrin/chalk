@@ -1,0 +1,1 @@
+open(my $fh, "<", \ "3\n4\n") or die; chomp(my @n = <$fh>); my $t = 0; $t += $_ for @n; open(my $e, "<", \ "") or die; my $l = <$e>; my @none = <$e>; print $t, defined $l ? "d" : "u", scalar(@none), "\n";

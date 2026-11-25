@@ -1,0 +1,1 @@
+my %h = map { $_ => 1 } qw(a b); my %i = map { ($_, length) } qw(aa b); my %j = map { lc($_) => $_ } qw(A B); my @p = %{{ a => 1 }}; my %k = (a => 1, a => 2); print join("", sort keys %h), $i{aa}, $j{b}, "@p", $k{a}, scalar(keys %k), "\n";

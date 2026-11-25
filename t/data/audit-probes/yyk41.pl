@@ -1,0 +1,1 @@
+use feature 'class'; no warnings; class P { field $x :param; method cmp($o) { $x <=> $o->x } method x { $x } } my @s = sort { $a->cmp($b) } map { P->new(x => $_) } 3,1,2; print join(",", map { $_->x } @s), "\n";

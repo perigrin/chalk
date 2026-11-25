@@ -1,0 +1,1 @@
+my %h = (a=>1,b=>2,c=>3); my @k = sort keys %h; my @v = map { $h{$_} } @k; my @p = map { "$_$h{$_}" } sort { $h{$b} <=> $h{$a} } keys %h; my $d = delete $h{a}; my @ds = delete @h{qw(b c)}; print "@k@v@p$d@ds", scalar(keys %h), "\n";

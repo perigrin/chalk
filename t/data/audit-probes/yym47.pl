@@ -1,0 +1,1 @@
+my @a; $a[5] = 1; my $c = grep { defined } @a; my @b = (undef, 0, "", "0", "a"); my $d = grep { defined } @b; my $t = grep { $_ } @b; my @e = (1) x 3; @e = (); my @f = (1,2); undef @f; print scalar(@a), "$c$d$t", scalar(@e), scalar(@f), "\n";

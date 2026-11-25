@@ -1,0 +1,1 @@
+package P; use overload "+" => sub { P->new($_[0]{v} + (ref $_[1] ? $_[1]{v} : $_[1])) }, q("") => sub { "P($_[0]{v})" }, "==" => sub { $_[0]{v} == $_[1]{v} }; sub new { bless {v=>$_[1]}, $_[0] } package main; my $a1 = P->new(1); my $b1 = $a1 + P->new(2) + 3; print "$b1", $a1 == P->new(1) ? "eq" : "ne", "\n";

@@ -1,0 +1,1 @@
+my %seen; my @u = grep { !$seen{$_}++ } qw(a b a c b); my @dup = grep { $seen{$_} > 1 } sort keys %seen; my %cnt; $cnt{length $_}++ for qw(a bb cc ddd); print "@u|@dup|", join(",", map { "$_:$cnt{$_}" } sort keys %cnt), "\n";

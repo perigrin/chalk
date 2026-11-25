@@ -1,0 +1,1 @@
+my %h = (a=>1); $_++ for values %h; print $h{a}; $_ .= "x" for keys %h; print join(",", keys %h); my ($x,$y)=(1,2); $_++ for ($x, $y); print "$x$y"; my @a=(1); my @b=(2); $_++ for (@a, @b); print "@a@b\n";

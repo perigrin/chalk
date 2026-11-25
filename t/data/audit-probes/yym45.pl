@@ -1,0 +1,1 @@
+my @a = (1) x 5; my @b = (0) x 3; $b[1] = 5; my @c = ("a", "b") x 2; my @e = () x 5; my @n = (undef) x 2; my $s = "ab" x 2.9; my @m = map { [(0) x 2] } 1..2; $m[0][0] = 1; print "@a@b@c", scalar(@e), scalar(@n), "$s$m[0][0]$m[1][0]\n";

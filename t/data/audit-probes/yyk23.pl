@@ -1,0 +1,1 @@
+package P; sub new { my ($c,%a) = @_; bless { x => 0, %a }, $c } sub x { my $s = shift; $s->{x} = shift if @_; $s->{x} } package main; my $o = P->new(x => 5); $o->x(7); my $q = P->new; print $o->x, $q->x, "\n";

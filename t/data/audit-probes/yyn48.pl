@@ -1,0 +1,1 @@
+open(my $fh, "<", \ "x y\nz\n") or die; { local $/; my $all = <$fh>; print length($all); } close $fh; open($fh, "<", \ "a,b,c") or die; { local $/ = ","; my @p = <$fh>; print scalar(@p), $p[0]; } print "\n";

@@ -1,0 +1,1 @@
+my @a = (1,2,3); my @c = @a; push @c, 4; my @d = (@a, @c); my ($x, @y) = @d; my @e = (@a)[1,2]; my @f = (@a, "x")[-1, 0]; local $, = ""; print scalar(@a), scalar(@c), scalar(@d), $x, scalar(@y), "@e@f\n";

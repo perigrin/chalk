@@ -1,0 +1,1 @@
+package A; sub new { my $c = shift; bless {@_}, $c } sub name { $_[0]{name} } package B; use parent -norequire, "A"; sub new { my ($c,%a)=@_; my $s = A::new($c, %a, kind => "b"); $s } sub kind { $_[0]{kind} } package main; my $o = B->new(name => "n"); print $o->name, $o->kind, ref($o), "\n";

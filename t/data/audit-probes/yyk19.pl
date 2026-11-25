@@ -1,0 +1,1 @@
+package P; sub new { bless [1,2], shift } sub sum { $_[0][0] + $_[0][1] } package Q; sub new { my $v = 5; bless \$v, shift } sub get { ${$_[0]} } package main; print P->new->sum, Q->new->get, ref(P->new), "\n";

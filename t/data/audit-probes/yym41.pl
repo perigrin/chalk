@@ -1,0 +1,1 @@
+my @a = (5,3,9); my ($min, $max) = ($a[0], $a[0]); for (@a) { $min = $_ if $_ < $min; $max = $_ if $_ > $max } my $i = 0; my %idx = map { $_ => $i++ } @a; my @sorted_idx = sort { $a[$a] <=> $a[$b] } 0..$#a; print "$min$max$idx{9}@sorted_idx\n";

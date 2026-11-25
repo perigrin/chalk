@@ -1,0 +1,1 @@
+eval { my $x = 1; my $y = 0; my $z = $x % $y; }; print $@ =~ /^Illegal modulus zero/ ? "mod" : "other"; my $r = eval { sqrt(-1) }; print $@ =~ /^Can't take sqrt of -1/ ? "sqrt" : "other"; eval { log(0) }; print $@ =~ /^Can't take log of 0/ ? "log" : "other", "\n";

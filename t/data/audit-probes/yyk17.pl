@@ -1,0 +1,1 @@
+package A; sub new { my $c = shift; my $s = bless {}, ref($c) || $c; $s->init(@_); $s } sub init { $_[0]{a} = 1 } package B; our @ISA = ("A"); sub init { my $s = shift; $s->SUPER::init; $s->{b} = 2 } package main; my $o = B->new; my $p = $o->new; print join(",", map { "$_$o->{$_}" } sort keys %$o), ref($p), "\n";

@@ -1,0 +1,1 @@
+use feature 'class'; no warnings; class P { field $v :param; method v { $v } } my $r = eval { P->new; 1 }; my $q = eval { P->new(v => 1, z => 2); 1 }; print $r ? "ok" : "died", $q ? "ok" : "died", "\n";

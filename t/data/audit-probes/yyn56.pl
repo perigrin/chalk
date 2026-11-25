@@ -1,0 +1,1 @@
+my $t = time; my @lt = localtime(0); my @gt = gmtime(0); print $t > 1600000000 ? "ok" : "bad", scalar(@lt), "$gt[5]$gt[4]$gt[3]$gt[2]", scalar(gmtime(86400 * 365)) =~ /^Fri Jan  1 00:00:00 1971$/ ? "y" : "n", "\n";

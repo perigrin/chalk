@@ -1,0 +1,1 @@
+my %h = (a=>1); my $e = exists $h{a}; my $n = exists $h{z}; my $d = defined $h{z}; my $v = $h{z} // "dflt"; my $c = keys %h; my ($k) = keys %h; my ($w) = values %h; my ($ek, $ev) = each %h; print $e, $n ? 1 : 0, $d ? 1 : 0, "$v$c$k$w$ek$ev\n";

@@ -1,0 +1,1 @@
+my %h; $h{a}{b}{c} = 1; $h{a}{d} = [1,2]; push @{$h{l}}, 1, 2; $h{cnt}{$_}++ for qw(x y x); print join(",", sort keys %h), scalar(@{$h{l}}), $h{cnt}{x}, exists $h{a}{b}{c} ? 1 : 0, ref $h{a}{d}, "\n";

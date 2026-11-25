@@ -1,0 +1,1 @@
+my %h = (b=>2, a=>1, c=>3); my $s = ""; for my $k (sort keys %h) { $s .= "$k=$h{$k};" } while (my ($k, $v) = each %h) { $s .= "" } my $t = 0; $t += $_ for values %h; $_ *= 2 for values %h; print "$s$t$h{a}$h{c}\n";

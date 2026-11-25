@@ -123,10 +123,19 @@ sub read_baseline ( $file = $BASELINE ) {
 }
 
 sub write_baseline ( $res, $file = $BASELINE ) {
+    # (THE COMMENT LINES AFTER THE HEADER ARE KEPT: the probes left out of
+    # the set because they are known WRONG pending a design decision are
+    # listed there, by class -- not rows, so not held as passing)
+    my @kept;
+    if ( open my $in, '<', $file ) {
+        my $i = 0;
+        while (<$in>) { push @kept, $_ if $i++ >= 2 && /^#/ }
+    }
     open my $o, '>', $file or die "$file: $!";
     print $o "# The audit probes' verdicts (tools/audit-probes.pl --update writes this file).\n";
     print $o "# name\tverdict\twhy\n";
     print $o join( "\t", $_, $res->{$_}->@* ), "\n" for sort keys $res->%*;
+    print $o @kept;
     close $o;
 }
 

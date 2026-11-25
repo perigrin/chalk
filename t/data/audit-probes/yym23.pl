@@ -1,0 +1,1 @@
+my %h; $h{undef} = 1; { no warnings; $h{+undef} = 2; } $h{""} .= "e"; $h{0} = "z"; $h{"0.0"} = "f"; $h{0.0} .= "!"; $h{-1} = "n"; $h{1e3} = "k"; print join(",", map { "[$_]$h{$_}" } sort keys %h), "\n";

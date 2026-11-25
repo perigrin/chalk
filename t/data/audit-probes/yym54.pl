@@ -1,0 +1,1 @@
+my %h = (a => [1,2], b => [3]); my $n = 0; $n += @{ $h{$_} } for keys %h; my @all = map { @{ $h{$_} } } sort keys %h; my %len = map { $_ => scalar @{ $h{$_} } } keys %h; my ($big) = sort { $len{$b} <=> $len{$a} } keys %len; print "$n@all$big\n";

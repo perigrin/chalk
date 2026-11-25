@@ -1,0 +1,1 @@
+package P; my $count = 0; sub new { $count++; bless {id=>$count}, shift } sub count { $count } sub id { $_[0]{id} } package main; my @o = map { P->new } 1..3; print P->count, P::count(), $o[1]->id, "\n";

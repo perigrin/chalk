@@ -1,0 +1,1 @@
+use feature 'class'; no warnings; class P { field %h; field @a = (1,2); method put($k,$v) { $h{$k} = $v; push @a, $v; $self } method dump { join(",", map { "$_$h{$_}" } sort keys %h) . "@a" } } print P->new->put(a => 1)->put(b => 2)->dump, "\n";

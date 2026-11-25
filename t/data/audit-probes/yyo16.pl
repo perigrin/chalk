@@ -1,0 +1,1 @@
+use Scalar::Util qw(blessed reftype looks_like_number refaddr weaken); my $o = bless [], "K"; print blessed($o), reftype($o), blessed([]) // "u", looks_like_number("1e3") ? 1 : 0, looks_like_number("abc") ? 1 : 0, refaddr($o) == $o + 0 ? "addr" : "no", "\n";

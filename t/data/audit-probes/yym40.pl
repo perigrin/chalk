@@ -1,0 +1,1 @@
+my @a = (1..10); my @ev = grep { !($_ & 1) } @a; my $sum = 0; $sum += $_ for @ev; my ($max) = sort { $b <=> $a } @a; my @sq = map { $_ ** 2 } grep { $_ > 7 } @a; my @pairs = map { [$_, $_ + 1] } 1..2; print "@ev|$sum|$max|@sq|", scalar(@pairs), $pairs[1][1], "\n";

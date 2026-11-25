@@ -1,0 +1,1 @@
+package A; sub new { bless {}, shift } sub hi { "A" } sub who { $_[0]->hi } package B; our @ISA = ("A"); sub hi { "B" } package main; print A->new->who, B->new->who, B->can("who") ? 1 : 0, B->isa("A") ? 1 : 0, "\n";
