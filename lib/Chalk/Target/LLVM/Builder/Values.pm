@@ -549,6 +549,15 @@ sub _value {
     }
     # AN ARGUMENT READ (a shift, $_[N], a signature parameter) is the argument.
     if (my $arg = $b->{args}{ refaddr($v) }) { return $arg }
+    # (A PLACE OF A `my (...) = @_` TARGET -- an array item of a foreach or
+    # map list, B::SoN's alias -- is that target: the same variable)
+    if ($b->{argsarr} && $v->operation eq 'PadAccess' && $v->place) {
+        my $k = ( $v->sigil // '' ) . ( $v->symbol // '' );
+        my ($t) = grep { blessed($_) && $_->operation eq 'PadAccess' && !$_->place && ( $_->sigil // '' ) . ( $_->symbol // '' ) eq $k }
+            map { $_->inputs->@[ 0 .. $_->inputs->$#* - 1 ] }
+            grep { $_->is_args_list_assign } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} );
+        return $b->value($t) if $t;
+    }
     # (a read after the Assign takes it as input; a target read is its input)
     if ($b->{argsarr} && $v->operation eq 'PadAccess'
         && ( my ($as) = ( ( grep { blessed($_) && $_->is_args_list_assign } $v->inputs->@* ),
