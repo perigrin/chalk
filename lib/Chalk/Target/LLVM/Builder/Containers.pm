@@ -714,10 +714,12 @@ sub array_value {
         out('an array first made in an arm or a loop body') if !$v->is_pinned
             && ( ( $v->stamp // '' ) eq 'ArrayRef' ? $b->{depth} : !$b->agg_made_here($v) );   # static type: a [...] is made where it runs
         # AN ALIAS LIST holding a place (B::SoN's foreach, map or grep over
-        # package scalars or elements): an array of aliases, each item the
-        # variable or element itself, read and stored through.
+        # package scalars or elements), or `values` of a hash (perl aliases
+        # each value -- design B, audit 3 N3): an array of aliases, each item
+        # the variable or element itself, read and stored through.
         return $b->args_array(@in)
-            if ( $v->stamp // '' ) ne 'ArrayRef' && grep { blessed($_) && $_->can('place') && $_->place } @in;   # static type
+            if ( $v->stamp // '' ) ne 'ArrayRef' && grep { blessed($_) && ( $_->can('place') && $_->place
+                || $_->operation eq 'Call' && ( $_->lists_a_hash // '' ) eq 'values' ) } @in;   # static type
         my $a = $b->emit(op => 'NewArray', type => '%Array*');
         for my $e (@in) {
             # A LIST IN IT is flattened: its elements appended (`(keys %h)`, `(@a, 4)`).
