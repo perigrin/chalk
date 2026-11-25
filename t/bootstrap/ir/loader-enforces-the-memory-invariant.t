@@ -74,6 +74,11 @@ for my $case (
                        $n->{15}{inputs} = [10, 13] } ],
     [ L5 => qr/Call#22 is a sub call/, 'a sub call off the control chain',
       sub ($n, $all) { push @$all, { id => 22, op => 'Call', inputs => [], mem_in => 17, fields => { dispatch_kind => 'direct', name => 'main::f' } } } ],
+    # (an :lvalue call an Assign stores through is a call too, run where it
+    # stands: off the chains, it ran nowhere -- audit 3, corpus 398)
+    [ L5 => qr/Call#22 is a sub call and on no control chain/, 'an :lvalue call off the chains, an Assign\'s target',
+      sub ($n, $all) { push @$all, { id => 22, op => 'Call', inputs => [], mem_in => 17, fields => { dispatch_kind => 'direct', name => 'main::f' } },
+                                     { id => 23, op => 'Assign', inputs => [ 22, 12 ], control_in => 20, mem_in => 17, mem_out => JSON::PP::true }; } ],
     [ L6 => qr/Phi#16/, 'a memory Phi with one input for two ways into its Region',
       sub ($n, $all) { $n->{16}{inputs} = [7] } ],
     # (stage 10: every kind that stores whenever it runs is a version)
@@ -98,9 +103,9 @@ for my $case (
 #  - a string eval's trap: its value Phi has one input more than its Region
 #    has ways in, as a block eval's join does, until the exceptional edge
 #    (stage 8);
-#  - an :lvalue call as the location an Assign stores through: a place (the
-#    Assign's target, its one use), reading memory, off the chains -- the
-#    Assign that calls it is the version (L5).
+#  - an :lvalue call as the location an Assign stores through: a call on
+#    both chains, and the Assign after it (L5; audit 3 took the exemption
+#    for one off the chains away).
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 SKIP: {
     skip "perl5-son not found at $SON (set PERL5_SON_LIB)", 3 unless -f "$SON/B/SoN.pm";

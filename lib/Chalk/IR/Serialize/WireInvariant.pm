@@ -16,11 +16,10 @@ use experimental 'class';
 #       Phi inputs) from the roots: each Return's and Unwind's mem_in, and the
 #       memory Phi of a Loop no exit Region names (SoN::Verify's V3, V4)
 #   L5  an Assign is a record, or is on both chains: control_in, mem_in,
-#       mem_out (hard since stage 6). A sub Call has all three too -- or is
-#       a place: an :lvalue call whose one use is the target of the Assign
-#       that stores through it (and calls it), reading memory (mem_in), off
-#       the chains; that Assign is the version (the plan's section 3.3: a
-#       node an Assign stores through is a place). And every kind that
+#       mem_out (hard since stage 6). A sub Call has all three too, an
+#       :lvalue call an Assign stores through as well: it runs where it
+#       stands (audit 3: off the chains, corpus 398's ran nowhere). And
+#       every kind that
 #       stores whenever it runs -- EntryWrite, CellWrite, Delete,
 #       ElemRestore, MakeCell -- is a version on both chains (stage 10).
 #   L6  a Phi has as many inputs as its Region has ways in (a Loop: its
@@ -170,10 +169,6 @@ class Chalk::IR::Serialize::WireInvariant {
             next unless $n->{op} eq 'Assign' && !$f->{record} || $sub_call;
             my $what = $sub_call ? 'is a sub call' : 'is no record';
             $gap->( 'L5', $n, "$what that names no memory (mem_in)" ) unless defined $n->{mem_in};
-            # (a place: the target of the Assign that stores through it, its one use)
-            my @u = ( $uses{ $n->{id} } // [] )->@*;
-            next if $sub_call && !defined $n->{control_in} && !$n->{mem_out}
-                && @u == 1 && $u[0][0]{op} eq 'Assign' && $u[0][1] == 0 && !( $u[0][0]{fields} // {} )->{record};
             $gap->( 'L5', $n, "$what and on no control chain (control_in)" ) unless defined $n->{control_in};
             $gap->( 'L5', $n, "$what and no memory version (mem_out)" ) unless $n->{mem_out};
         }
