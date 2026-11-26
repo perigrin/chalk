@@ -58,9 +58,9 @@ subtest 'Count takes the aggregates Length gave up' => sub {
     ok($acc->('Count', 'List'), 'Count accepts the List parent');
 };
 
-subtest 'both yield Int' => sub {
+subtest 'Length requires no Str operand: length(undef) is undef' => sub {
     my $r = \&Chalk::Grammar::Perl::TypeLibrary::operand_repr_for_ir_op;
-    is($r->('Length', 0), 'Str', 'Length requires a Str operand');
+    is($r->('Length', 0), undef, 'Length mints no Str coercion of its operand');
 };
 
 done_testing;

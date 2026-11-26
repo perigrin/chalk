@@ -53,6 +53,11 @@ lib/'s 96 `$N` reads overwhelmingly sit behind a match guard:
 `if ($x =~ /.../) { ... $1 ... }`. The guarded form reads the capture only on
 the matched path; the ternary face here is Int (`length($1)`).
 
+Re-typed 2026-11-26: perl's `length` of undef is undef (audit 3, N12), so the
+wire stamps Length Maybe[Int] and the ternary joins to Maybe[Int]. T1 narrows
+this Length back to Int (its operand, the capture, is a Str); the ternary keeps
+the wire's Maybe[Int] (a join only widens). perl prints `2` either way.
+
 ```perl
 # source
 use 5.42.0;
@@ -73,9 +78,9 @@ context: scalar
 %cap    = RegexCapture(%m, n: 1) :Str
 %len    = Length(%cap) :Int
 %zero   = Constant(0) :Int
-%result = TernaryExpr(%m, %len, %zero) :Int
+%result = TernaryExpr(%m, %len, %zero) :Maybe[Int]
 %nl = Constant("\n") :Str
-%co_p  = Coerce(%result : Int -> Str) :Str
+%co_p  = Coerce(%result : Maybe[Int] -> Str) :Str
 %p  = Print(%co_p, %nl)
 return %p
 control: %start -> %p

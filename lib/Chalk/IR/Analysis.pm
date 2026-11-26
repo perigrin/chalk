@@ -113,7 +113,7 @@ my %_COMPUTED_REPR = (
     Divide => 'Num', Power => 'Num', Modulo => 'Int',
     BitAnd => 'Int', BitOr => 'Int', BitXor => 'Int',
     LeftShift => 'Int', RightShift => 'Int', Complement => 'Int',
-    Concat => 'Str', Length => 'Int', Count => 'Int',
+    Concat => 'Str', Count => 'Int',
     # ref($x) reads the type/class name of a reference -- always a Str,
     # regardless of the operand (ref($obj) -> class name, ref([...]) -> "ARRAY").
     RefType => 'Str',
@@ -3335,6 +3335,17 @@ sub _propagate_computed_reprs ($graphs) {
                         $node->set_stamp($st);
                         $changed = 1;
                     }
+                    next;
+                }
+
+                # LENGTH IS Maybe[Int], AN Int OF AN OPERAND THAT CANNOT BE UNDEF
+                # (TypeLibrary::length_result): re-asked as the operand narrows.
+                if ($op eq 'Length') {
+                    my $in   = $node->inputs->[0];
+                    my $want = Chalk::Grammar::Perl::TypeLibrary::length_result( blessed($in) ? $in->stamp : undef );
+                    next if ( $node->stamp // '' ) eq $want;
+                    $node->set_stamp($want);
+                    $changed = 1;
                     next;
                 }
 

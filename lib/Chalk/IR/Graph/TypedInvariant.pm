@@ -11,7 +11,7 @@ use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: Int <: Num
 # Required-operand-representation for each operation.
 # Values may be a single string (all inputs must carry that repr) or an
 # arrayref of strings (inputs must carry ONE of the listed reprs — used for
-# polymorphic unary ops like Length which accept Array or Str).
+# polymorphic unary ops like Count which accept Array or Hash).
 # An op listed here requires ALL its data inputs to carry the given representation
 # (or be a Coerce node whose to_repr equals that representation).
 # Only ops whose operand representations are structurally enforced at the IR level
@@ -29,15 +29,8 @@ my %OP_REQUIRED_REPR = (
     Divide   => 'Num',  # Perl `/` is always float division; inputs must be Num
     Modulo   => 'Int',  # perl's `%` is integer-valued
     Concat   => 'Str',  # String concatenation requires Str operands (G3)
-    # Length ACCEPTS AGGREGATES STILL, deliberately. The producer split
-    # Count out of Length (93a2d12) and the split is SUBTRACTIVE -- but a
-    # producer from BEFORE it still emits Length over an aggregate, and
-    # this loader must read both. Measured: narrowing this to Str alone
-    # turns 30 pre-split nodes into invariant violations (gate-green
-    # 205 -> 195 against pin 8c15e32). The narrowing belongs at the
-    # producer, which decides which node it emits; the CONSUMER stays
-    # permissive because it is handed JSON of unknown provenance.
-    Length   => [qw(Array ArrayRef Hash HashRef Str)],  # scalar @arr (count), scalar %h (key count), or length($str); operand must be Array/ArrayRef, Hash/HashRef, or Str
+    # (Length is absent: it requires nothing of its operand -- perl's
+    # length(undef) is undef, audit 3 N12 -- as TypeLibrary's `length` says.)
     # Count is the aggregate half of the old Length. `List` is the
     # lattice parent over Array and Hash -- scalar(%h) is the key count.
     Count    => [qw(Array ArrayRef Hash HashRef List)],

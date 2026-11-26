@@ -27,7 +27,14 @@ use Encode ();
 # bounded the UV between exactly; the analysis keeps no bound past IV_MAX,
 # so T2 takes perl's general path for them (as perl, still). None in the
 # census corpus.
-my $LOST_ALLOWED = 9;
+#
+# LOST, 17 (2026-11-26, length is Maybe[Int]: perl's length(undef) is undef,
+# audit 3 N12): 8 more, each a Length whose operand's type may be undef -- a
+# method call's result (chalk-found-gaps:22, twice), $_[0] (:30, :149), an
+# array element (:65), a `my` from @_ (:89), $@ (:145), a string after a
+# call (:164). The oracle proved them on `length` always being an Int, which
+# is not perl's; T1 proves Int only for an operand that cannot be undef.
+my $LOST_ALLOWED = 17;
 
 my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/B/SoN.pm";

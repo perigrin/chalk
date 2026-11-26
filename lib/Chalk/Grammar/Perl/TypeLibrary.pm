@@ -245,7 +245,9 @@ class Chalk::Grammar::Perl::TypeLibrary {
         each    => { min_arity => 1, max_arity => 1, arg_types => ['Hash'],                      return_type => 'List' },
 
         # String operations
-        length  => { min_arity => 0, max_arity => 1, arg_types => ['Str'],                       return_type => 'Int' },
+        # (length(undef) is undef, perl 5.12 on: the operand is not made a
+        # string first, which made it "" and the length 0 -- audit 3, N12)
+        length  => { min_arity => 0, max_arity => 1, arg_types => ['List'],                      return_type => 'Maybe[Int]' },
         chomp   => { min_arity => 0, arg_types => ['List'],                       return_type => 'Int' },
         chop    => { min_arity => 0, arg_types => ['List'],                       return_type => 'Str' },
         chr     => { min_arity => 1, max_arity => 1, arg_types => ['Int'],                       return_type => 'Str' },
@@ -331,6 +333,16 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # Returns the signature hash for a builtin, or undef if not a builtin.
     sub get_builtin($name) {
         return $BUILTIN_SIGNATURES{$name};
+    }
+
+    # length_result($operand_type) -> the type of `length` of an operand of
+    # this type: its Maybe[Int] is undef only for an undef operand, so an
+    # operand that cannot be undef gives an Int. Unknown operand: Maybe[Int].
+    sub length_result($operand_type) {
+        my $maybe = $BUILTIN_SIGNATURES{length}{return_type};
+        return $maybe unless defined $operand_type && is_lattice_type($operand_type)
+            && $operand_type ne 'Unknown' && !is_subtype('Undef', $operand_type);
+        return _maybe_of($maybe) // $maybe;
     }
 
     # Returns true if the name is a known builtin function.
@@ -807,8 +819,10 @@ class Chalk::Grammar::Perl::TypeLibrary {
     # context and yields the element count (a Length)"). So the IR node stands
     # for two unrelated source constructs, and its operand set looks
     # polymorphic ([Array ArrayRef Hash HashRef Str], which is what
-    # TypedInvariant records) only because of that merge. TypeLibrary is RIGHT
-    # that `length => ['Str']`; the node is what is overloaded.
+    # TypedInvariant records) only because of that merge; the node is what is
+    # overloaded. (Since audit 3 N12 `length` requires nothing of its operand
+    # -- length(undef) is undef -- so no coercion is asked of a Length operand
+    # and this set is not consulted for it today.)
     #
     # Without this bridge the element-count use reads as a Str position holding
     # an ArrayRef and gets stringified -- measured, that un-lowered eight

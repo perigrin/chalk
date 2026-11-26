@@ -167,12 +167,11 @@ subtest 'Divide wants Num at both positions -- perl / is float division' => sub 
 # ---------------------------------------------------------------------------
 
 subtest 'a non-variadic op has no opinion beyond its last operand' => sub {
-    # `length` is arg_types => ['Str'] -- ONE entry, and NOT variadic. The
-    # last-entry-covers-the-rest rule holds only for signatures that ARE
-    # variadic (a trailing Any, as `print`/`join`/`sprintf` have). Applying it
-    # unconditionally makes the accessor answer for an operand position the
-    # operator does not have.
-    is want('Length', 0), 'Str', 'Length logical position 0 wants Str';
+    # `length` takes ONE operand (max_arity 1). The last-entry-covers-the-rest
+    # rule must not make the accessor answer for an operand position the
+    # operator does not have. Its one operand wants nothing either: perl's
+    # length(undef) is undef, so the operand is not made a string first.
+    is want('Length', 0), undef, 'Length logical position 0 has no opinion (length(undef) is undef)';
     is want('Length', 1), undef, 'Length logical position 1 has no opinion';
     is want('Length', 5), undef, 'Length is not variadic at any later position';
 

@@ -162,8 +162,9 @@ use Chalk::IR::Graph::TypedInvariant;
     is(scalar @{ $result->{violations} }, 0, 'H2-8: no violations for well-typed Length');
 }
 
-# H2-9 (Phase 0, bilateral): Length with Int operand FAILS the invariant.
-# Length requires Array or Str; an Int operand is a type error.
+# H2-9: Length with an Int operand PASSES the invariant. perl's length(42)
+# is 2 (the number made a string) and length(undef) is undef, so Length
+# requires nothing of its operand (audit 3, N12).
 {
     my $f = Chalk::IR::NodeFactory->new;
 
@@ -173,8 +174,8 @@ use Chalk::IR::Graph::TypedInvariant;
     $len->set_stamp('Int');
 
     my $result = Chalk::IR::Graph::TypedInvariant->check_nodes([$wrong, $len]);
-    ok(!$result->{ok}, 'H2-9 bilateral: Length(Int) FAILS the invariant (Int is not Array or Str)');
-    ok(scalar @{ $result->{violations} } > 0, 'H2-9: violations reported for ill-typed Length');
+    ok($result->{ok}, 'H2-9: Length(Int) passes the invariant (length requires nothing)');
+    is(scalar @{ $result->{violations} }, 0, 'H2-9: no violations for Length(Int)');
 }
 
 

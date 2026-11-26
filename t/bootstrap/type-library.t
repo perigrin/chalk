@@ -236,10 +236,11 @@ for my $name (qw(foo bar class if my)) {
     is($sig->{arg_types}[3], 'List', 'splice replacement args are List (Perl list flattening)');
 }
 
-# length: operates on Str
+# length: one scalar, not made a string first -- length(undef) is undef
 {
     my $sig = Chalk::Grammar::Perl::TypeLibrary::get_builtin('length');
-    is($sig->{arg_types}[0], 'Str', 'length arg type is Str');
+    is($sig->{arg_types}[0], 'List', 'length arg requires nothing (List)');
+    is($sig->{return_type}, 'Maybe[Int]', 'length returns Maybe[Int]');
 }
 
 # join: separator is Str, rest is List (Perl list flattening)
@@ -693,7 +694,7 @@ subtest 'operand_repr_for_ir_op reads the signature, per position' => sub {
     # assertions pinned nothing while reading as coverage. The map is now
     # checked against the factory in
     # t/bootstrap/ir/typelibrary-is-the-coercion-authority.t.
-    is($f->('Length', 0), 'Str', 'Length position 0 wants Str (length => arg_types [Str])');
+    is($f->('Length', 0), undef, 'Length position 0 declines -- length(undef) is undef, no Str coercion');
 
     # ...and NOT beyond its arity. `length` is not variadic, so it has no
     # opinion about a second operand it does not take.

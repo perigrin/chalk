@@ -311,6 +311,12 @@ The length is the RUNTIME digit count, so it is `_str_len_table`-tracked rather
 than a compile-time literal: `12345` renders to five bytes and `length` reads
 that tracked length back.
 
+Re-typed 2026-11-26: `length` no longer has a Str operand. perl's
+length(undef) is undef (audit 3, N12), so a Str coercion of the operand was
+wrong for undef, and B::SoN and TypeLibrary both give `length` no operand
+requirement. The Int reaches Length as is; the backend makes it a string where
+it measures it, and perl prints `5` either way.
+
 ```perl
 # source
 use 5.42.0;
@@ -329,8 +335,7 @@ context: scalar
 %start = Start()
 %nl  = Constant("\n") :Str
 %n   = Constant(12345) :Int
-%cs  = Coerce(%n, from_repr: "Int", to_repr: "Str") :Str
-%len = Length(%cs) :Int
+%len = Length(%n) :Int
 %cl  = Coerce(%len, from_repr: "Int", to_repr: "Str") :Str
 %p1  = Print(%cl)
 %p2  = Print(%nl)
