@@ -370,6 +370,10 @@ class Chalk::Grammar::Perl::TypeLibrary {
         if ($POLYMORPHIC_TYPES{$actual_type}) {
             return true if is_subtype($required_type, $actual_type);
         }
+        # Maybe[T] may be T at runtime (length's Maybe[Int] in substr's Num)
+        if (defined( my $t = _maybe_of($actual_type) )) {
+            return true if type_satisfies($t, $required_type);
+        }
         # Perl flattens any scalar/array/hash into list context at runtime.
         # Any concrete type satisfies a `List` position.
         return true if $required_type eq 'List';

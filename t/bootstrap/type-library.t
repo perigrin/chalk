@@ -444,6 +444,14 @@ ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Hash', 'List'),
 ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Num', 'Str'),
     'type_satisfies(Num, Str) returns true (subtype)');
 
+# A Maybe[T] may be T at runtime, as a Scalar may be a Str: length's
+# Maybe[Int] goes where a Num goes (`substr($s, length $t)`), not where an
+# Array does.
+ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Maybe[Int]', 'Num'),
+    'type_satisfies(Maybe[Int], Num) returns true (it may be an Int)');
+ok(!Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Maybe[Int]', 'Array'),
+    'type_satisfies(Maybe[Int], Array) returns false');
+
 # Exact match
 ok(Chalk::Grammar::Perl::TypeLibrary::type_satisfies('Array', 'Array'),
     'type_satisfies(Array, Array) returns true (exact)');
