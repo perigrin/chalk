@@ -56,15 +56,13 @@ for my $src (
 }
 
 # A READ OF @_ AFTER THE CALLEE STORED THE VARIABLE IT WAS HANDED: B::SoN's
-# wire carries the argument as a value read before the call, and T2 read it
-# again by its own rule -- right, against what the wire says. The loader
-# holds the wire to L11 (SoN::Verify's V12) now and refuses it by name (third
-# final audit, risk 5): it was SAME here.
+# wire carried the argument as a value read before the call, and the loader
+# refused it by L11 (third final audit, risk 5). Since B::SoN's
+# places-everywhere the argument is a place, and T2 reads it where @_ is read.
 {
     my $src = q{our $g = 1; sub f { $g = 2; return "@_" } print f($g), "\n";};
     my $r = tap("$src\n");
-    is $r->{verdict}, 'REFUSED', "$src: refused" or diag $r->{why} // explain $r;
-    like $r->{why} // '', qr/wire invariant L11/, '...by L11';
+    is $r->{verdict}, 'SAME', "$src: perl's answer" or diag $r->{why} // explain $r;
 }
 
 # NEVER A WRONG ANSWER: an array B::SoN folds to what it was made with (a

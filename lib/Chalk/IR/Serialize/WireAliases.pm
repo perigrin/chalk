@@ -81,7 +81,7 @@ class Chalk::IR::Serialize::WireAliases {
                 $localish{$g}{ $_->{id} } = 1 for ( $r, @save );
             }
         }
-        my $skip = sub ( $g, $n ) { _f($n)->{local} || _f($n)->{restore} || $n->{op} eq 'ElemRestore' || $localish{$g}{ $n->{id} } };
+        my $skip = sub ( $g, $n ) { _f($n)->{local} || _f($n)->{restore} || _f($n)->{binds} || $n->{op} eq 'ElemRestore' || $localish{$g}{ $n->{id} } };
         my $targets = sub ($n) {
             return $n->{inputs}->@[ 0 .. ( _f($n)->{targets} // 1 ) - 1 ] if $n->{op} eq 'Assign';
             return ( $n->{inputs}[0] ) if $n->{op} =~ /\A(?:EntryWrite|CellWrite|Delete|ElemRestore)\z/;
@@ -123,7 +123,10 @@ class Chalk::IR::Serialize::WireAliases {
                 my $t = $callees->( $g, $c ) or next;
                 for my $i ( 0 .. $c->{inputs}->$#* ) {
                     my $a = $by{$g}{ $c->{inputs}[$i] // '' } or next;
-                    next if _f($a)->{place} || !defined $a->{mem_in};
+                    # (a `promoted` one is B::SoN's V14's: re-proved there by
+                    # the pass's own proof, SoN::AliasProof, which knows a
+                    # `local` binds a new scalar -- as V12 leaves it)
+                    next if _f($a)->{place} || _f($a)->{promoted} || !defined $a->{mem_in};
                     my $key = $src->( $g, $a ) // next;
                     for my $h ( $t->@* ) {
                         my %args = map { ( $_->{id} => 1 ) } grep { $_->{op} eq 'ArgsSource' } values $by{$h}->%*;

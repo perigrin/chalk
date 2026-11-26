@@ -31,10 +31,6 @@ sub v12 ($json) { return scalar grep { $_->{rule} eq 'alias-not-private' } SoN::
 
 # (the audit's y probes the verifier flags: five wrong, the rest right by luck)
 for my $src (
-    'my $x=1; sub f { my $s=""; for my $i (1..2) { my ($p)=@_; $s.=$p; $x++ } $s } print f($x), "$x\n";',
-    'my $x=1; sub f { my $s=""; my $i=0; while ($i++ < 2) { my ($p)=@_; $s.=$p; $x++ } $s } print f($x), "$x\n";',
-    'my $x=1; sub g { $x++ } sub f { my $s=""; for my $i (1..2) { $s.=$_[0]; g() } $s } print f($x), "$x\n";',
-    'my @a=(1,2); sub z { $a[1]=7 } for (@a) { my $v=$_; z(); print $v } print "\n";',
     'my @a=(1,2); print map { my $v=$_; $a[1]=7; $v } @a; print "\n";',
 ) {
     my $w = wire($src);
@@ -42,8 +38,14 @@ for my $src (
     like( refused($w), qr/\AGAP: wire invariant L11: /, "...and the loader refuses it by L11" );
 }
 
-# (no store between: both clean, and it loads)
+# (no store between: both clean, and it loads -- and, since B::SoN's
+# places-everywhere, the four above that were wrong: each argument is a place
+# and each item its element read when used, both clean, and they load)
 for my $src (
+    'my $x=1; sub f { my $s=""; for my $i (1..2) { my ($p)=@_; $s.=$p; $x++ } $s } print f($x), "$x\n";',
+    'my $x=1; sub f { my $s=""; my $i=0; while ($i++ < 2) { my ($p)=@_; $s.=$p; $x++ } $s } print f($x), "$x\n";',
+    'my $x=1; sub g { $x++ } sub f { my $s=""; for my $i (1..2) { $s.=$_[0]; g() } $s } print f($x), "$x\n";',
+    'my @a=(1,2); sub z { $a[1]=7 } for (@a) { my $v=$_; z(); print $v } print "\n";',
     'my $x=1; sub f { my ($p)=@_; $p+1 } print f($x), "$x\n";',
     'our @a=(1,2,3); my $s=""; for my $v (@a) { $s.=$v } print "$s\n";',
     'my $x=1; sub g { 1 } sub f { my $s=""; for my $i (1..2) { $s.=$_[0]; g() } $s } print f($x), "$x\n";',
