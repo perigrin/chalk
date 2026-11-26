@@ -22,7 +22,6 @@ require Chalk::CodeGen::Harness::Producer;
 require Chalk::IR::Serialize::JSON;
 require JSON::PP;
 
-my $T2LA  = qr/a list assignment to an array or hash/;
 
 # floated($src, $is) -> why the loader refuses $src's wire once the node $is
 # accepts is taken off the control chain (what followed it now follows what
@@ -72,8 +71,9 @@ for my $case (
     [ q{my @a = (1,2); ($a[0], $a[1]) = ($a[1], $a[0]); print "@a\n";},          undef, 'a swap of elements' ],
     [ q{my @a = (1,2,3); my $x = $a[0] + $a[1]; ($a[0], $a[1]) = (10, 20) if @ARGV; $a[2] = $x; print "@a\n";},
         undef, 'elements, in an arm not taken' ],
-    # (placed, and not T2's yet: its own refusal)
-    [ q{sub f { @_ = (9, 9); $_[0] = 3 } my $x = 1; f($x); print "$x\n";},        $T2LA, 'the arguments' ],
+    # (placed: @_ assigned whole is the sub's own new elements, the caller's
+    # $x untouched -- lowered since B::SoN's places-everywhere, audit 3 N2)
+    [ q{sub f { @_ = (9, 9); $_[0] = 3 } my $x = 1; f($x); print "$x\n";},        undef, 'the arguments' ],
     # A call by a name made at run time: where B::SoN pins it (its
     # `placement-pins`), perl's output; floating, refused.
     [ q{package C; sub new { bless {n=>0}, shift } sub inc { $_[0]{n}++; return } package main; my $o = C->new; my $m = "inc"; $o->$m(); print $o->{n}, "\n";},

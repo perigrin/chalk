@@ -176,6 +176,8 @@ sub regex_subst {
         my $code = $b->emit(op => 'CodeOfFn', type => '%Slot', attr => { fn => $b->func( $sub, 'rxrepl_' . scalar keys $b->{rxcode}->%* )->{name} });
         ( my $flags = $s->flags // '' ) =~ s/[er]//g;
         my $subj = $b->as( $b->value( $s->inputs->[0] ), '%Slot' );
+        # (this s/// is a reader of a version passed too: not made again from inside itself)
+        local $b->{building}{ refaddr($s) } = 1;
         $b->reads_before($_) for $b->{passed}->@*;   # (the body may read and store what reads here read)
         return $b->{memo}{$k} = $b->subst_call( $s, $flags, { percall => 1 }, $subj, $code );
     }

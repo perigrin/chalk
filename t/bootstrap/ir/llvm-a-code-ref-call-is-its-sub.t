@@ -51,13 +51,13 @@ for my $case (
     is($got, $want, "$name: perl's answer") or diag $@;
 }
 
-# T2 REFUSES THESE, each by its reason (only the retired fallback lowered
-# them): refused by name, never a wrong answer.
+# LOWERED SINCE B::SoN'S PLACES-EVERYWHERE (was refused: "a direct call of a
+# closure made elsewhere"): `my ($a, $b) = @_` is each argument read at its
+# version, which T2 takes from the closure's @_ -- perl's answer.
 {
     my $src = q{my $add = sub { my ($a, $b) = @_; $a + $b }; print $add->(2, 3), "\n";};
     my $got = eval { through_llvm($src) };
-    ok(!defined $got, "T2 lowers no module for it: $src");
-    like($@, qr/\Alower: GAP: T2: out of its slices \(\Qa direct call of a closure made elsewhere\E\)/, "refused by T2's reason: $src");
+    is($got, "5\n", "perl's answer: $src") or diag $@;
 }
 
 done_testing;

@@ -752,7 +752,7 @@ sub _value {
         return $b->as($b->emit(op => 'ALen', type => 'i64', inputs => [ $b->array_of($in0) ]), $ty)
             if ( $in0->stamp // '' ) =~ /\A(?:Array|ArrayRef)\z/ || $b->type_of($in0) eq '%Array*'; # static type
         my $x = $b->value($in0);
-        return $b->emit(op => 'SlotLength', type => '%Slot', inputs => [$x]) if $ty eq '%Slot';
+        return $b->emit(op => 'SlotLength', type => '%Slot', inputs => [ $b->as($x, '%Slot') ]) if $ty eq '%Slot';
         return $b->emit(op => 'StrLen', type => 'i64', inputs => [ $b->as($x, '%Str') ]);
     }
     if ($op eq 'Not') {

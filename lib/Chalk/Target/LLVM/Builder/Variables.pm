@@ -269,7 +269,7 @@ sub reads_before {
         next if $b->{memo}{ refaddr($r) } || !$b->_rests_on_settled($r, {});
         $b->{arm_settled}{ refaddr($r) } = 1;
     }
-    do { local $b->{snapshot} = refaddr($_); $b->value($_) } for grep { !$_->is_pinned && !$b->{past_eval}{ refaddr($_) } && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_)
+    do { local $b->{snapshot} = refaddr($_); $b->value($_) } for grep { !$_->is_pinned && !$b->{past_eval}{ refaddr($_) } && !$b->{building}{ refaddr($_) } && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_)
                              && !$b->{arm_settled}{ refaddr($_) } && ( !$only || $only->($_) )
                              # (a variable made anew each pass, read before its `my`: none -- B::SoN's store target)
                              && !( $_->operation eq 'PadAccess' && $b->fresh_var($_) ) }
