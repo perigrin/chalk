@@ -367,12 +367,28 @@ sub walk {
             push $b->{passed}->@*, $s;
             $ctl = $s;
         }
-        elsif ($op eq 'EntryWrite' && $s->binds && $b->bound_scalar( $s->inputs->[0] ) && blessed( $s->inputs->[1] ) && $s->inputs->[1]->operation eq 'Ref') {
+        elsif ($op eq 'EntryWrite' && $s->binds && $b->bound_scalar( $s->inputs->[0] ) && _is_restore_of($b, $s)) {
             my $t = $s->inputs->[0];
             my $r = $s->inputs->[1];
             my $slot = $b->{agg_save}{ refaddr($r) } // out('a local scalar restored with no save made');
             $b->reads_before($_) for $b->{passed}->@*;
             $b->emit(op => 'GStore', type => 'void', inputs => [$slot], attr => { global => $b->global_named( 'bind::' . $t->qualified_name ) });
+            push $b->{passed}->@*, $s;
+            $ctl = $s;
+        }
+        # A GLOB BIND OF A PACKAGE SCALAR (`*x = \EXPR`): the name bound to the
+        # scalar EXPR refers to, as a local binds it -- never the reference
+        # stored into $x (audit 4, X2: SCALAR(0x...) for perl's 42).
+        elsif ($op eq 'EntryWrite' && $s->binds && ( $s->inputs->[0] isa Chalk::IR::Node && $s->inputs->[0]->is_package_scalar )) {
+            my ( $t, $r ) = $s->inputs->@*;
+            out('a glob bind of a package scalar that is not bound by name (the topic, or what is no reference)')
+                unless $b->bound_scalar($t) && blessed($r) && ( $r->operation eq 'Ref' || ( $r->operation eq 'Constant' && ( $r->const_type // '' ) eq 'ref' ) );
+            # (to a literal: perl's scalar is the literal itself, read-only --
+            # a store through the name dies, as through a reference to it)
+            my $ref = $r->operation eq 'Constant' ? $b->ro_literal_ref( $s, $r ) : $b->as( $b->value($r), '%Slot' );
+            $b->hash_reads_settled('a package store');
+            $b->reads_before($_) for $b->{passed}->@*;
+            $b->emit(op => 'GStore', type => 'void', inputs => [$ref], attr => { global => $b->global_named( 'bind::' . $t->qualified_name ) });
             push $b->{passed}->@*, $s;
             $ctl = $s;
         }
@@ -390,6 +406,17 @@ sub walk {
                 my $line = $s->can('line') && defined $s->line ? $s : undef;
                 $at = $b->deref_at($line) if $line;
                 $b->emit(op => 'AliasStore', type => 'void', inputs => [ $b->topic_raw, $val ], attr => { msg => $at->{msg}, id => $at->{id} });
+            }
+            elsif ( $b->bound_scalar( $s->inputs->[0] ) && $b->literal_bound( $s->inputs->[0] ) ) {
+                # (a name a glob bind may give a literal: perl's die on its store --
+                # which an eval would catch where the wire gives the store no way out)
+                out('a store to a name a glob bind may give a literal, in a program with an eval')
+                    if grep { $_->operation eq 'Region' && $_->can('eval_id') && defined $_->eval_id }
+                        _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} ),
+                        map { $_->graph ? $_->graph->component : () } map { $_->methods } $b->{mop} ? $b->{mop}->classes : ();
+                my $at = $b->deref_at( $s->can('line') && defined $s->line ? $s : $s->inputs->[0] );
+                $b->emit(op => 'AliasStore', type => 'void', attr => { msg => $at->{msg}, id => $at->{id} },
+                    inputs => [ $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->scalar_addr( $s->inputs->[0] ) ]), $val ]);
             }
             elsif ( $b->bound_scalar( $s->inputs->[0] ) ) { $b->emit(op => 'Store', type => 'void', inputs => [ $val, $b->scalar_addr( $s->inputs->[0] ) ]) }
             else { $b->emit(op => 'GStore', type => 'void', inputs => [$val], attr => { global => $b->global_of($s->inputs->[0]) }) }
@@ -1429,6 +1456,18 @@ sub merge_at {
         $memo{ refaddr($p) } = $b->emit(op => 'Phi', type => $ty, inputs => [ map { $_->[0] } @$in ], attr => { from => [ map { $_->[1]{block} } @$in ] });
     }
     return ( $join, \%memo );
+}
+
+
+# _is_restore_of($b, $EntryWrite) -> true for a local's restore of a package
+# scalar: a bind of the name to a reference to a read of that same name (its
+# save). Any other bind of the name is a glob bind (`*x = \EXPR`).
+sub _is_restore_of {
+    my ( $b, $s ) = @_;
+    my ( $t, $r ) = $s->inputs->@*;
+    return 0 unless blessed($r) && $r->operation eq 'Ref';
+    my $in = $r->inputs->[0];
+    return blessed($in) && $in->is_package_scalar && $b->global_of($in) eq $b->global_of($t) ? 1 : 0;
 }
 
 1;

@@ -1575,16 +1575,42 @@ sub as {
 }
 
 # bound_scalar($EntryDef) -> a package scalar some `local` of the program
-# binds to a new scalar (B::SoN's EntryWrite `local`, design B section 4): its
-# name is a binding (bind::NAME, a reference to the scalar's cell, undef for
-# its global), read through on each access. Any other is its global.
+# binds to a new scalar (B::SoN's EntryWrite `local`, design B section 4),
+# or a glob bind (`*x = \EXPR`) to another: its name is a binding (bind::NAME,
+# a reference to the scalar's cell, undef for its global), read through on each access. Any other is its global.
 sub bound_scalar {
     my ($b, $n) = @_;
     $b->{bound_scalars} //= { map { ( $b->global_of( $_->inputs->[0] ) => 1 ) }
-        grep { $_->operation eq 'EntryWrite' && $_->can('local') && $_->local && blessed( $_->inputs->[0] ) && $_->inputs->[0]->is_package_scalar }
+        grep { $_->operation eq 'EntryWrite' && ( $_->binds || $_->can('local') && $_->local ) && blessed( $_->inputs->[0] ) && $_->inputs->[0]->is_package_scalar }
         _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} ),
         map { $_->graph ? $_->graph->component : () } map { $_->methods } $b->{mop} ? $b->{mop}->classes : () };
     return blessed($n) && $n->is_package_scalar && !$b->is_topic($n) && $b->{bound_scalars}{ $b->global_of($n) } ? 1 : 0;
+}
+# literal_bound($EntryDef) -> a package scalar some glob bind gives a literal
+# (`*x = \42`): perl's scalar is then read-only, and a store dies.
+sub literal_bound {
+    my ($b, $n) = @_;
+    $b->{literal_bound} //= { map { ( $b->global_of( $_->inputs->[0] ) => 1 ) }
+        grep { $_->operation eq 'EntryWrite' && $_->binds && blessed( $_->inputs->[0] ) && $_->inputs->[0]->is_package_scalar
+               && blessed( $_->inputs->[1] ) && $_->inputs->[1]->operation eq 'Constant' }
+        _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} ),
+        map { $_->graph ? $_->graph->component : () } map { $_->methods } $b->{mop} ? $b->{mop}->classes : () };
+    return $b->{literal_bound}{ $b->global_of($n) } ? 1 : 0;
+}
+# ro_literal_ref($bind, $Constant) -> a reference to a read-only cell holding
+# the literal a glob bind gives a name, one per bind (the pool scalar_ref's
+# literals use: t2_is_ro, so a store through it dies).
+sub ro_literal_ref {
+    my ($b, $s, $c) = @_;
+    my $k = $b->{ro_cells}{ refaddr($s) . ':' . refaddr($c) } //= $b->{ro_n}++;
+    out('more than 256 references to literals') if $k >= 256;
+    my $d = $c->value;
+    my $x = !defined $d ? $b->emit(op => 'Undef', type => '%Slot')
+          : $d =~ /\A-?[0-9]{1,18}\z/ ? $b->as( $b->emit(op => 'Const', type => 'i64', attr => { value => $d }), '%Slot' )
+          : $b->as( $b->const_str($d), '%Slot' );
+    my $cell = $b->emit(op => 'ROCell', type => '%Slot*', attr => { index => $k });
+    $b->emit(op => 'Store', type => 'void', inputs => [ $x, $cell ]);
+    return $b->emit(op => 'SRef', type => '%Slot', inputs => [$cell]);
 }
 # scalar_addr($EntryDef) -> the %Slot* of the scalar its name is bound to now.
 sub scalar_addr {
