@@ -1123,11 +1123,14 @@ sub func {
     # A SUB SOME CALL PASSES A PLACE (B::SoN could not prove the alias
     # private: aliases-as-places): its @_ reads -- `$_[N]`, a shift, `my (...)
     # = @_` -- see the caller's variable as it is when they run, so it takes
-    # @_ as the array of aliases its caller builds.
+    # @_ as the array of aliases its caller builds. (So does a foreach
+    # iterator aliased by reference, B::SoN's read through the pass's element
+    # reference: perl hands the element -- by value, a store to it before
+    # `$_[0]` was lost, `1` for `5`: probe x/xm27.)
     $list ||= !$is_method && !$declared && grep {
         my $k = $_;
         $k->operation eq 'Call' && $k->is_sub_call
-            && ( grep { blessed($_) && $_->can('place') && $_->place } $k->inputs->@* )
+            && ( grep { blessed($_) && ( $_->can('place') && $_->place || _element_ref_read($_) ) } $k->inputs->@* )
             && grep { refaddr($_) == refaddr($sub) } $b->call_targets($k)
     } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} );
     # A SUB A CALL PASSES A LIST (`f(@$r)`): its count is the list's, known at

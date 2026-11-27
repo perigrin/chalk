@@ -2948,6 +2948,10 @@ xxm20	SAME
 xxm21	SAME	
 xxm22	SAME	
 xxm23	SAME	
+xxm24	REFUSED	B::SoN: GAP: a `my` made anew each pass, handed to a sub that may return or keep a reference to it, is not yet lowered -- every pass's would be one variable
+xxm25	REFUSED	B::SoN: GAP: a `my` made anew each pass, handed to a sub that may return or keep a reference to it, is not yet lowered -- every pass's would be one variable
+xxm26	SAME	
+xxm27	SAME	
 xxn01	REFUSED	GAP: T2: out of its slices (a reference to what is not an array)
 xxn02	SAME	
 xxn03	SAME	
