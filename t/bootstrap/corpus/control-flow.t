@@ -206,7 +206,21 @@ END_MD
 # All GREEN cases (D1-D7) must emit LLVM IR with NO Perl_/SV/sv_ symbols.
 # D1 already had this assertion; D2-D7 were missing it (alignment gap).
 # D8 is GAP (pure-GAP block, no emitted .ll to check).
+#
+# THE OLD-DIALECT BLOCKS (as D1's and D6's above): hand-written before wire v2,
+# so T2 refuses them; each program is gate-green through B::SoN and T2
+# (son-corpus-wide.t). Each is held here by its refusal's name -- a skip once
+# hid them all ("no .ll emitted"), and a block that lowers now fails until it
+# leaves this table.
 # ---------------------------------------------------------------------------
+
+my %REFUSED = (
+    ( map { $_ => 'PadAccess' } qw(D4 D6 D7 D9) ),
+    D1 => 'a statement VarDecl',
+    ( map { $_ => 'Phi' } qw(D2 D2b D2c D2d D2e D3 D3a D3b D3e D5 T3) ),
+    ( map { $_ => 'a control node with 2 successors' } qw(T4 T4b T4d T6 T7) ),
+    T5 => 'a direct call with no sub',
+);
 
 subtest 'all GREEN control-flow cases emit libperl-free .ll' => sub {
     for my $case (@$cases) {
@@ -219,19 +233,22 @@ subtest 'all GREEN control-flow cases emit libperl-free .ll' => sub {
 
         my $return_node;
         eval { $return_node = Chalk::CodeGen::Harness::MdtestCorpus->build_graph_from_ir($ir_text) };
-        next unless defined $return_node && !$@;
+        ok(defined $return_node && !$@, "case '$title': its block builds") or diag($@), next;
 
         my ($L, $meta) = Chalk::CodeGen::Harness::LLVMDriver->run($return_node);
         my $ll = $meta->{ll_text} // '';
 
-        SKIP: {
-            skip "case '$title': no .ll emitted (GAP or lower failed)", 3
-                unless length($ll) && !$meta->{marked_unsupported};
-
-            unlike($ll, qr/Perl_/,   "case '$title': .ll has no Perl_ C-API symbols");
-            unlike($ll, qr/\bSV\b/,  "case '$title': .ll has no SV type symbols");
-            unlike($ll, qr/libperl/, "case '$title': .ll has no libperl references");
+        my ($id) = $title =~ /\A(\S+)/;
+        if ( my $why = $REFUSED{$id} ) {
+            like($meta->{lower_error} // '', qr/\AGAP: T2: out of its slices \(\Q$why\E\)/,
+                "case '$title': T2 refuses its hand-written block by name");
+            next;
         }
+        ok(length($ll) && !$meta->{marked_unsupported}, "case '$title': T2 lowers its block")
+            or diag($meta->{lower_error} // 'no reason'), next;
+        unlike($ll, qr/Perl_/,   "case '$title': .ll has no Perl_ C-API symbols");
+        unlike($ll, qr/\bSV\b/,  "case '$title': .ll has no SV type symbols");
+        unlike($ll, qr/libperl/, "case '$title': .ll has no libperl references");
     }
 };
 
