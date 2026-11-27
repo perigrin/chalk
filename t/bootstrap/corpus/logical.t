@@ -16,7 +16,7 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 my $LOGICAL_MD = 't/corpus/mdtest/logical.md';
 
 unless (-f $LOGICAL_MD) {
-    plan skip_all => "logical.md not found at $LOGICAL_MD";
+    die "logical.md not found at $LOGICAL_MD", "\n";
 }
 
 # ---------------------------------------------------------------------------

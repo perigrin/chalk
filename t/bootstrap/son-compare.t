@@ -20,7 +20,7 @@ unless (-d $son_lib && -f "$son_lib/B/SoN.pm") {
 }
 
 unless (-f $chalk_script) {
-    plan skip_all => "chalk-emit-son-json not found";
+    die "chalk-emit-son-json not found", "\n";
 }
 
 # -----------------------------------------------------------------------

@@ -26,7 +26,7 @@ use Chalk::MOP;
 my $ir = perl_pipeline();
 
 unless (defined $ir) {
-    plan skip_all => 'Perl grammar failed to parse — cannot run $#{EXPR} tests';
+    die 'Perl grammar failed to parse — cannot run $#{EXPR} tests', "\n";
     exit;
 }
 
@@ -35,7 +35,7 @@ my $generated  = $bnf_target->generate($ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ArrayLengthDerefTest/g;
 eval $generated;
 if ($@) {
-    plan skip_all => "Generated grammar code failed: $@";
+    die "Generated grammar code failed: $@", "\n";
     exit;
 }
 

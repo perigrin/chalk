@@ -41,7 +41,7 @@ else {
     @files = grep { -f $_ } @files;
 }
 
-plan skip_all => "no lib files to measure" unless @files;
+die "no lib files to measure", "\n" unless @files;
 
 my @results;
 for my $file (@files) {

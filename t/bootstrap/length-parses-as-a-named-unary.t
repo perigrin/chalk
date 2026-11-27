@@ -12,11 +12,11 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 # still satisfy a Num position: lib/Chalk/Bootstrap/Perl/Actions.pm's
 # `substr($text, length($leaf->scanned_text()))` stopped parsing when it did not.
 my $ir = perl_pipeline();
-plan skip_all => 'Perl grammar failed' unless defined $ir;
+die 'Perl grammar failed', "\n" unless defined $ir;
 my $generated = Chalk::Bootstrap::BNF::Target::Perl->new->generate($ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::LengthParseTest/g;
 eval $generated;
-plan skip_all => "Generated grammar failed: $@" if $@;
+die "Generated grammar failed: $@", "\n" if $@;
 my $parser = build_perl_ir_parser(
     Chalk::Grammar::Perl::LengthParseTest::grammar(), start => 'Program');
 

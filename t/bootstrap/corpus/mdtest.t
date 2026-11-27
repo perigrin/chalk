@@ -23,7 +23,7 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 my $ARITHMETIC_MD = 't/corpus/mdtest/arithmetic.md';
 
 unless (-f $ARITHMETIC_MD) {
-    plan skip_all => "arithmetic.md not found at $ARITHMETIC_MD";
+    die "arithmetic.md not found at $ARITHMETIC_MD", "\n";
 }
 
 # ---------------------------------------------------------------------------

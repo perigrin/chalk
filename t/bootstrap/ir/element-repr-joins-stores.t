@@ -47,7 +47,7 @@ sub subscript_reprs ($graphs) {
 
 subtest 'a Str store widens the element repr the READ sees' => sub {
     my $g = load(qq{use 5.42.0;\nmy \@arr=(1,2); \$arr[0]="hello"; print \$arr[0];\n})
-        or plan skip_all => 'B::SoN produced no JSON';
+        or die 'B::SoN produced no JSON', "\n";
 
     my @reprs = subscript_reprs($g);
     ok(scalar @reprs, 'the program has Subscript nodes to check');
@@ -65,11 +65,11 @@ subtest 'the element join reaches the backend' => sub {
     # GAP no longer fires for a Str store. Until then this is the honest
     # refusal the guard's comment describes.
     my $g = load(qq{use 5.42.0;\nmy \@arr=(1,2); \$arr[0]="hello"; print \$arr[0];\n})
-        or plan skip_all => 'B::SoN produced no JSON';
-    my $entry = $g->{'main::__PROGRAM__'} or plan skip_all => 'no entry graph';
+        or die 'B::SoN produced no JSON', "\n";
+    my $entry = $g->{'main::__PROGRAM__'} or die 'no entry graph', "\n";
     my @rets = grep { $_->operation eq 'Return' }
                Chalk::IR::Analysis::_all_graph_nodes($entry);
-    plan skip_all => 'no Return' unless @rets;
+    die 'no Return', "\n" unless @rets;
 
     require Chalk::Target::LLVM;
     my $err;

@@ -70,7 +70,7 @@ subtest 'an aggregate default carries the field type' => sub {
 class Bag { field $items = [10, 20, 30]; method first { $items->[0] } }
 print Bag->new->first, "\n";
 PROG
-    plan skip_all => 'producer did not emit JSON for the class program' unless $graphs;
+    die 'producer did not emit JSON for the class program', "\n" unless $graphs;
 
     my ($f, $dv) = default_value_of($mop, 'Bag', '$items');
     ok $f, 'the MOP has field $items on class Bag';
@@ -95,7 +95,7 @@ subtest 'a scalar default the producer already typed is NOT overwritten' => sub 
 class Counter { field $n = 0; method get { $n } }
 print Counter->new->get, "\n";
 PROG
-    plan skip_all => 'producer did not emit JSON for the class program' unless $graphs;
+    die 'producer did not emit JSON for the class program', "\n" unless $graphs;
 
     my ($f, $dv) = default_value_of($mop, 'Counter', '$n');
     ok $dv, 'the field has a default value node';

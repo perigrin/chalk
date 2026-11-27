@@ -66,7 +66,7 @@ sub subscripts_of ($g) {
 }
 
 subtest 'a slice in a container defeats the static bounds check' => sub {
-    my $g = load_program(<<'PROG') or plan skip_all => 'producer emitted no graph';
+    my $g = load_program(<<'PROG') or die 'producer emitted no graph', "\n";
 use 5.42.0;
 my @a = (1,2,3,4);
 my @t = @a[-2, -1];
@@ -90,7 +90,7 @@ PROG
 # A plain list really does have one element per slot, so its bounds check is
 # sound and a genuine out-of-bounds read really is undef.
 subtest 'a plain literal still narrows, and a real miss is still Undef' => sub {
-    my $g = load_program(<<'PROG') or plan skip_all => 'producer emitted no graph';
+    my $g = load_program(<<'PROG') or die 'producer emitted no graph', "\n";
 use 5.42.0;
 my @a = (10, 20, 30);
 print "$a[1]\n";

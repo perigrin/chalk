@@ -30,13 +30,13 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 
 my $wire = do {
     open my $fh, '<', 't/bootstrap/ir/data/method-call-abi-boundary.json'
-        or plan skip_all => "fixture missing: $!";
+        or die "fixture missing: $!", "\n";
     local $/; <$fh>;
 };
 
 my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
-my $driver = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no driver';
-my $mop    = $driver->mop                   or plan skip_all => 'no mop';
+my $driver = $graphs->{'main::__PROGRAM__'} or die 'no driver', "\n";
+my $mop    = $driver->mop                   or die 'no mop', "\n";
 my ($ret)  = $driver->returns->@*;
 
 subtest 'the disagreement this exercises is real' => sub {

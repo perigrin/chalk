@@ -25,7 +25,7 @@ my %SKIP = (
 my $ir = perl_pipeline();
 
 unless (defined $ir) {
-    plan skip_all => 'Perl grammar (docs/chalk-bootstrap.bnf) failed to parse — cannot run conformance harness';
+    die 'Perl grammar (docs/chalk-bootstrap.bnf) failed to parse — cannot run conformance harness', "\n";
     exit;
 }
 
@@ -34,7 +34,7 @@ my $generated = $target->generate($ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ConformanceHarness/g;
 eval $generated;
 if ($@) {
-    plan skip_all => "Generated Perl grammar code failed to compile: $@";
+    die "Generated Perl grammar code failed to compile: $@", "\n";
     exit;
 }
 
@@ -47,7 +47,7 @@ my $gen_grammar = Chalk::Grammar::Perl::ConformanceHarness::grammar();
 my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
 
 unless (defined $parser) {
-    plan skip_all => 'Could not build Perl parser from generated grammar';
+    die 'Could not build Perl parser from generated grammar', "\n";
     exit;
 }
 

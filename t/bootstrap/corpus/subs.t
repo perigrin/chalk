@@ -15,7 +15,7 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 my $SUBS_MD = 't/corpus/mdtest/subs.md';
 
 unless (-f $SUBS_MD) {
-    plan skip_all => "subs.md not found at $SUBS_MD";
+    die "subs.md not found at $SUBS_MD", "\n";
 }
 
 # ---------------------------------------------------------------------------

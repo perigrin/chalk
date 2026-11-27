@@ -43,7 +43,7 @@ print $fh $SRC;
 close $fh;
 
 my $json = qx($PERL -I$SON -MO=SoN,json,package=main $path 2>/dev/null);
-plan skip_all => 'producer emitted no JSON' unless ($json // '') =~ /\S/;
+die 'producer emitted no JSON', "\n" unless ($json // '') =~ /\S/;
 
 sub direct_calls ($gs) {
     my @out;
@@ -64,7 +64,7 @@ my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
 my @calls  = direct_calls($graphs);
 
 subtest 'the edge and the hash name the same graph object' => sub {
-    plan skip_all => 'no direct call in the probe' unless @calls;
+    die 'no direct call in the probe', "\n" unless @calls;
     for my $c (@calls) {
         ok($c->target, 'the direct Call carries a callee metaobject');
         my $by_edge
@@ -81,7 +81,7 @@ subtest 'with the edge present, the name hash is not what is read' => sub {
     # Re-run the pass over a graph set whose callee is bound under a key no
     # Call names, with the Call's result repr cleared so the pass has work to
     # do. `$graphs->{$node->name}` misses; `$node->target->graph` does not.
-    plan skip_all => 'no direct call in the probe' unless @calls;
+    die 'no direct call in the probe', "\n" unless @calls;
 
     my %perturbed;
     for my $k ( sort keys $graphs->%* ) {

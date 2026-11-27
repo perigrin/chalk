@@ -30,11 +30,11 @@ my %FIXTURE = (
 for my $name (sort keys %FIXTURE) {
     subtest $name => sub {
         my $wire = do {
-            open my $fh, '<', $FIXTURE{$name} or plan skip_all => "fixture missing: $!";
+            open my $fh, '<', $FIXTURE{$name} or die "fixture missing: $!", "\n";
             local $/; <$fh>;
         };
         my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
-        my $prog = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no program graph';
+        my $prog = $graphs->{'main::__PROGRAM__'} or die 'no program graph', "\n";
         my ($ret) = grep {
             blessed($_) && $_->can('operation') && $_->operation eq 'Return'
         } $prog->returns->@*;
@@ -62,11 +62,11 @@ for my $name (sort keys %FIXTURE) {
 # thing, which is exactly the bug.
 subtest 'the folded comparator reaches the node' => sub {
     my $wire = do {
-        open my $fh, '<', $FIXTURE{'sort keys, joined'} or plan skip_all => 'fixture missing';
+        open my $fh, '<', $FIXTURE{'sort keys, joined'} or die 'fixture missing', "\n";
         local $/; <$fh>;
     };
     my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
-    my $prog = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no program graph';
+    my $prog = $graphs->{'main::__PROGRAM__'} or die 'no program graph', "\n";
 
     my ($sort) = grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Call'

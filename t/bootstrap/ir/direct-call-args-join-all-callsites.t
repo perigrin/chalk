@@ -89,10 +89,10 @@ my %stamp;    # order => the shift-read's repr, for the order-independence test
 for my $order ( sort keys %ORDER ) {
     subtest "$order call order" => sub {
         my $graphs = load( $ORDER{$order} );
-        plan skip_all => 'producer emitted no JSON' unless $graphs;
+        die 'producer emitted no JSON', "\n" unless $graphs;
 
         my ($callee) = grep { defined } $graphs->@{'main::g'};
-        plan skip_all => 'no callee graph' unless $callee;
+        die 'no callee graph', "\n" unless $callee;
 
         my @reads = arg_reads($callee);
         is( scalar @reads, 1, 'the callee has exactly one argument read' );

@@ -39,7 +39,7 @@ my ($fh, $tmp) = tempfile(SUFFIX => '.pl', UNLINK => 1);
 print $fh $prog;
 close $fh;
 my $json = qx($PERL -I$SON -MO=SoN,json,package=main $tmp 2>/dev/null);
-plan skip_all => "B::SoN produced no JSON" unless $json =~ /\S/;
+die "B::SoN produced no JSON", "\n" unless $json =~ /\S/;
 
 my $data = JSON::PP->new->decode($json);
 

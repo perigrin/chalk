@@ -11,7 +11,7 @@ use Chalk::CodeGen::Harness::MdtestCorpus;
 my $CLASSES_MD = 't/corpus/mdtest/classes.md';
 
 unless (-f $CLASSES_MD) {
-    plan skip_all => "classes.md not found at $CLASSES_MD";
+    die "classes.md not found at $CLASSES_MD", "\n";
 }
 
 # ---------------------------------------------------------------------------

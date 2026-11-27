@@ -57,7 +57,7 @@ subtest 'the producer really does stamp the source list List' => sub {
     print {$fh} "my \@g = grep { \$_ > 1 } (3,1,2); say(scalar(\@g));\n";
     close $fh;
     my $json = qx($PERL -I$SON -MO=SoN,json,package=main $tmp 2>/dev/null);
-    plan skip_all => 'producer emitted no JSON' unless $json =~ /\S/;
+    die 'producer emitted no JSON', "\n" unless $json =~ /\S/;
 
     like $json, qr/"stamp"\s*:\s*"List"/,
         'the wire carries a List stamp somewhere in this graph'
@@ -67,7 +67,7 @@ subtest 'the producer really does stamp the source list List' => sub {
 
 subtest 'a List-stamped ArrayLiteral loads with a representation' => sub {
     my $g = load("my \@g = grep { \$_ > 1 } (3,1,2); say(scalar(\@g));\n")
-        or plan skip_all => 'no graph';
+        or die 'no graph', "\n";
 
     my @lits = nodes_of($g, 'ArrayLiteral');
     cmp_ok scalar @lits, '>=', 1, 'the graph has an ArrayLiteral' or return;
@@ -82,7 +82,7 @@ subtest 'a List-stamped ArrayLiteral loads with a representation' => sub {
 
 subtest 'map is the same shape and must not be fixed separately' => sub {
     my $g = load("my \@m = map { \$_ * 2 } (1,2,3); say(scalar(\@m));\n")
-        or plan skip_all => 'no graph';
+        or die 'no graph', "\n";
 
     my @untyped = grep { !defined $_->stamp } nodes_of($g, 'ArrayLiteral');
     is_deeply [ map { $_->operation } @untyped ], [],
@@ -94,7 +94,7 @@ subtest 'map is the same shape and must not be fixed separately' => sub {
 # would be the guess the drop exists to prevent. This pins that the plain
 # array literal -- already stamped `Array` by the producer -- is untouched.
 subtest 'an already-typed literal keeps the type it had' => sub {
-    my $g = load("my \@a = (1,2,3); say(\$a[0]);\n") or plan skip_all => 'no graph';
+    my $g = load("my \@a = (1,2,3); say(\$a[0]);\n") or die 'no graph', "\n";
 
     my ($lit) = nodes_of($g, 'ArrayLiteral');
     ok $lit, 'found the array literal' or return;

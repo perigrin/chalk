@@ -16,7 +16,7 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 my $CONTROL_FLOW_MD = 't/corpus/mdtest/control-flow.md';
 
 unless (-f $CONTROL_FLOW_MD) {
-    plan skip_all => "control-flow.md not found at $CONTROL_FLOW_MD";
+    die "control-flow.md not found at $CONTROL_FLOW_MD", "\n";
 }
 
 # ---------------------------------------------------------------------------

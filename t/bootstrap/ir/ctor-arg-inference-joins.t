@@ -33,12 +33,12 @@ for my $fixture (sort keys %expect) {
     subtest $fixture => sub {
         my $path = "t/bootstrap/ir/data/$fixture.json";
         my $wire = do {
-            open my $fh, '<', $path or plan skip_all => "fixture missing: $!";
+            open my $fh, '<', $path or die "fixture missing: $!", "\n";
             local $/; <$fh>;
         };
         my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
         my ($any)  = values $graphs->%*;
-        my $mop    = $any->mop or plan skip_all => 'no mop';
+        my $mop    = $any->mop or die 'no mop', "\n";
 
         my ($holder) = grep { $_->name eq 'Holder' } $mop->classes;
         ok $holder, 'class Holder is in the MOP' or return;

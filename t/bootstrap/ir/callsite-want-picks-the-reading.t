@@ -37,7 +37,7 @@ use Chalk::IR::Node::Return;
 my $FIXTURE = 't/bootstrap/ir/data/list-return.json';
 
 my $wire = do {
-    open my $fh, '<', $FIXTURE or plan skip_all => "fixture missing: $!";
+    open my $fh, '<', $FIXTURE or die "fixture missing: $!", "\n";
     local $/; <$fh>;
 };
 
@@ -52,7 +52,7 @@ sub calls_in {
 }
 
 subtest 'the reading a callsite takes follows its want' => sub {
-    my $prog = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no program graph';
+    my $prog = $graphs->{'main::__PROGRAM__'} or die 'no program graph', "\n";
 
     my %by_want;
     for my $c (calls_in($prog)) {
@@ -101,7 +101,7 @@ subtest 'the reading a callsite takes follows its want' => sub {
 # single-input Return instead, because the branch still exists in the
 # consumer and a fixture that cannot reach it leaves it untested.
 subtest 'a single-reading callee answers every context' => sub {
-    my $agg = $graphs->{'main::agg'} or plan skip_all => 'no agg graph';
+    my $agg = $graphs->{'main::agg'} or die 'no agg graph', "\n";
     my ($ret) = grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Return'
     } $agg->returns->@*;
@@ -130,7 +130,7 @@ subtest 'a single-reading callee answers every context' => sub {
 # runtime from the caller's frame. The list reading is the sound default --
 # it carries all N values, so nothing is lost that a later collapse needs.
 subtest 'an absent want is not a scalar want' => sub {
-    my $lit = $graphs->{'main::lit'} or plan skip_all => 'no lit graph';
+    my $lit = $graphs->{'main::lit'} or die 'no lit graph', "\n";
     my ($ret) = grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Return'
     } $lit->returns->@*;

@@ -15,7 +15,7 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 my $REGEX_MD = 't/corpus/mdtest/regex.md';
 
 unless (-f $REGEX_MD) {
-    plan skip_all => "regex.md not found at $REGEX_MD";
+    die "regex.md not found at $REGEX_MD", "\n";
 }
 
 # ---------------------------------------------------------------------------

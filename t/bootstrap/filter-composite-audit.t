@@ -413,7 +413,7 @@ subtest 'real parse captures disagreement on push @arr, $obj->method()' => sub {
 
     eval { require TestPipeline; TestPipeline->import(qw(perl_pipeline build_perl_ir_parser)) };
     if ($@) {
-        plan skip_all => 'TestPipeline not available';
+        die 'TestPipeline not available', "\n";
         return;
     }
 
@@ -422,7 +422,7 @@ subtest 'real parse captures disagreement on push @arr, $obj->method()' => sub {
 
     my $raw_ir = TestPipeline::perl_pipeline();
     unless (defined $raw_ir) {
-        plan skip_all => 'perl_pipeline returned undef';
+        die 'perl_pipeline returned undef', "\n";
         return;
     }
 
@@ -431,7 +431,7 @@ subtest 'real parse captures disagreement on push @arr, $obj->method()' => sub {
     $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::AuditTest/g;
     eval $generated;
     if ($@) {
-        plan skip_all => "generated grammar failed to eval: $@";
+        die "generated grammar failed to eval: $@", "\n";
         return;
     }
 
@@ -442,7 +442,7 @@ subtest 'real parse captures disagreement on push @arr, $obj->method()' => sub {
     # Grab the FilterComposite from the parser so we can inspect its audit_log
     my $composite = $parser->semiring();
     unless ($composite->can('audit_log')) {
-        plan skip_all => 'parser semiring does not support audit_log';
+        die 'parser semiring does not support audit_log', "\n";
         return;
     }
 

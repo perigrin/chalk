@@ -41,7 +41,7 @@ subtest 'the transform exists and normalizes at entry' => sub {
 };
 
 subtest 'the absence is COUNTED, whether or not T1 later types it' => sub {
-    eval "require $T1; 1" or do { plan skip_all => "$T1 does not load" };
+    eval "require $T1; 1" or do { die "$T1 does not load", "\n" };
 
     my $f = Chalk::IR::NodeFactory->new;
     my $bare = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'y', inputs => []);
@@ -56,7 +56,7 @@ subtest 'the absence is COUNTED, whether or not T1 later types it' => sub {
 subtest 'a node that ARRIVES Unknown is not counted as absent' => sub {
     # The distinction spec §4 protects: Unknown is an ANSWER, absence is not.
     # A frontend that says Unknown did its job; one that says nothing did not.
-    eval "require $T1; 1" or do { plan skip_all => "$T1 does not load" };
+    eval "require $T1; 1" or do { die "$T1 does not load", "\n" };
 
     my $f = Chalk::IR::NodeFactory->new;
     my $stamped = $f->make('PadAccess', targ => 0, sigil => '$', symbol => 'z', inputs => []);
