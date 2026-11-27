@@ -1,5 +1,15 @@
 # The audit probes' verdicts (tools/audit-probes.pl --update writes this file).
 # name	verdict	why
+# THE THIRD FINAL AUDIT'S PROBES (probes/y in perl5-son) LEFT OUT OF THIS SET. 94 of the 110 it once
+# left out are rows now, as y<name> (branch x-wrongs: SAME or refused by name, promotion on and off).
+# NOT DETERMINISTIC in perl, so no verdict holds: yp13 (its answer depends on hash order), ya57 (perl
+# reads a freed scalar).
+# Their wires still break a verifier rule (t/bootstrap/ir/wire-verify.t holds every probe here to
+# SoN::Verify; a %HELD entry would hold them by name). Each is REFUSED or SAME today:
+# VERIFY yb41 yc160 ye49 ye53 yn26 yo15 yo17 yo22 yo23 yo27 yo30 yo33 yp158 yp18
+# THE FOURTH FINAL AUDIT'S PROBES (probes/x) are rows, as x<name>, but class X5's 16 (a promoted argument
+# read after a closure or a store through a reference changed it: SoN::AliasProof), fixed on their own
+# branch: xh05 xr01 xr02 xr03 xr08 xr10 xr18 xr20 xr21 xr27 xr30 xr35 xr37 xr38 xr43 xr45
 ag1	SAME	
 ag10	SAME	
 ag11	SAME	
@@ -2746,6 +2756,7 @@ xxh01	SAME
 xxh02	REFUSED	GAP: T2: out of its slices (a reference to what is not an array)
 xxh03	SAME	
 xxh04	SAME	
+xxh05	SAME	
 xxh06	SAME	
 xxh07	SAME	
 xxh08	REFUSED	B::SoN: GAP: an anonymous sub closing over $x has a capture that does not resolve to a slot in the enclosing pad (a nested closure's grandparent capture)
@@ -3027,11 +3038,16 @@ xxq05	REFUSED	load: from_json failed: GAP: main::u, which the program calls, is 
 xxq06	SAME	
 xxq07	SAME	
 xxq08	SAME	
+xxr01	SAME	
+xxr02	SAME	
+xxr03	SAME	
 xxr04	REFUSED	GAP: T2: out of its slices (a scalar deref where a reference T2 does not make may reach it)
 xxr05	REFUSED	GAP: T2: out of its slices (an array through an element read whole)
 xxr06	SAME	
 xxr07	SAME	
+xxr08	SAME	
 xxr09	SAME	
+xxr10	SAME	
 xxr11	REFUSED	B::SoN: GAP: an anonymous sub closing over $x has a capture that does not resolve to a slot in the enclosing pad (a nested closure's grandparent capture)
 xxr12	SAME	
 xxr13	SAME	
@@ -3039,24 +3055,34 @@ xxr14	SAME
 xxr15	SAME	
 xxr16	SAME	
 xxr17	SAME	
+xxr18	SAME	
 xxr19	SAME	
+xxr20	SAME	
+xxr21	SAME	
 xxr22	SAME	
 xxr23	SAME	
 xxr24	SAME	
 xxr25	SAME	
 xxr26	SAME	
+xxr27	SAME	
 xxr28	SAME	
 xxr29	SAME	
+xxr30	SAME	
 xxr31	REFUSED	GAP: T2: out of its slices (a captured variable that is not one kept in memory)
 xxr32	REFUSED	GAP: T2: out of its slices (a sort comparator reading @_)
 xxr33	SAME	
 xxr34	SAME	
+xxr35	SAME	
 xxr36	SAME	
+xxr37	SAME	
+xxr38	SAME	
 xxr39	SAME	
 xxr40	SAME	
 xxr41	SAME	
 xxr42	SAME	
+xxr43	SAME	
 xxr44	REFUSED	B::SoN: GAP: an anonymous sub closing over $x, $keep has a capture that does not resolve to a slot in the enclosing pad (a nested closure's grandparent capture)
+xxr45	SAME	
 xxr46	SAME	
 xxr47	SAME	
 xxr48	SAME	
@@ -5412,13 +5438,3 @@ zun77	SAME
 zun78	REFUSED	B::SoN: GAP: loop without a lowerable condition
 zun79	SAME	
 zun80	SAME	
-# THE THIRD FINAL AUDIT'S PROBES (probes/y in perl5-son) LEFT OUT OF THIS SET. 94 of the 110 it once
-# left out are rows now, as y<name> (branch x-wrongs: SAME or refused by name, promotion on and off).
-# NOT DETERMINISTIC in perl, so no verdict holds: yp13 (its answer depends on hash order), ya57 (perl
-# reads a freed scalar).
-# Their wires still break a verifier rule (t/bootstrap/ir/wire-verify.t holds every probe here to
-# SoN::Verify; a %HELD entry would hold them by name). Each is REFUSED or SAME today:
-# VERIFY yb41 yc160 ye49 ye53 yn26 yo15 yo17 yo22 yo23 yo27 yo30 yo33 yp158 yp18
-# THE FOURTH FINAL AUDIT'S PROBES (probes/x) are rows, as x<name>, but class X5's 16 (a promoted argument
-# read after a closure or a store through a reference changed it: SoN::AliasProof), fixed on their own
-# branch: xh05 xr01 xr02 xr03 xr08 xr10 xr18 xr20 xr21 xr27 xr30 xr35 xr37 xr38 xr43 xr45
