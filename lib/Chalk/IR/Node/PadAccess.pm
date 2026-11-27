@@ -27,6 +27,10 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
     # ...and of those, the FILE's (B::SoN `file`): the program's own, or one a
     # named sub reaches out to -- not a sub's own aggregate a closure captures.
     field $file :param :reader = 0;
+    # A `my` MADE ANEW EACH PASS, as a place handed to a call (B::SoN
+    # `fresh_each_pass`, as on a Ref): each pass's is a cell of its own
+    # (Builder fresh_var), which the callee's `\$_[N]` may outlive.
+    field $fresh_each_pass :param :reader = 0;
 
     method operation() { 'PadAccess' }
 
@@ -57,7 +61,7 @@ class Chalk::IR::Node::PadAccess :isa(Chalk::IR::Node::Access) {
         # field for diagnostics / round-trip only (no consumer reads it
         # behaviorally; PadAccess resolves to its VarDecl via inputs[0]).
         return join('|', 'PadAccess', 'name=' . $self->name(),
-            ($shared ? 'shared' : ()), $self->_serialize_inputs());
+            ($shared ? 'shared' : ()), ($fresh_each_pass ? 'fresh' : ()), $self->_serialize_inputs());
     }
 
     # is_my_hash -> true for A `my %h` NAMED, NOT MADE HERE (`my %e;`): one hash

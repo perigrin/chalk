@@ -899,6 +899,7 @@ sub _deserialize_graph ($method_data) {
         if ( $fields->{place} ) {
             $args{place}  = true;
             $args{vivify} = true if $fields->{vivify};
+            $args{fresh_each_pass} = 1 if $fields->{fresh_each_pass} && $op eq 'PadAccess';
         }
         my $node;
         if ($op eq 'Loop' && $phi_backedge_slot == 1) {

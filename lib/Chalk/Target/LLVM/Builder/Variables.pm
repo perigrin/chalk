@@ -206,13 +206,16 @@ sub location {
 # fresh_var($pad) -> a `my` scalar of this function a reference is taken to
 # that B::SoN says is made anew each pass (Ref's fresh_each_pass: `for (...)
 # { my $x = $_; push @l, \$x }`), not a closure's: each pass's is a cell
-# of its own (fresh_cell).
+# of its own (fresh_cell). Or one a call is handed as a place B::SoN says is
+# made anew each pass (PadAccess fresh_each_pass: the callee may keep
+# `\$_[0]`, `3,3,3` for perl's `1,2,3`).
 sub fresh_var {
     my ($b, $pad) = @_;
     return 0 unless blessed($pad) && $pad->operation eq 'PadAccess' && ( $pad->sigil // '' ) eq '$' && !$pad->shared;
     return $b->{fresh_vars}{ $pad->name } //= scalar grep {
         $_->operation eq 'Ref' && $_->fresh_each_pass && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation eq 'PadAccess'
             && ( $_->inputs->[0]->name // '' ) eq $pad->name
+        || $_->operation eq 'PadAccess' && $_->fresh_each_pass && ( $_->name // '' ) eq $pad->name
     } +($b->{own_nodes} // [])->@*;
 }
 

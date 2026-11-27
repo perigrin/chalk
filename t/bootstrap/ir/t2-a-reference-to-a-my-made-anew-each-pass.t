@@ -40,6 +40,22 @@ my @same = (
       'a range iterator' ],
     [ q{my @r; for my $i (1..2) { for my $j (1..2) { push @r, \$i } } print join(",", map { $$_ } @r), "\n";},
       'a range iterator, from an inner loop' ],
+    # (HANDED TO A CALL that keeps `\$_[0]`: B::SoN's place for it says
+    # fresh_each_pass -- one slot for every pass was `3,3,3`; x/xm24-xm31)
+    [ q{sub k { \$_[0] } my @r; for my $i (1..3) { my $x = $i; push @r, k($x) } print join(",", map { $$_ } @r), "\n";},
+      'handed to a named sub returning \$_[0]' ],
+    [ q{our @K; sub keep { push @K, \$_[0] } for my $i (1..3) { my $x = $i; keep($x) } print join(",", map { $$_ } @K), "\n";},
+      'handed to a named sub keeping \$_[0]' ],
+    [ q{package K; sub new { bless {}, shift } sub k { \$_[1] } package main; my $o = K->new; my @r; for my $i (1..3) { my $x = $i; push @r, $o->k($x) } print join(",", map { $$_ } @r), "\n";},
+      'handed to a method returning \$_[1]' ],
+    [ q{my $k = sub { \$_[0] }; my @r; for my $i (1..3) { my $x = $i; push @r, $k->($x) } print join(",", map { $$_ } @r), "\n";},
+      'handed to a code ref returning \$_[0]' ],
+    [ q{my @K; my $keep = sub { push @K, \$_[0] }; for my $i (1..3) { my $x = $i; $keep->($x) } print join(",", map { $$_ } @K), "\n";},
+      'handed to a code ref keeping \$_[0]' ],
+    [ q{sub k { \$_[0] } my @r; my $i = 0; while ($i < 3) { my $x = ++$i; push @r, k($x) } print join(",", map { $$_ } @r), "\n";},
+      'in a while body, handed to a named sub' ],
+    [ q{sub bump { $_[0]++ } my @o; for my $i (1..3) { my $x = $i; bump($x); push @o, $x } print "@o\n";},
+      'handed to a sub writing $_[0], read after' ],
 );
 
 for my $case (@same) {
