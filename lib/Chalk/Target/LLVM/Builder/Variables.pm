@@ -219,6 +219,15 @@ sub fresh_var {
     } +($b->{own_nodes} // [])->@*;
 }
 
+# fresh_made($pad) -> the cell of a fresh_var has been made this pass (or an
+# enclosing loop's): its `my` was reached.
+sub fresh_made {
+    my ($b, $pad) = @_;
+    my $key = $pad->name . '#' . ( $pad->can('targ') ? $pad->targ // '' : '' );
+    for ( my $p = $b->{fresh_pass}; $p; $p = $p->{outer} ) { return 1 if $p->{made}{$key} }
+    return 0;
+}
+
 # fresh_cell($pad, $key) -> the cell of a fresh_var this pass: made where the
 # pass first reaches it (its `my`), on the heap -- a reference to it
 # outlives the pass -- and held in a slot of the function (a %Slot holding a
@@ -278,8 +287,10 @@ sub reads_before {
     }
     do { local $b->{snapshot} = refaddr($_); $b->value($_) } for grep { !$_->is_pinned && !$b->{past_eval}{ refaddr($_) } && !$b->{building}{ refaddr($_) } && !$b->_needs_unmade_phi($_, {}) && !$b->_through_ref($_)
                              && !$b->{arm_settled}{ refaddr($_) } && ( !$only || $only->($_) )
-                             # (a variable made anew each pass, read before its `my`: none -- B::SoN's store target)
-                             && !( $_->operation eq 'PadAccess' && $b->fresh_var($_) ) }
+                             # (a variable made anew each pass, read before its `my`: none -- B::SoN's store target;
+                             # read after it, this pass, it is made here as any read: a call
+                             # storing it through @_ follows -- fifth final audit, Q17, vt87)
+                             && !( $_->operation eq 'PadAccess' && $b->fresh_var($_) && !$b->fresh_made($_) ) }
         +($b->{readers}{ refaddr($version) } // [])->@*;
 }
 
@@ -409,8 +420,13 @@ sub lvalue_sub_store {
     $b->value($c);
     $b->hash_reads_settled('a store through an lvalue sub');
     $b->reads_before($_) for $b->{passed}->@*;
+    # (a package scalar: the one its name holds where the store runs -- a
+    # `local`'s or a glob bind's, not the first -- fifth final audit, Q9; one
+    # a glob bind may give a literal dies there, which is refused)
+    out('an assignment through an lvalue sub to a name a glob bind may give a literal')
+        if !$file && $b->bound_scalar($lv) && $b->literal_bound($lv);
     my $ptr = $file ? $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_named( 'my::' . $lv->symbol ) })
-                    : $b->emit(op => 'GAddr', type => '%Slot*', attr => { global => $b->global_of($lv) });
+                    : $b->scalar_addr($lv);
     $b->emit(op => 'Store', type => 'void', inputs => [ $val, $ptr ]);
 }
 

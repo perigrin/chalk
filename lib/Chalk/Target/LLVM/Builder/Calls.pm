@@ -1477,6 +1477,11 @@ sub func {
     }
     else {
         out("sub $name returns a list as one value") if blessed($v) && _is_list($v);
+        # (a choice whose arm is a list -- `$x ? ($x) : ()`, B::SoN stamps
+        # it Unknown -- is no item or one in a list, undef or one in a
+        # scalar: not one value either way -- fifth final audit, Q16)
+        out("sub $name returns a choice of a list and a value, as one value")
+            if blessed($v) && $v->operation eq 'TernaryExpr' && grep { blessed($_) && _is_list($_) } $v->inputs->@[1, 2];
         $r = blessed($v) ? $b->as($b->value($v), '%Slot') : $b->emit(op => 'Undef', type => '%Slot');
     }
     $b->{cur}{term} = [ 'retval', $r ];

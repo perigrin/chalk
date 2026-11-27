@@ -497,6 +497,10 @@ sub value {
         if delete $b->{past_eval}{ refaddr($v) } and !$v->all_made_the_same;
     out('a read through a reference an arm made, read again past a call or a store')
         if $b->{arm_settled} && $b->{arm_settled}{ refaddr($v) } && !$b->{memo}{ refaddr($v) };
+    # (THE NAME OF A PACKAGE AGGREGATE A `local` SWAPS, read as the place --
+    # no memory version: which aggregate it holds is the one there where the
+    # read is made, each time, never the first read's -- fifth final audit, Q7)
+    return $b->_value($v) if $b->swapped_place($v);
     my $t = $b->{memo}{ refaddr($v) } //= $b->_value($v);
     $b->{made}{ refaddr($v) } = 1;   # (made, in some scope: hash_reads_settled)
     return $t;

@@ -608,6 +608,15 @@ sub _pkg_agg_name {
     return ( $n->sigil eq '%' ? 'pkghash::' : 'pkgarr::' ) . $n->qualified_name;
 }
 
+# swapped_place($n) -> true where $n reads the name of a package aggregate a
+# `local` swaps as the place (no memory version): what it is depends on where
+# it is read.
+sub swapped_place {
+    my ($b, $n) = @_;
+    return blessed($n) && $n isa Chalk::IR::Node && $n->operation eq 'EntryDef' && $n->is_package_aggregate
+        && !blessed( $n->mem_in ) && $b->swapped->{ _pkg_agg_name($n) } ? 1 : 0;
+}
+
 # swapped -> { name => 1 } of the package aggregates a `local` swaps anywhere.
 sub swapped {
     my ($b) = @_;
@@ -1165,7 +1174,11 @@ sub array_of {
     }
     # A CHOICE IN LIST CONTEXT (`$c ? @$x : ()`, `$c ? @a : 7`): the list of
     # the arm taken, merged at the join.
-    return $b->list_choice($n) if blessed($n) && $n->operation =~ /\A(?:TernaryExpr|And|Or)\z/ && ( _is_list($n) || $b->type_of($n) eq '%Array*' );
+    # (one whose arm is a list -- `$x ? ($x) : ()` B::SoN stamps Unknown --
+    # is a list here too: the empty arm is no item, not an undef -- fifth
+    # final audit, Q16)
+    return $b->list_choice($n) if blessed($n) && $n->operation =~ /\A(?:TernaryExpr|And|Or)\z/
+        && ( _is_list($n) || $b->type_of($n) eq '%Array*' || $n->operation eq 'TernaryExpr' && grep { blessed($_) && _is_list($_) } $n->inputs->@[1, 2] );
     # A LIST A LOOP BUILDS (a phi of one, map's ListAppend) is its array.
     return $b->value($n) if blessed($n) && $n->operation =~ /\A(?:Phi|ListAppend)\z/ && $b->type_of($n) eq '%Array*';
     # A HASH IN A LIST is its pairs, key then value (`(0, %h)`, `%$r`, a

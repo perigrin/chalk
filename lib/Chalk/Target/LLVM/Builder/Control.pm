@@ -145,7 +145,21 @@ sub walk {
             # (A BLESS replaces what its reference is blessed into: a ref() or
             # a blessed() of an earlier version is made before it)
             $b->class_reads_settled if $op eq 'Call' && $s->blesses;
+            # (AN ARRAY THROUGH A REFERENCE READ ONLY FOR ITS ELEMENTS -- an
+            # item of the list a `my` array is made from, of [...], of a
+            # print, a join, an `x` -- is its elements here: a copy, as a read
+            # made before a store is (reads_before). What reads them is made
+            # where it is first used, after a push or a call that changes the
+            # array -- `my @l = (@{$h{a}}, 0); push @{$h{a}}, 3` gave `1 2 3 0`
+            # -- fifth final audit, Q13. Read some other way, or both ways,
+            # it is refused by name.)
             if ( $op eq 'PostfixDeref' && ( $s->sigil // '' ) =~ /\A[\@%]\z/ && !$b->_value_read($s) ) { $b->{stood}{ refaddr($s) } = 1 }
+            elsif ( $op eq 'PostfixDeref' && $s->is_array_deref && ( my $uses = _element_uses($s) ) =~ /\A(?:elements|unknown)\z/ ) {
+                out('an array through a reference made where it stands, read whole where it is not said (its elements, or the array)')
+                    if $uses eq 'unknown';
+                local $b->{snapshot} = refaddr($s);
+                $b->value($s);
+            }
             else { $b->value($s) }
             push $b->{passed}->@*, $s;
             $ctl = $s;
@@ -431,6 +445,13 @@ sub walk {
             my ($t, $v) = $s->inputs->@*;
             my $mem = $s->mem_in;
             my $h = $t->sigil eq '%';
+            # (A REFERENCE TO THE NAME, taken at no memory version: which of
+            # the two aggregates it refers to is where perl takes it, and the
+            # wire does not say where that is -- T2 makes it at its first use,
+            # or looks through it to the name -- fifth final audit, Q7)
+            out('a reference to a package array or hash a `local` swaps, taken at no memory version (which of the two it refers to is not said)')
+                if grep { blessed($_) && $_->operation eq 'Ref' && $b->swapped_place( $_->inputs->[0] ) && _pkg_agg_name( $_->inputs->[0] ) eq _pkg_agg_name($t) }
+                    _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
             $b->hash_reads_settled('a local');
             $b->reads_before($_) for $b->{passed}->@*;
             my $slot;
@@ -510,6 +531,13 @@ sub walk {
         # value is the argument. A direct call is made where it stands, and so
         # is a method named by a value (`$o->$m()`): what it does, it does here.
         elsif ($op eq 'Call' && ( $b->{args}{ refaddr($s) } || $s->is_sub_call )) {
+            # (AN ARRAY OR HASH THROUGH A REFERENCE HANDED TO IT beside a later
+            # argument that is a call: perl takes its elements, aliased, before
+            # that call runs, which may change it; T2 hands the aggregate --
+            # `f(@$o, c())` with c pushing gave `1 9 0` for `1 0`, fifth final
+            # audit, Q13)
+            out('an array or hash through a reference handed to a sub beside a later call that may change it (perl takes its elements before the call)')
+                if $s->is_sub_call && _whole_deref_beside_a_later_call($s);
             $b->value($s);
             push $b->{passed}->@*, $s;   # B::SoN versions memory at a call
             $ctl = $s;
@@ -1179,6 +1207,53 @@ sub _only_counted {
     return 1;
 }
 
+# _element_uses($n) -> how $n's value is used: 'elements' where every use
+# reads only its elements, never the array itself -- an item of the list a
+# `my` array or hash is made from, of [...] or {...}, of a print, a join or
+# another builtin that changes nothing, of a string, or of an unnamed list or
+# an `x` whose own uses are all such (a copy there is perl's answer: each
+# takes the elements as they are where the item stands); 'container' where
+# every use is of the array itself (a count, an element, a slice, a sub's
+# argument, a push, a reference, a foreach's list); 'none' where nothing
+# takes its value; else 'unknown' (a use of each kind, or one not told).
+sub _element_uses {
+    my ( $n, $depth ) = @_;
+    return 'unknown' if ( $depth //= 0 ) > 8;
+    my %kind;
+    for my $u (grep { blessed($_) && $_->operation ne 'Exc' } ( $n->consumers // [] )->@*) {
+        next if $u->operation =~ /\A(?:Loop|Region|If|Proj)\z/ || $u->operation eq 'Phi' && $u->memory;
+        my @at = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
+        next unless @at;
+        my $op = $u->operation;
+        if ( $op eq 'Print' || $op eq 'Concat'
+            || $op =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( defined $u->symbol && $u->symbol !~ /::/ || ( $u->stamp // '' ) =~ /\A(?:ArrayRef|HashRef)\z/ )   # static type
+            || $op eq 'Call' && !$u->is_sub_call && !$u->mutates_array
+                && ( Chalk::Grammar::Perl::BuiltinTable::fact( $u->name, 'effect_pure' ) || Chalk::Grammar::Perl::BuiltinTable::fact( $u->name, 'reads_list' ) ) ) {
+            $kind{elements} = 1;
+        }
+        elsif ( $op =~ /\A(?:Coerce|Repeat|ArrayLiteral)\z/ ) { $kind{ _element_uses( $u, $depth + 1 ) =~ s/\Anone\z/unknown/r } = 1 }
+        elsif ( $op =~ /\A(?:Count|Exists|Delete|Ref|LocalAlias)\z/ || $op eq 'Subscript' && "@at" eq '0'
+            || $op eq 'Slice' && "@at" eq $u->inputs->$#* || $op eq 'Call' && ( $u->is_sub_call || $u->mutates_array ) ) {
+            $kind{container} = 1;
+        }
+        else { $kind{unknown} = 1 }
+    }
+    return 'none' unless %kind;
+    return keys(%kind) == 1 ? ( keys %kind )[0] : 'unknown';
+}
+
+# _whole_deref_beside_a_later_call($call) -> an argument of $call is an array
+# or hash through a reference, and one after it is a sub call (through a
+# coercion).
+sub _whole_deref_beside_a_later_call {
+    my ($c) = @_;
+    my @in = map { my $x = $_; $x = $x->inputs->[0] while blessed($x) && $x->operation eq 'Coerce'; $x } grep { blessed($_) } $c->inputs->@*;
+    for my $i ( grep { $in[$_]->operation eq 'PostfixDeref' && ( $in[$_]->sigil // '' ) =~ /\A[\@%]\z/ } 0 .. $#in ) {
+        return 1 if grep { $_->operation eq 'Call' && $_->is_sub_call } @in[ $i + 1 .. $#in ];
+    }
+    return 0;
+}
+
 # reads_topic -> the program reads the global $_ (a sub reading it, called
 # in a foreach's body). Where anything writes it too, $_ is aliased
 # (topic_alias): perl's $_ is the element itself, and a write through it
@@ -1210,7 +1285,11 @@ sub topic_alias {
         # (WHETHER OR NOT THIS GRAPH READS IT: a callee's store to $_ is to the
         # element -- `for (@l) { f() } sub f { $_ = 9 }` left @l as it was,
         # audit 2026-11-22)
-        $aliased && $writes ? 1 : 0;
+        # (AND WHERE THE PROGRAM READS $_ BY ITS NAME: the element as it is
+        # where it is read, which a store by another name -- `$a[0]++` in a
+        # callee -- changes; a copy made at the pass's start did not see it
+        # -- fifth final audit, Q17)
+        $aliased && ( $writes || $b->reads_topic ) ? 1 : 0;
     };
 }
 

@@ -293,7 +293,9 @@ sub _use_counts {
         next unless @pos;
         my $at0 = grep { $_ == 0 } @pos;   # (a bare grep in an || chain takes the rest as its list)
         my $at1 = grep { $_ == 1 } @pos;
-        if ($op eq 'ArrayLiteral' || $op eq 'Print'
+        # (a hash literal's items are a list too: `(a => f(), b => 1)` calls f
+        # for a list, as many items as it returns -- fifth final audit, Q16)
+        if ($op eq 'ArrayLiteral' || $op eq 'HashLiteral' || $op eq 'Print'
             || $op eq 'Call' && ( $u->dispatch_kind // '' ) eq 'direct'
             || $op eq 'Call' && ( $u->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ && !$at0   # not the invocant, nor the code
             || $op eq 'Call' && $u->takes_a_list && !$at0   # (push's list, join's: not its array, its separator)

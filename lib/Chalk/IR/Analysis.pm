@@ -2738,7 +2738,10 @@ sub _narrow_unknown_coercions ($graphs) {
                     # re-propagation below derives the new answer. Restricted to
                     # the vacuous case -- an identity edge ($repr eq to_repr)
                     # changes no type, so its consumer's stamp is still true.
-                    if ($vacuous && $node isa Chalk::IR::Value) {
+                    # (ONLY ONE THE JOIN RULE DERIVES: a builtin's type -- join's
+                    # Str -- is no join of its operands, and cleared it stayed
+                    # untyped: fifth final audit, vo05)
+                    if ($vacuous && $node isa Chalk::IR::Value && exists $_COMPUTED_REPR{ $node->operation }) {
                         push @stale, $node;
                     }
 
