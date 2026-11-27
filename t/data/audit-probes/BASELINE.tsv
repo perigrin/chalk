@@ -7,9 +7,7 @@
 # Their wires still break a verifier rule (t/bootstrap/ir/wire-verify.t holds every probe here to
 # SoN::Verify; a %HELD entry would hold them by name). Each is REFUSED or SAME today:
 # VERIFY yb41 yc160 ye49 ye53 yn26 yo15 yo17 yo22 yo23 yo27 yo30 yo33 yp158 yp18
-# THE FOURTH FINAL AUDIT'S PROBES (probes/x) are rows, as x<name>, but class X5's 16 (a promoted argument
-# read after a closure or a store through a reference changed it: SoN::AliasProof), fixed on their own
-# branch: xh05 xr01 xr02 xr03 xr08 xr10 xr18 xr20 xr21 xr27 xr30 xr35 xr37 xr38 xr43 xr45
+# THE FOURTH FINAL AUDIT'S PROBES (probes/x) are rows, as x<name>; class X5's 16 among them.
 ag1	SAME	
 ag10	SAME	
 ag11	SAME	
