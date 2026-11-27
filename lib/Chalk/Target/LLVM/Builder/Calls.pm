@@ -804,6 +804,16 @@ sub _element_ref_read {
     return undef;
 }
 
+# _of_no_args($r) -> the element reference $r (from _element_ref_read) is to
+# an element of what is not @_.
+sub _of_no_args {
+    my ($r) = @_;
+    return 0 unless blessed($r);
+    my $ref = $r->operation eq 'TernaryExpr' ? $r->inputs->[1] : $r;
+    my $s = $ref->element_subscript // $ref->hash_element_subscript // return 0;
+    return _of_args( $s->inputs->[0] ) ? 0 : 1;
+}
+
 # _folded($aggregate) -> a named array or hash B::SoN reads at no memory
 # version anywhere: one it takes for never written, every read of it folded
 # to what it was made with -- a store through an alias of its elements (a
@@ -1126,11 +1136,13 @@ sub func {
     # @_ as the array of aliases its caller builds. (So does a foreach
     # iterator aliased by reference, B::SoN's read through the pass's element
     # reference: perl hands the element -- by value, a store to it before
-    # `$_[0]` was lost, `1` for `5`: probe x/xm27.)
+    # `$_[0]` was lost, `1` for `5`: probe x/xm27. Not one of a foreach over
+    # @_: its element may be a caller's literal, which an alias of it stops
+    # at -- by value, as before.)
     $list ||= !$is_method && !$declared && grep {
         my $k = $_;
         $k->operation eq 'Call' && $k->is_sub_call
-            && ( grep { blessed($_) && ( $_->can('place') && $_->place || _element_ref_read($_) ) } $k->inputs->@* )
+            && ( grep { blessed($_) && ( $_->can('place') && $_->place || _of_no_args( _element_ref_read($_) ) ) } $k->inputs->@* )
             && grep { refaddr($_) == refaddr($sub) } $b->call_targets($k)
     } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} );
     # A SUB A CALL PASSES A LIST (`f(@$r)`): its count is the list's, known at
