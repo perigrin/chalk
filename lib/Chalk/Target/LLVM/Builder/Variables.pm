@@ -230,7 +230,11 @@ sub fresh_cell {
     };
     my $pass = $b->{fresh_pass};
     out('a variable made anew each pass first reached outside a loop\'s body') unless $pass;
-    unless ( $pass->{made}{$key} ) {
+    # (made by an enclosing loop's pass: an inner loop refers to that one --
+    # its own pass made a cell nothing stored, ",,," for "1,1,2,2")
+    my $made = 0;
+    for ( my $p = $pass; $p && !$made; $p = $p->{outer} ) { $made = $p->{made}{$key} }
+    unless ($made) {
         out('a variable made anew each pass first reached in an arm or an inner loop') unless ( $b->{depth} // 0 ) == $pass->{depth};
         my $cell = $b->emit(op => 'NewCell', type => '%Slot*', attr => { name => $pad->name });
         $b->emit(op => 'Store', type => 'void', inputs => [ $b->emit(op => 'SRef', type => '%Slot', inputs => [$cell]), $holder ]);

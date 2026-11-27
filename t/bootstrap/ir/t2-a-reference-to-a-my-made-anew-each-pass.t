@@ -31,6 +31,15 @@ my @same = (
       'each call its own' ],
     [ q{my @l; for my $i (1..2) { my $x = $i; my $r = \$x; $$r += 10; push @l, $x } print "@l\n";},
       'written through its reference, read by its name' ],
+    # (the outer pass's variable, referred to in an inner loop: that loop's
+    # pass made a cell of its own, never stored -- ",,," for "1,1,2,2")
+    [ q{my @r; for my $i (1..2) { my $x = $i; for my $j (1..2) { push @r, \$x } } print join(",", map { $$_ } @r), "\n";},
+      'the outer pass\'s, from an inner loop' ],
+    # (a range's iterator is made anew each pass too: audit 4, X1)
+    [ q{my @r; for my $i (1..3) { push @r, \$i } print join(",", map { $$_ } @r), "\n";},
+      'a range iterator' ],
+    [ q{my @r; for my $i (1..2) { for my $j (1..2) { push @r, \$i } } print join(",", map { $$_ } @r), "\n";},
+      'a range iterator, from an inner loop' ],
 );
 
 for my $case (@same) {

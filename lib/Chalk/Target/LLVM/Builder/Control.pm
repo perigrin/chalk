@@ -1114,7 +1114,7 @@ sub loop {
         local $b->{memo} = { $b->{memo}->%* };
         local $b->{stood} = { ( $b->{stood} // {} )->%* };   # (as its memo: see _stood_already)
         local $b->{depth} = ( $b->{depth} // 0 ) + 1;
-        local $b->{fresh_pass} = { depth => $b->{depth}, made => {} };   # (a pass's own variables: fresh_cell)
+        local $b->{fresh_pass} = { depth => $b->{depth}, made => {}, outer => $b->{fresh_pass} };   # (a pass's own variables: fresh_cell)
         local $b->{lscope} = scope_key($bodyp);
         local $b->{scope_in} = [ 'loop', $pre_memo ];
         local $b->{rx_ok} = _rx_arm( $b->{rx_ok}, $cond[0], 0 );   # (a body runs where its condition held)
