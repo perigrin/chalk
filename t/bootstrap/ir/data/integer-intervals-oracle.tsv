@@ -447,8 +447,8 @@ node	chalk-found-gaps:4	main::__PROGRAM__|Constant|const_type=integer|value=1#1	
 node	chalk-found-gaps:4	main::__PROGRAM__|Constant|const_type=integer|value=2#0	iv,e53
 node	chalk-found-gaps:4	main::__PROGRAM__|Constant|const_type=integer|value=3#0	iv,e53
 node	chalk-found-gaps:4	main::__PROGRAM__|Constant|const_type=integer|value=4#0	iv,e53
-node	chalk-found-gaps:4	main::__PROGRAM__|Count|PostfixDeref|sigil=@|PadAccess|name=$items|Phi#10|Phi#10#0	iv
-node	chalk-found-gaps:4	main::__PROGRAM__|Count|PostfixDeref|sigil=@|PadAccess|name=$items|Phi#10|Phi#12#0	iv
+node	chalk-found-gaps:4	main::__PROGRAM__|Count|PostfixDeref|sigil=@|Subscript|ArgsSource|Constant|const_type=integer|value=1|MemStart|Phi#10|Phi#10#0	iv
+node	chalk-found-gaps:4	main::__PROGRAM__|Count|PostfixDeref|sigil=@|Subscript|ArgsSource|Constant|const_type=integer|value=1|MemStart|Phi#10|Phi#12#0	iv
 node	chalk-found-gaps:4	main::__PROGRAM__|Phi#13#0	iv
 case	chalk-found-gaps:5	d26365d33b1b27afa38d82a898a8b2ed	OK
 node	chalk-found-gaps:5	main::__PROGRAM__|Constant|const_type=integer|value=1#0	iv,e53
@@ -1512,6 +1512,7 @@ node	chalk-found-gaps:134	main::__PROGRAM__|Count|TernaryExpr|PadAccess|name=$c|
 node	chalk-found-gaps:134	main::__PROGRAM__|Phi#17#0	iv
 node	chalk-found-gaps:134	main::__PROGRAM__|Phi#8#0	iv
 case	chalk-found-gaps:135	ba4213c899f9cebca75f8e9059e29517	OK
+node	chalk-found-gaps:135	main::__PROGRAM__|Constant|const_type=integer|value=0#0	iv,e53
 case	chalk-found-gaps:136	081b4ed046fc9111c014c8eef391ec31	OK
 case	chalk-found-gaps:137	7c3e06092f05cc98b8c32ca8d300683e	OK
 node	chalk-found-gaps:137	N::id|Constant|const_type=integer|value=0#0	iv,e53
@@ -1808,7 +1809,9 @@ node	chalk-found-gaps:163	main::__PROGRAM__|Phi#9#0	iv
 case	chalk-found-gaps:164	835eb1d691b33fd4f3e654f38dd2b46e	OK
 node	chalk-found-gaps:164	main::__PROGRAM__|Length|PadAccess|name=$s|Call#3#0	iv
 case	chalk-found-gaps:165	1c4a248148da281c6a4b2047e24ca240	OK
-node	chalk-found-gaps:165	main::__PROGRAM__|Count|PostfixDeref|sigil=@|site||/p.pl|1||Subscript|PadAccess|name=$self|Constant|const_type=string|value=s|MemStart|Subscript|PadAccess|name=$self|Constant|const_type=string|value=s|MemStart|PostfixDeref|sigil=@|site||/p.pl|1||Subscript|PadAccess|name=$self|Constant|const_type=string|value=s|MemStart|Subscript|PadAccess|name=$self|Constant|const_type=string|value=s|MemStart#0	iv
+node	chalk-found-gaps:165	main::__PROGRAM__|Constant|const_type=integer|value=0#0	iv,e53
+node	chalk-found-gaps:165	main::__PROGRAM__|Constant|const_type=integer|value=1#0	iv,e53
+node	chalk-found-gaps:165	main::__PROGRAM__|Count|PostfixDeref|sigil=@|site||/p.pl|1||Subscript|Subscript|ArgsSource|Constant|const_type=integer|value=0|MemStart|Constant|const_type=string|value=s|MemStart|Subscript|Subscript|ArgsSource|Constant|const_type=integer|value=0|MemStart|Constant|const_type=string|value=s|MemStart|PostfixDeref|sigil=@|site||/p.pl|1||Subscript|Subscript|ArgsSource|Constant|const_type=integer|value=0|MemStart|Constant|const_type=string|value=s|MemStart|Subscript|Subscript|ArgsSource|Constant|const_type=integer|value=0|MemStart|Constant|const_type=string|value=s|MemStart#0	iv
 case	chalk-found-gaps:166	0dcf0be17646010e31f63c16108a99c0	OK
 node	chalk-found-gaps:166	K::f|Add|Phi#6|Constant|const_type=integer|value=1#0	iv
 node	chalk-found-gaps:166	K::f|Constant|const_type=integer|value=0#0	iv,e53
