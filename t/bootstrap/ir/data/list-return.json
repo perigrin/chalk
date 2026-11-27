@@ -153,6 +153,7 @@
                },
                "id" : 7,
                "inputs" : [],
+               "mem_in" : 3,
                "op" : "EntryDef",
                "stamp" : "Scalar"
             },

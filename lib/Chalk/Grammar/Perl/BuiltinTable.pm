@@ -273,6 +273,59 @@ class Chalk::Grammar::Perl::BuiltinTable {
         # THE BASE A NUMERAL IS READ IN: hex's 16; oct's 8, or 16, 2 or 8 by
         # its prefix (0x, 0b, 0o).
         numeral_base => { hex => 16, oct => 8 },
+
+        # WHAT A BUILTIN DOES TO MEMORY AND THE WORLD, by perl's op name (prtf
+        # is printf, dofile `do FILE`): B::SoN's EffectTable, the table the
+        # producer places builtins by, and the one the loader checks a wire
+        # against (WireReads: L13, L14). Held to agree with it, row by row
+        # (t/bootstrap/ir/builtin-effects-agree-with-the-producer.t).
+        # It CHANGES MEMORY OR THE WORLD: a variable, an object's class, a
+        # handle's position, the file system, a process, the random stream.
+        effect_writes => { map { ( $_ => 1 ) } qw(
+            open close binmode prtf read sysread syswrite sysopen sysseek seek getc truncate flock
+            opendir readdir closedir rewinddir seekdir open_dir
+            chdir chroot mkdir rmdir unlink rename link symlink chmod chown utime umask
+            system exec fork wait waitpid kill sleep alarm setpgrp setpriority syscall
+            socket connect bind listen accept shutdown send recv pipe_op sockpair ssockopt
+            dbmopen dbmclose fcntl ioctl
+            srand formline reset study lock weaken unweaken rand bless require dofile tie untie
+            readline eof select warn rcatline sselect) },
+        # IT IS A MEMORY VERSION: a write a later read in the graph may see
+        # (a class, %INC, a tie, a handle's buffer, a __WARN__ handler's store).
+        effect_version => { map { ( $_ => 1 ) } qw(bless require dofile tie untie open close readline eof warn rcatline) },
+        # IT DIES ON A VALUE OUT OF ITS DOMAIN: log(0), sqrt(-1).
+        effect_faults => { map { ( $_ => 1 ) } qw(log sqrt) },
+        # WHERE THE STATE ITS VALUE IS OF LIVES: a handle's position, the call
+        # stack, a variable's pos, an object's class, the clock, the world.
+        effect_reads => {
+            ( map { ( $_ => 'handle' ) } qw(readline eof tell rcatline) ),
+            caller => 'stack', pos => 'variable', time => 'clock',
+            ( map { ( $_ => 'object-class' ) } qw(ref reftype blessed reftype_of_ref) ),
+            ( map { ( $_ => 'external' ) } qw(
+                localtime gmtime glob tied tms getlogin stat lstat readlink fileno telldir
+                ftis ftsize ftdir ftfile ftlink ftzero ftchr ftmtime fteread fteexec
+                ftatime ftbinary ftblk ftctime fteowned ftewrite ftpipe ftrexec ftrowned ftrread
+                ftrwrite ftsgid ftsock ftsuid ftsvtx fttext fttty getsockname getpeername gsockopt) ),
+        },
+        # ITS VALUE IS OF ITS OPERANDS ALONE, AND IT CHANGES NOTHING.
+        effect_pure => { map { ( $_ => 1 ) } qw(
+            substr index rindex uc ucfirst lc lcfirst fc quotemeta sprintf join pack unpack
+            reverse refaddr is_weak is_bool is_tainted abs int sin cos atan2 exp ceil floor
+            chr ord hex oct crypt prototype runcv anonconst) },
+        # A NODE OF ITS OWN, OR ITS OWN HANDLER, PLACES IT, and it writes: a
+        # container op, chomp, a print, a die, ++, s///.
+        effect_own_handler => { map { ( $_ => 1 ) } qw(
+            push pop shift unshift splice delete each undef local chomp chop
+            print say die exit eval set_arylen vec write
+            subst preinc predec postinc postdec i_preinc i_predec i_postinc i_postdec
+            lvref lvavref lvrefslice substr_left) },
+        # ...and of those, the container ops that are the memory version after them.
+        effect_own_version => { map { ( $_ => 1 ) } qw(push pop shift unshift splice) },
+        # PLACED ELSEWHERE, writing nothing: a read of a container or a list,
+        # a call, a block run per item.
+        effect_elsewhere => { map { ( $_ => 1 ) } qw(
+            keys values aeach akeys avalues sort split entersub arylen
+            grepstart mapstart allstart anystart coreargs custom) },
     );
     while ( my ( $col, $rows ) = splice @COLUMNS, 0, 2 ) {
         $FACTS{$_}{$col} = $rows->{$_} for keys $rows->%*;

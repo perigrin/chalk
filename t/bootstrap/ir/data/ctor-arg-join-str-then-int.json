@@ -57,6 +57,7 @@
                },
                "id" : 2,
                "inputs" : [],
+               "mem_in" : 1,
                "op" : "FieldAccess",
                "stamp" : "Unknown"
             },

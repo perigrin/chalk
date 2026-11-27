@@ -52,6 +52,7 @@
                },
                "id" : 2,
                "inputs" : [],
+               "mem_in" : 1,
                "op" : "FieldAccess",
                "stamp" : "Scalar"
             },
@@ -89,6 +90,7 @@
                },
                "id" : 2,
                "inputs" : [],
+               "mem_in" : 1,
                "op" : "FieldAccess",
                "stamp" : "Scalar"
             },

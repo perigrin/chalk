@@ -31,6 +31,7 @@ my $SON = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 plan skip_all => "perl5-son not found at $SON (set PERL5_SON_LIB)" unless -f "$SON/SoN/Verify.pm";
 unshift @INC, $SON;
 require SoN::Verify;
+use Chalk::IR::Serialize::WireReads;
 
 # A VIOLATION HELD, by file, graph and rule, each with why it is
 # not fixed yet. One that no longer occurs is printed: take it out.
@@ -134,12 +135,22 @@ ok( scalar(@lib) > 100 && scalar(@probes) > 100, sprintf( 'the sets: %d lib modu
 }
 
 # verify each set: every violation is hard, but those %HELD names
-my ( @hard, @dropped, %held );
+my ( @hard, @dropped, %held, @disagree );
 for my $f ( @lib, @probes ) {
     my $w = cached($f);
     unless ($w) { push @dropped, $f; next }
     die "$f: B::SoN wrote wire version " . ( $w->{version} // 1 ) . ", not 2\n" unless ( $w->{version} // 1 ) == 2;
-    for my $v ( SoN::Verify::verify($w)->{violations}->@* ) {
+    my @v = SoN::Verify::verify($w)->{violations}->@*;
+    # (THE LOADER'S PORT AGREES, graph by graph: L12-L14 refuse a graph
+    # where V7, V6 or V2b names a violation, and only there -- fifth final
+    # audit, section 3)
+    my %flagged = map { ( $_->{graph} => 1 ) } grep { $_->{rule} =~ /\A(?:record|read-unversioned|effect-floating)/ } @v;
+    for my $g ( sort keys +( $w->{methods} // {} )->%* ) {
+        my $refused = eval { Chalk::IR::Serialize::WireReads->new->check( $g, $w->{methods}{$g} ); 1 } ? '' : $@;
+        push @disagree, "$f: $g: " . ( $refused ? "the loader refuses what the verifier passes: $refused" : 'the verifier names a read or record rule the loader lets through' )
+            if !!$refused != !!$flagged{$g};
+    }
+    for my $v (@v) {
         my $k = "$f:$v->{graph} $v->{rule}";
         if ( $HELD{$k} ) { $held{$k} = 1; next }
         push @hard, "$f: $v->{graph}#$v->{node} $v->{op} $v->{rule}: $v->{detail}";
@@ -147,6 +158,7 @@ for my $f ( @lib, @probes ) {
 }
 
 is_deeply( \@dropped, [], 'every file has a wire (none timed out or wrote no JSON)' );
+is_deeply( \@disagree, [], "the loader's L12-L14 (WireReads) refuse what V7, V6 and V2b name, and nothing else" ) or diag join "\n", @disagree[ 0 .. ( $#disagree < 30 ? $#disagree : 30 ) ];
 is_deeply( \@hard, [], 'no violation of any rule (but those %HELD names)' ) or diag join "\n", @hard[ 0 .. ( $#hard < 30 ? $#hard : 30 ) ];
 diag "held, and no longer seen (take it out of %HELD): $_" for grep { !$held{$_} } sort keys %HELD;
 

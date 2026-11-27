@@ -16,6 +16,7 @@ use Chalk::IR::Analysis;   # from_json still runs it; see the note at its call
 use Chalk::IR::Node::Coerce;   # _insert_str_coercions builds these directly
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype: the join lattice
 use Chalk::IR::Value;   # for `isa Chalk::IR::Value`
+use Chalk::IR::Serialize::WireReads;   # L12-L14, what a node reads
 use Chalk::IR::Serialize::WireCheck;   # what the wire cannot order, refused
 use Chalk::IR::Serialize::WireInvariant; # a v2 wire's memory edges, checked
 use Chalk::IR::Serialize::WireAliases;   # L11: an alias carried as a value is private
@@ -1367,6 +1368,11 @@ sub from_json ($json_string) {
         my $inv = Chalk::IR::Serialize::WireInvariant->new;
         $inv->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;
         $inv->check( 'a ' . ( $_->{phase} // 'phase' ) . ' block', $_ ) for ( $data->{phase_blocks} // [] )->@*;
+        # (L12-L14: what a node reads -- a record binds `my` variables, a read
+        # of changeable state names a version, an effect is on the chain)
+        my $reads = Chalk::IR::Serialize::WireReads->new;
+        $reads->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;
+        $reads->check( 'a ' . ( $_->{phase} // 'phase' ) . ' block', $_ ) for ( $data->{phase_blocks} // [] )->@*;
         # (L11, across the graphs: an alias carried as a value is private)
         Chalk::IR::Serialize::WireAliases->new->check( $data->{methods} );
     }
