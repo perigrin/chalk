@@ -13,7 +13,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 # Build Perl grammar via the full pipeline: BNF → IR → codegen → eval → grammar objects
 my $raw_ir = perl_pipeline();
 if (!defined $raw_ir) {
-    plan(skip_all => 'BNF pipeline failed — cannot generate Perl grammar');
+    die 'BNF pipeline failed — cannot generate Perl grammar', "\n";
 }
 
 my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
@@ -21,7 +21,7 @@ my $generated = $target->generate($raw_ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::BuiltinCallTest/g;
 eval $generated;
 if ($@) {
-    plan(skip_all => "Generated grammar code failed to eval: $@");
+    die "Generated grammar code failed to eval: $@", "\n";
 }
 my $gen_grammar = Chalk::Grammar::Perl::BuiltinCallTest::grammar();
 

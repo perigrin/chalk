@@ -54,7 +54,7 @@ class Box { field $v :param :reader; method get { return $v } }
 print Box->new(v => 7)->get, "\n";
 PROG
 
-plan skip_all => 'producer did not emit JSON for the class program' unless $graphs;
+die 'producer did not emit JSON for the class program', "\n" unless $graphs;
 
 subtest 'the field type is known before either graph is walked' => sub {
     my ($box) = grep { $_->name eq 'Box' } $mop->classes;

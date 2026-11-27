@@ -16,7 +16,7 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 my $STRINGS_MD = 't/corpus/mdtest/strings.md';
 
 unless (-f $STRINGS_MD) {
-    plan skip_all => "strings.md not found at $STRINGS_MD";
+    die "strings.md not found at $STRINGS_MD", "\n";
 }
 
 # ---------------------------------------------------------------------------

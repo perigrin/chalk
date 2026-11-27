@@ -16,7 +16,7 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 my $INCREMENT_MD = 't/corpus/mdtest/increment.md';
 
 unless (-f $INCREMENT_MD) {
-    plan skip_all => "increment.md not found at $INCREMENT_MD";
+    die "increment.md not found at $INCREMENT_MD", "\n";
 }
 
 # ---------------------------------------------------------------------------

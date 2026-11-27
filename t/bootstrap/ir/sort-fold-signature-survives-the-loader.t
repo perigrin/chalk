@@ -38,11 +38,11 @@ for my $fixture (sort keys %expect) {
     subtest $fixture => sub {
         my $wire = do {
             open my $fh, '<', "t/bootstrap/ir/data/$fixture.json"
-                or plan skip_all => "fixture missing: $!";
+                or die "fixture missing: $!", "\n";
             local $/; <$fh>;
         };
         my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
-        my $driver = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no driver';
+        my $driver = $graphs->{'main::__PROGRAM__'} or die 'no driver', "\n";
 
         my ($sort) = grep {
             $_->operation eq 'Call' && ($_->name // '') eq 'sort'

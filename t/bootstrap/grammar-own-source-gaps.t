@@ -12,14 +12,14 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 
 my $ir = perl_pipeline();
 unless (defined $ir) {
-    plan skip_all => 'Perl grammar failed to parse';
+    die 'Perl grammar failed to parse', "\n";
     exit;
 }
 my $generated = Chalk::Bootstrap::BNF::Target::Perl->new()->generate($ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::Phase5Gaps/g;
 eval $generated;
 if ($@) {
-    plan skip_all => "Generated grammar code failed: $@";
+    die "Generated grammar code failed: $@", "\n";
     exit;
 }
 my $grammar    = Chalk::Grammar::Perl::Phase5Gaps::grammar();

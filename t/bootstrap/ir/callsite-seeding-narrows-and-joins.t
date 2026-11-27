@@ -40,11 +40,11 @@ for my $fixture (sort keys %case) {
     subtest "$fixture: $c->{why}" => sub {
         my $wire = do {
             open my $fh, '<', "t/bootstrap/ir/data/$fixture.json"
-                or plan skip_all => "fixture missing: $!";
+                or die "fixture missing: $!", "\n";
             local $/; <$fh>;
         };
         my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
-        my $g = $graphs->{ $c->{graph} } or plan skip_all => "no $c->{graph}";
+        my $g = $graphs->{ $c->{graph} } or die "no $c->{graph}", "\n";
 
         # The positional argument read: a builtin `shift` over ArgsSource.
         my ($read) = grep {
@@ -62,11 +62,11 @@ for my $fixture (sort keys %case) {
 subtest 'the narrowed case reaches the Call result' => sub {
     my $wire = do {
         open my $fh, '<', 't/bootstrap/ir/data/single-callsite-narrows.json'
-            or plan skip_all => "fixture missing: $!";
+            or die "fixture missing: $!", "\n";
         local $/; <$fh>;
     };
     my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
-    my $driver = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no driver';
+    my $driver = $graphs->{'main::__PROGRAM__'} or die 'no driver', "\n";
 
     my ($call) = grep {
         $_->operation eq 'Call'

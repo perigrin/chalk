@@ -14,7 +14,7 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 my $VARIABLES_MD = 't/corpus/mdtest/variables.md';
 
 unless (-f $VARIABLES_MD) {
-    plan skip_all => "variables.md not found at $VARIABLES_MD";
+    die "variables.md not found at $VARIABLES_MD", "\n";
 }
 
 # ---------------------------------------------------------------------------

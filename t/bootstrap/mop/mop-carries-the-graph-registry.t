@@ -38,7 +38,7 @@ my ($fh, $tmp) = tempfile(SUFFIX => '.pl', UNLINK => 1);
 print $fh $prog;
 close $fh;
 my $json = qx($PERL -I$SON -MO=SoN,json,package=main $tmp 2>/dev/null);
-plan skip_all => "B::SoN produced no JSON" unless $json =~ /\S/;
+die "B::SoN produced no JSON", "\n" unless $json =~ /\S/;
 
 my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
 my ($any) = map { $graphs->{$_} } sort keys %$graphs;
@@ -58,8 +58,8 @@ subtest 'a graph reaches a SIBLING through the edge alone' => sub {
     # The §6 property, stated as a traversal: starting from ONE graph and
     # nothing else, every other graph in the unit is reachable. This is what
     # makes T1's one-graph contract possible rather than merely honest.
-    my $mop = $any->mop or plan skip_all => 'no MOP edge';
-    $mop->can('graphs') or plan skip_all => 'no registry yet';
+    my $mop = $any->mop or die 'no MOP edge', "\n";
+    $mop->can('graphs') or die 'no registry yet', "\n";
     my $reg = $mop->graphs;
     for my $want (sort keys %$graphs) {
         ok(exists $reg->{$want}, "'$want' is reachable from a sibling")
@@ -67,8 +67,8 @@ subtest 'a graph reaches a SIBLING through the edge alone' => sub {
 };
 
 subtest 'the registry names the SAME objects, not copies' => sub {
-    my $mop = $any->mop or plan skip_all => 'no MOP edge';
-    $mop->can('graphs') or plan skip_all => 'no registry yet';
+    my $mop = $any->mop or die 'no MOP edge', "\n";
+    $mop->can('graphs') or die 'no registry yet', "\n";
     my $reg = $mop->graphs;
     require Scalar::Util;
     for my $n (sort keys %$graphs) {

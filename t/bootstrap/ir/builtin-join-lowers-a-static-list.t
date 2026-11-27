@@ -28,7 +28,7 @@ use Chalk::Target::LLVM;
 
 my $FIXTURE = 't/bootstrap/ir/data/builtin-join.json';
 my $wire = do {
-    open my $fh, '<', $FIXTURE or plan skip_all => "fixture missing: $!";
+    open my $fh, '<', $FIXTURE or die "fixture missing: $!", "\n";
     local $/; <$fh>;
 };
 my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
@@ -43,8 +43,8 @@ sub return_of {
 }
 
 subtest 'the program calling join lowers' => sub {
-    my $prog = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no program graph';
-    my $ret  = return_of($prog) or plan skip_all => 'no Return';
+    my $prog = $graphs->{'main::__PROGRAM__'} or die 'no program graph', "\n";
+    my $ret  = return_of($prog) or die 'no Return', "\n";
 
     my $ir = eval { Chalk::Target::LLVM->lower($ret) };
     my $err = $@;
@@ -62,7 +62,7 @@ subtest 'the program calling join lowers' => sub {
 # argument has runtime arity cannot be a static concat chain, and guessing a
 # count there is the miscompile this refuses.
 subtest 'a non-static list argument still GAPs' => sub {
-    my $prog = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no program graph';
+    my $prog = $graphs->{'main::__PROGRAM__'} or die 'no program graph', "\n";
 
     my ($join) = grep {
         blessed($_) && $_->can('operation') && $_->operation eq 'Call'

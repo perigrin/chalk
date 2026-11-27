@@ -44,7 +44,7 @@ use Chalk::IR::Serialize::JSON;
 my $FIXTURE = 't/bootstrap/ir/data/anon-sub-as-value.json';
 
 my $wire = do {
-    open my $fh, '<', $FIXTURE or plan skip_all => "fixture missing: $!";
+    open my $fh, '<', $FIXTURE or die "fixture missing: $!", "\n";
     local $/; <$fh>;
 };
 

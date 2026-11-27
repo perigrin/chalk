@@ -15,7 +15,7 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 my $HOST_MD = 't/corpus/mdtest/host.md';
 
 unless (-f $HOST_MD) {
-    plan skip_all => "host.md not found at $HOST_MD";
+    die "host.md not found at $HOST_MD", "\n";
 }
 
 # H3 reads $ENV{CHALK_G7_TEST}; both the perl-oracle and lli child processes

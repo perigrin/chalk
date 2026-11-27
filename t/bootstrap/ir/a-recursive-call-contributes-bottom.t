@@ -65,7 +65,7 @@ subtest 'the premise: None is the join identity and Unknown absorbs' => sub {
 # fall through. If it were not, the join above would be an accident.
 subtest 'None is a lattice member, not a sentinel' => sub {
     my $is_lattice = Chalk::Grammar::Perl::TypeLibrary->can('is_lattice_type');
-    plan skip_all => 'is_lattice_type not exposed' unless $is_lattice;
+    die 'is_lattice_type not exposed', "\n" unless $is_lattice;
     ok $is_lattice->('None'), 'None is a member of the type lattice';
 };
 

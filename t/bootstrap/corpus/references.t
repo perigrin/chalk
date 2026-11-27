@@ -15,7 +15,7 @@ my $LLI = Chalk::CodeGen::Harness::LLI->lli;
 my $REFERENCES_MD = 't/corpus/mdtest/references.md';
 
 unless (-f $REFERENCES_MD) {
-    plan skip_all => "references.md not found at $REFERENCES_MD";
+    die "references.md not found at $REFERENCES_MD", "\n";
 }
 
 # ---------------------------------------------------------------------------

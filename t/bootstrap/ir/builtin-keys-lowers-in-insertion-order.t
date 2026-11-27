@@ -31,7 +31,7 @@ use Chalk::Target::LLVM;
 
 my $FIXTURE = 't/bootstrap/ir/data/builtin-keys.json';
 my $wire = do {
-    open my $fh, '<', $FIXTURE or plan skip_all => "fixture missing: $!";
+    open my $fh, '<', $FIXTURE or die "fixture missing: $!", "\n";
     local $/; <$fh>;
 };
 my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
@@ -54,11 +54,11 @@ my %FIXTURE = (
 for my $ctx (sort keys %FIXTURE) {
     subtest "keys in $ctx lowers" => sub {
         my $wire = do {
-            open my $fh, '<', $FIXTURE{$ctx} or plan skip_all => "fixture missing: $!";
+            open my $fh, '<', $FIXTURE{$ctx} or die "fixture missing: $!", "\n";
             local $/; <$fh>;
         };
         my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);
-        my $prog = $graphs->{'main::__PROGRAM__'} or plan skip_all => 'no program graph';
+        my $prog = $graphs->{'main::__PROGRAM__'} or die 'no program graph', "\n";
         my ($ret) = grep {
             blessed($_) && $_->can('operation') && $_->operation eq 'Return'
         } $prog->returns->@*;
@@ -88,7 +88,7 @@ subtest 'the two contexts are stamped differently' => sub {
     my %stamp;
     for my $ctx (sort keys %FIXTURE) {
         my $wire = do {
-            open my $fh, '<', $FIXTURE{$ctx} or plan skip_all => "fixture missing: $!";
+            open my $fh, '<', $FIXTURE{$ctx} or die "fixture missing: $!", "\n";
             local $/; <$fh>;
         };
         my $graphs = Chalk::IR::Serialize::JSON::from_json($wire);

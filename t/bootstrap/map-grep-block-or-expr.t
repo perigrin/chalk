@@ -22,11 +22,11 @@ use Chalk::Bootstrap::Perl::Target::Perl;
 # today, because whether chalk refuses them too is perigrin's decision.
 
 my $ir = perl_pipeline();
-plan skip_all => 'Perl grammar failed' unless defined $ir;
+die 'Perl grammar failed', "\n" unless defined $ir;
 my $generated = Chalk::Bootstrap::BNF::Target::Perl->new->generate($ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::MapBlockOrExprTest/g;
 eval $generated;
-plan skip_all => "Generated grammar failed: $@" if $@;
+die "Generated grammar failed: $@", "\n" if $@;
 my $parser = build_perl_ir_parser(
     Chalk::Grammar::Perl::MapBlockOrExprTest::grammar(), start => 'Program');
 

@@ -118,7 +118,7 @@ my $total = 0;
 for my $name (sort keys %programs) {
     subtest $name => sub {
         my $wire = wire_for($programs{$name});
-        plan skip_all => "producer emitted no JSON for $name" unless $wire;
+        die "producer emitted no JSON for $name", "\n" unless $wire;
 
         my $graphs = from_json($wire);
         # NOT `ok $graphs`: an empty hashref is truthy, so that assertion held

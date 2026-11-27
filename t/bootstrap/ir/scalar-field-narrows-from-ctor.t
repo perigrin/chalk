@@ -16,7 +16,7 @@ use Chalk::IR::Serialize::JSON;
 # The guard has to use it.
 
 my $wire = do {
-    open my $fh, '<', 't/bootstrap/ir/data/scalar-field-ctor.json' or plan skip_all => "fixture missing: $!";
+    open my $fh, '<', 't/bootstrap/ir/data/scalar-field-ctor.json' or die "fixture missing: $!", "\n";
     local $/; <$fh>;
 };
 

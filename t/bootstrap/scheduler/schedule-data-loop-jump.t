@@ -12,17 +12,17 @@ use Chalk::Scheduler::EagerPinning::If;
 use Chalk::Bootstrap::BNF::Target::Perl;
 
 my $ir = perl_pipeline();
-plan skip_all => 'Perl grammar failed' unless defined $ir;
+die 'Perl grammar failed', "\n" unless defined $ir;
 
 my $target = Chalk::Bootstrap::BNF::Target::Perl->new();
 my $generated = $target->generate($ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::ScheduleDataLoopJumpTest/g;
 eval $generated;
-plan skip_all => "Generated code failed: $@" if $@;
+die "Generated code failed: $@", "\n" if $@;
 
 my $gen_grammar = Chalk::Grammar::Perl::ScheduleDataLoopJumpTest::grammar();
 my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
-plan skip_all => 'IR parser not built' unless defined $parser;
+die 'IR parser not built', "\n" unless defined $parser;
 
 my $semiring = $parser->semiring();
 

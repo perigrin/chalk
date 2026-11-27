@@ -14,7 +14,7 @@ use Chalk::Bootstrap::BNF::Target::Perl;
 my $ir = perl_pipeline();
 
 unless (defined $ir) {
-    plan skip_all => 'Perl grammar failed to parse — cannot run placeholder tests';
+    die 'Perl grammar failed to parse — cannot run placeholder tests', "\n";
     exit;
 }
 
@@ -23,7 +23,7 @@ my $generated = $target->generate($ir);
 $generated =~ s/Chalk::Grammar::BNF::Generated/Chalk::Grammar::Perl::PlaceholderTests/g;
 eval $generated;
 if ($@) {
-    plan skip_all => "Generated grammar code failed: $@";
+    die "Generated grammar code failed: $@", "\n";
     exit;
 }
 
@@ -31,7 +31,7 @@ my $gen_grammar = Chalk::Grammar::Perl::PlaceholderTests::grammar();
 my $parser = build_perl_ir_parser($gen_grammar, start => 'Program');
 
 unless (defined $parser) {
-    plan skip_all => 'Could not build parser';
+    die 'Could not build parser', "\n";
     exit;
 }
 
