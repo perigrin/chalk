@@ -281,11 +281,14 @@ my sub c($val) {
 # ============================================================
 # 20. FieldDecl with default_value (backward-compatible)
 # ============================================================
-# FieldDecl is not currently in the Shim translation table and has no
-# typed Chalk::IR::Node::* equivalent. Skip until it is migrated.
+# FieldDecl has no typed Chalk::IR::Node::* equivalent: the factory refuses
+# it by name (this was an unconditional skip). When it is migrated, this
+# fails and the backward-compatible checks come back.
 
-SKIP: {
-    skip 'FieldDecl has no typed equivalent yet', 4;
+{
+    my $node = eval { $typed->make('FieldDecl', inputs => [], compat_class => 'FieldDecl') };
+    ok(!defined $node, 'FieldDecl: not made');
+    like($@, qr/\AUnknown data node operation: FieldDecl /, 'FieldDecl: refused by name');
 }
 
 # ============================================================
