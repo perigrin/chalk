@@ -16,71 +16,81 @@ use Chalk::IR::Serialize::JSON ();
 # order leaves one input pointing forward. The loader resolves inputs single-
 # pass (earlier nodes only), so a forward index must be deferred: construct the
 # Phi with its init input, then wire inputs[1] via set_backedge once the
-# referenced node exists (the same post-construction patch the corpus builder
-# uses for loop_backedge edges).
+# referenced node exists. A wire v2 Loop's back control (its test's Proj 0) is
+# the other forward reference, patched the same way.
 #
-# Shape under test = the corpus control-flow.md D2 contract:
-#   my $n = 3; my $s = 0; while ($n > 0) { $s += $n; $n-- } $s   => 6
+# The graph is B::SoN's wire (writer loop-my-fresh, `-MO=-q,SoN,json`; the
+# `classes` table dropped) for the corpus control-flow.md D2 contract:
+#   my $n = 3; my $s = 0; while ($n > 0) { $s += $n; $n-- } print "[$s]\n";
+# (The hand-built graph it replaces pinned the loop's Projs on the Loop, with
+# no If and no back control -- a pre-v2 shape T2 refuses by name, "a loop whose
+# test is pinned on it"; a skip_all after that failed assertion hid it.)
 
 my $json = JSON::PP->new->encode({
-    version => 2, writer => 'chalk',
+    version => 2,
     source  => 'loop-backedge',
+    dowarn  => { all_off => JSON::PP::false, all_on => JSON::PP::false, on => JSON::PP::false },
+    marks   => { mem_operand => JSON::PP::true },
     methods => {
-        'main::f' => {
+        'main::__PROGRAM__' => {
             start   => 0,
-            returns => [13],
+            returns => [18],
             nodes   => [
-                { id => 0,  op => 'Start', cfg => JSON::PP::true, inputs => [] },
-                { id => 1,  op => 'Loop',  cfg => JSON::PP::true, inputs => [0] },
-                { id => 2,  op => 'Constant', inputs => [], stamp => 'Int',
-                  fields => { value => 3, const_type => 'integer' } },
+                { id => 0,  op => 'Start', inputs => [] },
+                { id => 1,  op => 'Constant', inputs => [], stamp => 'Undef',
+                  fields => { const_type => 'undef', value => undef } },
+                { id => 2,  op => 'Constant', inputs => [], stamp => 'Str',
+                  fields => { const_type => 'string', value => '[' } },
                 { id => 3,  op => 'Constant', inputs => [], stamp => 'Int',
-                  fields => { value => 0, const_type => 'integer' } },
-                { id => 4,  op => 'Constant', inputs => [], stamp => 'Int',
-                  fields => { value => 1, const_type => 'integer' } },
-                # $n phi: init 3, backedge Subtract (id 8, FORWARD reference)
-                { id => 5,  op => 'Phi', inputs => [2, 8], stamp => 'Int',
-                  fields => { region => 1 } },
-                # $s phi: init 0, backedge Add (id 9, FORWARD reference)
-                { id => 6,  op => 'Phi', inputs => [3, 9], stamp => 'Int',
-                  fields => { region => 1 } },
-                # condition reads the $n phi (backend strategy 2)
-                { id => 7,  op => 'NumGt', inputs => [5, 3], stamp => 'Boolean' },
-                { id => 8,  op => 'Subtract', inputs => [5, 4], stamp => 'Int' },
-                { id => 9,  op => 'Add', inputs => [6, 5], stamp => 'Int' },
-                { id => 10, op => 'Proj', cfg => JSON::PP::true, inputs => [1],
-                  fields => { index => 0 } },
-                { id => 11, op => 'Proj', cfg => JSON::PP::true, inputs => [1],
-                  fields => { index => 1 } },
-                # `head` is a produce-time wire key (Serialize/JSON.pm ~499
-                # calls set_region on it). The loader does NOT derive the head
-                # from the Proj inputs, so a fixture omitting it leaves
-                # Region.head undef. Node 1 is the Loop.
-                { id => 12, op => 'Region', cfg => JSON::PP::true,
-                  inputs => [11], head => 1 },
-                # Current wire shape: control on control_in, value in inputs.
-                # (Was the pre-perl5-son-344fc075 flattened
-                # `inputs => [control, value]`; the loader no longer reshapes
-                # that, so control_in came back undef and the assertions below
-                # — which were already written for the current shape — crashed.)
-                { id => 13, op => 'Return', cfg => JSON::PP::true,
-                  inputs => [6], control_in => 12 },
+                  fields => { const_type => 'integer', value => '0' } },
+                # back control: the test's Proj 0 (id 19, FORWARD reference)
+                { id => 4,  op => 'Loop', inputs => [0, 19], fields => { bound => 'each' } },
+                # $s phi: init 0, backedge Add (id 22, FORWARD reference)
+                { id => 5,  op => 'Phi', inputs => [3, 22], stamp => 'Int', fields => { region => 4 } },
+                { id => 6,  op => 'Coerce', inputs => [5], stamp => 'Str',
+                  fields => { from_repr => 'Int', to_repr => 'Str' } },
+                { id => 7,  op => 'Concat', inputs => [2, 6], stamp => 'Str' },
+                { id => 8,  op => 'Constant', inputs => [], stamp => 'Str',
+                  fields => { const_type => 'string', value => "]\n" } },
+                { id => 9,  op => 'Concat', inputs => [7, 8], stamp => 'Str' },
+                { id => 10, op => 'Constant', inputs => [], stamp => 'Int',
+                  fields => { const_type => 'integer', value => '3' } },
+                # $n phi: init 3, backedge Subtract (id 21, FORWARD reference)
+                { id => 11, op => 'Phi', inputs => [10, 21], stamp => 'Int', fields => { region => 4 } },
+                { id => 12, op => 'NumGt', inputs => [11, 3], stamp => 'Boolean' },
+                # the loop's test: an If on the Loop, its Projs the body (0) and the exit (1)
+                { id => 13, op => 'If', inputs => [4, 12], control_in => 4 },
+                { id => 14, op => 'Proj', inputs => [13], fields => { index => 1 } },
+                { id => 15, op => 'Region', inputs => [14], head => 4 },
+                { id => 16, op => 'Print', inputs => [9], control_in => 15, stamp => 'Maybe[Boolean]' },
+                { id => 17, op => 'MemStart', inputs => [] },
+                { id => 18, op => 'Return', inputs => [1], control_in => 16, mem_in => 17,
+                  fields => { implicit => JSON::PP::true } },
+                { id => 19, op => 'Proj', inputs => [13], fields => { index => 0 } },
+                { id => 20, op => 'Constant', inputs => [], stamp => 'Int',
+                  fields => { const_type => 'integer', value => '1' } },
+                { id => 21, op => 'Subtract', inputs => [11, 20], stamp => 'Int' },
+                { id => 22, op => 'Add', inputs => [5, 11], stamp => 'Int' },
             ],
         },
     },
 });
 
 my $graphs = Chalk::IR::Serialize::JSON::from_json($json);
-my $g = $graphs->{'main::f'};
+my $g = $graphs->{'main::__PROGRAM__'};
 my $ret = $g->returns->[0];
 
 subtest 'forward-referenced backedges are patched onto the Phis' => sub {
-    my $region = $ret->control_in;
-    is($region->operation, 'Region', 'Return control_in is the exit Region');
-    is($region->head->operation, 'Loop', 'Region.head reaches the Loop');
+    my ($print) = grep { $_->operation eq 'Print' } $g->nodes->@*;
+    my $region = $print->control_in;
+    is($region->operation, 'Region', 'the Print follows the exit Region');
+    my $loop = $region->head;
+    is($loop->operation, 'Loop', 'Region.head reaches the Loop');
+    ok(defined $loop->inputs->[1], 'the Loop back control is wired (not undef)');
+    is($loop->inputs->[1]->operation, 'Proj', 'the Loop back control is its test\'s Proj');
 
-    my $s_phi = $ret->inputs->[0];
-    is($s_phi->operation, 'Phi', 'Return value is the $s Phi');
+    my $s_phi = $print->inputs->[0]->inputs->[0]->inputs->[1]->inputs->[0];
+    is($s_phi->operation, 'Phi', 'the printed value is the $s Phi');
     ok(defined $s_phi->inputs->[1], '$s Phi backedge is wired (not undef)');
     is($s_phi->inputs->[1]->operation, 'Add', '$s Phi backedge is the Add');
 
@@ -97,42 +107,11 @@ subtest 'forward-referenced backedges are patched onto the Phis' => sub {
 };
 
 subtest 'the loaded loop graph lowers and runs, printing 6' => sub {
-    require Chalk::CodeGen::Harness::LLI;
     my $LLI = Chalk::CodeGen::Harness::LLI->path;
-
     require Chalk::Target::LLVM;
-    require Chalk::IR::NodeFactory;
 
-    # Observe the loop's result the way a program does -- by PRINTING it --
-    # rather than off a type-tag return epilogue. The Prints hang off the
-    # Return's EXISTING control_in (the exit Region), so they land after the
-    # loop and do not perturb the block structure asserted above. Three
-    # Prints, not a Concat: a Coerce'd Int has no tracked length.
-    my $f = Chalk::IR::NodeFactory->new;
-    my $str = $f->make('Coerce', inputs => [$ret->inputs->[0]],
-                       from_repr => 'Int', to_repr => 'Str');
-    $str->set_stamp('Str');
-
-    my $ctrl = $ret->control_in;
-    for my $part ('[', $str, "]\n") {
-        my $val = ref $part ? $part : do {
-            my $k = $f->make('Constant', value => $part, const_type => 'string');
-            $k->set_stamp('Str');
-            $k;
-        };
-        my $p = $f->make('Print', inputs => [$val]);
-        $p->set_control_in($ctrl);
-        $ctrl = $p;
-    }
-
-    my $u = $f->make('Constant', value => undef, const_type => 'undef');
-    $u->set_stamp('Undef');
-    my $prog_ret = $f->make_cfg('Return', inputs => [$u]);
-    $prog_ret->set_control_in($ctrl);
-
-    my $ll = eval { Chalk::Target::LLVM->lower($prog_ret, program_mode => 1) };
-    is($@, '', 'lower() does not die') or diag($@);
-    plan skip_all => 'lowering failed' unless defined $ll;
+    my $ll = eval { Chalk::Target::LLVM->lower($ret, program_mode => 1) };
+    is($@, '', 'lower() does not die') or return;
 
     my ($fh, $tmp) = tempfile(SUFFIX => '.ll', UNLINK => 1);
     print {$fh} $ll;
