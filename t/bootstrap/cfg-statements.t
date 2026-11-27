@@ -1225,49 +1225,32 @@ SKIP: {
         ok(defined $result, '_chart_set pattern parses for subscript-push test');
 
         SKIP: {
-            skip '_chart_set did not parse', 4 unless defined $result;
+            skip '_chart_set did not parse', 5 unless defined $result;
             my $sem_ctx = $result;
             my $state = $sem_ctx->cfg_state();
             ok(defined $state && defined $state->{if_node}, 'if_node present');
 
             SKIP: {
-                skip 'no if_node', 3 unless defined $state && defined $state->{if_node};
+                skip 'no if_node', 4 unless defined $state && defined $state->{if_node};
                 my $cond = $state->{if_node}->inputs()->[1];
                 ok(defined $cond, 'condition exists');
 
                 SKIP: {
-                    skip 'no condition', 2 unless defined $cond;
-                    # Condition should be BinaryExpr(||, ...)
-                    # TODO: polymorphic SoN migration produces typed nodes (Or/And),
-                    # not Constructor nodes. These checks need updating for typed nodes.
-                    my $is_or = $cond isa Chalk::IR::Node::Constructor
-                        && $cond->class() eq 'BinaryExpr'
-                        && ($cond->inputs()->[0]->value() // '') eq '||';
-                    TODO: {
-                        local $TODO = 'BinaryExpr(||) is now typed Or node, not Constructor';
-                        ok($is_or, 'condition is BinaryExpr(||)');
-                    }
-
-                    SKIP: {
-                        skip 'condition is not BinaryExpr(||) Constructor', 1 unless $is_or;
-                        # Right operand: BinaryExpr(<, $origin, SubscriptExpr($arr, $pos))
-                        my $right = $cond->inputs()->[2];
-                        # The right operand of < should be SubscriptExpr, not bare variable
-                        my $right_rhs;
-                        if ($right isa Chalk::IR::Node::Constructor
-                            && $right->class() eq 'BinaryExpr') {
-                            $right_rhs = $right->inputs()->[2];  # right operand of <
-                        }
-                        if (defined $right_rhs
-                            && $right_rhs isa Chalk::IR::Node::Constructor
-                            && $right_rhs->class() eq 'SubscriptExpr') {
-                            pass('right || operand has SubscriptExpr (subscript pushed in)');
-                        } else {
-                            my $class = (defined $right_rhs && $right_rhs isa Chalk::IR::Node::Constructor)
-                                ? $right_rhs->class() : (ref($right_rhs) // 'undef');
-                            fail("right || operand should have SubscriptExpr, got $class");
-                        }
-                    }
+                    skip 'no condition', 3 unless defined $cond;
+                    # Condition: Or(||, Not(...), NumLt(<, $origin, Subscript($arr, $pos)))
+                    # -- the typed nodes (inputs: the operator, then its operands)
+                    # the polymorphic SoN migration makes; this once expected
+                    # Constructor('BinaryExpr') under a TODO and skipped the rest.
+                    ok($cond isa Chalk::IR::Node::Or, 'condition is Or(||)')
+                        or diag('got ' . ref($cond));
+                    my $right = $cond->inputs()->[2];
+                    ok($right isa Chalk::IR::Node::NumLt, 'right || operand is NumLt(<)')
+                        or diag('got ' . (ref($right) || 'undef'));
+                    # The right operand of < is the subscript, not the bare array
+                    my $right_rhs = $right isa Chalk::IR::Node::NumLt ? $right->inputs()->[2] : undef;
+                    ok($right_rhs isa Chalk::IR::Node::Subscript,
+                        'right operand of < is a Subscript (subscript pushed in)')
+                        or diag('got ' . (ref($right_rhs) || 'undef'));
                 }
             }
         }
