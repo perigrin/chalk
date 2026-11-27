@@ -11,7 +11,7 @@ use Test::Chalk;
 use Chalk::IR::Serialize::JSON ();
 
 my $perl    = "$ENV{HOME}/.local/share/pvm/versions/5.42.0/bin/perl";
-my $son_lib = "$ENV{HOME}/dev/perl5-son/lib";
+my $son_lib = $ENV{PERL5_SON_LIB} // "$ENV{HOME}/dev/perl5-son/lib";
 
 unless (-d $son_lib) {
     plan skip_all => "perl5-son not found at $son_lib";
