@@ -717,6 +717,15 @@ sub arg_alias {
         return $b->as($b->value($n), '%Slot');
     }
     if ($op eq 'PadAccess' && ( $n->sigil // '' ) eq '$' && $n->is_location) {
+        # A READ AT AN OLDER VERSION THAN THE CALL'S, which B::SoN did not
+        # pass as a place, is the value it read, as a package scalar's below:
+        # `f(--$x, $x--)` hands f $x and the old $x, a copy -- passed as $x
+        # itself it was read after the decrement's store (`-1-1` for `-10`,
+        # fifth final audit vp94, promotion off).
+        my $call = $b->{arg_call};
+        return $b->emit(op => 'Fresh', type => '%Slot', inputs => [ $b->as($b->value($n), '%Slot') ])
+            if !$n->place && !$n->shared && blessed( $n->mem_in ) && blessed($call) && blessed( $call->mem_in )
+            && refaddr( $n->mem_in ) != refaddr( $call->mem_in );
         return $b->emit(op => 'SRef', type => '%Slot', inputs => [ $b->location($n) ]);
     }
     # (a captured variable's place: its cell)
