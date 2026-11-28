@@ -170,6 +170,18 @@ sub _refs_made_of_made {
     return !grep { !( blessed($_) && ( $b->{memo}{ refaddr($_) } || $_->operation eq 'Constant' ) ) } @parts;
 }
 
+# _of_constants($n) -> a Constant, or a list, coercion or repetition of
+# constants (`(0) x 3`): on no chain, and none of them can die -- made early,
+# the same.
+sub _of_constants {
+    my ($n) = @_;
+    return 0 unless blessed($n);
+    return 1 if $n->operation eq 'Constant';
+    return 0 unless $n->operation =~ /\A(?:ArrayLiteral|Coerce|Repeat)\z/ && !$n->is_pinned && !blessed( $n->mem_in );
+    return 0 if $n->operation eq 'ArrayLiteral' && defined $n->symbol;
+    return !grep { !_of_constants($_) } $n->inputs->@*;
+}
+
 # agg_settle(): AS AN IF OR A LOOP IS ENTERED, each whole aggregate of this
 # function not pinned and not made yet that is of the pass the walk is in --
 # a merge places it there, or none does -- and all of whose parts are made
@@ -181,7 +193,7 @@ sub agg_settle {
     for my $L (grep { $_->operation =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( $_->stamp // '' ) =~ /\A(?:Array|Hash)\z/   # static type
                       && !$_->is_pinned && defined $_->symbol } +($b->{own_nodes} // [])->@*) {
         next if $b->{memo}{ refaddr($L) } || $L->stored_whole_into || !$b->agg_home_here($L, $loop);
-        next if grep { !( blessed($_) && ( $b->{memo}{ refaddr($_) } || $_->operation eq 'Constant' || $b->_refs_made_of_made($_) ) ) } $L->inputs->@*;
+        next if grep { !( blessed($_) && ( $b->{memo}{ refaddr($_) } || _of_constants($_) || $b->_refs_made_of_made($_) ) ) } $L->inputs->@*;
         local $b->{agg_settling} = 1;
         $b->value($L);
     }
