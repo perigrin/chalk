@@ -294,8 +294,16 @@ sub _use_counts {
         my $at0 = grep { $_ == 0 } @pos;   # (a bare grep in an || chain takes the rest as its list)
         my $at1 = grep { $_ == 1 } @pos;
         # (a hash literal's items are a list too: `(a => f(), b => 1)` calls f
-        # for a list, as many items as it returns -- fifth final audit, Q16)
-        if ($op eq 'ArrayLiteral' || $op eq 'HashLiteral' || $op eq 'Print'
+        # for a list, as many items as it returns -- fifth final audit, Q16.
+        # Only where nothing else reads the call: `%h = f()` counted too, in
+        # a loop's test, counted the hash's list wrong -- refused there, as
+        # a call read both ways is.)
+        my $only_hash = $op eq 'HashLiteral' && !grep {
+            my $o = $_;
+            blessed($o) && refaddr($o) != refaddr($u) && $o->operation !~ /\A(?:Loop|Region|Proj|Exc)\z/ && !( $o->operation eq 'Phi' && $o->memory )
+                && grep { blessed($_) && refaddr($_) == refaddr($c) } $o->inputs->@*
+        } ( $c->consumers // [] )->@*;
+        if ($op eq 'ArrayLiteral' || $only_hash || $op eq 'Print'
             || $op eq 'Call' && ( $u->dispatch_kind // '' ) eq 'direct'
             || $op eq 'Call' && ( $u->dispatch_kind // '' ) =~ /\A(?:method|indirect)\z/ && !$at0   # not the invocant, nor the code
             || $op eq 'Call' && $u->takes_a_list && !$at0   # (push's list, join's: not its array, its separator)
