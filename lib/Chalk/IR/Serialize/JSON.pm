@@ -1368,11 +1368,6 @@ sub from_json ($json_string) {
         my $inv = Chalk::IR::Serialize::WireInvariant->new;
         $inv->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;
         $inv->check( 'a ' . ( $_->{phase} // 'phase' ) . ' block', $_ ) for ( $data->{phase_blocks} // [] )->@*;
-        # (L12-L14: what a node reads -- a record binds `my` variables, a read
-        # of changeable state names a version, an effect is on the chain)
-        my $reads = Chalk::IR::Serialize::WireReads->new;
-        $reads->check( $_, $data->{methods}{$_} ) for sort keys +( $data->{methods} // {} )->%*;
-        $reads->check( 'a ' . ( $_->{phase} // 'phase' ) . ' block', $_ ) for ( $data->{phase_blocks} // [] )->@*;
         # (L11, across the graphs: an alias carried as a value is private)
         Chalk::IR::Serialize::WireAliases->new->check( $data->{methods} );
     }
@@ -1472,6 +1467,14 @@ sub from_json ($json_string) {
     # B::SoN's rules. Every other is checked -- `dowarn` or none.)
     Chalk::IR::Serialize::WireCheck->new( methods => $data->{methods}, defined => \%defined )->check
         if $theirs;
+    # (L12-L14, what a node reads -- a record binds `my` variables, a read of
+    # changeable state names a version, an effect is on the chain -- on the
+    # graphs the program may run: a followed module's sub it never reaches,
+    # List::Util::_Pair::key's, is not lowered, whatever it reads)
+    if ($theirs) {
+        my $reads = Chalk::IR::Serialize::WireReads->new;
+        $reads->check( $_, $data->{methods}{$_} ) for sort keys $data->{methods}->%*;
+    }
     # ...and its class's record of it: a module's class keeps its shape, and
     # the name stays in its stash, unloaded (can() asks by name).
     my %gone = map { $_ => 1 } @gone;

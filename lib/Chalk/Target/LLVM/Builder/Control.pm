@@ -309,9 +309,9 @@ sub walk {
                     # that writes $_ ran. Refused, both.
                     my $c = blessed($src) && $src->operation eq 'Subscript' ? $src->inputs->[0] : undef;
                     out('a $_ aliased to an item of a list written out, where the program writes $_ (B::SoN may have folded the item)')
-                        if blessed($c) && $c->operation eq 'ArrayLiteral' && !defined $c->symbol;
+                        if $b->topic_written && blessed($c) && $c->operation eq 'ArrayLiteral' && !defined $c->symbol;
                     out('a read of $_ B::SoN folds to the element it aliases, where the program writes $_ (B::SoN sees no write through $_)')
-                        if blessed($c) && grep {
+                        if $b->topic_written && blessed($c) && grep {
                             my $o = $_;
                             blessed($o) && refaddr($o) != refaddr($src) && $o->operation eq 'Subscript' && ( $o->kind // 'array' ) eq ( $src->kind // 'array' )
                                 && blessed( $o->inputs->[1] ) && blessed( $src->inputs->[1] ) && refaddr( $o->inputs->[1] ) == refaddr( $src->inputs->[1] )
@@ -449,8 +449,11 @@ sub walk {
             # the two aggregates it refers to is where perl takes it, and the
             # wire does not say where that is -- T2 makes it at its first use,
             # or looks through it to the name -- fifth final audit, Q7)
+            # (One only stored -- `$r = \@a` into a variable kept in memory --
+            # is taken where the store stands, which is perl's.)
             out('a reference to a package array or hash a `local` swaps, taken at no memory version (which of the two it refers to is not said)')
-                if grep { blessed($_) && $_->operation eq 'Ref' && $b->swapped_place( $_->inputs->[0] ) && _pkg_agg_name( $_->inputs->[0] ) eq _pkg_agg_name($t) }
+                if grep { blessed($_) && $_->operation eq 'Ref' && $b->swapped_place( $_->inputs->[0] ) && _pkg_agg_name( $_->inputs->[0] ) eq _pkg_agg_name($t)
+                          && !_only_stored($_) }
                     _all_nodes($b->{mop}, $b->{root_ret} // $b->{ret});
             $b->hash_reads_settled('a local');
             $b->reads_before($_) for $b->{passed}->@*;
@@ -1228,10 +1231,19 @@ sub _element_uses {
         if ( $op eq 'Print' || $op eq 'Concat'
             || $op =~ /\A(?:ArrayLiteral|HashLiteral)\z/ && ( defined $u->symbol && $u->symbol !~ /::/ || ( $u->stamp // '' ) =~ /\A(?:ArrayRef|HashRef)\z/ )   # static type
             || $op eq 'Call' && !$u->is_sub_call && !$u->mutates_array
-                && ( Chalk::Grammar::Perl::BuiltinTable::fact( $u->name, 'effect_pure' ) || Chalk::Grammar::Perl::BuiltinTable::fact( $u->name, 'reads_list' ) ) ) {
+                && ( Chalk::Grammar::Perl::BuiltinTable::fact( $u->name, 'effect_pure' ) || Chalk::Grammar::Perl::BuiltinTable::fact( $u->name, 'reads_list' ) )
+            # (a list assign's right side, `my ($n, $d) = @$f`; map's yield)
+            || $op eq 'Assign' && $u->can('targets') && defined $u->targets && !( grep { $_ < $u->targets } @at )
+            || $op eq 'ListAppend' && !( grep { $_ == 0 } @at )
+            # (a sub's value: perl returns copies of the elements)
+            || $op eq 'Return' ) {
             $kind{elements} = 1;
         }
+        # (a merge only a loop goes round with, nothing reading it: no use)
+        elsif ( $op eq 'Phi' ) { my $k = _element_uses( $u, $depth + 1 ); $kind{$k} = 1 unless $k eq 'none' }
         elsif ( $op =~ /\A(?:Coerce|Repeat|ArrayLiteral)\z/ ) { $kind{ _element_uses( $u, $depth + 1 ) =~ s/\Anone\z/unknown/r } = 1 }
+        # (a count made at the deref's own version: of a copy or the array alike)
+        elsif ( $op eq 'Count' && blessed( $u->mem_in ) && refaddr( $u->mem_in ) == refaddr($n) ) { }
         elsif ( $op =~ /\A(?:Count|Exists|Delete|Ref|LocalAlias)\z/ || $op eq 'Subscript' && "@at" eq '0'
             || $op eq 'Slice' && "@at" eq $u->inputs->$#* || $op eq 'Call' && ( $u->is_sub_call || $u->mutates_array ) ) {
             $kind{container} = 1;
@@ -1240,6 +1252,20 @@ sub _element_uses {
     }
     return 'none' unless %kind;
     return keys(%kind) == 1 ? ( keys %kind )[0] : 'unknown';
+}
+
+# _only_stored($n) -> $n's value is used, and only as the value a store on
+# the chain stores (an Assign's, an EntryWrite's, a CellWrite's).
+sub _only_stored {
+    my ($n) = @_;
+    my $used = 0;
+    for my $u (grep { blessed($_) && $_->operation ne 'Exc' } ( $n->consumers // [] )->@*) {
+        my @at = grep { blessed( $u->inputs->[$_] ) && refaddr( $u->inputs->[$_] ) == refaddr($n) } 0 .. $u->inputs->$#*;
+        next unless @at;
+        return 0 unless $u->operation =~ /\A(?:Assign|EntryWrite|CellWrite)\z/ && $u->is_pinned && !( grep { $_ != $u->inputs->$#* } @at );
+        $used = 1;
+    }
+    return $used;
 }
 
 # _whole_deref_beside_a_later_call($call) -> an argument of $call is an array
@@ -1285,13 +1311,30 @@ sub topic_alias {
         # (WHETHER OR NOT THIS GRAPH READS IT: a callee's store to $_ is to the
         # element -- `for (@l) { f() } sub f { $_ = 9 }` left @l as it was,
         # audit 2026-11-22)
-        # (AND WHERE THE PROGRAM READS $_ BY ITS NAME: the element as it is
-        # where it is read, which a store by another name -- `$a[0]++` in a
-        # callee -- changes; a copy made at the pass's start did not see it
-        # -- fifth final audit, Q17)
-        $aliased && ( $writes || $b->reads_topic ) ? 1 : 0;
+        # (AND WHERE THE PROGRAM READS $_ BY ITS NAME and stores into an
+        # element by another: the element as it is where $_ is read, which
+        # that store -- `$a[0]++` in a callee -- changes; a copy made at the
+        # pass's start did not see it -- fifth final audit, Q17)
+        my $elem_store = grep {
+            $_->operation eq 'Assign' && blessed( $_->inputs->[0] ) && $_->inputs->[0]->operation =~ /\A(?:Subscript|Slice)\z/
+                || $_->operation =~ /\A(?:Delete|ElemRestore)\z/ || $_->operation eq 'Call' && $_->mutates_array
+        } @all;
+        # (an alias to an element of a named aggregate: one of a temporary --
+        # a sorted list, a range -- no other name reaches)
+        my $of_named = grep {
+            my $x = $_->inputs->[0];
+            $x = $x->inputs->[1] if blessed($x) && $x->operation eq 'TernaryExpr';
+            $x = $x->inputs->[0] if blessed($x) && $x->operation eq 'Ref';
+            my $c = blessed($x) && $x->operation eq 'Subscript' ? $x->inputs->[0] : undef;
+            blessed($c) && !( $c->operation =~ /\A(?:Call|Range)\z/ || $c->operation eq 'ArrayLiteral' && !defined $c->symbol )
+        } grep { $_->operation eq 'LocalAlias' && ( $_->name // '' ) eq '_' } @all;
+        $b->{topic_written} = $writes ? 1 : 0;
+        $aliased && ( $writes || $of_named && $elem_store && $b->reads_topic ) ? 1 : 0;
     };
 }
+
+# topic_written -> the program stores into $_ by its name (topic_alias).
+sub topic_written { my ($b) = @_; $b->topic_alias; return $b->{topic_written} }
 
 # is_topic($n) -> $n is the package scalar $_ (main::_).
 sub is_topic {
