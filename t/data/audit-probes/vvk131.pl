@@ -1,0 +1,1 @@
+package B1; sub new { my $c = shift; my $s = bless {}, $c; $s->init; $s } sub init { $_[0]{k} = "b" } package D1; our @ISA = ("B1"); sub init { my $s = shift; $s->SUPER::init; $s->{k} .= "d" } package main; print D1->new->{k}, "\n";

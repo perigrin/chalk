@@ -1,0 +1,1 @@
+package C; sub new { bless {v => $_[1]}, $_[0] } sub set { $_[0]{v} = $_[1] } sub get { $_[0]{v} } package main; my $o = C->new(1); my $p = $o; $p->set(2); my $v = $o->get; $o->set(3); print $v, $p->get, "\n";

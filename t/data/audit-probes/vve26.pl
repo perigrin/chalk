@@ -1,0 +1,1 @@
+our $x = 1; sub g { $_[0] = 5 } sub f { my $o = $_[0]; &g; "$o$_[0]" } print f($x), "\n";
