@@ -652,6 +652,10 @@ sub list_assign {
         # (B::SoN reads it AT this Assign's version: its mem_in)
         next unless grep { blessed($_) && refaddr($_) == refaddr($s) } $r->inputs->@*, $r->mem_in;
         if ( exists $val{ $r->symbol } ) { $b->{memo}{ refaddr($r) } = $val{ $r->symbol }; next }
+        # (ONE KEPT IN MEMORY that no list assign gave a value: this one left
+        # it as it was, so it is read from its place, as any read of it is --
+        # a foreach variable read in a try's catch, stevan/curly brainfuck.pl)
+        next if !exists $b->{lvals}{ $r->symbol } && $r->is_location && !$r->place;
         my $last = $b->{lvals}{ $r->symbol } // out('a read after a list assignment of no target (' . $r->symbol . ')');
         # (an argument is read where it is: as `my (...) = @_` reads keep it)
         if ( $b->{args_vals}{ refaddr($last) } ) { $b->{args}{ refaddr($r) } = $last } else { $b->{memo}{ refaddr($r) } = $last }

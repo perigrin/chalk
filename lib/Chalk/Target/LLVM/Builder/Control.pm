@@ -843,6 +843,15 @@ sub if_stmt {
                       && !$_->memory } ( $region->consumers // [] )->@*;
     my %seen;
     @phis = grep { !$seen{ refaddr($_) }++ } @phis;
+    # (A PHI NO NODE READS is not made: a try/catch statement's value, its
+    # try arm's last statement, is no value past the eval's end -- refused
+    # as one, though nothing read it. Unread both by its `consumers`, which
+    # can miss a reader, and by the graph's nodes, which can miss one too.)
+    if ( my @unread = grep { !( $_->consumers // [] )->@* } @phis ) {
+        my %read = map { refaddr($_) => 1 } grep { blessed($_) } map { $_->inputs->@* } _all_nodes( $b->{mop}, $b->{root_ret} // $b->{ret} );
+        my %skip = map { refaddr($_) => 1 } grep { !$read{ refaddr($_) } } @unread;
+        @phis = grep { !$skip{ refaddr($_) } } @phis;
+    }
     # Each Region input is an arm's end; the phi's input of the same place is
     # that arm's value -- made in the arm, where it is live.
     my @arm_of = map { my $in = $_; ( grep { refaddr($end{$_}) == refaddr($in) } 0, 1 )[0] } $region->inputs->@*;
