@@ -1,0 +1,14 @@
+ok:     alice pays bob 30
+ok:     bob pays carol 90
+failed: bob pays carol 20: bob has -40, can't take 20
+failed: carol pays dave 5: no account called dave
+failed: alice pays carol -5: withdrawal must be positive, not -5
+failed: open alice again: account alice already exists
+failed: carol deposits 0: deposit must be positive, not 0
+alice     70  -30
+bob      -40  +30 -90
+carol     90  +90
+money in the bank: 120
+month 1: alice 70.70  bob -40.80  carol 90.90
+month 2: alice 71.41  bob -41.62  carol 91.81
+month 3: alice 72.12  bob -42.45  carol 92.73

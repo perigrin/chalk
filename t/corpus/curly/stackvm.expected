@@ -1,0 +1,5 @@
+broken: stack underflow at 1
+countdown: 5 4 3 2 1 (36 steps, 9 instructions)
+factorial: 3628800 (118 steps, 17 instructions)
+forever: step limit reached
+missing: no label 'nowhere'

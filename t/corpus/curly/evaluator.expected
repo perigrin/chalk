@@ -1,0 +1,11 @@
+e = 3 * x ^ 2 + (2 * x - 7)
+  at x = 0: -7
+  at x = 1: -2
+  at x = 2: 9
+  at x = 10: 313
+de/dx = 3 * (2 * x) + 2
+  at x = 2: 14
+f = (a - b) / (a + b) = 0.5
+1 / (2 - 2): division by zero
+1 % 2: unknown operator %
+y + 1: unbound variable y

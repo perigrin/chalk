@@ -1,0 +1,12 @@
+built     (0 -> 1 -> 2 -> 3 -> 4 -> 5) size 6
+shifted 0
+now       (1 -> 2 -> 3 -> 4 -> 5) size 5
+reversed  (5 -> 4 -> 3 -> 2 -> 1) size 5
+pushed 9  (5 -> 4 -> 3 -> 2 -> 1 -> 9) size 6
+first even at 1
+first over 100 at -1
+deleted 4 threes
+left      (1 -> 2) size 2
+then 7    (1 -> 2 -> 7) size 3
+merged    (0 -> 1 -> 2 -> 4 -> 4 -> 6 -> 7 -> 8 -> 10 -> 10 -> 13) size 11
+shift from empty: undef

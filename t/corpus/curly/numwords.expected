@@ -1,0 +1,17 @@
+0: zero
+7: seven
+13: thirteen
+21: twenty-one
+99: ninety-nine
+100: one hundred
+101: one hundred and one
+342: three hundred and forty-two
+1000: one thousand
+1001: one thousand and one
+12345: twelve thousand three hundred and forty-five
+1000000: one million
+7000005: seven million and five
+123456789012: one hundred and twenty-three billion four hundred and fifty-six million seven hundred and eighty-nine thousand and twelve
+-40: minus forty
+round trips that failed below 10,000: 0
+letters used writing 1 to 1000: 21124

@@ -1,0 +1,17 @@
+greet ran 4 handlers
+greet ran 3 handlers
+save ran 2 handlers
+save ran 1 handlers
+nobody listens: 0
+removed 1 tick handler; again 0
+counter: 10
+(priority) checking Ann
+first greeting!
+hello, Ann
+nice name
+(priority) checking BOB
+hello, BOB
+greet: handler 3 failed: no shouting
+validated
+saved a.txt
+save: stopped by handler 5

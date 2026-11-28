@@ -1,0 +1,12 @@
+edit distance kitten -> sitting: 3
+edit distance flaw -> lawn: 2
+edit distance intention -> execution: 5
+edit distance  -> abc: 3
+edit distance same -> same: 0
+knapsack of 10: worth 420 with water sandwich glucose
+ways to make 100 from 1 5 10 25 50: 292
+ways to make 200p from British coins: 73682
+fewest coins for 63 from (1 5 10 21 25): 21 21 21
+fewest coins for 30 from (1 15 25): 15 15
+fewest coins for 7 from (2 4): impossible
+longest increasing subsequence: 2 5 7 18 19

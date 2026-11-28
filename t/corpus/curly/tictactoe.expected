@@ -1,0 +1,8 @@
+  X X O
+  O O X
+  X O X
+result after 9 moves: draw; 8533 positions looked at
+XX.OO.... with X to play: move to 2, worth 1 (157 positions)
+X.O.X..O. with O to play: move to 8, worth -1 (178 positions)
+O.X.X.... with O to play: move to 6, worth 0 (933 positions)
+3468 possible games after X in a corner and O in the centre: O 1312, X 1436, draw 720

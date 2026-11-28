@@ -1,0 +1,13 @@
+stack holds a,b,c,d; size 4
+popped d, then c
+peek: b
+popping an empty stack: stack empty
+took 1 2 3 4; 2 left; served 4
+0 1 2 3 4
+100 90 80 70 60
+c1 goes on at 5
+s has 0, t has 1
+title=published, words=250
+undo: title=final, words=250
+undo: title=final, words=100
+undo: title=draft, words=100

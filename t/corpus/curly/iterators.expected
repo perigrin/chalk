@@ -1,0 +1,9 @@
+1 to 10: 1 2 3 4 5 6 7 8 9 10
+squares: 1 4 9 16 25 36 49 64
+odd squares: 1 9 25 49 81 121
+primes: 2 3 5 7 11 13 17 19 23 29 31 37 41 43 47
+pairs: 1a 2b 3c 4d 5e
+chained: 1 2 3 10 11 12 100 101 102 103
+double after increment of 5: 12; increment after double: 11
+curried: 13 23
+twin primes: 3/5 5/7 11/13 17/19 29/31 41/43

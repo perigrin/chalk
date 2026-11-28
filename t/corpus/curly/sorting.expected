@@ -1,0 +1,9 @@
+data starts: 27 264 753 806 735 532 333 266 459 752
+sorted:      0 14 15 16 22 27 27 28 37 43 ... 995
+heap       ok,  1239 comparisons
+insertion  ok, 10284 comparisons
+merge      ok,  1268 comparisons
+quick      ok,  1647 comparisons
+Apple Banana apple banana cherry date pear
+Apple apple Banana banana cherry date pear
+Banana cherry banana apple Apple date pear

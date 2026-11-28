@@ -1,0 +1,18 @@
+permutations of a b c: abc acb bac bca cab cba
+1 items: 1 permutations (1)
+2 items: 2 permutations (2)
+3 items: 6 permutations (6)
+4 items: 24 permutations (24)
+5 items: 120 permutations (120)
+6 items: 720 permutations (720)
+3 of 5: abc abd abe acd ace ade bcd bce bde cde
+C(6, 0) =  1 ok
+C(6, 1) =  6 ok
+C(6, 2) = 15 ok
+C(6, 3) = 20 ok
+C(6, 4) = 15 ok
+C(6, 5) =  6 ok
+C(6, 6) =  1 ok
+abcd abdc acbd acdb adbc adcb bacd badc bcad bcda bdac bdca cabd cadb cbad cbda cdab cdba dabc dacb dbac dbca dcab dcba 
+24 in lexical order
+power set: {} {x} {y} {x,y} {z} {x,z} {y,z} {x,y,z}

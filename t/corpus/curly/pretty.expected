@@ -1,0 +1,42 @@
+{
+  "authors": [
+    {
+      "name": "Stevan",
+      "role": "design"
+    },
+    {
+      "name": "Fable",
+      "role": "build"
+    }
+  ],
+  "empty": {
+    "list": [],
+    "map": {}
+  },
+  "name": "curly",
+  "nested": [
+    [
+      1,
+      [
+        2,
+        [
+          3,
+          [
+            4
+          ]
+        ]
+      ]
+    ]
+  ],
+  "nothing": null,
+  "quoted": "say \"hi\"\n\tthen go",
+  "steps": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "version": 0.17
+}
+arrays 8, deepest 6, hashes 5, scalars 16, undefs 1

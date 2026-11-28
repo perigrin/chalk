@@ -1,0 +1,56 @@
+# The curly examples' verdicts through B::SoN, T2 and lli against perl (t/bootstrap/corpus/curly-examples.t).
+# Re-record after a look: CURLY_UPDATE=1 prove -l t/bootstrap/corpus/curly-examples.t
+ackermann	REFUSED	GAP: T2: out of its slices (a call of a sub with optional parameters passing a list (its count unknown))
+anagrams	REFUSED	load: from_json failed: GAP: a `my` aggregate a sub also reaches, flattened beside a call that may change it (in main::__PROGRAM__)
+bank	REFUSED	B::SoN: GAP: a foreach whose body writes its alias and may reshape the array (a shift, push, splice, list assign or call) not yet lowered
+bases	REFUSED	GAP: T2: out of its slices (a sprintf of a list)
+bignum	REFUSED	load: from_json failed: GAP: main::big_mul, which the program calls, is refused in its module: GAP: void-context 'and' arm did not converge (statement-modifier loop o
+binomial	LOUD	Can't use an undefined value as an ARRAY reference
+binsearch	REFUSED	GAP: T2: out of its slices (an array first made in an arm or a loop body)
+bottles	SAME	
+brainfuck	SAME	
+calendar	REFUSED	GAP: T2: out of its slices (a phi stamped List)
+closures-stack	REFUSED	GAP: T2: out of its slices (an array a closure shares)
+collatz	SAME	
+dijkstra	SAME	
+dynprog	REFUSED	GAP: T2: out of its slices (a call of a sub with a signature of another arity (perl dies))
+evaluator	REFUSED	load: from_json failed: GAP: main::simplify, which the program calls, is refused in its module: GAP: an element operand is read by alias and a later operand calls cod
+even-odd	SAME	
+events	REFUSED	B::SoN: GAP: a call's argument perl hands on as an SV (rv2sv) is read when the callee reads @_, after the call or a later argument may store it -- not yet lowered
+factorial	SAME	
+fibonacci	SAME	
+gcd	LOUD	/usr/bin/lli: lli: /tmp/EVzxgMt9br/p.ll:8305:3: error: instruction forward referenced with type '%Slot = type { i8, i64 }' %v32 = call %Array* @t2_new_array() ^
+hanoi	REFUSED	GAP: T2: out of its slices (a range taken as a scalar (Call))
+huffman	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across a call)
+inventory	REFUSED	GAP: T2: out of its slices (a read through a reference waiting across an eval)
+iterators	REFUSED	GAP: T2: out of its slices (a call of a code value that may be closure main::__PROGRAM__::__ANON__:73:22, of a count perl checks against its signature)
+life	REFUSED	load: from_json failed: GAP: main::show, which the program calls, is refused in its module: GAP: a foreach over an unproven list (a bare-declared array, or a deref it
+linkedlist	REFUSED	GAP: T2: out of its slices (a read through a reference an arm made, read again past a call or a store)
+luhn	REFUSED	GAP: T2: out of its slices (a range taken as a scalar (Call))
+matrix	REFUSED	GAP: T2: out of its slices (an array through an element read whole)
+maze	REFUSED	GAP: T2: out of its slices (a hash first made in an arm or a loop body)
+memoize	REFUSED	GAP: T2: out of its slices (a hash a closure shares)
+numwords	REFUSED	load: from_json failed: GAP: a `my` aggregate a sub also reaches, flattened beside a call that may change it (in main::below_thousand)
+permutations	REFUSED	B::SoN: GAP: a `my` array assigned whole from itself while a reference to one of its elements may be live is not yet lowered -- perl keeps or copies the element the ref
+pqueue	REFUSED	GAP: T2: out of its slices (sub main::make_heap has a default that is not made the same anywhere)
+pretty	REFUSED	load: from_json failed: GAP: main::walk, which the program calls, is refused in its module: GAP: an if/else in its caller's context whose arm stores an element, then
+queens	REFUSED	GAP: T2: out of its slices (an array through an element read whole)
+rational	REFUSED	GAP: T2: out of its slices (a call of a sub with optional parameters passing a list (its count unknown))
+report	REFUSED	B::SoN: GAP: a foreach whose body writes its alias and may reshape the array (a shift, push, splice, list assign or call) not yet lowered
+rle	REFUSED	load: from_json failed: GAP: main::encode, which the program calls, is refused in its module: GAP: statement-modifier loop or unhandled op inside an if/else arm not y
+roman	SAME	
+rpn	REFUSED	B::SoN: GAP: a call's value that may alias a foreach iterator is not yet lowered -- the iterator is a copy written back each pass, and the callee can return or keep a r
+sieve	SAME	
+sorting	REFUSED	B::SoN: GAP: a foreach whose body writes its alias and may reshape the array (a shift, push, splice, list assign or call) not yet lowered
+spiral	REFUSED	load: from_json failed: GAP: main::show, which the program calls, is refused in its module: GAP: a foreach over an unproven list (a bare-declared array, or a deref it
+stackvm	REFUSED	load: from_json failed: GAP: a `my` aggregate a sub also reaches, flattened beside a call that may change it (in main::run::__ANON__:66:13)
+statemachine	REFUSED	B::SoN: GAP: substr or $#a handed to a sub that may store through $_[N] is not yet lowered -- perl's alias is a magic lvalue, and the wire has no such place
+stats	REFUSED	load: from_json failed: GAP: main::quartiles, which the program calls, is refused in its module: GAP: a slice perl's alias may make elements of is not yet lowered --
+strings	REFUSED	GAP: T2: out of its slices (Call builtin rindex)
+sudoku	REFUSED	GAP: T2: out of its slices (Phi)
+sum-digits	REFUSED	B::SoN: GAP: a slice perl's alias may make elements of is not yet lowered -- a foreach, map, grep or call over it creates them, and a slice is no place on the wire
+tictactoe	REFUSED	B::SoN: GAP: an until whose condition is not a negatable comparison is not yet lowered
+toposort	REFUSED	load: from_json failed: GAP: main::kahn, which the program calls, is refused in its module: GAP: a foreach over an unproven list (a bare-declared array, or a deref it
+tree	REFUSED	B::SoN: GAP: an anonymous sub closing over @keys is not yet lowered -- it is built once per pass of a loop that gives it a fresh variable, and its lifted body reads one
+unionfind	REFUSED	load: from_json failed: GAP: wire invariant L8: main::make_sets::__ANON__:15:8: Proj#37 names 43, made after it
+wordfreq	REFUSED	B::SoN: GAP: a slice perl's alias may make elements of is not yet lowered -- a foreach, map, grep or call over it creates them, and a slice is no place on the wire

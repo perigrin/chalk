@@ -1,0 +1,10 @@
+Kahn: config core util lib widgets ui app tests
+DFS:  config core util lib widgets ui app tests
+level 0: config core
+level 1: util widgets
+level 2: lib
+level 3: ui
+level 4: app
+level 5: tests
+cyclic: cycle among: app core lib tests ui util widgets
+cyclic: cycle: app -> lib -> core -> tests -> app

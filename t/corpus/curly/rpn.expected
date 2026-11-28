@@ -1,0 +1,13 @@
+3 4 + => 7
+5 1 2 + 4 * + 3 - => 14
+2 3 ^ dup * => 64
+10 neg 4 / => -2.5
+1 + => error: stack underflow at '+'
+1 2 => error: expected one value, the stack holds 2
+4 0 / => error: division by zero
+2 x + => error: unknown token 'x'
+3 + 4 * 2 / ( 1 - 5 ) ^ 2 ^ 3  ->  3 4 2 * 1 5 - 2 3 ^ ^ / +  =  3.0001220703125
+( 1 + 2 ) * ( 3 + 4 )  ->  1 2 + 3 4 + *  =  21
+2 ^ 3 ^ 2  ->  2 3 2 ^ ^  =  512
+100 - 10 - 1  ->  100 10 - 1 -  =  89
+( 1 + 2 => error: unbalanced (

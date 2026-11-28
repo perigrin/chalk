@@ -1,0 +1,31 @@
+order 1:
+  manual     2 x   4.00 =     8.00 (no tax)
+  widget    10 x   2.50 =    25.00
+  subtotal                        33.00
+  tax                              2.00
+  total                           35.00
+order 2:
+  gadget     8 x  12.99 =   103.92
+  widget    20 x   2.50 =    50.00
+  subtotal                       153.92
+  discount 5%                     -7.70
+  tax                             12.31
+  total                          158.54
+order 3 refused: only 0 gizmo left, 1 wanted
+order 4 refused: only 7 gadget left, 8 wanted
+order 5 refused: unknown product 'sprocket'
+order 6 refused: bad quantity -1 for widget
+gizmos now 5
+order 7:
+  gizmo      5 x   7.25 =    36.25
+  manual    38 x   4.00 =   152.00 (no tax)
+  subtotal                       188.25
+  discount 5%                     -9.41
+  tax                              2.90
+  total                          181.74
+stock:
+  gizmo       0 OUT
+  manual      0 OUT
+  gadget      7 low
+  widget     70 
+stock is worth 265.93

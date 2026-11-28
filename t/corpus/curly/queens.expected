@@ -1,0 +1,24 @@
+1 queens:   1 solutions
+2 queens:   0 solutions
+3 queens:   0 solutions
+4 queens:   2 solutions
+5 queens:  10 solutions
+6 queens:   4 solutions
+7 queens:  40 solutions
+8 queens:  92 solutions
+Q . . . . . . .
+. . . . Q . . .
+. . . . . . . Q
+. . . . . Q . .
+. . Q . . . . .
+. . . . . . Q .
+. Q . . . . . .
+. . . Q . . . .
+first column 0: 4
+first column 1: 8
+first column 2: 16
+first column 3: 18
+first column 4: 18
+first column 5: 16
+first column 6: 8
+first column 7: 4

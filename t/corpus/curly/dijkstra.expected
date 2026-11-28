@@ -1,0 +1,10 @@
+A to A:  0 via A
+A to B:  7 via A-B
+A to C:  9 via A-C
+A to D: 20 via A-C-D
+A to E: 20 via A-C-F-E
+A to F: 11 via A-C-F
+A to G: unreachable
+A to H: unreachable
+Bellman-Ford agrees: yes
+the two nodes furthest apart: B-E, 21

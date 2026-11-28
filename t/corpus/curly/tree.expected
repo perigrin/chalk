@@ -1,0 +1,27 @@
+pre-order: 50 30 20 40 35 45 70 60 65 80
+in-order: 20 30 35 40 45 50 60 65 70 80
+post-order: 20 35 45 40 30 65 60 80 70 50
+size 10, height 4
+3rd smallest: 35; 8th: 65
+lookup 40: forty; lookup 99: none
+        80
+    70
+            65
+        60
+50
+            45
+        40
+            35
+    30
+        20
+after removing 30, 50 and 99:
+        80
+    70
+        65
+60
+            45
+        40
+    35
+        20
+in-order: 20 35 40 45 60 65 70 80; size 8
+200 keys inserted in order make a tree 200 high

@@ -1,0 +1,14 @@
+0 is at 0 (6 probes)
+1 is at 1 (7 probes)
+49 is at 7 (7 probes)
+50 is missing; it would go at 8 (7 probes)
+2500 is at 50 (1 probes)
+9999 is missing; it would go at 100 (7 probes)
+10000 is at 100 (7 probes)
+10001 is missing; it would go at 101 (7 probes)
+apple at 0
+fig at 5
+mango at 9
+zucchini not found
+aardvark not found
+never more than 7 probes over 101 values

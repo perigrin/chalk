@@ -1,0 +1,11 @@
+p(1) = 1
+p(5) = 7
+p(10) = 42
+p(50) = 204226
+p(100) = 190569292
+lattice paths through a 16x16 grid: 601080390
+partitions was called 10105 times
+paths was called 513 times
+lcs(AGGTAB, GXTXAYB) = 'GTAB' (4 long, 36 cells)
+lcs(thisisatest, testing123testing) = 'tsitest' (7 long, 158 cells)
+lcs(perl, pearl) = 'perl' (4 long, 7 cells)

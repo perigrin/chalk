@@ -1,0 +1,9 @@
+6765
+0 1 1 2 3 5 8 13 21 34 55 89 144 233 377 610
+fib(10) = 55
+fib(30) = 832040
+fib(50) = 12586269025
+fib(90) = 2880067194370816120
+fib_memo was called 182 times; the memo holds 91 values
+fib(69) = 117669030460994 is the first with 15 digits
+even: 2 8 34 144 610 ... 10 of them

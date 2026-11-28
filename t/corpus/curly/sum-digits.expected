@@ -1,0 +1,10 @@
+         0  sum  0  root 0
+         7  sum  7  root 7
+        42  sum  6  root 6
+      1234  sum 10  root 1
+     99999  sum 45  root 9
+      2026  sum 10  root 1
+9876543210  sum 45  root 9
+Harshad numbers to 60: 1 2 3 4 5 6 7 8 9 10 12 18 20 21 24 27 30 36 40 42 45 48 50 54 60
+commonest digit sums below 1000: 13 (75), 14 (75), 12 (73), 15 (73)
+digit sum 27 happens 1 time

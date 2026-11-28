@@ -1,0 +1,20 @@
+   1 = I
+   4 = IV
+   9 = IX
+  14 = XIV
+  40 = XL
+  90 = XC
+ 400 = CD
+1994 = MCMXCIV
+2026 = MMXXVI
+3999 = MMMCMXCIX
+round trips that failed: 0
+the longest numeral is MMMDCCCLXXXVIII (3888)
+MDCCLXXVI (1776): a declaration
+MCMLXIX (1969): the moon landing
+MMXXVI (2026): this program
+XLII + XIX = LXI
+MMXXVI - MCMLXIX = LVII
+from_roman(MMXQ): not a roman digit: Q
+from_roman(0): not a roman digit: 0
+to_roman(4000): out of range: 4000

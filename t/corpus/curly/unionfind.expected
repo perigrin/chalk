@@ -1,0 +1,3 @@
+groups: ann,bob,cid,dee | eve,fay | gus | hal
+6 islands, of sizes 4 4 3 2 1 1
+minimum spanning tree: AD(5) CE(5) DF(6) AB(7) BE(7) EG(9), weight 39

@@ -1,0 +1,22 @@
+locked + push
+  it's locked
+locked + coin
+  unlocked
+unlocked + push
+  you pass
+locked + push
+  it's locked
+locked + coin
+  unlocked
+unlocked + coin
+  coin returned
+unlocked + push
+  you pass
+ended locked; locked 4 times, unlocked 3 times
+x1 = 42 + y_2*(7-z)
+  => WORD(x1) OP(=) NUM(42) OP(+) WORD(y_2) OP(*) OP(() NUM(7) OP(-) WORD(z) OP())
+say "hi there", 3
+  => WORD(say) STR(hi there) OP(,) NUM(3)
+if n>10 "big"
+  => WORD(if) WORD(n) OP(>) NUM(10) STR(big)
+oops "open: unterminated string
