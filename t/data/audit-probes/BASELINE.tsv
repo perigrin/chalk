@@ -1,13 +1,5 @@
 # The audit probes' verdicts (tools/audit-probes.pl --update writes this file).
 # name	verdict	why
-# THE THIRD FINAL AUDIT'S PROBES (probes/y in perl5-son) LEFT OUT OF THIS SET. 94 of the 110 it once
-# left out are rows now, as y<name> (branch x-wrongs: SAME or refused by name, promotion on and off).
-# NOT DETERMINISTIC in perl, so no verdict holds: yp13 (its answer depends on hash order), ya57 (perl
-# reads a freed scalar).
-# Their wires still break a verifier rule (t/bootstrap/ir/wire-verify.t holds every probe here to
-# SoN::Verify; a %HELD entry would hold them by name). Each is REFUSED or SAME today:
-# VERIFY yb41 yc160 ye49 ye53 yn26 yo15 yo17 yo22 yo23 yo27 yo30 yo33 yp158 yp18
-# THE FOURTH FINAL AUDIT'S PROBES (probes/x) are rows, as x<name>; class X5's 16 among them.
 ag1	SAME	
 ag10	SAME	
 ag11	SAME	
@@ -2390,6 +2382,55 @@ vp6	SAME
 vp7	SAME	
 vp8	SAME	
 vp9	SAME	
+vva04	SAME	
+vva13	SAME	
+vva49	REFUSED	GAP: T2: out of its slices (a reference to a package array or hash a `local` swaps, taken at no memory version (which of the two it refers to is not said))
+vva58	SAME	
+vva69	SAME	
+vvj140	SAME	
+vvk15	SAME	
+vvm07	SAME	
+vvm16	REFUSED	GAP: T2: out of its slices (a reference to a package array or hash a `local` swaps, taken at no memory version (which of the two it refers to is not said))
+vvm17	REFUSED	GAP: T2: out of its slices (a reference to a package array or hash a `local` swaps, taken at no memory version (which of the two it refers to is not said))
+vvm40	REFUSED	GAP: T2: out of its slices (a reference to a package array or hash a `local` swaps, taken at no memory version (which of the two it refers to is not said))
+vvm41	REFUSED	GAP: T2: out of its slices (a reference to a package array or hash a `local` swaps, taken at no memory version (which of the two it refers to is not said))
+vvm42	REFUSED	GAP: T2: out of its slices (a reference to a package array or hash a `local` swaps, taken at no memory version (which of the two it refers to is not said))
+vvm63	SAME	
+vvm66	SAME	
+vvm69	SAME	
+vvo05	SAME	
+vvq42	SAME	
+vvq43	SAME	
+vvq47	SAME	
+vvq49	SAME	
+vvq50	SAME	
+vvq51	SAME	
+vvq52	SAME	
+vvq53	SAME	
+vvq55	SAME	
+vvq62	SAME	
+vvq63	SAME	
+vvq64	SAME	
+vvq71	SAME	
+vvq74	SAME	
+vvq75	SAME	
+vvq76	SAME	
+vvq77	SAME	
+vvs120	SAME	
+vvs126	SAME	
+vvs127	SAME	
+vvs128	SAME	
+vvs129	SAME	
+vvs130	SAME	
+vvs131	SAME	
+vvs132	SAME	
+vvs133	SAME	
+vvs143	SAME	
+vvs149	REFUSED	GAP: T2: out of its slices (sub main::f returns a choice of a list and a value, as one value)
+vvs151	SAME	
+vvs152	SAME	
+vvt48	SAME	
+vvt87	SAME	
 w1lib1	SAME	
 w1lib2	SAME	
 w1lib3	SAME	
@@ -3104,7 +3145,6 @@ xxt01	SAME
 xxt02	SAME	
 xxt03	SAME	
 xxt04	SAME	
-xxt05	REFUSED	GAP: T2: out of its slices (a {...} of an odd list)
 xxt06	LOUD	chalk: refused at run time: an array element read through no ARRAY reference
 xxt07	SAME	
 xxt08	REFUSED	GAP: T2: out of its slices (a sprintf of a list)
@@ -5443,3 +5483,19 @@ zun77	SAME
 zun78	REFUSED	B::SoN: GAP: loop without a lowerable condition
 zun79	SAME	
 zun80	SAME	
+# THE THIRD FINAL AUDIT'S PROBES (probes/y in perl5-son) LEFT OUT OF THIS SET. 94 of the 110 it once
+# left out are rows now, as y<name> (branch x-wrongs: SAME or refused by name, promotion on and off).
+# NOT DETERMINISTIC in perl, so no verdict holds: yp13 (its answer depends on hash order), ya57 (perl
+# reads a freed scalar).
+# Their wires still break a verifier rule (t/bootstrap/ir/wire-verify.t holds every probe here to
+# SoN::Verify; a %HELD entry would hold them by name). Each is REFUSED or SAME today:
+# VERIFY yb41 yc160 ye49 ye53 yn26 yo15 yo17 yo22 yo23 yo27 yo30 yo33 yp158 yp18
+# THE FOURTH FINAL AUDIT'S PROBES (probes/x) are rows, as x<name>; class X5's 16 among them.
+# LEFT OUT, xxt05 (B::SoN: `sub { $x++; () }` returns the increment, not the empty list -- the same
+# wire as `sub { ++$x }`, so chalk cannot tell; `my $x = 1; sub g { $x++; () } my @l = (5, g(), 6)`
+# prints `5 2 6` for `5 6` at a2fe984d too). It was REFUSED only as `a {...} of an odd list`, which
+# the fifth audit's Q16 fix (a call in a hash literal is its list) took away: WRONG. Back when the
+# producer gives a void `$x++; ()` an empty list. The program:
+#   my $x = 1; my $c = sub { $x++; () }; my %h = (a => $x, $c->(), b => $x); print "$h{a}$h{b}\n";
+# THE FIFTH FINAL AUDIT'S PROBES (probes/v): the classes on chalk's side (Q7, Q9, Q13, Q16, Q17) and
+# vo05 are rows, as v<name>; the producer's classes are gated with the producer's fixes.
