@@ -13,6 +13,7 @@ use Chalk::IR::Node::Coerce;             # _insert_str_coercions builds these
 use Chalk::Grammar::Perl::TypeLibrary;   # is_subtype / join_types: the lattice
 use Chalk::IR::Node;   # stamp reads gate on isa Chalk::IR::Node
 use Chalk::MOP::Sub;   # an anonymous callee's metaobject, from its graph
+use Chalk::IR::Transform::UnreadPhis;
 
 # NOTE: no `use Chalk::IR::Serialize::JSON` here, and none is needed. The passes
 # below used to live in that module and were called back into it from here,
@@ -902,6 +903,8 @@ sub infer ($class, $graphs) {
     # belief that the repr fixpoint below needed to precede it -- measured
     # wrong: _replay_classes seals the MOP ~30 lines BEFORE the direct-call
     # fixpoint, so the metaobject is available to it.
+    # (a value Phi nothing reads is removed before any pass types it)
+    Chalk::IR::Transform::UnreadPhis->new->run($_) for grep { blessed($_) } values %graphs;
     _answer_sub_defined(\%graphs);
     _rewrite_tied_scalars(\%graphs);
     _attach_call_targets(\%graphs, $mop);
